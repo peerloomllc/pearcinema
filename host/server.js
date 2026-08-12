@@ -43,7 +43,6 @@ class PearCinemaHost {
     this.libraryName = this._readSettings().name || libraryName
 
     this.source = this._readSource()
-    this.adapter = buildAdapter(this.source, { log })
     this.sourceError = null
 
     this.host = new LibraryHost({
@@ -81,6 +80,54 @@ class PearCinemaHost {
         }
       })
     })
+
+    // AFTER the host, because an adapter needs the libraryId - and the libraryId is
+    // derived from the host identity, which does not exist until LibraryHost has
+    // opened the seed. Ids are source-scoped AND library-scoped by design, so an
+    // adapter built with the wrong one would mint ids nothing else in the system
+    // agrees with.
+    this.adapter = buildAdapter(this.source, {
+      libraryId: this.host.libraryId,
+      ids: PROTOCOL.ids,
+      log
+    })
+  }
+
+  // Change where the films come from, live, without a restart.
+  //
+  // The adapter is swapped ATOMICALLY and only after the new one has scanned: if the
+  // Jellyfin credentials are wrong, this throws and the old source is still serving.
+  // A library that goes dark because someone mistyped a password is not an
+  // acceptable way to find out you mistyped a password.
+  async setSource (cfg) {
+    const next = buildAdapter(cfg, {
+      libraryId: this.host.libraryId,
+      ids: PROTOCOL.ids,
+      log: this.log
+    })
+    const leaves = await next.scan() // throws on a bad URL, bad credentials, no folder
+
+    this.adapter = next
+    this.source = cfg
+    this.sourceError = null
+    fs.mkdirSync(this.dataDir, { recursive: true })
+    fs.writeFileSync(path.join(this.dataDir, 'source.json'), JSON.stringify(cfg, null, 2), { mode: 0o600 })
+
+    const stats = await next.stats().catch(() => ({}))
+    this.log('host:source-changed', { source: cfg.kind, leaves })
+    return { kind: cfg.kind, leaves, ...stats }
+  }
+
+  // Does this config actually work? The dashboard's Test button, so an operator
+  // finds out before saving rather than after.
+  async testSource (cfg) {
+    const probe = buildAdapter(cfg, {
+      libraryId: this.host.libraryId,
+      ids: PROTOCOL.ids,
+      log: () => {}
+    })
+    const leaves = await probe.scan()
+    return { ok: true, kind: cfg.kind, leaves, ...(await probe.stats().catch(() => ({}))) }
   }
 
   get protocol () { return PROTOCOL }

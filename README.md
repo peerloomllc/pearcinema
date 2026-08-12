@@ -27,21 +27,48 @@ What works today, proven end to end over a real DHT testnet in `test/first-pair.
 - A PearTune phone cannot reach a PearCinema host, and neither app's pairing link parses
   as the other's.
 
+- **Jellyfin and Emby work as a source**, for films, shows, seasons and episodes,
+  including subtitle listing and seeking.
+
 What is not built yet:
 
-- **Any real source.** The only adapter is `EmptyAdapter`, which is how a freshly
-  installed host behaves before the operator picks a source. Jellyfin is next, then the
-  folder adapter.
+- The **folder adapter**, which is the moat and is in v1.
 - The phone client.
 - Continue-watching, which is inherited from PearTune's `resume.*` and arrives with the
   shared user-state store.
-- Subtitles, casting, the dashboard.
+- Casting and the dashboard.
 
 Run it:
 
 ```
 npm install && npm run host -- --pair
 ```
+
+Point it at a Jellyfin or Emby server:
+
+```
+npm run host -- --jellyfin http://your-server:8096 --user you --pass secret --pair
+```
+
+`--test` checks the credentials without saving them or starting the host.
+
+### What is actually in your library?
+
+The reason v1 is direct-play only is that nobody knows which files in a real collection
+a real phone can open, and building a transcode pipeline first means building it against
+a guess. So before there is a client, there is this:
+
+```
+npm run host -- --codec-report
+```
+
+It walks both roots - the flat film list and the whole show tree - and prints the
+containers, codecs, resolutions and, most importantly, the **combinations** that appear
+together. The combination is what decides: MKV plus H.265 plus TrueHD does not direct-play
+on iOS at all, and counting those three separately would hide that.
+
+It describes. It does not judge. Which of those a phone can actually open is what the
+first client build finds out.
 
 ## Why a separate app rather than "PearTune plays video too"
 
