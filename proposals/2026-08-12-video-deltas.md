@@ -81,8 +81,9 @@ Targets, in order of how well they work with **no app to install on the TV**:
    from Android.
 4. **Roku**, which really wants a published channel. Not worth it.
 
-An **Android TV / Fire TV build of the client itself** beats all four on quality. It is
-costed in the resolved section below and scheduled for v2.
+An **Android TV / Fire TV build of the client itself** would beat all four on quality. It
+is costed in the resolved section below and **scrapped for now** (Tim, 2026-08-12), so
+Chromecast is the whole TV story.
 
 ## Scope
 
@@ -210,10 +211,21 @@ by design (`:ro` in the Umbrel compose) and writing to someone's media directory
 ours to do. Offer "also write `.nfo` sidecars" as a separate explicit action for a
 writable library, since that benefits their Jellyfin and Kodi too.
 
-**Open, and it needs Tim:** whether PearCinema ships a PeerLoom API key or asks the
-operator for their own. A shipped key in an MIT repo is extractable and its rate limit is
-shared across every install. A key the operator pastes is one more setup step on a feature
-meant to be easy. Listed in open questions.
+**The operator brings their own API key** (Tim, 2026-08-12). PearCinema ships no
+credential. Three consequences that follow and are not optional:
+
+- **One provider, not two.** Asking someone to register with two services for one feature
+  is how a feature goes unused. **TMDB for both films and TV**, since its key is free and
+  self-serve, where TVDB gates parts of its API behind a subscription. This is a direct
+  consequence of the bring-your-own decision: a shipped key could have afforded two
+  providers, a user-supplied one cannot.
+- **No key must not look broken.** Without one the library still works: sidecars where
+  they exist, filename parsing where they do not. The absence of a key means no posters
+  for unorganised files, and the UI should say exactly that rather than showing an error.
+- **The setup step is the whole risk, so it gets real design.** A direct link to the
+  provider's key page, a paste field, and a Test button that validates before saving. A
+  key that silently does not work is worse than no key, because the library just looks
+  wrong.
 
 ## Resolved: no TV client, casting only
 
@@ -306,18 +318,11 @@ reverted by re-pinning the previous digest.
 
 ## Open questions
 
-Questions 1 and 2 of the first draft are resolved above: folders are in v1 with opt-in
-online metadata on top, and the TV client is scrapped in favour of casting alone.
+Resolved so far: folders are in v1 with opt-in online metadata on top, the TV client is
+scrapped in favour of casting alone, and the operator brings their own API key, which
+settles the provider question as TMDB-only.
 
-1. **Does PearCinema ship a metadata API key, or ask for the operator's?** New, raised by
-   the opt-in metadata design. A shipped key in an MIT repo is extractable and its rate
-   limit is shared across every install; a pasted key is one more setup step on a feature
-   whose whole point is being easy. **Recommendation: ship ours, with the operator's own
-   key as an override.** The failure mode of a shared limit is a slow lookup, and the
-   feature is off by default and one-time per library, so real usage is a trickle. Needs
-   Tim, because it is the first time the suite would ship a credential.
-
-2. **Where does transcode run when the host is a Mac?** Not v1 - there is no transcode in
+1. **Where does transcode run when the host is a Mac?** Not v1 - there is no transcode in
    v1 - but it shapes the adapter seam, so it should not be discovered late.
    **Recommendation: detect at startup and keep two encoder paths**, VideoToolbox on the
    Mac and VAAPI or QSV through `/dev/dri` on Linux, with software as the last resort.
@@ -326,7 +331,7 @@ online metadata on top, and the TV client is scrapped in favour of casting alone
    host is a LaunchDaemon and the Linux host is a container needing a device passed in, so
    the packaging differs even where the ffmpeg flags do not.
 
-3. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
+2. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
    on the TV's network, so casting there needs the phone as the origin. It composes, since
    the phone already runs an HTTP shim and would just bind it to the LAN under the same
    token discipline. **Recommendation: no, not in v1.** It doubles the bytes through the
@@ -335,7 +340,7 @@ online metadata on top, and the TV client is scrapped in favour of casting alone
    the home LAN case `cast.js` reasoned about. Treat casting as a same-network feature and
    have the UI say so plainly rather than failing obscurely.
 
-4. **What do we tell Apple and Google?** Both scrutinise apps that play video, for
+3. **What do we tell Apple and Google?** Both scrutinise apps that play video, for
    copyright reasons, and PearCinema shows a reviewer an empty app because the library is
    behind a pairing wall - the exact situation that made PearTune's iOS review notes
    necessary. Expect to answer "where does this content come from" as well.
@@ -346,5 +351,7 @@ online metadata on top, and the TV client is scrapped in favour of casting alone
    submission. The framing that matters: PearCinema is a player for files the user already
    has, it hosts nothing, indexes nothing and has no catalog of its own.
 
-Questions 1 and 3 need Tim. Questions 2 and 4 have recommendations that only need someone
-to disagree with them.
+All three carry recommendations, and none of them block approval. Question 3 is the one
+with lead time in it, deferred deliberately rather than forgotten: the demo library waits
+until there is an app to demo, which means the sourcing has to start before submission and
+not at it.

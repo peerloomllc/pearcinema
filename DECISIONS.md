@@ -2,6 +2,26 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-12 (latest) - the operator brings their own metadata API key
+Tier: T2
+Context: the opt-in online metadata pull needs a credential. Ship a PeerLoom one, or ask
+the operator for theirs.
+Choice: **the operator brings their own.** PearCinema ships no credential.
+Why: a shipped key in an MIT repo is extractable and its rate limit is shared across every
+install, and it would have been the first credential the suite ships.
+Three consequences that are NOT optional and follow directly:
+- **TMDB only, one provider.** A shipped key could have afforded two providers; a
+  user-supplied one cannot, because asking for two registrations kills the feature. TMDB's
+  key is free and self-serve where TVDB gates parts of its API behind a subscription.
+- **No key must not look broken.** Sidecars and filename parsing still produce a working
+  library. Missing key means no posters for unorganised files, said plainly, not an error.
+- **The setup step is the whole risk.** Direct link to the key page, paste field, and a
+  Test button that validates before saving. A key that silently fails is worse than none,
+  because the library just looks wrong.
+Also decided: the App Store demo library (public-domain films) WAITS until there is an app
+to demo. Deferred deliberately, with the note that sourcing has lead time and must start
+before submission rather than at it.
+
 ## 2026-08-12 (later) - folders in v1, no TV client, casting only
 Tier: T2
 Context: Tim read the two resolved questions and adjusted both.
