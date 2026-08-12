@@ -1,0 +1,58 @@
+node_modules/
+.expo/
+dist/
+web-build/
+
+# Build artifacts
+assets/bare-universal.bundle
+assets/bare-ios.bundle
+assets/app-ui.bundle
+# esbuild emits the stylesheet beside the bundle; build-ui.mjs then INLINES it into
+# assets/index.html, which is what the app loads. So this is an intermediate like the
+# bundle beside it, not a shipped file - it was tracked by oversight until 2026-07-26.
+assets/app-ui.css
+assets/index.html
+host/ui/build/
+# Intermediate esbuild outputs for the dashboard; host/ui/dashboard.html (the
+# inlined result) IS committed - the image's Dockerfile copies host/ with no
+# build step, so the served artifact must be in the tree.
+host/ui/app/.dashboard.bundle
+host/ui/app/.dashboard.css
+*.apk
+*.aab
+*.ipa
+*.sha256
+release_notes.md
+
+# Host runtime data (identity seed, grant store) - NEVER commit
+host-data/
+*.seed
+
+# Local-only docs (per CLAUDE.md)
+TODO.md
+DONE.md
+
+# deno bundle lockfile (start9 s9pk procedures)
+/deno.lock
+
+# Recorded demo videos (scripts/ios-sim-demo-video.sh writes here) and the screen-recorded
+# dashboard clips they get cut together with. Build OUTPUT, not source - the phone half is
+# reproducible from the app, the dashboard half is a re-shoot, and takes pile up fast.
+peartune-demo-ios.mp4
+*.mp4
+*.webm
+
+# Screenshot fixtures: real album art from a live library. Never committed - see
+# scripts/screenshot-fixture.sh for why.
+metadata/screenshot-fixtures/
+# ...and the CAPTURES made from them, for the same reason: every frame is a grid of that
+# same album art, so committing the output would put in the repo exactly what the line above
+# keeps out. They are build output anyway - scripts/screenshots.sh and
+# scripts/android-screenshots.sh reproduce them from the fixture in a couple of minutes.
+metadata/ios/screenshots/
+metadata/android/screenshots/
+
+# Release secrets. app.conf says "scripts/.env is not [committed]" and nothing was
+# enforcing it - scripts/ios-appstore.sh tells you to put an App Store Connect app-specific
+# password in there. Checked 2026-07-31: `git check-ignore scripts/.env` said NOT IGNORED.
+scripts/.env
