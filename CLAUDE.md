@@ -76,9 +76,20 @@ The answer is **bring your own relay**, a settings field for the user's own VPS 
 
 ## Suggested v1 scope
 
-Jellyfin source only, direct play only, no transcode, no relay, LAN plus punched DHT,
-Chromecast push. Discover the codec problem against real libraries instead of guessing at
-it. Folder source, remux, hardware transcode and subtitles come after.
+Jellyfin **and** folder sources, direct play only, no transcode, no relay, LAN plus punched
+DHT, Chromecast push, opt-in online metadata (default off, sidecar-first). Discover the
+codec problem against real libraries instead of guessing at it. Remux and hardware
+transcode come after.
+
+Two things Tim decided on 2026-08-12 that are easy to get backwards:
+
+- **Folders are in v1, not deferred.** Jellyfin comes first only because it reaches first
+  playback faster. It is a sequencing convenience, not the product. The folder adapter is
+  the moat: reading only Jellyfin makes this an accessory to a project that can add its own
+  remote access whenever it likes.
+- **No TV client. Casting only.** The costing for an Android TV build is kept in the
+  proposal because the question returns once casting's browse-on-a-phone limitation is felt,
+  not because it is scheduled.
 
 ## Branch Strategy
 

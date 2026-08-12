@@ -2,6 +2,23 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-12 (later) - folders in v1, no TV client, casting only
+Tier: T2
+Context: Tim read the two resolved questions and adjusted both.
+Choice: (a) the folder adapter moves INTO v1 rather than v2, with Jellyfin first only as
+the faster path to first playback. (b) On top of sidecar metadata, an OPT-IN online
+metadata pull, default off, with pre-filled provider config and pre-filled match candidates
+the operator confirms. (c) The Android TV client is scrapped for now. Chromecast push is
+the entire TV story.
+Why: "we definitely want folders" - the folder adapter is the moat and deferring it read as
+optional. The opt-in pull covers libraries with no sidecars, which filename parsing alone
+serves badly, without making a third-party lookup the default. Results cache to the data
+dir and not into the library, which is mounted read-only by design. On the TV client: the
+costing stands and is kept in the proposal, because the question returns once casting's
+browse-on-a-phone limitation is felt in real use.
+Superseded: the parts of the two 2026-08-12 entries below that scheduled folders and a TV
+client for v2. The reasoning in them still holds and is why these calls are safe.
+
 ## 2026-08-12 - the folder adapter reads sidecar metadata, not TMDB
 Tier: T2
 Context: open question #2 of the video-deltas proposal asked whether PearCinema is

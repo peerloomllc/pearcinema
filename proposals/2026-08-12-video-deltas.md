@@ -88,24 +88,27 @@ costed in the resolved section below and scheduled for v2.
 
 **In, for v1:**
 
-- Jellyfin and Emby as the source. The adapter already exists in PearTune and filters
-  `IncludeItemTypes: 'Audio'`; movies and episodes are the same API with different
-  parameters and a different stream endpoint.
+- **Two sources, in this order.** Jellyfin and Emby first, because the adapter already
+  exists in PearTune and reaches first playback in days. **Then the folder adapter, also
+  in v1** (Tim, 2026-08-12: "we definitely want folders"). Jellyfin is the fast path to
+  first playback, not the product.
 - Direct play only. No transcode, no remux.
 - Continue watching, via inherited `resume.*`.
 - External `.srt` subtitles.
-- Chromecast push.
+- Chromecast push. **This is the whole TV story for now** (Tim, 2026-08-12).
+- **Opt-in online metadata**, default off, sidecar-first. Designed below.
 - Android client first, iOS second.
 
 **Out, for v1, deliberately:**
 
 - **Transcoding of any kind.** Named below as the reason.
-- The folder adapter. **Committed for v2, not dropped** - see the resolved section below,
-  which also settles that it reads local sidecar metadata rather than TMDB.
 - Offline downloads. A film is 4 GB where a song is 4 MB, so the pin/LRU cache needs a
   different budget model and UI, not a bigger number.
 - **Any relay.** See below.
-- DLNA, AirPlay, a TV client.
+- DLNA, AirPlay.
+- **A TV client. Scrapped for now** (Tim, 2026-08-12), casting only. The costing is kept
+  below because it is the reason the decision is safe rather than a guess, and because the
+  question will come back once people are using casting and find it awkward.
 
 **Why direct-play-only is the right v1 and not a cop-out.** The expensive, uncertain part
 of this app is which files in a real library actually play on a real phone. Shipping
@@ -144,10 +147,11 @@ the container alongside the existing `network_mode: host`. Out of scope for v1, 
 capacity doc needs a video section written from fresh measurements before anyone promises
 a number.
 
-## Resolved: Jellyfin-only, or a folder adapter later?
+## Resolved: folders are in v1, with opt-in metadata on top
 
-**Answer: Jellyfin and Emby for v1, folder adapter committed for v2, and the metadata
-answer is local sidecar files rather than TMDB.**
+**Answer: both sources in v1, Jellyfin first only because it is faster to first playback.
+Metadata is sidecar-first and offline by default, with an opt-in online pull the operator
+turns on deliberately.** (Tim, 2026-08-12.)
 
 **This was framed as a product fork in the road in the first draft, and that was wrong.**
 It read that way because of an assumption that did not survive checking: that a folder
@@ -169,21 +173,56 @@ The fallback for a library with no sidecars is filename parsing, which yields ti
 and `SxxEyy` and nothing else. That is a degraded but genuinely usable library, and it is
 honest to say so in the UI: no posters until you run a scanner.
 
-**Why v2 and not v1 anyway.** The v1 goal is to learn which files direct-play on real
-devices, and Jellyfin gets there in days with a catalog that already exists. Adding a
-scanner first delays that answer without improving it.
+**Why folders are not deferred.** The folder adapter is the moat. If PearCinema only ever
+reads Jellyfin, it is a Jellyfin accessory and Jellyfin is free to improve its own remote
+access whenever it likes. PearTune works standalone rather than only in front of Navidrome,
+and this should too. Jellyfin-first is a sequencing convenience inside v1, not a scope cut.
 
-**Why committed rather than optional.** This is the part of the original question that
-survives. If PearCinema only ever reads Jellyfin, PearCinema is a Jellyfin accessory, and
-Jellyfin is free to improve its own remote access whenever it likes. **The folder adapter
-is the moat**, the same way PearTune works standalone rather than only in front of
-Navidrome. Deferring it is fine. Dropping it would make this a feature of someone else's
-project.
+**What the folder adapter actually costs**, since it is now v1 work and should be costed
+honestly rather than waved through. Reusable from PearTune: multi-root support, the
+unplugged-drive resilience, the dashboard picker and `visibleMounts()`. New: the
+movie/series/season/episode tree, filename parsing, `.nfo` XML parsing and artwork
+resolution. Call it the second largest chunk in v1 after the item model itself, and note
+that the two overlap.
 
-## Resolved: the Android TV client, costed
+### Opt-in online metadata
 
-**Answer: worth building, as v2. Cheaper than the transcode pipeline, more valuable than
-DLNA, and it is the real TV story. Chromecast still ships in v1 because it is nearly free.**
+Default **off**. Nothing about the library leaves the host unless the operator switches it
+on. Three rules, in order:
+
+1. **Sidecar first, always.** If a `.nfo` and artwork sit beside the file, they win and no
+   lookup happens, whatever the setting says. For most libraries this means the online
+   path never runs at all.
+2. **Opt in per library, in the dashboard**, with the choices pre-filled so the operator
+   confirms rather than researches: provider and language already selected, and toggles
+   for what to fetch (artwork, synopses, cast) already set to sensible values.
+3. **Pre-filled matches, operator confirms.** When the scanner is unsure which film a file
+   is, it presents its best candidates already filled in and the operator picks or
+   corrects. This is the standard identify flow and it is the difference between a library
+   that is 95% right and one that is trusted.
+
+**Say plainly what it does**, in the dashboard and not only in a privacy page: turning
+this on means **the host** tells a third party the titles it is trying to identify. Not
+the phone, and not the files. It is a real disclosure and the reason the default is off.
+
+**Results cache to `PEARTUNE_DATA`, not into the library.** The library mount is read-only
+by design (`:ro` in the Umbrel compose) and writing to someone's media directory is not
+ours to do. Offer "also write `.nfo` sidecars" as a separate explicit action for a
+writable library, since that benefits their Jellyfin and Kodi too.
+
+**Open, and it needs Tim:** whether PearCinema ships a PeerLoom API key or asks the
+operator for their own. A shipped key in an MIT repo is extractable and its rate limit is
+shared across every install. A key the operator pastes is one more setup step on a feature
+meant to be easy. Listed in open questions.
+
+## Resolved: no TV client, casting only
+
+**Answer: scrapped for now (Tim, 2026-08-12). Chromecast push is the entire TV story.**
+
+The costing is kept below rather than deleted, for two reasons: it is what makes the
+decision informed rather than a guess, and the question comes back the moment people use
+casting enough to find it awkward. When it does, the answer is "the toolchain is free, the
+UI is a second UI", and nobody has to re-derive that.
 
 **What is free or nearly free:**
 
@@ -222,10 +261,11 @@ DLNA, and it is the real TV story. Chromecast still ships in v1 because it is ne
 the phone UI again minus all the plumbing, which makes it the largest single chunk of work
 after the host extraction, and still smaller than a correct transcode pipeline with seek.
 
-**Why Chromecast still ships first.** The security machinery already exists in
+**Why casting is enough for now.** The security machinery already exists in
 `peartune/host/cast.js` and the Default Media Receiver needs no published app, so v1 gets
-video onto a television for very little. It is just a worse product: the phone is the
-remote, and all browsing happens on a 6-inch screen while a 55-inch one plays.
+video onto a television for very little. The cost of stopping here is that the phone is the
+remote and all browsing happens on a 6-inch screen while a 55-inch one plays. That is a
+real limitation to watch for in feedback, and the trigger to revisit this.
 
 ## Compat
 
@@ -266,16 +306,45 @@ reverted by re-pinning the previous digest.
 
 ## Open questions
 
-Questions 1 and 2 of the first draft are resolved above: the Android TV client is costed
-and scheduled for v2, and the folder adapter is committed for v2 on local sidecar metadata
-rather than TMDB.
+Questions 1 and 2 of the first draft are resolved above: folders are in v1 with opt-in
+online metadata on top, and the TV client is scrapped in favour of casting alone.
 
-1. **Where does transcode run when the host is a Mac?** PearTune's Mac host is a
-   LaunchDaemon and VideoToolbox is excellent, but the packaging differs enough from the
-   Linux `/dev/dri` path to need its own answer.
-2. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
-   on the TV's LAN, so casting there needs the phone as the origin. It composes, since the
-   phone already runs an HTTP shim, but it doubles the bandwidth through the phone.
-3. **Store listings.** Apple and Google both scrutinise apps that stream video for
-   copyright reasons. PearTune's App Review notes had to explain a pairing wall; this will
-   likely have to explain provenance too. Worth drafting early rather than at submission.
+1. **Does PearCinema ship a metadata API key, or ask for the operator's?** New, raised by
+   the opt-in metadata design. A shipped key in an MIT repo is extractable and its rate
+   limit is shared across every install; a pasted key is one more setup step on a feature
+   whose whole point is being easy. **Recommendation: ship ours, with the operator's own
+   key as an override.** The failure mode of a shared limit is a slow lookup, and the
+   feature is off by default and one-time per library, so real usage is a trickle. Needs
+   Tim, because it is the first time the suite would ship a credential.
+
+2. **Where does transcode run when the host is a Mac?** Not v1 - there is no transcode in
+   v1 - but it shapes the adapter seam, so it should not be discovered late.
+   **Recommendation: detect at startup and keep two encoder paths**, VideoToolbox on the
+   Mac and VAAPI or QSV through `/dev/dri` on Linux, with software as the last resort.
+   `host/detect.js` already establishes the probe-at-startup pattern for music servers, so
+   this follows an existing shape rather than inventing one. The real work is that the Mac
+   host is a LaunchDaemon and the Linux host is a container needing a device passed in, so
+   the packaging differs even where the ffmpeg flags do not.
+
+3. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
+   on the TV's network, so casting there needs the phone as the origin. It composes, since
+   the phone already runs an HTTP shim and would just bind it to the LAN under the same
+   token discipline. **Recommendation: no, not in v1.** It doubles the bytes through the
+   phone, on the connection least able to afford it, and it puts library audio and video on
+   a stranger's network in cleartext, which is a materially different security story from
+   the home LAN case `cast.js` reasoned about. Treat casting as a same-network feature and
+   have the UI say so plainly rather than failing obscurely.
+
+4. **What do we tell Apple and Google?** Both scrutinise apps that play video, for
+   copyright reasons, and PearCinema shows a reviewer an empty app because the library is
+   behind a pairing wall - the exact situation that made PearTune's iOS review notes
+   necessary. Expect to answer "where does this content come from" as well.
+   **Recommendation: reuse PearTune's playbook and start now, not at submission.** That
+   means review notes giving the exact tap path, an attached video showing pairing, and a
+   demo library bundled the way `2026-07-28-app-review-demo.md` did it - which for video
+   means public-domain films, and sourcing those is lead time nobody will have at
+   submission. The framing that matters: PearCinema is a player for files the user already
+   has, it hosts nothing, indexes nothing and has no catalog of its own.
+
+Questions 1 and 3 need Tim. Questions 2 and 4 have recommendations that only need someone
+to disagree with them.
