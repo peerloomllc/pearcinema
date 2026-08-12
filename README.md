@@ -10,11 +10,38 @@ It is the video sibling of [PearTune](../peartune), and it is built on the same 
 
 ## Status
 
-**Design stage. No app code yet.**
+**The host runs and pairs. No phone client yet, and no real source adapter yet.**
 
-The T3 proposal is `proposals/2026-08-12-video-deltas.md`. Per the Constitution, approval
-is Tim committing that proposal. It depends on `@peerloom/host`, the shared host package
-extracted from PearTune, proposed at `../proposals/2026-08-12-shared-host.md`.
+Both T3 proposals are approved (`proposals/2026-08-12-video-deltas.md`, merged as PR #1,
+and `../proposals/2026-08-12-shared-host.md`, approved verbally). `@peerloom/host` is
+extracted and PearCinema is its first consumer, which is what makes it a shared package
+rather than a rename.
+
+What works today, proven end to end over a real DHT testnet in `test/first-pair.test.js`:
+
+- The host starts, announces itself, and prints a pairing QR (`npm run host -- --pair`).
+- A device pairs, browses the library, fetches an item, searches, and streams bytes -
+  **including seeking into a film**, which is free because `media.stream` already carried
+  `offset` and `length`.
+- Revoke cuts a paired device off mid-connection and refuses to let it back.
+- A PearTune phone cannot reach a PearCinema host, and neither app's pairing link parses
+  as the other's.
+
+What is not built yet:
+
+- **Any real source.** The only adapter is `EmptyAdapter`, which is how a freshly
+  installed host behaves before the operator picks a source. Jellyfin is next, then the
+  folder adapter.
+- The phone client.
+- Continue-watching, which is inherited from PearTune's `resume.*` and arrives with the
+  shared user-state store.
+- Subtitles, casting, the dashboard.
+
+Run it:
+
+```
+npm install && npm run host -- --pair
+```
 
 ## Why a separate app rather than "PearTune plays video too"
 
