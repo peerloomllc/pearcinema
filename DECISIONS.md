@@ -1,0 +1,120 @@
+# PearCinema decisions
+
+Append-only, newest on top. Per Constitution §4.
+
+## 2026-08-12 (latest) - the operator brings their own metadata API key
+Tier: T2
+Context: the opt-in online metadata pull needs a credential. Ship a PeerLoom one, or ask
+the operator for theirs.
+Choice: **the operator brings their own.** PearCinema ships no credential.
+Why: a shipped key in an MIT repo is extractable and its rate limit is shared across every
+install, and it would have been the first credential the suite ships.
+Three consequences that are NOT optional and follow directly:
+- **TMDB only, one provider.** A shipped key could have afforded two providers; a
+  user-supplied one cannot, because asking for two registrations kills the feature. TMDB's
+  key is free and self-serve where TVDB gates parts of its API behind a subscription.
+- **No key must not look broken.** Sidecars and filename parsing still produce a working
+  library. Missing key means no posters for unorganised files, said plainly, not an error.
+- **The setup step is the whole risk.** Direct link to the key page, paste field, and a
+  Test button that validates before saving. A key that silently fails is worse than none,
+  because the library just looks wrong.
+Also decided: the App Store demo library (public-domain films) WAITS until there is an app
+to demo. Deferred deliberately, with the note that sourcing has lead time and must start
+before submission rather than at it.
+
+## 2026-08-12 (later) - folders in v1, no TV client, casting only
+Tier: T2
+Context: Tim read the two resolved questions and adjusted both.
+Choice: (a) the folder adapter moves INTO v1 rather than v2, with Jellyfin first only as
+the faster path to first playback. (b) On top of sidecar metadata, an OPT-IN online
+metadata pull, default off, with pre-filled provider config and pre-filled match candidates
+the operator confirms. (c) The Android TV client is scrapped for now. Chromecast push is
+the entire TV story.
+Why: "we definitely want folders" - the folder adapter is the moat and deferring it read as
+optional. The opt-in pull covers libraries with no sidecars, which filename parsing alone
+serves badly, without making a third-party lookup the default. Results cache to the data
+dir and not into the library, which is mounted read-only by design. On the TV client: the
+costing stands and is kept in the proposal, because the question returns once casting's
+browse-on-a-phone limitation is felt in real use.
+Superseded: the parts of the two 2026-08-12 entries below that scheduled folders and a TV
+client for v2. The reasoning in them still holds and is why these calls are safe.
+
+## 2026-08-12 - the folder adapter reads sidecar metadata, not TMDB
+Tier: T2
+Context: open question #2 of the video-deltas proposal asked whether PearCinema is
+Jellyfin-only forever. It was framed as a product fork in the road on the assumption that a
+folder adapter needs an online metadata service.
+Choice: Jellyfin and Emby for v1, folder adapter committed for v2, reading **local sidecar
+files**: Kodi-format `.nfo` XML plus `poster.jpg` / `fanart.jpg` / `banner.jpg`.
+Why: the assumption was wrong, which collapses the fork into a sequencing question.
+Self-hosted video libraries are overwhelmingly populated by Sonarr/Radarr or scanned by
+Jellyfin/Emby/Kodi, all of which write metadata to disk beside the media. So a folder
+library gets titles, synopses, cast, episode ordering and artwork with zero network calls,
+no API key and nothing learning what you own - a TMDB dependency would have been the first
+outbound metadata call anywhere in the suite. PearTune's `FolderAdapter._coverFile` already
+does this shape for album art. Fallback with no sidecars is filename parsing, which yields
+title, year and SxxEyy, and the UI should say so rather than look broken.
+The part of the original question that SURVIVES: the folder adapter is the moat. Reading
+only Jellyfin makes PearCinema an accessory to a project that can improve its own remote
+access whenever it likes. Deferring is fine, dropping is not.
+
+## 2026-08-12 - Android TV client is v2, Chromecast ships in v1
+Tier: T2
+Context: open question #1 asked whether a TV client beats casting, and whether it is
+cheaper than the transcode pipeline.
+Choice: build it, in v2. Chromecast push still ships in v1.
+Why: the toolchain is free - `react-native-tvos` plus the `@react-native-tvos/config-tv`
+Expo plugin is the documented path, and PearTune's existing Expo SDK 54 / RN 0.81.5 stack
+is exactly the supported pairing with RNTV 0.81-stable, so no SDK migration. Android TV is
+arm64/x86_64 Android, so the worklet and addon slices are already-solved problems, and
+direct play gets EASIER because TV boxes have better codec support than phones.
+**The whole cost is the UI.** PearCinema's UI is a WebView, Chromium does not ship the CSS
+spatial-navigation spec, so D-pad focus has to be implemented in JavaScript, with a focus
+model and visible focus rings on every screen. That is a second UI, not a port, and it is
+the largest chunk after the host extraction - still smaller than a correct transcode
+pipeline with seek. Chromecast ships first because the security machinery already exists in
+`peartune/host/cast.js` and the Default Media Receiver needs no published app; it is just a
+worse product, since browsing happens on a 6-inch screen while a 55-inch one plays.
+
+## 2026-08-12 - the name is PearCinema
+Tier: T0 (but expensive to change later)
+Context: Tim proposed "PearTube" for the video sibling of PearTune.
+Choice: PearCinema.
+Why: PearTube is a YouTube trademark risk - Google enforces the "-tube" suffix against
+app-store listings. PearFlix fails the same way against Netflix. PearVideo is already a
+shipped app with 1M+ downloads (`com.pearvideo.tec.android`). PearScreen collides with
+PearGuard, which is the screen-time app. PearReel runs into Instagram Reels regardless of
+the word predating it by a century. PearCinema is clear, unused, and says what it is.
+
+## 2026-08-12 - no relay key, ever, and bring-your-own instead
+Tier: T3
+Context: PearTune ships a PeerLoom-run blind relay as the off-LAN backstop for users whose
+hole-punch never lands. Tim asked for the relay off by default, or absent entirely.
+Choice: bake in NO relay key. Offer a settings field for a relay the user runs themselves.
+Why: PearTune's relay carried 163 MB in six days against a 500 GB/month tier. Video at
+8 Mbps is 3.6 GB per HOUR, so one user watching two hours a day costs 216 GB/month alone.
+That is an unbounded bill scaling with adoption. Mechanically free to do:
+`relayThroughFor` only returns a key when `(force || randomized) && useRelay && relayKey`.
+Cost, accepted and to be stated in the store listing rather than hidden: users on
+symmetric NAT at both ends have no direct path and cannot reach their library off-LAN.
+
+## 2026-08-12 - extract @peerloom/host, do not fork PearTune's
+Tier: T3
+Context: roughly two thirds of PearTune's host is media-agnostic. The obvious move was a
+copy-fork, which is what the suite did for the seeder, `release.sh` and the release library.
+Choice: extract `@peerloom/host` first. PearCinema is its first consumer. PearTune migrates
+onto it on a branch, merged only after the iOS 1.0.0 App Review outcome is known.
+Why: all three previous copy-forks are still open TODO items and the seeder had already
+diverged by the time it was written down. This fork would be ten times the size and covers
+the firewall gate, the grant store and the revoke path, where two divergent copies is a
+security problem rather than a tidiness one. `@peerloom/core` is the cautionary case here,
+not the model: its donor apps were never migrated.
+
+## 2026-08-12 - v1 is direct-play only
+Tier: T2
+Context: video needs transcoding far more than music does, and PearTune's measured
+capacity numbers (200+ concurrent audio transcodes on an N100) do not survive the move.
+Choice: ship v1 with Jellyfin as the only source, direct play only, no transcode, no remux.
+Why: the expensive and genuinely uncertain part of this app is which files in a real
+library actually play on a real phone. Direct-play-only answers that with data in days.
+Building a transcode pipeline first means building it against a guess.
