@@ -12,6 +12,25 @@ const z32 = require('z32')
 const qrcode = require('qrcode-terminal')
 
 const { PearCinemaHost } = require('./server')
+const { codecReport } = require('./codec-report')
+
+const USAGE = `
+PearCinema host
+
+  --data <dir>        where identity, grants and settings live (PEARCINEMA_DATA)
+  --name <name>       the library's name, as the phone will show it
+  --pair              open a pairing window and draw the QR
+  --owner             make it an OWNER window (a device paired through it can manage the library)
+  --guest <minutes>   make it a GUEST window, access expiring after this many minutes
+  --dht-port <port>   pin the DHT's UDP port (only needed behind a manual port-forward)
+
+  --jellyfin <url>    point the library at a Jellyfin or Emby server and save it
+  --user <name>       Jellyfin username
+  --pass <password>   Jellyfin password
+  --test              check the source works WITHOUT saving it, then exit
+
+  --codec-report      walk the library, print what is actually in it, and exit
+`
 
 function arg (name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`)
@@ -30,12 +49,55 @@ async function main () {
   const libraryName = arg('name', process.env.PEARCINEMA_NAME || 'My Library')
   const dhtPort = arg('dht-port', process.env.PEARCINEMA_DHT_PORT || null)
 
+  if (arg('help') || arg('h')) {
+    process.stdout.write(USAGE)
+    return
+  }
+
   const host = new PearCinemaHost({
     dataDir,
     libraryName,
     dhtPort,
     log
   })
+
+  // Configuring or checking a source happens BEFORE the host listens. There is
+  // nothing to serve until the operator has told us where the films are, and a
+  // --test run should never announce itself on the DHT.
+  const jellyfin = arg('jellyfin')
+  if (typeof jellyfin === 'string') {
+    const cfg = {
+      kind: 'jellyfin',
+      url: jellyfin,
+      username: arg('user') || process.env.PEARCINEMA_JELLYFIN_USER || '',
+      password: arg('pass') || process.env.PEARCINEMA_JELLYFIN_PASS || ''
+    }
+
+    if (arg('test')) {
+      try {
+        const res = await host.testSource(cfg)
+        log('source:ok', res)
+      } catch (e) {
+        process.stderr.write(`source failed: ${e.message}\n`)
+        process.exitCode = 1
+      }
+      await host.close()
+      return
+    }
+
+    const res = await host.setSource(cfg)
+    log('source:saved', res)
+  }
+
+  if (arg('codec-report')) {
+    await host.adapter.scan()
+    const { text } = await codecReport(host.adapter, {
+      onProgress: (n) => { if (n % 500 === 0) log('report:walking', { items: n }) }
+    })
+    process.stdout.write(text)
+    await host.close()
+    return
+  }
 
   await host.ready()
 
