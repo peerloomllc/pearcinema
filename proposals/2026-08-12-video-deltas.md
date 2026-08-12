@@ -81,8 +81,8 @@ Targets, in order of how well they work with **no app to install on the TV**:
    from Android.
 4. **Roku**, which really wants a published channel. Not worth it.
 
-An **Android TV / Fire TV build of the client itself** beats all four on quality and is
-worth costing separately.
+An **Android TV / Fire TV build of the client itself** beats all four on quality. It is
+costed in the resolved section below and scheduled for v2.
 
 ## Scope
 
@@ -100,8 +100,8 @@ worth costing separately.
 **Out, for v1, deliberately:**
 
 - **Transcoding of any kind.** Named below as the reason.
-- The folder adapter. Video metadata from filenames needs TMDB, which is a network
-  dependency the suite does not currently have anywhere.
+- The folder adapter. **Committed for v2, not dropped** - see the resolved section below,
+  which also settles that it reads local sidecar metadata rather than TMDB.
 - Offline downloads. A film is 4 GB where a song is 4 MB, so the pin/LRU cache needs a
   different budget model and UI, not a bigger number.
 - **Any relay.** See below.
@@ -144,6 +144,89 @@ the container alongside the existing `network_mode: host`. Out of scope for v1, 
 capacity doc needs a video section written from fresh measurements before anyone promises
 a number.
 
+## Resolved: Jellyfin-only, or a folder adapter later?
+
+**Answer: Jellyfin and Emby for v1, folder adapter committed for v2, and the metadata
+answer is local sidecar files rather than TMDB.**
+
+**This was framed as a product fork in the road in the first draft, and that was wrong.**
+It read that way because of an assumption that did not survive checking: that a folder
+adapter needs an online metadata service. It mostly does not.
+
+Self-hosted video libraries are overwhelmingly populated by Sonarr and Radarr, or scanned
+by Jellyfin, Emby or Kodi. **All of them write metadata to disk beside the media**: Kodi
+format `.nfo` XML, plus `poster.jpg`, `fanart.jpg` and `banner.jpg`. So a folder adapter
+can have titles, years, synopses, cast, episode ordering and artwork with **zero network
+calls, no API key and no third party learning what you own**. That last part matters: a
+TMDB dependency would be the first outbound metadata call anywhere in the suite, and it
+would undercut the privacy pitch for no good reason.
+
+There is precedent in the donor. PearTune's `FolderAdapter._coverFile` already looks for a
+cover image sitting in the album directory. Sidecar metadata is the same pattern with
+different filenames.
+
+The fallback for a library with no sidecars is filename parsing, which yields title, year
+and `SxxEyy` and nothing else. That is a degraded but genuinely usable library, and it is
+honest to say so in the UI: no posters until you run a scanner.
+
+**Why v2 and not v1 anyway.** The v1 goal is to learn which files direct-play on real
+devices, and Jellyfin gets there in days with a catalog that already exists. Adding a
+scanner first delays that answer without improving it.
+
+**Why committed rather than optional.** This is the part of the original question that
+survives. If PearCinema only ever reads Jellyfin, PearCinema is a Jellyfin accessory, and
+Jellyfin is free to improve its own remote access whenever it likes. **The folder adapter
+is the moat**, the same way PearTune works standalone rather than only in front of
+Navidrome. Deferring it is fine. Dropping it would make this a feature of someone else's
+project.
+
+## Resolved: the Android TV client, costed
+
+**Answer: worth building, as v2. Cheaper than the transcode pipeline, more valuable than
+DLNA, and it is the real TV story. Chromecast still ships in v1 because it is nearly free.**
+
+**What is free or nearly free:**
+
+- **The toolchain is supported and needs no upgrade.** `react-native-tvos` plus the
+  `@react-native-tvos/config-tv` Expo config plugin is the documented path, and Expo's own
+  docs cover building for TV. PearTune is on **Expo SDK 54 / RN 0.81.5**, and RNTV
+  `0.81-stable` is exactly the matching supported pairing, so this rides the stack the
+  suite already has rather than forcing an SDK migration.
+- **Android TV is arm64 or x86_64 Android**, so the Bare worklet and native addon slices
+  are a problem already solved. The x86_64 slice exists for emulators.
+- **The host, protocol, pairing, grants and revoke are identical.** Nothing new.
+- **Direct play gets EASIER, not harder.** Android TV boxes have far better codec support
+  than phones (HEVC routinely, often AV1), so the format problem this app is mostly about
+  shrinks on the platform where the files are biggest.
+
+**What it actually costs, and it is one thing:**
+
+- **The UI is a WebView, and that is the entire cost.** D-pad navigation in a WebView is
+  not free. Chromium does not ship the CSS spatial-navigation spec, so focus movement has
+  to be implemented in JavaScript, either with a spatial-navigation library or hand-rolled
+  LRUD. Every screen needs a focus model, visible focus rings and an explicit rule for
+  Back. **This is not a port of the phone UI, it is a second UI**, and it should be costed
+  as such.
+- 10-foot layout on top of that: type sizes, hit targets and overscan margins. Reusing
+  phone layouts on a television looks exactly as bad as it sounds.
+- Manifest and packaging work, all mechanical: the `android.software.leanback` feature, a
+  TV banner asset, a leanback launcher intent filter and
+  `android.hardware.touchscreen required="false"`.
+- **Separate store listings.** Play Store TV is its own listing with its own review and
+  quality checklist. Fire TV is a separate Amazon Appstore submission, though sideloading
+  for personal use is trivial and is how this gets tested.
+- Testing runs on an Android TV emulator AVD first per suite rule 15, then a cheap Fire TV
+  stick for the real thing.
+
+**Sizing.** Everything except the UI is close to free. The TV UI is comparable to building
+the phone UI again minus all the plumbing, which makes it the largest single chunk of work
+after the host extraction, and still smaller than a correct transcode pipeline with seek.
+
+**Why Chromecast still ships first.** The security machinery already exists in
+`peartune/host/cast.js` and the Default Media Receiver needs no published app, so v1 gets
+video onto a television for very little. It is just a worse product: the phone is the
+remote, and all browsing happens on a 6-inch screen while a 55-inch one plays.
+
 ## Compat
 
 - **Old peers**: none exist. Greenfield.
@@ -183,19 +266,16 @@ reverted by re-pinning the previous digest.
 
 ## Open questions
 
-1. **Android TV client: v1.5 or v2?** It may be a better product than casting and cheaper
-   than the transcode pipeline. Worth costing before committing to the cast path as the
-   primary TV story.
-2. **Jellyfin-only forever, or a folder adapter later?** Jellyfin-only makes PearCinema a
-   remote-access layer for Jellyfin rather than a standalone server, which is a smaller
-   and more honest product. It also means no library works without installing Jellyfin
-   first. Genuine product fork in the road.
-3. **Where does transcode run when the host is a Mac?** PearTune's Mac host is a
+Questions 1 and 2 of the first draft are resolved above: the Android TV client is costed
+and scheduled for v2, and the folder adapter is committed for v2 on local sidecar metadata
+rather than TMDB.
+
+1. **Where does transcode run when the host is a Mac?** PearTune's Mac host is a
    LaunchDaemon and VideoToolbox is excellent, but the packaging differs enough from the
    Linux `/dev/dri` path to need its own answer.
-4. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
+2. **Does the phone re-serve to a TV when off-LAN?** At a friend's house the host is not
    on the TV's LAN, so casting there needs the phone as the origin. It composes, since the
    phone already runs an HTTP shim, but it doubles the bandwidth through the phone.
-5. **Store listings.** Apple and Google both scrutinise apps that stream video for
+3. **Store listings.** Apple and Google both scrutinise apps that stream video for
    copyright reasons. PearTune's App Review notes had to explain a pairing wall; this will
    likely have to explain provenance too. Worth drafting early rather than at submission.

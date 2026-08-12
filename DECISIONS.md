@@ -2,6 +2,43 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-12 - the folder adapter reads sidecar metadata, not TMDB
+Tier: T2
+Context: open question #2 of the video-deltas proposal asked whether PearCinema is
+Jellyfin-only forever. It was framed as a product fork in the road on the assumption that a
+folder adapter needs an online metadata service.
+Choice: Jellyfin and Emby for v1, folder adapter committed for v2, reading **local sidecar
+files**: Kodi-format `.nfo` XML plus `poster.jpg` / `fanart.jpg` / `banner.jpg`.
+Why: the assumption was wrong, which collapses the fork into a sequencing question.
+Self-hosted video libraries are overwhelmingly populated by Sonarr/Radarr or scanned by
+Jellyfin/Emby/Kodi, all of which write metadata to disk beside the media. So a folder
+library gets titles, synopses, cast, episode ordering and artwork with zero network calls,
+no API key and nothing learning what you own - a TMDB dependency would have been the first
+outbound metadata call anywhere in the suite. PearTune's `FolderAdapter._coverFile` already
+does this shape for album art. Fallback with no sidecars is filename parsing, which yields
+title, year and SxxEyy, and the UI should say so rather than look broken.
+The part of the original question that SURVIVES: the folder adapter is the moat. Reading
+only Jellyfin makes PearCinema an accessory to a project that can improve its own remote
+access whenever it likes. Deferring is fine, dropping is not.
+
+## 2026-08-12 - Android TV client is v2, Chromecast ships in v1
+Tier: T2
+Context: open question #1 asked whether a TV client beats casting, and whether it is
+cheaper than the transcode pipeline.
+Choice: build it, in v2. Chromecast push still ships in v1.
+Why: the toolchain is free - `react-native-tvos` plus the `@react-native-tvos/config-tv`
+Expo plugin is the documented path, and PearTune's existing Expo SDK 54 / RN 0.81.5 stack
+is exactly the supported pairing with RNTV 0.81-stable, so no SDK migration. Android TV is
+arm64/x86_64 Android, so the worklet and addon slices are already-solved problems, and
+direct play gets EASIER because TV boxes have better codec support than phones.
+**The whole cost is the UI.** PearCinema's UI is a WebView, Chromium does not ship the CSS
+spatial-navigation spec, so D-pad focus has to be implemented in JavaScript, with a focus
+model and visible focus rings on every screen. That is a second UI, not a port, and it is
+the largest chunk after the host extraction - still smaller than a correct transcode
+pipeline with seek. Chromecast ships first because the security machinery already exists in
+`peartune/host/cast.js` and the Default Media Receiver needs no published app; it is just a
+worse product, since browsing happens on a 6-inch screen while a 55-inch one plays.
+
 ## 2026-08-12 - the name is PearCinema
 Tier: T0 (but expensive to change later)
 Context: Tim proposed "PearTube" for the video sibling of PearTune.
