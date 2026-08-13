@@ -120,6 +120,17 @@ export default function App () {
   const [pairing, setPairing] = useState(false)
   const [wizard, setWizard] = useState(false)
 
+  // Where this person got to, and what they have finished. SEPARATE from /api/state,
+  // which is the operator's view of the box and polls every eight seconds - watch
+  // state changes when somebody watches something, not on a timer, and re-reading it
+  // eight times a minute would be a scan of the store for nothing.
+  const [watch, setWatch] = useState({ watched: [], continue: [], watching: null, choose: [] })
+  const reloadWatch = useCallback(async () => {
+    const w = await api('/api/watch/state')
+    if (!w?.error) setWatch(w)
+    return w
+  }, [])
+
   const reload = useCallback(async () => {
     const s = await api('/api/state')
     setState(s)
@@ -129,6 +140,7 @@ export default function App () {
   useEffect(() => {
     applyThemePref(loadThemePref())
     reload().then(s => { if (needsSetup(s) && !setupDismissed()) setWizard(true) })
+    reloadWatch()
     // The device list changes without us doing anything - a phone pairs, a guest
     // pass expires, somebody comes online. Poll gently rather than leaving a stale
     // roster on screen next to a revoke button.
@@ -172,8 +184,21 @@ export default function App () {
 
         {!wizard && tab === 'watch' && (
           playing
-            ? <Player item={playing} caps={CAPS} queue={queue} onPlay={setPlaying} onClose={() => setPlaying(null)} />
-            : <Library state={state} caps={CAPS} search={search} onPlay={play} />
+            ? (
+              <Player
+                item={playing}
+                caps={CAPS}
+                queue={queue}
+                watch={watch}
+                onWatchChange={reloadWatch}
+                onPlay={setPlaying}
+                // The shelf is rebuilt when the player closes rather than while it
+                // runs: a position written every fifteen seconds would otherwise
+                // reshuffle the row behind the film somebody is watching.
+                onClose={() => { setPlaying(null); reloadWatch() }}
+              />
+              )
+            : <Library state={state} caps={CAPS} search={search} watch={watch} onPlay={play} onWatchChange={reloadWatch} />
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}

@@ -116,9 +116,15 @@ async function cinema (t, { bind = '127.0.0.1', password = PASSWORD } = {}) {
 // A tiny client that keeps one cookie, so "logged in" and "logged out" are two
 // clients rather than a flag.
 function client (base) {
-  let cookie = null
+  // A JAR, not one cookie. The dashboard sets two: the session, which is a
+  // credential, and the person this browser watches as, which is a preference.
+  // Keeping only the newest would have the second log the first out - a real browser
+  // holds both, and a harness that does not would prove the wrong thing.
+  const jar = new Map()
+  const cookieHeader = () => [...jar].map(([k, v]) => `${k}=${v}`).join('; ') || null
+
   return {
-    get cookie () { return cookie },
+    get cookie () { return cookieHeader() },
     async req (method, pathname, { body, headers = {} } = {}) {
       const url = new URL(pathname, base)
       return new Promise((resolve, reject) => {
@@ -128,7 +134,7 @@ function client (base) {
           port: url.port,
           path: url.pathname + url.search,
           headers: {
-            ...(cookie ? { cookie } : {}),
+            ...(cookieHeader() ? { cookie: cookieHeader() } : {}),
             ...(body === undefined ? {} : { 'content-type': 'application/json' }),
             ...headers
           }
@@ -136,8 +142,10 @@ function client (base) {
           const chunks = []
           res.on('data', c => chunks.push(c))
           res.on('end', () => {
-            const set = res.headers['set-cookie']
-            if (set) cookie = String(set[0]).split(';')[0]
+            for (const raw of (res.headers['set-cookie'] || [])) {
+              const [k, v] = String(raw).split(';')[0].split('=')
+              jar.set(k, v)
+            }
             const buf = Buffer.concat(chunks)
             let json = null
             try { json = JSON.parse(buf.toString()) } catch {}
@@ -716,4 +724,188 @@ test('a device can pair while the library is still being read', async (t) => {
   assert.equal(res.status, 200)
   assert.match(res.json.link, /^pear:\/\/pearcinema\/pair\?/)
   host.stopPairing()
+})
+
+/* ------------------------------------------- where you stopped, per person -- */
+//
+// Approved as a T2 in proposals/2026-08-13-watch-state.md. The claim being pinned is
+// Tim's requirement: per USER, not per device. A phone gets that free - the package
+// derives its owner from the Noise-authenticated connection - but a browser arrives
+// with a password and nothing else, so the routes below are where it is either true
+// or quietly wrong.
+
+test('A BROWSER THAT HAS NEVER WATCHED ANYTHING HOLDS NOBODY', async (t) => {
+  // Lazily created, so a host nobody watches on carries no person it never needed.
+  const { c, host } = await loggedIn(t)
+  assert.deepEqual(await host.grants.listPersons(), [])
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.watching, null)
+  assert.deepEqual(state.json.continue, [])
+})
+
+test('the first thing watched creates the person, and it is renameable like any other', async (t) => {
+  const { c, host } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 90_000 } })
+
+  const persons = await host.grants.listPersons()
+  assert.equal(persons.length, 1, 'one, not one per browser')
+  assert.equal(persons[0].name, 'Me')
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.watching.name, 'Me')
+  assert.deepEqual(state.json.choose, [], 'one person is not a choice worth showing')
+})
+
+test('IT REMEMBERS WHERE YOU STOPPED, and the film comes back with its title', async (t) => {
+  const { c } = await loggedIn(t)
+  // Metropolis is 153 SECONDS in this fixture, so 100 seconds in is two thirds
+  // through - part-watched rather than finished.
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 100_000 } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.continue.length, 1)
+  assert.equal(state.json.continue[0].title, 'Metropolis')
+  assert.equal(state.json.continue[0].resume.positionMs, 100_000)
+})
+
+test('THE RUNTIME COMES FROM THE LIBRARY, never from the browser', async (t) => {
+  // A client that could name its own duration could mark anything watched by
+  // claiming a two-hour film is one second long. Metropolis is 153 seconds here, so
+  // 150 seconds in is finished and the browser said nothing about it.
+  const { c } = await loggedIn(t)
+  const res = await c.req('POST', '/api/watch/position', {
+    body: { itemId: FILM.id, positionMs: 150_000, durationMs: 1 }
+  })
+  assert.equal(res.json.finished, true)
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.watched, [FILM.id])
+  assert.deepEqual(state.json.continue, [], 'and it is not also sitting in continue-watching')
+})
+
+test('a minute in is not watching it', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: MP4.id, positionMs: 20_000 } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.continue, [])
+})
+
+test('MARKING IT UNWATCHED BY HAND STICKS', async (t) => {
+  // The affordance everybody reaches for when somebody else watched an episode. It
+  // must beat the automatic mark rather than being overwritten by it.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 150_000 } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.watched, [FILM.id])
+
+  await c.req('POST', '/api/watch/watched', { body: { itemId: FILM.id, watched: false } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.watched, [])
+})
+
+test('marking it watched by hand clears the position too', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 90_000 } })
+  await c.req('POST', '/api/watch/watched', { body: { itemId: FILM.id, watched: true } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.watched, [FILM.id])
+  assert.deepEqual(state.json.continue, [], 'a finished film does not also sit half-watched')
+})
+
+test('an item that has left the library is dropped rather than drawn as a dead card', async (t) => {
+  const { c, host } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: 'gone-away', positionMs: 90_000 } })
+  assert.equal((await c.req('GET', '/api/watch/state')).json.continue.length, 0)
+  assert.ok(host)
+})
+
+test('TWO PEOPLE ON ONE MACHINE KEEP TWO HISTORIES', async (t) => {
+  // The whole requirement in one test: per USER, not per device. Same browser, same
+  // password, two people - and the film one of them finished is not ticked for the
+  // other.
+  const { c, host } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 150_000 } })
+
+  const ben = await host.grants.addPerson('Ben')
+  await c.req('POST', '/api/watch/as', { body: { personId: ben.id } })
+
+  const asBen = await c.req('GET', '/api/watch/state')
+  assert.equal(asBen.json.watching.name, 'Ben')
+  assert.deepEqual(asBen.json.watched, [], "Ben has not seen Tim's film")
+  // And with a second person on the box, the page is offered the choice.
+  assert.equal(asBen.json.choose.length, 2)
+
+  await c.req('POST', '/api/watch/position', { body: { itemId: MP4.id, positionMs: 120_000 } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.continue.map(i => i.id), [MP4.id])
+})
+
+test('IT ASKS RATHER THAN GUESSING when there are several people and no choice made', async (t) => {
+  // Filing a film under the wrong person is worse than filing it under nobody.
+  const { c, host } = await loggedIn(t)
+  await host.grants.addPerson('Tim')
+  await host.grants.addPerson('Ben')
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.watching, null)
+  assert.equal(state.json.choose.length, 2)
+
+  const write = await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 90_000 } })
+  assert.equal(write.json.needsPerson, true, 'and it does not invent a third person to hold it')
+  assert.equal((await host.grants.listPersons()).length, 2)
+})
+
+test('a cookie naming a DELETED person does not file a film under a stranger', async (t) => {
+  const { c, host } = await loggedIn(t)
+  const ben = await host.grants.addPerson('Ben')
+  await c.req('POST', '/api/watch/as', { body: { personId: ben.id } })
+  await host.grants.deletePerson(ben.id)
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.watching, null, 'the cookie is checked against the live list')
+})
+
+test('watching as somebody who does not exist is refused', async (t) => {
+  const { c } = await loggedIn(t)
+  const res = await c.req('POST', '/api/watch/as', { body: { personId: 'not-a-person' } })
+  assert.equal(res.status, 400)
+})
+
+test('NONE OF THE WATCH ROUTES ANSWER A STRANGER', async (t) => {
+  // The same rule every other route on this page follows. A watch position is a
+  // small thing to leak and the list of them is not.
+  const ctx = await cinema(t)
+  const anon = client(ctx.base)
+
+  // No body on the GET: a request the server answers 401 to without ever draining is
+  // a reset socket rather than a clean status, which reads as a broken test instead
+  // of the passing gate it is.
+  assert.equal((await anon.req('GET', '/api/watch/state')).status, 401)
+  for (const route of ['/api/watch/position', '/api/watch/watched', '/api/watch/as']) {
+    assert.equal((await anon.req('POST', route, { body: {} })).status, 401, route)
+  }
+})
+
+test('A PERSON CAN BE ADDED WITHOUT A DEVICE, or the chooser could never appear', async (t) => {
+  // People used to exist only once a paired phone claimed a name. That is fine while
+  // a person is a way to group devices and wrong the moment watch state is per
+  // person: a household watching on one laptop would have nobody but the
+  // auto-created "Me" and no way to make a second.
+  const { c, host } = await loggedIn(t)
+  const res = await c.req('POST', '/api/person', { body: { name: 'Ben' } })
+  assert.equal(res.status, 200)
+  assert.equal(res.json.name, 'Ben')
+  assert.equal((await host.grants.listPersons()).length, 1)
+
+  // And it is immediately somebody this browser can watch as.
+  const state = await c.req('GET', '/api/watch/state')
+  assert.equal(state.json.watching.name, 'Ben', 'the only person is the one watching')
+})
+
+test('two people of one name is refused, because "revoke Sam" has to mean something', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/person', { body: { name: 'Ben' } })
+  const dup = await c.req('POST', '/api/person', { body: { name: 'ben' } })
+  assert.equal(dup.status, 400)
+  assert.match(dup.json.error, /already somebody called Ben/)
+
+  assert.equal((await c.req('POST', '/api/person', { body: { name: '  ' } })).status, 400)
 })

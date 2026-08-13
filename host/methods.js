@@ -15,16 +15,20 @@
 // typed code the channel survives.
 
 const items = require('./items')
+const watch = require('./watch')
 
 // Methods that mutate, refused for a readonly grant at the package's chokepoint
 // rather than inside a handler - so a new mutating method cannot ship without a
 // scope check.
 //
-// EMPTY IN THIS CUT, and that is a fact about scope rather than an oversight:
-// first pair serves a read-only library. `resume.set` is the first entry it gains,
-// and resume is inherited wholesale from the donor rather than written here (it
-// already IS continue-watching), so it arrives with the state store in phase 3.
-const MUTATING = []
+// The two writes a VIEWER may make. Everything else on this table is a read.
+//
+// They are listed here rather than checked inside a handler so that a new mutating
+// method cannot ship without a scope check - a readonly grant is refused at the
+// package's chokepoint before a handler runs. Both write only to the caller's OWN
+// per-person rows, keyed by an ownerId the host derives from the connection, so a
+// readonly device is being denied its own history rather than anybody else's.
+const MUTATING = ['resume.set', 'watched.set']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -45,7 +49,10 @@ function requireScope (ctx, type) {
 // phone relabels on its next read.
 // `grants` is the host's grant store, passed in rather than reached for, so two
 // hosts in one process (a test, a box serving two libraries) never share one.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null }) {
+// `state` is the per-person store from @peerloom/host. Null in a cut that has none -
+// the handlers below then answer empty rather than throwing, so a host built without
+// it still serves a library.
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -132,6 +139,98 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       })
       if (!stream) throw ctx.notFound('no such subtitle')
       return ctx.stream(stream)
+    },
+
+    // --- where you stopped, and what you have finished --------------------
+    //
+    // Approved as a T2 in proposals/2026-08-13-watch-state.md. PER PERSON, NOT PER
+    // DEVICE: `ctx.owner` is `p:{personId}` for a device assigned to somebody and
+    // `d:{deviceKey}` for one that is not, derived by the package from the
+    // Noise-authenticated connection. There is no owner parameter to forge, and
+    // adding one would be the whole vulnerability.
+    //
+    // The consequence is the feature: put a phone down, pick a laptop up, same film
+    // same place, because both devices belong to the same person and talk to the
+    // same host.
+
+    'resume.set': async (ctx) => {
+      if (!state) throw ctx.notFound('this host does not keep watch state')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      const itemId = String(ctx.params.itemId)
+
+      // The RUNTIME comes from the library, never from the client. A client that
+      // could name its own duration could mark anything watched by claiming a film
+      // is one second long.
+      const item = await getAdapter().get({ id: itemId })
+      if (!item) throw ctx.notFound('no such item')
+
+      const verdict = watch.decide({
+        positionMs: ctx.params.positionMs,
+        runtimeSeconds: item.runtime,
+        ended: !!ctx.params.ended
+      })
+
+      // Finishing is BOTH writes: the tick goes on and the position goes away. A
+      // finished film sitting at the top of continue-watching wearing a watched
+      // badge is the state this avoids, and it falls out of the store's
+      // delete-at-zero rule rather than needing a rule of its own.
+      if (verdict.finished) await state.setWatched(ctx.owner, itemId, true, { auto: true })
+
+      const row = await state.setResume(ctx.owner, itemId, verdict.positionMs, verdict.durationMs, {
+        // WHEN THE DEVICE WATCHED, not when the write landed. The two differ whenever
+        // a write came out of an offline outbox, and continue-watching orders by the
+        // first - see the donor's note, which cost a proposal to learn.
+        playedAt: Number(ctx.params.playedAt) || 0,
+        deviceKey: ctx.deviceKey
+      })
+      return { ok: true, finished: verdict.finished, positionMs: row?.positionMs || 0 }
+    },
+
+    'resume.get': async (ctx) => {
+      if (!state) return { resume: null }
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      return { resume: await state.getResume(ctx.owner, String(ctx.params.itemId)) }
+    },
+
+    // The continue-watching row. Rows first, then the items they point at, because a
+    // client rendering a shelf needs titles and artwork rather than ids - and a
+    // position whose item has since left the library is dropped rather than sent as
+    // a card that cannot be opened.
+    'resume.list': async (ctx) => {
+      if (!state) return { items: [] }
+      const rows = await state.listResume(ctx.owner, Number(ctx.params.limit) || 20)
+      const adapter = getAdapter()
+      const out = []
+      for (const r of rows) {
+        const item = await adapter.get({ id: r.itemId })
+        if (item) out.push({ ...item, resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
+      }
+      return { items: out }
+    },
+
+    'watched.set': async (ctx) => {
+      if (!state) throw ctx.notFound('this host does not keep watch state')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      const itemId = String(ctx.params.itemId)
+      const on = ctx.params.watched !== false
+
+      // BY HAND, so `auto` is false: a person saying "no, I have not seen this" must
+      // not read as the host's own guess, or a later change to where the end is could
+      // quietly overrule them.
+      await state.setWatched(ctx.owner, itemId, on, { auto: false })
+
+      // Marking something watched clears its position, for the same reason finishing
+      // it does. Marking it UNWATCHED does not invent one - it starts over.
+      if (on) await state.setResume(ctx.owner, itemId, 0, null)
+      return { ok: true, watched: on }
+    },
+
+    // Every id this person has finished. A LIST, not a per-item question: a grid asks
+    // about two hundred posters at once and two hundred round trips to draw one
+    // screen is the kind of thing that only hurts on somebody else's library.
+    'watched.list': async (ctx) => {
+      if (!state) return { items: [] }
+      return { items: [...await state.watchedSet(ctx.owner)] }
     },
 
     // --- identity ---------------------------------------------------------
