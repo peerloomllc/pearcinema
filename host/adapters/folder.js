@@ -28,6 +28,7 @@ const path = require('path')
 const items = require('../items')
 const names = require('../names')
 const nfo = require('../nfo')
+const subtitles = require('../subtitles')
 const { walkVideos, probeAll } = require('../probe')
 
 // How long a scan's results stand before a rescan is worth doing. A film library
@@ -68,6 +69,17 @@ const SUBTITLE_REASON = {
   ssa: 'ASS and SSA subtitles carry their own styling and positioning, which needs converting before a player can show them. This version does not do that yet.',
   sub: 'This is an image-based subtitle (VobSub). Showing it means drawing it into the picture, which needs a full re-encode.'
 }
+
+// AND THE TRACKS INSIDE THE FILE, which this adapter ignored entirely until
+// 2026-08-13 - it read the disk beside a film and nothing within it. On the real
+// library that hid **2,715 embedded text tracks** across the television, and left
+// every film whose only subtitles are PGS showing an empty Subtitles panel with no
+// explanation, which reads as "this app cannot do subtitles" rather than as the
+// truthful "those ones are pictures".
+//
+// External files still come FIRST, and that is measured rather than stylistic: the
+// Movies collection is 232 PGS tracks against 383 usable `.srt` files on disk. Lead
+// with what is inside the file and most films look like their subtitles are broken.
 
 const stemOf = (name) => name.slice(0, name.lastIndexOf('.') === -1 ? name.length : name.lastIndexOf('.'))
 const extOf = (name) => name.slice(name.lastIndexOf('.')).toLowerCase()
@@ -118,7 +130,7 @@ class FolderAdapter {
   // MULTI-ROOT from the start, because a real collection is `Movies` on one disk and
   // `TV Shows` on another more often than it is one tidy tree - and because a root
   // that is missing must not take the others down with it.
-  constructor ({ roots = [], dataDir = null, libraryId = null, ids, log = () => {}, ffprobe = 'ffprobe' } = {}) {
+  constructor ({ roots = [], dataDir = null, libraryId = null, ids, log = () => {}, ffprobe = 'ffprobe', ffmpeg = 'ffmpeg' } = {}) {
     if (!ids) throw new Error('FolderAdapter needs the protocol id factory')
 
     this.kind = 'folder'
@@ -128,6 +140,10 @@ class FolderAdapter {
     this.ids = ids
     this.log = log
     this.ffprobe = ffprobe
+    // Only ever used to lift ONE TEXT SUBTITLE TRACK out of a file. The video path
+    // has its own ffmpeg, in the remuxer, with a concurrency cap that matters there
+    // and would be meaningless here.
+    this.ffmpeg = ffmpeg
 
     this.scannedAt = null
     this.scanError = null
@@ -149,6 +165,9 @@ class FolderAdapter {
     // maps rather than one with a type tag somebody can get wrong.
     this._artPaths = new Map()
     this._subPaths = new Map()
+    // subtitleId -> { file, index } for a track that lives INSIDE a video, which is
+    // resolved by asking ffmpeg for it rather than by opening a file of its own.
+    this._subTracks = new Map()
     this._subs = new Map() // itemId -> the listed tracks, wire-shaped
     this._scanning = null
   }
@@ -410,6 +429,31 @@ class FolderAdapter {
     )
   }
 
+  // The tracks INSIDE the file, off the same ffprobe pass that read its codecs. No
+  // extra work at scan time and no second walk of the disk.
+  _embeddedSubtitles (file, root, probed) {
+    return (probed?.subtitles || []).map(track => {
+      const codec = String(track.codec || '').toLowerCase()
+      const playable = subtitles.TEXT_SUBTITLE_CODECS.has(codec)
+      return {
+        // Keyed by the RELATIVE path and the track's position within the file's
+        // subtitle streams, for the same reason every other id here is: a drive that
+        // remounts elsewhere must not orphan them.
+        id: this.ids.itemId(this.libraryId, this.kind, `emb:${path.relative(root, file)}:${track.index}`),
+        _embedded: track.index,
+        _sourceFile: file,
+        language: track.language,
+        title: subtitles.titleFor(track),
+        codec,
+        external: false,
+        forced: !!track.forced,
+        sdh: !!track.sdh,
+        playable,
+        reason: playable ? null : subtitles.reasonFor(codec)
+      }
+    })
+  }
+
   // One file: what is it, and what does the disk already say about it?
   async _identify (file, rootEntry, probed, dirs) {
     const root = rootEntry.path
@@ -469,7 +513,13 @@ class FolderAdapter {
     // where the folder holds exactly one video. See GENERIC_ART.
     const soleVideo = (dirs.get(dir)?.videos || 0) === 1
     const artFile = this._pickArt(dir, stem, dirs, { allowGeneric: soleVideo })
-    const subs = this._findSubtitles(dir, stem, dirs, root)
+    // FILES ON DISK FIRST, then what is inside the film. Order is the whole point -
+    // see the note above SUBTITLE_PLAYABLE - and it is expressed by concatenation
+    // rather than by a sort key, so nothing downstream can reverse it by accident.
+    const subs = [
+      ...this._findSubtitles(dir, stem, dirs, root),
+      ...this._embeddedSubtitles(file, root, probed)
+    ]
 
     if (episode) {
       const show = names.parseShowFolder(seriesFolder || episode.series)
@@ -591,6 +641,7 @@ class FolderAdapter {
     this._paths = new Map()
     this._artPaths = new Map()
     this._subPaths = new Map()
+    this._subTracks = new Map()
     this._subs = new Map()
 
     const pairs = [
@@ -615,10 +666,14 @@ class FolderAdapter {
       if (raw._artFile && clean.artId) this._artPaths.set(clean.artId, raw._artFile)
 
       if (raw._subs?.length) {
-        // Strip `_file` off each track on the way into the public list, and keep the
-        // pairing in `_subPaths` where nothing serialises it.
-        this._subs.set(clean.id, raw._subs.map(({ _file: f, ...track }) => {
+        // Strip the internals off each track on the way into the public list, and
+        // keep the pairing where nothing serialises it. A track is one of two things
+        // and they resolve differently: a FILE beside the video, or an index into the
+        // video's own subtitle streams. Both are host paths in the end, so neither
+        // may travel.
+        this._subs.set(clean.id, raw._subs.map(({ _file: f, _sourceFile: src, _embedded: idx, ...track }) => {
           if (f) this._subPaths.set(track.id, f)
+          if (src && idx !== undefined) this._subTracks.set(track.id, { file: src, index: idx })
           return track
         }))
       }
@@ -681,7 +736,12 @@ class FolderAdapter {
       // so serving it looks fine right up until the drive moves and the shows a phone
       // remembers are gone. The property is the whole point; a stale set of ids that
       // does not have it is the bug, not a saving.
-      if (raw.version !== 4) return false
+      //
+      // Version 5 added the subtitle tracks INSIDE each file. A version 4 cache has
+      // only the files found beside them, so a host loading one would show an empty
+      // Subtitles panel on 2,715 television episodes that have perfectly good text
+      // tracks - the exact complaint this version answers.
+      if (raw.version !== 5) return false
       // A cache built from different folders describes a different library - and a
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
@@ -702,7 +762,7 @@ class FolderAdapter {
     try {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
-        version: 4,
+        version: 5,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,
@@ -821,8 +881,29 @@ class FolderAdapter {
     return file ? { input: file } : null
   }
 
+  // CAN THIS TRACK BE SHOWN, and if not, why - decided when it is ASKED FOR rather
+  // than when it was scanned.
+  //
+  // The verdict is a fact about what this VERSION can do, not about the file. Baking
+  // it into the scan means a cache written today still says "cannot show" after the
+  // day something learns to burn a picture track in, and the operator's only route
+  // out is a rescan they have no reason to suspect they need. It also bit
+  // immediately: the reason wording was fixed hours after a cache was written with
+  // the old one, and a cached host would have gone on saying the useless version.
+  _verdict (track) {
+    if (track.external) {
+      const playable = SUBTITLE_PLAYABLE.has(track.codec)
+      return {
+        playable,
+        reason: playable ? null : (SUBTITLE_REASON[track.codec] || `unsupported subtitle format: ${track.codec}`)
+      }
+    }
+    const reason = subtitles.reasonFor(track.codec)
+    return { playable: !reason, reason }
+  }
+
   async subtitles ({ itemId } = {}) {
-    return this._subs.get(String(itemId)) || []
+    return (this._subs.get(String(itemId)) || []).map(t => ({ ...t, ...this._verdict(t) }))
   }
 
   async subtitle ({ itemId, subtitleId } = {}) {
@@ -830,8 +911,31 @@ class FolderAdapter {
     // subtitle id serves against any item id, which is not a disclosure on its own -
     // they are all in the same library - but it is the kind of loose coupling that
     // stops being harmless the moment there are per-item permissions.
-    const owned = (this._subs.get(String(itemId)) || []).some(s => s.id === String(subtitleId))
-    if (!owned) return null
+    const track = (this._subs.get(String(itemId)) || []).find(s => s.id === String(subtitleId))
+    if (!track) return null
+
+    // A track that was listed as unshowable is not served, whatever asks for it. The
+    // list is honest about PGS precisely so a client can say why; handing one over
+    // anyway would produce a player showing an empty subtitle track and no reason.
+    // Re-decided here rather than read off the row, so this cannot disagree with the
+    // list the client was given - see _verdict.
+    if (!this._verdict(track).playable) return null
+
+    // INSIDE THE FILE. One ffmpeg, reading a text track out and converting it to
+    // WebVTT - kilobytes of text, no decoding, nothing written to disk. The video
+    // path's concurrency limit deliberately does not apply: this is a header read,
+    // not a transcode.
+    const embedded = this._subTracks.get(String(subtitleId))
+    if (embedded) {
+      const input = this._resolveIn(this._paths, itemId, 'subtitle-source')
+      if (!input || input !== path.resolve(embedded.file)) return null
+      return subtitles.extractSubtitle({
+        ffmpeg: this.ffmpeg,
+        input,
+        index: embedded.index,
+        log: this.log
+      })
+    }
 
     const file = this._resolveIn(this._subPaths, subtitleId, 'subtitle')
     if (!file) return null

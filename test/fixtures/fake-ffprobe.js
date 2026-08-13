@@ -24,10 +24,26 @@ try {
 const ext = path.extname(file).toLowerCase()
 const container = ext === '.mkv' ? 'matroska,webm' : ext === '.avi' ? 'avi' : 'mov,mp4,m4a'
 
+// SUBTITLE TRACKS ON DEMAND, from the filename, because a test about which tracks a
+// player is offered needs a file that HAS tracks. `.subs-<codec>-<codec>` anywhere in
+// the name asks for them: `Film.subs-subrip-pgssub.mkv` is one text track and one
+// image one. Anything without the marker has none, which is the common case and what
+// every test written before this expected.
+const marker = /\.subs-([a-z0-9-]+)/i.exec(path.basename(file))
+const subs = marker
+  ? marker[1].split('-').map((codec, i) => ({
+      codec_type: 'subtitle',
+      codec_name: codec,
+      tags: { language: i === 0 ? 'eng' : 'fre', title: i === 0 ? 'English' : null },
+      disposition: { forced: 0, default: i === 0 ? 1 : 0, hearing_impaired: 0 }
+    }))
+  : []
+
 process.stdout.write(JSON.stringify({
   streams: [
     { codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080 },
-    { codec_type: 'audio', codec_name: 'aac', channels: 6 }
+    { codec_type: 'audio', codec_name: 'aac', channels: 6 },
+    ...subs
   ],
   format: {
     format_name: container,

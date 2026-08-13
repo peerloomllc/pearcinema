@@ -291,3 +291,134 @@ test('A RESCAN PICKS UP A POSTER ADDED AFTER THE FIRST SCAN', async (t) => {
   assert.ok(after.artId, 'the new poster is found')
   assert.equal(await read(await a.art({ artId: after.artId })), 'DEADPOOLPOSTER')
 })
+
+/* ------------------------------------------- the subtitles INSIDE the file -- */
+//
+// Until 2026-08-13 this adapter read the disk BESIDE a film and nothing within it.
+// On the real library that hid 2,715 embedded text tracks across the television, and
+// left every film whose only subtitles are PGS showing an empty panel with no
+// explanation - which reads as "this app cannot do subtitles" rather than the
+// truthful "those ones are pictures".
+//
+// The fake ffprobe mints tracks from the filename: `.subs-<codec>-<codec>`.
+
+test('THE TRACKS INSIDE A FILE ARE LISTED, and the files beside it still come first', async (t) => {
+  const { a } = await library(t, {
+    'Tenet/Tenet.subs-subrip-pgssub.mkv': 'x',
+    'Tenet/Tenet.subs-subrip-pgssub.en.srt': SRT
+  })
+
+  const film = (await a.list({ type: 'movies' })).items.find(m => m.title.startsWith('Tenet'))
+  const subs = await a.subtitles({ itemId: film.id })
+  assert.equal(subs.length, 3, 'one file on disk plus the two inside the film')
+
+  // ORDER IS THE POINT. A collection whose embedded tracks are mostly pictures looks
+  // broken if the panel leads with them.
+  assert.equal(subs[0].external, true)
+  assert.deepEqual(subs.slice(1).map(s => s.external), [false, false])
+
+  const text = subs.find(s => !s.external && s.codec === 'subrip')
+  assert.equal(text.playable, true)
+  assert.equal(text.reason, null)
+  assert.equal(text.language, 'eng')
+  assert.equal(text.title, 'English')
+
+  // And the common case on a film collection, said in words rather than hidden.
+  const image = subs.find(s => s.codec === 'pgssub')
+  assert.equal(image.playable, false)
+  assert.match(image.reason, /pictures rather than text/)
+})
+
+test('a film with NOTHING beside it still offers what is inside it', async (t) => {
+  const { a } = await library(t, { 'Dune/Dune.subs-subrip.mkv': 'x' })
+  const film = (await a.list({ type: 'movies' })).items.find(m => m.title.startsWith('Dune'))
+  const subs = await a.subtitles({ itemId: film.id })
+  assert.equal(subs.length, 1)
+  assert.equal(subs[0].external, false)
+  assert.equal(subs[0].playable, true)
+})
+
+test('AN UNSHOWABLE TRACK IS NOT SERVED, whatever asks for it', async (t) => {
+  // The list is honest about PGS precisely so a client can say why. Handing one over
+  // anyway would spawn an ffmpeg to produce nothing and leave a player showing an
+  // empty subtitle track with no explanation.
+  const { a } = await library(t, { 'Sicario/Sicario.subs-pgssub.mkv': 'x' })
+  const film = (await a.list({ type: 'movies' })).items.find(m => m.title.startsWith('Sicario'))
+  const [image] = await a.subtitles({ itemId: film.id })
+
+  assert.equal(image.playable, false)
+  assert.equal(await a.subtitle({ itemId: film.id, subtitleId: image.id }), null)
+})
+
+test('NO TRACK CARRIES A HOST PATH, the same rule the artwork follows', async (t) => {
+  const { root, a } = await library(t, { 'Arrival/Arrival.subs-subrip-pgssub.mkv': 'x' })
+  const film = (await a.list({ type: 'movies' })).items.find(m => m.title.startsWith('Arrival'))
+
+  const wire = JSON.stringify(await a.subtitles({ itemId: film.id }))
+  assert.ok(!wire.includes(root), 'the shape of somebody s disk is not a client s business')
+  assert.ok(!wire.includes('_sourceFile'))
+  assert.ok(!wire.includes('_embedded'))
+})
+
+test('an embedded track cannot be pulled through a DIFFERENT film', async (t) => {
+  const { a } = await library(t, {
+    'Arrival/Arrival.subs-subrip.mkv': 'x',
+    'Sicario/Sicario.subs-subrip.mkv': 'x'
+  })
+  const films = (await a.list({ type: 'movies' })).items
+  const arrival = films.find(m => m.title.startsWith('Arrival'))
+  const sicario = films.find(m => m.title.startsWith('Sicario'))
+
+  const [track] = await a.subtitles({ itemId: arrival.id })
+  assert.equal(await a.subtitle({ itemId: sicario.id, subtitleId: track.id }), null)
+})
+
+test('the tracks inside a file survive a restart from the cache', async (t) => {
+  // They are found during the ffprobe pass, so losing them on a cache load would
+  // mean a host that shows subtitles until it is restarted - the worst kind of bug
+  // to be told about second-hand.
+  const { root, dataDir } = await library(t, { 'Tenet/Tenet.subs-subrip-pgssub.mkv': 'x' })
+
+  const b = new FolderAdapter({ roots: [root], dataDir, libraryId: LIB, ids: protocol.ids, ffprobe: FAKE_FFPROBE })
+  b.visibleRoots = () => { throw new Error('must not walk') }
+  await b.scan()
+
+  const film = (await b.list({ type: 'movies' })).items.find(m => m.title.startsWith('Tenet'))
+  const subs = await b.subtitles({ itemId: film.id })
+  assert.equal(subs.length, 2)
+  assert.equal(subs.filter(s => s.playable).length, 1)
+})
+
+test('THE VERDICT IS DECIDED WHEN A TRACK IS ASKED FOR, not when it was scanned', async (t) => {
+  // "Can this be shown" is a fact about what this VERSION can do, not about the file.
+  // Baking it into the scan means a cache written today still says "cannot show"
+  // after the day something learns to burn a picture track in - with no reason for
+  // the operator to suspect a rescan would help. It bit immediately, too: the PGS
+  // wording was fixed hours after a cache had been written with the old one.
+  const { root, dataDir } = await library(t, { 'Tenet/Tenet.subs-subrip-pgssub.mkv': 'x' })
+
+  // Reach into the cache and put a stale verdict in it, which is exactly what an
+  // older build left behind.
+  const file = path.join(dataDir, 'folder-scan.json')
+  const raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+  for (const m of raw.movies) {
+    for (const s of (m._subs || [])) { s.playable = !s.playable; s.reason = 'stale nonsense' }
+  }
+  await fsp.writeFile(file, JSON.stringify(raw))
+
+  const b = new FolderAdapter({ roots: [root], dataDir, libraryId: LIB, ids: protocol.ids, ffprobe: FAKE_FFPROBE })
+  await b.scan()
+
+  const film = (await b.list({ type: 'movies' })).items.find(m => m.title.startsWith('Tenet'))
+  const subs = await b.subtitles({ itemId: film.id })
+  const text = subs.find(s => s.codec === 'subrip')
+  const image = subs.find(s => s.codec === 'pgssub')
+
+  assert.equal(text.playable, true)
+  assert.equal(text.reason, null, 'the stale reason did not survive')
+  assert.equal(image.playable, false)
+  assert.match(image.reason, /pictures rather than text/)
+
+  // And serving agrees with listing, rather than trusting the same stale row.
+  assert.equal(await b.subtitle({ itemId: film.id, subtitleId: image.id }), null)
+})

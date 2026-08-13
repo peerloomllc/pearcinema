@@ -53,7 +53,11 @@ function buildAdapter (cfg, { libraryId, ids, dataDir = null, log = () => {} } =
         dataDir,
         libraryId,
         ids,
-        log
+        log,
+        // The same binaries the rest of the host uses. Overridable for the same
+        // reason the remuxer's is: an image may carry them somewhere unusual.
+        ffprobe: process.env.PEARCINEMA_FFPROBE || 'ffprobe',
+        ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg'
       })
 
     case 'jellyfin':

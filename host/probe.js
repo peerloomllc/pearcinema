@@ -103,6 +103,13 @@ async function probeFile (file, { ffprobe = 'ffprobe', timeoutMs = 30_000 } = {}
       '-v', 'error',
       '-show_entries', 'format=format_name,duration,size',
       '-show_entries', 'stream=codec_type,codec_name,width,height,channels',
+      // A NARROW `-show_entries` DROPS TAGS AND DISPOSITION ENTIRELY, and it does it
+      // silently - the streams come back, just with nothing on them. Naming a
+      // subtitle track needs its language and whether it is forced, so both are asked
+      // for explicitly. Still narrow: a full `-show_streams` on 2,986 files hands back
+      // megabytes of encoder strings nothing reads.
+      '-show_entries', 'stream_tags=language,title',
+      '-show_entries', 'stream_disposition=forced,default,hearing_impaired',
       '-of', 'json',
       file
     ], { timeoutMs })
@@ -139,7 +146,29 @@ async function probeFile (file, { ffprobe = 'ffprobe', timeoutMs = 30_000 } = {}
     height: video.height || null,
     size: Number(parsed.format?.size) || null,
     duration: Math.round(Number(parsed.format?.duration) || 0) || null,
-    subtitleCodecs: subtitles.map(s => s.codec_name).filter(Boolean)
+    subtitleCodecs: subtitles.map(s => s.codec_name).filter(Boolean),
+    // THE TRACKS THEMSELVES, not just a tally of their codecs.
+    //
+    // `subtitleCodecs` above answers the codec report's question - what is in a
+    // library - and it is deliberately kept, because that report is cited in
+    // DECISIONS. This answers the player's question: which track, in what language,
+    // and can it be shown. On the real library it is 2,715 embedded text tracks
+    // across the television that were invisible while only files on disk were read.
+    //
+    // `index` is the stream's index WITHIN the subtitle streams, not within the
+    // file, because that is what ffmpeg's `-map 0:s:N` takes. Deriving it from
+    // `s.index` would be off by however many video and audio streams came first.
+    subtitles: subtitles.map((s, i) => ({
+      index: i,
+      codec: s.codec_name || null,
+      language: s.tags?.language && s.tags.language !== 'und' ? String(s.tags.language).toLowerCase() : null,
+      title: s.tags?.title ? String(s.tags.title).slice(0, 120) : null,
+      forced: !!s.disposition?.forced,
+      default: !!s.disposition?.default,
+      // Kodi and Jellyfin both spell this `hearing_impaired`; a lot of files instead
+      // say SDH in the title, which the folder adapter already reads off filenames.
+      sdh: !!s.disposition?.hearing_impaired
+    }))
   }
 }
 

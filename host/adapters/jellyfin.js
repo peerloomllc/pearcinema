@@ -60,11 +60,11 @@ const SORT_BY = {
 }
 const sortOrder = (order) => (order === 'desc' ? 'Descending' : 'Ascending')
 
-// Subtitle codecs we can hand a phone as TEXT. Everything else on a real library is
-// image-based, and burning an image track into the picture means a full transcode,
-// which v1 does not have.
-const TEXT_SUBTITLE_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'vtt', 'mov_text', 'text'])
-const IMAGE_SUBTITLE_CODECS = new Set(['pgssub', 'pgs', 'dvdsub', 'dvd_subtitle', 'dvbsub', 'dvb_subtitle', 'xsub'])
+// Subtitle codecs we can hand a phone as TEXT, and the image-based ones we cannot.
+// SHARED WITH THE FOLDER ADAPTER rather than defined twice: both sources meet the
+// same PGS tracks off the same disk, and two lists that drift would mean one source
+// offering a track the other refuses. Re-exported below, where the tests read them.
+const { TEXT_SUBTITLE_CODECS, IMAGE_SUBTITLE_CODECS } = require('../subtitles')
 
 class JellyfinAdapter {
   // `ids` is the protocol's id factory (protocol.ids). Passed in rather than
