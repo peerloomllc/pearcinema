@@ -46,6 +46,26 @@ function Poster ({ item, caps, onOpen }) {
   )
 }
 
+// A grid of grey rectangles is indistinguishable from a broken scanner, and the
+// first thing anyone does about it is assume the app is broken rather than that
+// their files have no pictures beside them. So say which it is.
+//
+// PearCinema never fetches artwork from the internet unless the operator turns that
+// on and supplies their own key - a library populated by hand, rather than by
+// Sonarr or Radarr, genuinely has nothing on disk to show.
+function ArtNote ({ list, source }) {
+  if (source !== 'folder' || !list.length) return null
+  if (list.some(i => i.artId)) return null
+  return (
+    <p class='hint'>
+      No posters: these files have no artwork saved next to them on disk. PearCinema
+      only reads what is already there, so nothing is missing or broken. Drop a
+      <span class='mono'> poster.jpg </span> in a film's folder, or name it after the
+      film, and it appears on the next scan.
+    </p>
+  )
+}
+
 function CompatLine ({ list, caps }) {
   const t = tally(list, caps)
   if (!t.total) return null
@@ -179,6 +199,7 @@ export default function Library ({ state, caps, search, onPlay }) {
           <>
             <h2>{season.title}</h2>
             <CompatLine list={episodes.items} caps={caps} />
+            <ArtNote list={episodes.items} source={state.source?.kind} />
             <div class='rows' style='margin-top:.8rem'>
               {episodes.items.map(e => {
                 const v = verdictFor(e, caps)
@@ -215,6 +236,7 @@ export default function Library ({ state, caps, search, onPlay }) {
       </div>
 
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
+      <ArtNote list={showing.items} source={state.source?.kind} />
 
       {showing.err && <div class='banner bad'>{showing.err}</div>}
 

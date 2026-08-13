@@ -85,6 +85,15 @@ async function main () {
     return out
   }, [])
 
+  // --rescan USED TO BE READ ONLY BY --codec-report, so `npm run host --rescan`
+  // silently did nothing and left the operator watching a cached library and
+  // wondering. A documented flag that is ignored on the path people actually use is
+  // worse than no flag. It now reaches every scan below.
+  const rescan = !!arg('rescan')
+  // Set below by whichever branch configures a source, so ready() knows whether the
+  // disk has already been walked this startup.
+  let sourceConfigured = false
+
   if (folders.length) {
     const cfg = { kind: 'folder', roots: folders }
     if (arg('test')) {
@@ -97,7 +106,8 @@ async function main () {
       await host.close()
       return
     }
-    log('source:saved', await host.setSource(cfg))
+    log('source:saved', await host.setSource(cfg, { force: rescan }))
+    sourceConfigured = true
   }
 
   const jellyfin = arg('jellyfin')
@@ -121,12 +131,13 @@ async function main () {
       return
     }
 
-    const res = await host.setSource(cfg)
+    const res = await host.setSource(cfg, { force: rescan })
+    sourceConfigured = true
     log('source:saved', res)
   }
 
   if (arg('codec-report')) {
-    await host.adapter.scan(arg('rescan') ? { force: true } : {})
+    await host.adapter.scan({ force: rescan })
     const { text } = await codecReport(host.adapter, {
       onProgress: (n) => { if (n % 500 === 0) log('report:walking', { items: n }) }
     })
@@ -135,7 +146,11 @@ async function main () {
     return
   }
 
-  await host.ready()
+  // NOT `rescan` on its own. If --folder was given, setSource above has already
+  // walked the disk with force, and forcing again here would walk the whole tree a
+  // SECOND time - twenty minutes twice, on the 3 TB drive this is built for. Without
+  // --folder there was no such scan, so this is the one that has to do it.
+  await host.ready({ rescan: rescan && !sourceConfigured })
 
   log('host:ready', {
     library: host.libraryName,
