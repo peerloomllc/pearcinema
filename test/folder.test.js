@@ -366,6 +366,213 @@ test('the adapter refuses to be built without the protocol id factory', () => {
   assert.throws(() => new FolderAdapter({ roots: ['/x'] }), /needs the protocol id factory/)
 })
 
+// --- what a root HOLDS ------------------------------------------------------
+//
+// The measured bug this fixes, from the real drive on 2026-08-12: a nested file with
+// no parseable episode code fell through to being a film, so 34 of 2,746 television
+// files - an MST3K box set numbered `K05` - landed in the Films list. No filename
+// rule settles that, because the filename genuinely does not say which episode it is.
+// The ROOT does.
+
+// Two roots, the shape a real collection is actually in.
+async function split (t, files) {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-split-'))
+  const dataDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-data-'))
+
+  for (const [rel, body] of Object.entries(files)) {
+    const full = path.join(root, rel)
+    await fsp.mkdir(path.dirname(full), { recursive: true })
+    await fsp.writeFile(full, body)
+  }
+
+  t.after(async () => {
+    await fsp.rm(root, { recursive: true, force: true })
+    await fsp.rm(dataDir, { recursive: true, force: true })
+  })
+
+  return { root, dataDir }
+}
+
+function typed ({ roots, dataDir }) {
+  return new FolderAdapter({ roots, dataDir, libraryId: LIB, ids: protocol.ids, ffprobe: FAKE_FFPROBE })
+}
+
+// The real filenames, verbatim from the box set that produced the bug.
+const MST3K = {
+  'Shelf/MST3K - Complete 35 DVD Collection/MST3K DVD 18/MST3K - K05 - The Gunslinger.avi': 'x',
+  'Shelf/MST3K - Complete 35 DVD Collection/MST3K DVD 18/MST3K - K06 - Gamera.avi': 'x',
+  'Shelf/MST3K - Complete 35 DVD Collection/MST3K DVD 19/MST3K - K07 - Superdome.avi': 'x'
+}
+
+test('UNTYPED, an unreadable episode filename is still filed as a film', async (t) => {
+  // The behaviour being fixed, pinned so the fix is demonstrably a change and not a
+  // claim. Nothing about a root called `Shelf` says television.
+  const { root, dataDir } = await split(t, MST3K)
+  const a = typed({ roots: [path.join(root, 'Shelf')], dataDir })
+  await a.scan()
+
+  assert.equal((await a.stats()).movies, 3, 'three episodes, sitting in the film list')
+  assert.equal((await a.stats()).episodes, 0)
+})
+
+test('A SHOWS ROOT FILES IT AS AN EPISODE OF UNKNOWN NUMBERING, never as a film', async (t) => {
+  const { root, dataDir } = await split(t, MST3K)
+  const a = typed({ roots: [{ path: path.join(root, 'Shelf'), type: 'shows' }], dataDir })
+  await a.scan()
+
+  const stats = await a.stats()
+  assert.equal(stats.movies, 0, 'not one of them is a film')
+  assert.equal(stats.episodes, 3)
+  assert.equal(stats.series, 1, 'all three under the one box set')
+
+  const [show] = (await a.list({ type: 'series' })).items
+  assert.match(show.title, /MST3K/)
+
+  const seasons = await a.list({ type: 'seasons', seriesId: show.id })
+  // THE DISC FOLDERS STAY APART AND KEEP THEIR NAMES. Collapsing them into one
+  // anonymous "Season" would be a different kind of wrong from the one being fixed.
+  assert.deepEqual(seasons.items.map(s => s.title), ['MST3K DVD 18', 'MST3K DVD 19'])
+  assert.deepEqual(seasons.items.map(s => s.number), [null, null])
+  assert.equal(seasons.items[0].episodeCount, 2)
+
+  const eps = await a.list({ type: 'episodes', seasonId: seasons.items[0].id })
+  assert.deepEqual(eps.items.map(e => e.title).sort(), ['MST3K - K05 - The Gunslinger', 'MST3K - K06 - Gamera'].sort())
+  assert.equal(eps.items[0].episodeNumber, null, 'unknown is null, not an invented number')
+})
+
+test('a numbered episode under a shows root is untouched, ids and all', async (t) => {
+  // The type must not remint an id: every resume position on every phone is keyed by
+  // one. THE SAME FOLDER read twice, untyped and then as shows, because a series id
+  // is derived from the root path and two temporary copies would differ for a reason
+  // that has nothing to do with the type.
+  const { root, dataDir } = await split(t, { 'Shelf/The Wire/Season 01/The Wire - s01e01.mkv': 'x' })
+  const at = path.join(root, 'Shelf')
+
+  const plain = typed({ roots: [at], dataDir })
+  await plain.scan()
+  const before = (await plain.list({ type: 'episodes', seriesId: (await plain.list({ type: 'series' })).items[0].id })).items
+
+  const shows = typed({ roots: [{ path: at, type: 'shows' }], dataDir })
+  await shows.scan()
+  const after = (await shows.list({ type: 'episodes', seriesId: (await shows.list({ type: 'series' })).items[0].id })).items
+
+  assert.equal(before[0].seasonNumber, 1)
+  assert.deepEqual(
+    before.map(e => [e.id, e.seriesId, e.seasonId, e.seasonNumber, e.episodeNumber]),
+    after.map(e => [e.id, e.seriesId, e.seasonId, e.seasonNumber, e.episodeNumber]),
+    'declaring the root changed no id'
+  )
+})
+
+test('A FILMS ROOT NEVER PRODUCES AN EPISODE, which is the same bug pointing the other way', async (t) => {
+  // `Part 2` in a film's own folder is read as episode 2 when nothing says otherwise,
+  // because that fallback exists for shows that never write SxxExx. A films root
+  // switches it off along with every other episode rule.
+  const { root, dataDir } = await split(t, {
+    'Shelf/Dune Part 2/Dune - Part 2.mkv': 'x',
+    'Shelf/Blade Runner (1982)/Blade Runner (1982).mkv': 'x'
+  })
+  const at = path.join(root, 'Shelf')
+
+  const loose = typed({ roots: [at], dataDir })
+  await loose.scan()
+  assert.equal((await loose.stats()).episodes, 1, 'the fallback bites: Part Two became an episode')
+
+  const films = typed({ roots: [{ path: at, type: 'movies' }], dataDir })
+  await films.scan()
+  const stats = await films.stats()
+  assert.equal(stats.episodes, 0)
+  assert.equal(stats.movies, 2)
+})
+
+test("THE ROOT'S OWN NAME TYPES IT, so a library saved before this fixes itself", async (t) => {
+  // Every host in the field saved its roots as bare paths. A folder called `TV Shows`
+  // is not a guess about its contents - it is what the person who made it wrote on
+  // the front - so an untyped root of that name is read as television with nothing
+  // for the operator to do. This is what makes the fix reach the deployed Umbrel.
+  const { root, dataDir } = await split(t, {
+    'TV Shows/MST3K/MST3K - K05 - The Gunslinger.avi': 'x',
+    'Movies/Blade Runner (1982).mkv': 'x'
+  })
+
+  const a = typed({ roots: [path.join(root, 'TV Shows'), path.join(root, 'Movies')], dataDir })
+  await a.scan()
+
+  const stats = await a.stats()
+  assert.equal(stats.movies, 1, 'only the one in Movies')
+  assert.equal(stats.episodes, 1, 'and the unreadable filename went under its show')
+
+  // The resolution is VISIBLE rather than silent - the dashboard shows it beside the
+  // folder, so nobody has to reverse-engineer why their library sorted itself out.
+  assert.deepEqual(a.roots.map(r => [path.basename(r.path), r.type, r.holds]), [
+    ['TV Shows', 'auto', 'shows'],
+    ['Movies', 'auto', 'movies']
+  ])
+})
+
+test('a folder whose name says nothing is left to the filenames, exactly as before', async (t) => {
+  const { root, dataDir } = await split(t, { 'Stuff/Blade Runner (1982).mkv': 'x' })
+  const a = typed({ roots: [path.join(root, 'Stuff')], dataDir })
+  await a.scan()
+  assert.equal(a.roots[0].holds, null)
+  assert.equal((await a.stats()).movies, 1)
+})
+
+test('A SIDECAR STILL OVERRULES THE UNKNOWN NUMBERING', async (t) => {
+  // The MST3K case is precisely the one nfo.js was built for: the filename says K05
+  // and nothing can be inferred, so a sidecar that names the season and episode is
+  // the only real answer. Typing the root must not shut that out.
+  const { root, dataDir } = await split(t, {
+    'Shelf/MST3K/MST3K - K05 - The Gunslinger.avi': 'x',
+    'Shelf/MST3K/MST3K - K05 - The Gunslinger.nfo':
+      '<episodedetails><title>The Gunslinger</title><season>5</season><episode>11</episode></episodedetails>'
+  })
+
+  const a = typed({ roots: [{ path: path.join(root, 'Shelf'), type: 'shows' }], dataDir })
+  await a.scan()
+
+  const [show] = (await a.list({ type: 'series' })).items
+  const seasons = await a.list({ type: 'seasons', seriesId: show.id })
+  assert.deepEqual(seasons.items.map(s => s.number), [5], 'the sidecar knew what the filename could not say')
+
+  const eps = await a.list({ type: 'episodes', seasonId: seasons.items[0].id })
+  assert.equal(eps.items[0].episodeNumber, 11)
+  assert.equal(eps.items[0].title, 'The Gunslinger')
+})
+
+test('THE CACHE IS REFUSED WHEN A ROOT CHANGED TYPE', async (t) => {
+  // Same paths, same files, read a different way. Serving the old rows would leave an
+  // operator having typed their folders and watched nothing happen, which is worse
+  // than the minutes a rescan costs.
+  const { root, dataDir } = await split(t, MST3K)
+  const at = path.join(root, 'Shelf')
+
+  await typed({ roots: [at], dataDir }).scan()
+
+  const after = typed({ roots: [{ path: at, type: 'shows' }], dataDir })
+  await after.scan()
+  assert.equal((await after.stats()).movies, 0, 'it rescanned rather than trusting the cache')
+  assert.equal((await after.stats()).episodes, 3)
+})
+
+test('a bare string root is still a valid config, and always will be', async (t) => {
+  // Every host in the field saved them this way, and PEARCINEMA_FOLDERS is a
+  // colon-separated path list. A config this cannot read is a library gone dark.
+  const { root, dataDir } = await split(t, { 'Stuff/Deadpool.mkv': 'x' })
+  const a = typed({ roots: path.join(root, 'Stuff'), dataDir })
+  await a.scan()
+  assert.equal((await a.stats()).movies, 1)
+  assert.deepEqual(a.roots.map(r => r.type), ['auto'])
+})
+
+test('a nonsense root type is read as "work it out" rather than trusted', async (t) => {
+  const { root, dataDir } = await split(t, { 'Stuff/Deadpool.mkv': 'x' })
+  const a = typed({ roots: [{ path: path.join(root, 'Stuff'), type: 'films-probably' }], dataDir })
+  assert.equal(a.roots[0].type, 'auto')
+  await a.scan()
+  assert.equal((await a.stats()).movies, 1)
+})
+
 // --- the Umbrel default -----------------------------------------------------
 //
 // Two things these have to get right, both learned the hard way in this repo:

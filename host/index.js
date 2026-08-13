@@ -39,6 +39,10 @@ PearCinema host
 
   --folder <dir>      point the library at a folder of films and shows and save it
                       (repeatable: --folder /a/Movies --folder /b/TV)
+  --movies <dir>      the same, for a folder that holds ONLY films
+  --shows <dir>       the same, for a folder that holds ONLY television. A file in
+                      here with no S01E01 in its name is an episode of unknown
+                      numbering rather than a film
   --rescan            walk the folder again instead of using the cached scan
 
   --test              check the source works WITHOUT saving it, then exit
@@ -80,8 +84,16 @@ async function main () {
   // --test run should never announce itself on the DHT.
   // Repeatable, because a real collection is `Movies` on one disk and `TV Shows`
   // on another more often than it is one tidy tree.
+  //
+  // `--movies` and `--shows` are the same flag with the root's type declared, which
+  // is how a nested file with no episode code stops being filed as a film. `--folder`
+  // leaves it at 'auto', where the folder's own name decides and an unrecognised name
+  // falls back to reading each filename on its own.
+  const FOLDER_FLAGS = { '--folder': 'auto', '--movies': 'movies', '--shows': 'shows' }
   const folders = process.argv.reduce((out, a, i) => {
-    if (a === '--folder' && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')) out.push(process.argv[i + 1])
+    const type = FOLDER_FLAGS[a]
+    const next = process.argv[i + 1]
+    if (type && next && !next.startsWith('--')) out.push({ path: next, type })
     return out
   }, [])
 

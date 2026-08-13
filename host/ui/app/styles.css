@@ -296,6 +296,9 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   border-radius: 8px; padding: .35rem .6rem; font-size: .85rem;
 }
 .roots .root span { flex: 1; word-break: break-all; font-family: ui-monospace, monospace; font-size: .78rem }
+/* What the folder holds, beside the folder. Narrow on purpose - the path is the
+ * thing being read here and the type is a one-word answer next to it. */
+.roots .root select { flex: 0 0 auto; max-width: 11rem; font-size: .78rem; padding: .2rem .3rem }
 
 /* ---- wizard --------------------------------------------------------------- */
 

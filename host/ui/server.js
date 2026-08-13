@@ -258,7 +258,15 @@ async function startDashboard ({
           source: {
             kind: host.source?.kind || 'empty',
             from: host.sourceFrom,
-            roots: host.source?.roots || (host.source?.root ? [host.source.root] : []),
+            // THE ADAPTER'S NORMALISED ROOTS, not the raw config, so the panel shows
+            // what each folder is actually being read AS. A root saved as a bare
+            // string (every host in the field before root types existed) comes back
+            // as `{ path, type: 'auto', holds }` - and `holds` is what the operator
+            // needs to see, because it is what decided whether their nested files
+            // became episodes or films.
+            roots: host.adapter?.kind === 'folder'
+              ? host.adapter.roots
+              : (host.source?.roots || (host.source?.root ? [host.source.root] : [])),
             url: host.source?.url || null,
             username: host.source?.username || null
           },

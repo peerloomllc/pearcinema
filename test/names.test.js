@@ -289,3 +289,39 @@ test('THE LOOSE FALLBACK NEVER RUNS ON A FILM', () => {
   assert.equal(real.episode, 7)
   assert.equal(real.loose, false)
 })
+
+test('A DECLARED TELEVISION ROOT IS THE OTHER WAY OF SAYING "this is a show"', () => {
+  // The loose fallback is guarded on the caller already knowing this is television.
+  // A series folder is one way to know it; a root the operator typed as shows is the
+  // other, and it is the only one available for a file sitting directly in that root.
+  assert.equal(names.parseEpisode('Some Show Part 2.mkv'), null)
+  const e = names.parseEpisode('Some Show Part 2.mkv', { television: true })
+  assert.equal(e.season, 1)
+  assert.equal(e.episode, 2)
+  assert.equal(e.loose, true)
+})
+
+// --- what a root holds -------------------------------------------------------
+
+test('a folder called TV Shows is not a guess, it is what somebody wrote on the front', () => {
+  for (const name of ['Movies', 'movies', 'Films', 'film', 'Cinema']) {
+    assert.equal(names.rootTypeFromName(name), 'movies', name)
+  }
+  for (const name of ['TV Shows', 'tvshows', 'TV', 'Series', 'Television', 'Shows']) {
+    assert.equal(names.rootTypeFromName(name), 'shows', name)
+  }
+})
+
+test('it reads the LAST segment, because a root is a path', () => {
+  assert.equal(names.rootTypeFromName('/library/Elements (3)/Video/TV Shows'), 'shows')
+  assert.equal(names.rootTypeFromName('/mnt/Movies/'), 'movies')
+})
+
+test('DELIBERATELY NARROW: a name that says nothing gets no type', () => {
+  // A folder called `Video` holding somebody's phone recordings is not a film
+  // library, and a folder called `Media` says nothing at all. Guessing at these
+  // would silently reclassify a library on the strength of a generic word.
+  for (const name of ['Video', 'Media', 'Downloads', 'Elements (3)', 'Stuff', '', null]) {
+    assert.equal(names.rootTypeFromName(name), null, String(name))
+  }
+})

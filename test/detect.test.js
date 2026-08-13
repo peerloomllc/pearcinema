@@ -127,19 +127,27 @@ test('A DRIVE WITH MOVIES AND TV SHOWS ON IT IS A FIND', async (t) => {
   // on the desk. The walk skips generic names until it finds one of its own.
   assert.equal(found[0].label, 'Elements (3)')
   assert.deepEqual(
-    found[0].roots.map(r => path.basename(r)).sort(),
+    found[0].roots.map(r => path.basename(r.path)).sort(),
     ['Movies', 'TV Shows']
   )
   // Home Videos is NOT offered. On the real drive it is 9,211 phone recordings that
   // drown the actual library three to one, and it is not a film collection.
-  assert.ok(!found[0].roots.some(r => /Home Videos/.test(r)))
+  assert.ok(!found[0].roots.some(r => /Home Videos/.test(r.path)))
+
+  // EACH ROOT CARRIES WHAT IT HOLDS, and this is the whole reason the detector's
+  // matching is worth keeping rather than throwing away. It matched these two
+  // folders BY NAME, so "Use these" configures a typed library in one click - and a
+  // typed TV root is what stops an unparseable episode being filed as a film.
+  const byName = Object.fromEntries(found[0].roots.map(r => [path.basename(r.path), r.type]))
+  assert.deepEqual(byName, { Movies: 'movies', 'TV Shows': 'shows' })
 })
 
 test('it takes a films folder on its own, because plenty of people have only that', async (t) => {
   const root = await tree(t, ['media/Films', 'media/Photos'])
   const found = await findLibraryFolders([root])
   assert.equal(found.length, 1)
-  assert.deepEqual(found[0].roots.map(r => path.basename(r)), ['Films'])
+  assert.deepEqual(found[0].roots.map(r => path.basename(r.path)), ['Films'])
+  assert.equal(found[0].roots[0].type, 'movies')
 })
 
 test('a folder merely called Video is NOT offered', async (t) => {

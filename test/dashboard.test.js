@@ -469,6 +469,37 @@ test('the source Test button checks without saving, and a bad save leaves the ol
   assert.equal(host.adapter.kind, 'test')
 })
 
+test('A FOLDER SAVED WITH A TYPE COMES BACK WITH IT, and the state says what it resolved to', async (t) => {
+  // The round trip is the whole feature: the panel saves what the operator declared,
+  // the adapter reads its files that way, and the state hands back BOTH - what was
+  // declared and what it was read as - so an untyped folder called `TV Shows` can say
+  // out loud that it is being treated as television.
+  const { c } = await loggedIn(t)
+
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-roots-'))
+  t.after(() => fsp.rm(root, { recursive: true, force: true }))
+  await fsp.mkdir(path.join(root, 'TV Shows'), { recursive: true })
+  await fsp.mkdir(path.join(root, 'Odds and Ends'), { recursive: true })
+
+  const res = await c.req('POST', '/api/source', {
+    body: {
+      kind: 'folder',
+      roots: [
+        { path: path.join(root, 'Odds and Ends'), type: 'shows' },
+        path.join(root, 'TV Shows')
+      ]
+    }
+  })
+  assert.equal(res.status, 200)
+
+  const state = await c.req('GET', '/api/state')
+  assert.deepEqual(state.json.source.roots.map(r => [path.basename(r.path), r.type, r.holds]), [
+    ['Odds and Ends', 'shows', 'shows'],
+    // Nobody typed this one; its own name did.
+    ['TV Shows', 'auto', 'shows']
+  ])
+})
+
 test('a platform-set password cannot be changed from the page', async (t) => {
   const ctx = await cinema(t)
   const c = client(ctx.base)
