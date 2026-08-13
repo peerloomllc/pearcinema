@@ -33,7 +33,7 @@ What works today, proven end to end over a real DHT testnet in `test/first-pair.
 - **A plain folder works as a source**, with no server in the path at all. Measured
   against a real 3 TB drive: 2,986 items - 274 films, 29 shows, 2,712 episodes - read
   from filenames and the `.nfo` sidecars already sitting beside the media.
-- **A web interface with a player**, password-gated, at `http://localhost:8742`.
+- **A web interface with a player**, password-gated, at `http://localhost:8751`.
 
 What is not built yet:
 
@@ -48,7 +48,7 @@ Run it:
 npm install && npm run host
 ```
 
-Then open `http://localhost:8742`. Point it at a folder or a Jellyfin server from the
+Then open `http://localhost:8751`. Point it at a folder or a Jellyfin server from the
 first-run screen, and pair a phone by scanning the QR it draws.
 
 The command line still does all of it, which is the right answer over ssh:
@@ -65,7 +65,7 @@ npm run host -- --jellyfin http://your-server:8096 --user you --pass secret --pa
 
 ### The web interface
 
-`http://localhost:8742` by default; `PEARCINEMA_HTTP_HOST`, `PEARCINEMA_HTTP_PORT` and
+`http://localhost:8751` by default; `PEARCINEMA_HTTP_HOST`, `PEARCINEMA_HTTP_PORT` and
 `PEARCINEMA_PASSWORD` move it and lock it. It does the setup, the library browsing, the
 pairing QR, the device and people list with revoke - and it plays.
 
@@ -75,12 +75,13 @@ Two things about it are worth knowing before you judge it:
   bytes. The host refuses to start if it would listen on anything but loopback without a
   password. A bare Docker or systemd install with no password generates one, saves it
   `0600` next to the identity seed, and prints it once.
-- **A browser refuses most of a normal collection, and that is the honest result.**
-  Chrome and Safari will not open Matroska, and 83% of the measured real library is
-  Matroska - the same refusal, for the same reason, an iPhone gives. So the player shows
-  roughly a tenth of a real collection and says plainly why for each file it will not
-  open, rather than showing a black rectangle. That is the clearest argument there is for
-  remux, which is the next thing to build.
+- **It repackages what your browser will not open, and browsers disagree about that.**
+  Measured rather than assumed: Chromium-based browsers (Chrome, Brave, Edge) do open an
+  MKV holding H.264 and AAC, while Safari and iOS do not - and none of them decode HEVC
+  or Dolby audio, which between them cover most of a real television library. So
+  PearCinema asks each browser what it can open and repackages only what it must, on the
+  fly, without ever re-encoding the picture. Anything that genuinely cannot be played
+  says which part is the problem instead of showing a black rectangle.
 
 The page counts it for you: above each list it says how many of these files *this*
 browser can play. It is a second compatibility engine with published rules, run against

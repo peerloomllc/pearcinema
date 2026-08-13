@@ -143,13 +143,13 @@ class FolderAdapter {
 
   // One scan at a time. A cold host answering a screen of requests would otherwise
   // start a dozen, and each one walks the whole disk.
-  async scan ({ force = false } = {}) {
+  async scan ({ force = false, onProgress = null } = {}) {
     if (this._scanning) return this._scanning
-    this._scanning = this._scan({ force }).finally(() => { this._scanning = null })
+    this._scanning = this._scan({ force, onProgress }).finally(() => { this._scanning = null })
     return this._scanning
   }
 
-  async _scan ({ force }) {
+  async _scan ({ force, onProgress = null }) {
     if (!this.roots.length) throw new Error('no folders configured')
 
     if (!force && await this._loadCache()) {
@@ -184,7 +184,10 @@ class FolderAdapter {
       concurrency: PROBE_CONCURRENCY,
       ffprobe: this.ffprobe,
       onProgress: (n, total) => {
+        // The log every 500; the caller on EVERY file, because the page shows a
+        // count and a number that moves once a minute reads as a hang.
         if (n % 500 === 0) this.log('folder:probing', { done: n, total })
+        if (onProgress) onProgress(n, total)
       }
     })
     if (failed.length) this.log('folder:unreadable', { count: failed.length })

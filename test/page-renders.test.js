@@ -74,7 +74,7 @@ async function open () {
 
   const dom = new JSDOM(PAGE, {
     runScripts: 'dangerously',
-    url: 'http://localhost:8742/',
+    url: 'http://localhost:8751/',
     pretendToBeVisual: true,
     virtualConsole: vc
   })
@@ -113,14 +113,18 @@ test('the page mounts and shows the library, rather than a blank control plane',
 })
 
 test('the compatibility line is on screen, and it is honest about the MKV', async (t) => {
-  const { dom, text } = await open()
+  const { dom, doc, text } = await open()
   t.after(() => dom.window.close())
 
   // jsdom's canPlayType answers '' to everything, so it stands in for the strictest
-  // possible browser: NOTHING is playable. The line must still be there and must
-  // still count correctly rather than quietly showing a full library.
-  assert.match(text(), /Your browser can play/)
-  assert.match(text(), /remux/, 'the refusal has to point at the fix, not just refuse')
+  // possible browser: NOTHING is playable and nothing is repackageable either, since
+  // repackaging still needs the browser to decode the picture.
+  //
+  // The COUNT is always shown; the reasoning is folded behind it, because three lines
+  // of prose about codecs above every grid stands between somebody and their films.
+  assert.match(text(), /play in this browser/)
+  assert.ok(doc.querySelector('details.compat'), 'the reasoning is one click away, not in the way')
+  assert.match(doc.querySelector('details.compat').textContent, /never the picture/)
 })
 
 test('clicking a film opens the player, and an MKV lands on the refusal rather than a black box', async (t) => {
@@ -139,6 +143,8 @@ test('clicking a film opens the player, and an MKV lands on the refusal rather t
   // has to say which half is the problem rather than spinning.
   assert.match(text(), /cannot be played here/)
   assert.match(text(), /Try anyway/)
+  // A file nothing can play gets no controls either - there is nothing to control.
+  assert.equal(doc.querySelector('.controls'), null)
   // And no <video> was created, so nothing is quietly buffering a film the browser
   // cannot show.
   assert.equal(doc.querySelector('video'), null)
@@ -154,4 +160,30 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
 
   assert.match(text(), /A phone/)
   assert.match(text(), /Cut off/)
+})
+
+test('EVERY FILM GETS THE SAME CONTROLS, whether it is repackaged or not', async (t) => {
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  // Metropolis here is mov/h264/aac - it plays straight from the file in a browser
+  // that can open it. Nosferatu is matroska - repackaged. Under jsdom neither can be
+  // decoded, so force one open to reach the player.
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  // Ours, always: one scrub bar, a clock, volume, and no native controls attribute.
+  const controls = doc.querySelector('.controls')
+  assert.ok(controls, 'the player has its own controls')
+  assert.ok(controls.querySelector('input.scrub'), 'one scrub bar')
+  assert.ok(controls.querySelector('input.vol'), 'volume')
+
+  const v = doc.querySelector('video')
+  assert.ok(v)
+  assert.equal(v.hasAttribute('controls'), false, 'the native controls are gone, so there is only ever one bar')
 })

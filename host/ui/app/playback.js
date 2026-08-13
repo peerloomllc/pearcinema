@@ -5,12 +5,17 @@
 // against the same library the phone reads - so "which of my files actually play"
 // stops being an opinion and becomes an answer.
 //
-// The answer is bleak, and that is not a bug in the player. Chrome and Safari will
-// not open Matroska, and 83% of the measured real library (2,986 films and
-// episodes, DECISIONS 2026-08-12) is Matroska. A browser therefore shows roughly
-// the same tenth of a collection an iPhone would. That similarity is the point:
-// two independent engines refusing the same files for the same reason is the
-// argument for remux, and it is evidence rather than a prediction.
+// AND BROWSERS DISAGREE WITH EACH OTHER, which is exactly why this file ASKS rather
+// than assumes. Measured 2026-08-13 against a real browser: Chromium-based ones
+// (Chrome, Brave, Edge) answer `maybe` for `video/x-matroska` and genuinely play an
+// MKV holding H.264 and AAC. Safari and iOS do not. So "no browser opens Matroska"
+// was too strong a claim, and a hard-coded refusal would have made PearCinema
+// repackage films that were already playing perfectly.
+//
+// What every browser measured DOES refuse is HEVC and Dolby audio - and HEVC is 64%
+// of the real television library. So the remux case is not smaller than it looked,
+// it is differently shaped: fewer container refusals, and the codec ones are what
+// remain.
 //
 // So the rule everywhere below: SAY WHY, and never hide an item we cannot play.
 // A film that silently fails to start sends someone hunting through their router
@@ -166,17 +171,32 @@ export function verdictFor (item, caps) {
   // click, where a false promise costs a black screen with no explanation.
   if (video && !caps[video]) {
     // Repackaging cannot change the picture, so this one is not fixable by it.
+    //
+    // THE `.mp4` CASE NEEDS SAYING OUT LOUD. A file can be named .mp4 and still hold
+    // HEVC, and then it looks like it ought to play and does not - Tim hit this on
+    // Blade. The extension names the BOX; the codec is what is inside it, and only
+    // the codec decides whether anything can decode the picture.
+    const familiarBox = BROWSER_CONTAINERS.has(container)
     return {
       status: 'refuse',
       remuxable: false,
-      reason: `Your browser cannot decode ${String(m.videoCodec).toUpperCase()} video. Repackaging cannot change the picture, so this needs re-encoding, which this version does not do.`
+      reason: `Your browser cannot decode ${String(m.videoCodec).toUpperCase()} video.` +
+        (familiarBox
+          ? ` The file is an ${name}, which browsers do open - but the name describes the box, not what is inside it, and this one holds ${String(m.videoCodec).toUpperCase()}.`
+          : '') +
+        ' Repackaging changes the wrapper and never the picture, so this one needs re-encoding, which this version does not do.'
     }
   }
 
   if (audio && !caps[audio]) {
+    // FIXABLE, and cheaply. Rebuilding a soundtrack is rung two and per the
+    // 2026-08-13 measurement it is a rounding error of the library - so a browser
+    // that cannot decode this audio should be given sound rather than told to
+    // accept a silent film. The picture is still never touched.
     return {
       status: 'nosound',
-      reason: `The picture will play but there will be no sound: your browser cannot decode ${String(m.audioCodec).toUpperCase()} audio. On a phone this track is usually fine.`
+      remuxable: MP4_VIDEO.has(video) || !video,
+      reason: `Your browser cannot decode ${String(m.audioCodec).toUpperCase()} sound. The picture is untouched; only the soundtrack is rebuilt, which is quick.`
     }
   }
 
@@ -187,11 +207,16 @@ export function verdictFor (item, caps) {
 // Counted rather than estimated, and unknowns counted separately so the number is
 // never quietly inflated by files we simply know nothing about.
 export function tally (list, caps) {
-  const out = { total: 0, play: 0, nosound: 0, refuse: 0, unknown: 0 }
+  const out = { total: 0, play: 0, nosound: 0, refuse: 0, unknown: 0, repackaged: 0 }
   for (const item of list || []) {
     if (!item?.media) continue
     out.total++
-    out[verdictFor(item, caps).status]++
+    const v = verdictFor(item, caps)
+    out[v.status]++
+    // Counted separately as well as by status, because a `refuse` the host can
+    // repackage is a film that plays - and a count that called it a failure would
+    // tell somebody their library is broken while they are watching it.
+    if (v.remuxable) out.repackaged++
   }
   return out
 }
