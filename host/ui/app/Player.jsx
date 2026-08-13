@@ -46,6 +46,16 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   const [offer, setOffer] = useState(null)
   const [seen, setSeen] = useState(false)
   const video = useRef(null)
+  // HAS THE VIEWER ASKED FOR THIS TO PLAY? Nothing starts on its own (Tim,
+  // 2026-08-13): opening a page should not fill a room with sound, and on a
+  // repackaged film it also spends a child process on the host before anybody has
+  // said they want it.
+  //
+  // It cannot simply be "no autoplay", though. On the repackaged path a SEEK is a new
+  // stream and therefore a new element, so without this a scrub would silently stop
+  // playback. The flag says the viewer already pressed play, and the new element picks
+  // up where the old one left off.
+  const wantPlay = useRef(false)
   // The last position WRITTEN, so the fifteen-second heartbeat can skip a write when
   // nothing has moved - a paused film should not keep writing the same number.
   const wrote = useRef(0)
@@ -81,6 +91,9 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     setForced(false); setFailed(null); setAt(0); setOffset(0); setSubs([]); setBusy(false)
     setOffer(null)
     wrote.current = 0
+    // A different film is a fresh decision. Playing one and clicking another must not
+    // start the second one on its own.
+    wantPlay.current = false
     let live = true
     api('/api/subtitles?itemId=' + encodeURIComponent(item.id)).then(res => {
       if (live) setSubs(res.items || [])
@@ -186,13 +199,16 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
               <video
                 ref={video}
                 key={src}
-                autoplay
                 playsinline
                 onClick={() => { const v = video.current; if (v) v.paused ? v.play().catch(() => {}) : v.pause() }}
                 onLoadedMetadata={e => {
                   const d = e.currentTarget.duration
                   setElDuration(Number.isFinite(d) && d > 0 ? d : 0)
+                  // Only ever resumes something the viewer already started - see
+                  // wantPlay. A first open stays paused.
+                  if (wantPlay.current) e.currentTarget.play().catch(() => {})
                 }}
+                onPlay={() => { wantPlay.current = true }}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
                 onPause={() => savePosition()}
@@ -229,7 +245,14 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
         {offer !== null && !blocked && (
           <div class='resumeoffer'>
             <span>You stopped at <b>{fmtRuntime(Math.round(offer))}</b>.</span>
-            <button onClick={() => { seekTo(offer); setOffer(null) }}>Resume</button>
+            <button onClick={() => {
+              wantPlay.current = true
+              seekTo(offer)
+              setOffer(null)
+              // On a file the element is already loaded, so nothing will fire
+              // loadedmetadata to start it - say so directly.
+              if (!remuxing) video.current?.play().catch(() => {})
+            }}>Resume</button>
             <button class='ghost' onClick={() => setOffer(null)}>Start over</button>
           </div>
         )}

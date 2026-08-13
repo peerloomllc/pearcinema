@@ -101,7 +101,11 @@ const ROUTES = {
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
 // back the document.
-async function open (state = STATE, extraRoutes = {}) {
+// `delay` matters more than it looks. A stub that answers instantly cannot reproduce
+// anything about REQUESTS IN FLIGHT - and the empty-season bug was exactly that: a
+// first request still running when the real one arrived. A test written against an
+// instant stub passed against the broken code.
+async function open (state = STATE, extraRoutes = {}, asked = null, delay = 0) {
   const errors = []
   const vc = new VirtualConsole()
   vc.on('jsdomError', e => errors.push(e))
@@ -115,6 +119,8 @@ async function open (state = STATE, extraRoutes = {}) {
 
   const win = dom.window
   win.fetch = async (url) => {
+    if (asked) asked.push(String(url))
+    if (delay) await new Promise(r => setTimeout(r, delay))
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
     const routes = { ...ROUTES, ...extraRoutes }
     const hit = Object.keys(routes).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
@@ -610,4 +616,75 @@ test('AN EPISODE CAN CLIMB BACK TO ITS SEASON AND ITS SHOW', async (t) => {
   const crumbs = [...doc.querySelectorAll('.crumbs button')].map(b => b.textContent)
   assert.deepEqual(crumbs, ['Shows', 'The Wire', 'Season 1'], 'every level is reachable, not just the top')
   assert.match(text(), /S01E02/, 'and where you are is named rather than linked')
+})
+
+test('NOTHING STARTS PLAYING ON ITS OWN', async (t) => {
+  // Opening a page should not fill a room with sound - and on a repackaged film it also
+  // spends a child process on the host before anybody has said they want it.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const v = doc.querySelector('video')
+  assert.ok(v, 'the player is there')
+  assert.equal(v.hasAttribute('autoplay'), false, 'and it waits to be asked')
+})
+
+test('OPENING A SEASON ASKS FOR THAT SEASON, not for nothing', async (t) => {
+  // The bug behind an empty season page: this mounts with no season yet, that first
+  // request is in flight, and the real query - the one carrying the season - arrived a
+  // tick later and was dropped as a duplicate by an over-eager guard. Crumbs, a title
+  // and no episodes.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const asked = []
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null },
+    '/api/library/list?type=episodes&limit=200&seasonId=season-1': { items: [EP], total: 1, cursor: null }
+  }, asked, 12)
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const crumb = [...doc.querySelectorAll('.crumbs button')].find(b => b.textContent === 'Season 1')
+  crumb.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 200))
+
+  assert.ok(
+    asked.some(u => u.includes('type=episodes') && u.includes('seasonId=season-1')),
+    'the season it climbed to is the one it asked the host for'
+  )
+})
+
+test('SWITCHING FILMS AND SHOWS LEAVES THE SHELF AND THE SWITCH ALONE', async (t) => {
+  // Sliding those out and back makes the page look like it reloaded, and it takes the
+  // button somebody just pressed out from under the pointer.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const shelfBefore = [...doc.querySelectorAll('h2')].find(h => h.textContent === 'Continue watching')
+  assert.ok(shelfBefore)
+  assert.equal(shelfBefore.closest('.screen'), null, 'the shelf is outside the moving part')
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  assert.equal(shows.closest('.screen'), null, 'and so is the switch itself')
+
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok([...doc.querySelectorAll('h2')].some(h => h.textContent === 'Continue watching'),
+    'so the shelf survives the switch')
 })

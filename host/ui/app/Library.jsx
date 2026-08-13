@@ -304,22 +304,37 @@ function CompatLine ({ list, caps }) {
 // answer to: somebody who has scrolled to the bottom of their films wants the next
 // hundred, and making them say so is a click for nothing (Tim, 2026-08-13).
 //
-// One request at a time, guarded by a ref rather than by the busy flag - state is
-// asynchronous, and two observer callbacks in the same frame would both read `false`
-// and fire the same page twice.
+// THE GUARD IS ONLY ON THE NEXT PAGE, and getting that wrong cost an empty screen.
+//
+// A single "one request at a time" ref looked right and was not: opening a season from
+// the player mounts this with no season yet, that first request is in flight, and the
+// real query - the one with the season on it - arrives a tick later and is DROPPED as
+// a duplicate. The page then shows the crumbs, the title and no episodes, which is
+// exactly what Tim screenshotted.
+//
+// So a NEW query always goes, and only a request for the next page of the same query
+// can be turned away. Late answers are discarded by sequence number rather than by
+// refusing to ask, because the one that matters is usually the newest one.
 function useList (query, deps) {
   const [items, setItems] = useState([])
   const [cursor, setCursor] = useState(null)
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState('')
-  const loading = useRef(false)
+  const paging = useRef(false)
+  const seq = useRef(0)
 
   const fetchPage = async (c) => {
-    if (loading.current) return
-    loading.current = true
+    if (c && paging.current) return
+    if (c) paging.current = true
+    const mine = ++seq.current
     setBusy(true)
+
     const res = await api(query + (c ? '&cursor=' + encodeURIComponent(c) : ''))
-    loading.current = false
+
+    // A newer query has been asked since. Its answer is the one that belongs on screen,
+    // so this one is dropped rather than overwriting it.
+    if (mine !== seq.current) return
+    paging.current = false
     setBusy(false)
     if (res.error) return setErr(res.error)
     setErr('')
@@ -655,8 +670,13 @@ export default function Library ({
 
   const showing = root === 'films' ? films : shows
 
+  // WHAT STAYS PUT AND WHAT MOVES. The shelf and the Films/Shows switch are not part of
+  // the thing being switched - sliding them out and back when somebody presses Shows
+  // makes the page look like it reloaded, and it takes the switch they just pressed
+  // away from under the pointer (Tim, 2026-08-13). So only what is BELOW them animates,
+  // keyed on which root is showing.
   return (
-    <div class={'screen ' + dir} key={depth}>
+    <>
       <ContinueRow
         watch={watch}
         caps={caps}
@@ -673,6 +693,8 @@ export default function Library ({
           Shows {stats.series ? <span class='chip'>{stats.series}</span> : null}
         </button>
       </div>
+
+      <div class={'screen ' + dir} key={root}>
 
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
       <ArtNote list={showing.items} source={state.source?.kind} />
@@ -695,6 +717,7 @@ export default function Library ({
         </div>
       )}
       <LoadMore cursor={showing.cursor} onMore={showing.more} busy={showing.busy} />
-    </div>
+      </div>
+    </>
   )
 }
