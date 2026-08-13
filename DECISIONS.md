@@ -2,7 +2,64 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - NOTHING ABSOLUTE IN AN ID: a show survives a remount, the same way a film always did
+## 2026-08-13 (latest) - THE SUBTITLES INSIDE THE FILE, and the two halves of a library fail in opposite ways
+Tier: T2 (a new ffmpeg path on the host, and a third cache version in one day)
+Context: TODO carried this as "expect the PGS refusal to be the COMMON case on films - make
+sure the UI reaches for the external `.srt` files FIRST". Half of that was already shipped:
+the player has sorted external before embedded since PR #10. The other half turned out to
+be that **the folder adapter never read inside a file at all.** It listed what sat beside a
+film on disk and nothing within it.
+
+The measurement (DECISIONS 2026-08-12) says why that matters, and why it matters differently
+on each half of a collection:
+
+```
+MOVIES   232 image tracks across 240 films, and only 57 text
+TV     1,429 image against 2,715 TEXT
+```
+
+- **On the films, the answer is almost always no.** A PGS track is a sequence of pictures
+  and showing one means drawing it into the video - a full re-encode, which is rung three.
+  Those films were showing an EMPTY subtitle panel with no explanation, which reads as "this
+  app cannot do subtitles" rather than the truthful "those particular ones are pictures".
+- **On the television it is 2,715 perfectly good text tracks that were invisible.** Reading
+  one out is `ffmpeg -map 0:s:N -f webvtt` - kilobytes of text, no decoding, nothing written
+  to disk. It is safe on a Pi-class box in a way the video path deliberately is not.
+
+**Choice: list both, files on disk FIRST, and extract a text track on demand.**
+
+The ordering is expressed by concatenation rather than by a sort key, so nothing downstream
+can reverse it by accident. It is a measurement rather than a preference: 232 image tracks
+against 383 usable `.srt` files means leading with what is inside the file makes most of a
+film collection look broken.
+
+### Three things that only a real file could have settled
+
+**1. A narrow `-show_entries` drops tags and disposition SILENTLY.** The probe asked for
+`stream=codec_type,codec_name,width,height,channels`, so every subtitle stream came back
+with no language and no forced flag - present, and anonymous. Both are now asked for by
+name. Still narrow: a full `-show_streams` on 2,986 files is megabytes of encoder strings
+nothing reads.
+
+**2. The index is within the SUBTITLE streams, not within the file.** `-map 0:s:N` counts
+subtitle tracks; ffprobe's own `index` counts everything. On a normal file the video and
+audio come first, so using `index` would be off by two and hand back the wrong language or
+fail outright. Recorded as `index` in probe.js for exactly this reason, with a test that
+pins the second track really is the second language.
+
+**3. `-shortest` truncated a test fixture and looked exactly like a bug in the extraction.**
+A two-second French subtitle input cut the four-second English track down to one cue, so a
+correct extraction returned half a file. Worth writing down because the same trap is
+waiting in any future fixture built from several inputs.
+
+### Cost, accepted
+
+Cache version 5, so the drive is walked again - the third time today. A version 4 cache
+holds only the files found beside a film, so a host loading one would show an empty panel on
+2,715 episodes that have perfectly good text tracks, which is the exact complaint this
+answers.
+
+## 2026-08-13 - NOTHING ABSOLUTE IN AN ID: a show survives a remount, the same way a film always did
 Tier: T2 (an id scheme change, which reminst every series and season once)
 Context: found while testing root types, by an assertion that compared two copies of the
 same library and failed for a reason that had nothing to do with the change under test.
