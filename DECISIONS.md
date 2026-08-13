@@ -2,7 +2,77 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - the web interface is the operator's dashboard WITH playback, and the player is one transport rather than a second implementation
+## 2026-08-13 (latest) - MEASURED: Dolby Digital survives a plain rewrap into MP4, DTS does not
+Tier: T2 (a measurement that decides how much of the remux proposal has to be built)
+Context: open question 1 of `proposals/2026-08-13-remux.md`. The repair ladder puts ~650
+files on rung two, "container rewrite PLUS an audio re-encode", almost all of it HEVC +
+AC-3 television. Apple documents Dolby Digital support in MP4, which would move most of
+that bucket down to rung one and make it free rather than merely cheap. The proposal said
+find out with a real file before building the audio path, because it changes what gets
+built. This is that.
+
+**Method.** Ten-second clips, H.264 video plus one audio codec each, muxed in Matroska -
+the shape the real library is in - then remuxed with `ffmpeg -c copy` into MP4 and served
+over HTTP to Mobile Safari, which reports its own decoder's verdict.
+
+### First: what ffmpeg will even mux into MP4 with `-c copy`
+
+```
+aac     MUXED     eac3    MUXED
+ac3     MUXED     dts     MUXED
+truehd  REFUSED - "truehd in MP4 support is experimental"
+```
+
+TrueHD needs `-strict -2` to mux at all, which is ffmpeg telling us not to.
+
+### Then: what iOS actually does with them
+
+Mobile Safari, iOS 18.7 runtime, `canPlayType` plus a real load and play:
+
+| codec | canPlayType | loaded | played |
+| --- | --- | --- | --- |
+| AAC | probably | yes | yes |
+| **AC-3** | **probably** | **yes** | **yes** |
+| **E-AC-3** | **probably** | **yes** | **yes** |
+| DTS | **""** | yes | yes, **and that is the trap** |
+
+**Dolby Digital and Dolby Digital Plus pass straight through.** So the ~620 AC-3 and
+E-AC-3 files in the measured library are a CONTAINER REWRITE and nothing else - rung one,
+not rung two. Rung two shrinks to DTS (14 files) and TrueHD (5), which is 19 files out of
+2,986, and TrueHD cannot be muxed into MP4 at all so it needs the re-encode regardless.
+
+**The DTS row is the one to read carefully.** `canPlayType` answered `""` - no - and yet
+the file loaded, played and the clock advanced. iOS did not refuse it; it played the
+picture and dropped the audio track. That is exactly the "picture, no sound" outcome the
+web player's `verdictFor` already models as its own status rather than folding into a
+refusal, and this is independent confirmation that the distinction is real rather than
+theoretical. A player that treated `canPlayType` as a yes/no would have shown a silent
+film with no explanation.
+
+### Which device this was, and why the answer is safe anyway
+
+**This was the iOS SIMULATOR, not the iPhone SE** (rule 7 says say which). Safari was
+launched on the SE over USB but `devicectl` has no way to hand it a URL, so the page never
+loaded there. The Simulator runs on the Mac's decoders and can in principle be optimistic
+about codecs, so this is not the last word.
+
+It is good enough to plan on, for a reason that is structural rather than hopeful: **the
+remux design has the CLIENT declare its capabilities and the HOST decide the mode.** An
+iPhone that turns out to refuse AC-3 simply does not declare it, and the host re-encodes
+the audio for that client. So a wrong answer here costs some wasted CPU on one device
+class, not a silent film - and the real device answer arrives for free the moment there is
+an iOS client to ask. Do not spend more effort on it before then.
+
+### What this changes in the plan
+
+- Rung two is **19 files, not ~650**. The audio re-encode path is a rounding error and
+  can be built last, or skipped for a long time.
+- **Rung one now covers essentially the whole of the 83%.** Container rewrite alone is the
+  release.
+- TrueHD is the one codec that must be re-encoded to be carried at all, and there are five
+  of them.
+
+## 2026-08-13 - the web interface is the operator's dashboard WITH playback, and the player is one transport rather than a second implementation
 Tier: T2
 Context: the TODO item asked the question outright and said to answer it before
 building: is this the operator's dashboard with playback added, or a genuine second
