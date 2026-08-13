@@ -121,14 +121,18 @@ class PearCinemaHost {
   // Jellyfin credentials are wrong, this throws and the old source is still serving.
   // A library that goes dark because someone mistyped a password is not an
   // acceptable way to find out you mistyped a password.
-  async setSource (cfg) {
+  // `force` walks the disk again instead of trusting the scan cache. It has to be a
+  // parameter rather than a decision made inside the adapter, because the operator
+  // is the only one who knows they just added a film - or that they are running a
+  // build that reads something off the disk the last scan did not.
+  async setSource (cfg, { force = false } = {}) {
     const next = buildAdapter(cfg, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
       dataDir: this.dataDir,
       log: this.log
     })
-    const leaves = await next.scan() // throws on a bad URL, bad credentials, no folder
+    const leaves = await next.scan({ force }) // throws on a bad URL, bad credentials, no folder
 
     this.adapter = next
     this.source = cfg
@@ -239,13 +243,13 @@ class PearCinemaHost {
 
   // --- lifecycle ------------------------------------------------------------
 
-  async ready () {
+  async ready ({ rescan = false } = {}) {
     // A BAD SOURCE MUST NOT STOP THE HOST FROM STARTING. If the saved credentials
     // are wrong or the drive is unplugged, scan() throws - and if that killed the
     // process, the operator would be locked out of the very dashboard they need in
     // order to fix it. Come up, serve, and say what is wrong.
     try {
-      const n = await this.adapter.scan()
+      const n = await this.adapter.scan({ force: rescan })
       this.log('host:scanned', { source: this.adapter.kind, items: n })
     } catch (e) {
       this.sourceError = e.message

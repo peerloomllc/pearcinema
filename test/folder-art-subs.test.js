@@ -267,3 +267,27 @@ test('a poster that has been deleted since the scan is null, not a crash', async
   await fsp.rm(path.join(root, 'Blurays', 'Heat.jpg'))
   assert.equal(await a.art({ artId: heat.artId }), null)
 })
+
+test('A RESCAN PICKS UP A POSTER ADDED AFTER THE FIRST SCAN', async (t) => {
+  // The user-visible version of this: "I dropped a poster next to my film and
+  // nothing changed." The scan cache is deliberately long-lived (12 hours - a
+  // rescan of 12,000 files is twenty minutes of a spinning disk), so without a
+  // forced walk the new file is invisible and the operator has no way to tell that
+  // from a scanner that cannot see it.
+  //
+  // `--rescan` used to be read ONLY by --codec-report, so `npm run host --rescan`
+  // silently did nothing on the path people actually use. It now reaches every scan.
+  const { a, root } = await library(t)
+  const deadpool = await filmNamed(a, 'Deadpool')
+  assert.equal(deadpool.artId, null)
+
+  await fsp.writeFile(path.join(root, 'Blurays', 'Deadpool.jpg'), 'DEADPOOLPOSTER')
+
+  await a.scan()                     // cached: still nothing, and that is correct
+  assert.equal((await filmNamed(a, 'Deadpool')).artId, null)
+
+  await a.scan({ force: true })      // what --rescan does
+  const after = await filmNamed(a, 'Deadpool')
+  assert.ok(after.artId, 'the new poster is found')
+  assert.equal(await read(await a.art({ artId: after.artId })), 'DEADPOOLPOSTER')
+})
