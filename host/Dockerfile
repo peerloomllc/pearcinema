@@ -1,9 +1,19 @@
 # The PearCinema host as a container, for Umbrel and any Docker host.
 #
-# Port 8742, NOT 8741: PearTune already publishes 8741 on Umbrel and PearCircle's
-# seeder has 8731. Two PeerLoom apps on one box cannot share a port, and a box
-# running both PearTune and PearCinema is an expected setup rather than an edge
-# case.
+# THE SUITE'S PORT MAP, and it is a map rather than a preference because a box
+# running several of these at once is the expected setup rather than an edge case:
+#
+#   8731  PearCircle seeder
+#   8741  PearTune dashboard
+#   8742  PearTune CAST server   <- host/cast.js, and the reason 8742 is not ours
+#   8751  PearCinema dashboard   <- this
+#   8752  PearCinema cast, reserved for when casting lands
+#
+# PearCinema originally took 8742 on the reasoning that PearTune "has 8741". That was
+# wrong: PearTune binds BOTH, and the second one is its Chromecast media server. The
+# collision was invisible until the image was actually run on a real Umbrel alongside
+# a real PearTune (2026-08-13) - the host came up, scanned the whole library, and then
+# died with EADDRINUSE. Leave a gap between apps rather than taking the next number.
 #
 # BUILD CONTEXT IS THE SUITE ROOT'S STAGING DIR, not this repo. PearCinema depends
 # on `@peerloom/host` via `file:../peerloom-host`, which is outside the repo and
@@ -43,8 +53,20 @@ WORKDIR /app
 
 # The shared host package first, and INSTALLED IN PLACE, so the `file:` dependency
 # below resolves to a real directory rather than a symlink into nowhere.
+# NOT `--omit=dev` HERE, and the difference is the image starting at all.
+#
+# @peerloom/host declares its runtime packages (b4a, hyperdht, corestore and the
+# rest) as devDependencies plus peerDependencies rather than dependencies - the
+# consumer-provides model. That works in a checkout because npm links the `file:`
+# dependency and Node resolves through the symlink to the REAL directory, which walks
+# up into peerloom-host/node_modules where a plain `npm install` has put them.
+#
+# In the image `--omit=dev` installed literally nothing, and the first `require` out
+# of the package died with MODULE_NOT_FOUND. The container exited at startup, every
+# time - found 2026-08-13, the first time anyone actually ran the image rather than
+# checking that it built.
 COPY peerloom-host/package.json peerloom-host/package-lock.json /peerloom-host/
-RUN cd /peerloom-host && npm ci --omit=dev --no-audit --no-fund
+RUN cd /peerloom-host && npm ci --no-audit --no-fund
 COPY peerloom-host/src/ /peerloom-host/src/
 
 # Deps before code, so a code change does not re-resolve the tree.
@@ -73,6 +95,6 @@ VOLUME /data
 # reaches it whatever PEARCINEMA_HTTP_HOST says. start-period covers the folder scan,
 # which on a 3 TB drive is minutes on a cold cache.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
-  CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PEARCINEMA_HTTP_PORT||8742,path:'/'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PEARCINEMA_HTTP_PORT||8751,path:'/'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["node", "host/index.js"]

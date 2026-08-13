@@ -2,7 +2,81 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - CORRECTION: Chromium-based browsers DO open Matroska
+## 2026-08-13 (latest) - DEPLOYED TO THE UMBREL, against the real 3 TB library, and it found four bugs
+Tier: T2 (measurements and a port reallocation that affect every install)
+Context: Tim's call, and it was right. "There are only MP4 files on this host. If there
+are HEVC files they are on the Elements drive attached to the Umbrel. If you're basing
+everything on that full library then we should be building and testing the Host server
+dashboard as an Umbrel app from the Umbrel where it can actually see those files."
+
+Everything before this had been developed against a folder of two files on a laptop,
+which tests the mechanism perfectly and tests nothing about the library.
+
+**The image had never actually run.** It was accepted in PR #9 because it BUILT.
+
+### Four bugs, none of which any test could have found
+
+**1. The container died at startup, every time.** `@peerloom/host` declares its runtime
+packages as devDependencies plus peerDependencies, and the Dockerfile installed them with
+`--omit=dev` - which installed nothing. The first `require` out of the package was
+MODULE_NOT_FOUND. It works in a checkout because npm links the `file:` dependency and
+Node resolves through the symlink into a directory where a plain `npm install` HAS put
+them. Fixed by not omitting dev there, with the reasoning written down.
+
+**2. PORT 8742 WAS ALREADY PEARTUNE'S.** PearCinema chose it on the reasoning that
+"PearTune has 8741". PearTune binds BOTH: `host/cast.js` runs its Chromecast media server
+on 8742. So the host came up, scanned the whole library, and died with EADDRINUSE. The
+suite now has a written port map rather than a next-free-number habit:
+
+```
+8731  PearCircle seeder
+8741  PearTune dashboard      8742  PearTune cast
+8751  PearCinema dashboard    8752  PearCinema cast (reserved)
+```
+
+**3. The page did not exist until the scan finished** - about four minutes for 2,986
+files on a USB drive. `ready()` scanned and THEN listened, so a fresh install answered
+nothing at all for minutes, which is indistinguishable from a broken one and is exactly
+the experience this app works hard to avoid everywhere else. Now it listens first and
+scans after, reporting progress, and **a phone can pair while it works** - which is the
+moment somebody is most likely to try.
+
+**4. A deploy that failed printed a cheerful "open http://..." underneath a stack
+trace.** The check looked for any 200; something else on the box answered 8742 with a 404
+while our container crash-looped. It now looks for OUR page and exits non-zero.
+
+### What the real library actually looks like to a player
+
+274 films, 29 shows, 160 seasons, 2,712 episodes. Sampled through the running host:
+
+```
+FILMS (274)                        EPISODES (902 sampled)
+182  matroska/h264/aac             315  matroska/hevc/aac
+ 40  avi/mpeg4/mp3                 211  matroska/hevc/ac3
+ 18  mov/h264/aac                  138  mov/h264/aac
+ 14  matroska/h264/dts              87  mov/hevc/aac
+  5  matroska/hevc/aac              76  matroska/h264/aac
+  5  matroska/h264/truehd           75  matroska/hevc/eac3
+  3  matroska/h264/ac3
+```
+
+**HEVC is 76% of the sampled television**, which confirms the earlier 64% figure and
+sharpens it. And that single fact splits the two clients completely:
+
+- **An iPhone gets essentially all of it after remux.** iOS decodes HEVC and Dolby, so
+  every episode above is a container rewrite; only the 40 AVI films are out of reach.
+  Verified on real files: a `matroska/hevc/ac3` episode remuxed with the audio COPIED.
+- **A desktop browser gets about a quarter of the television.** No browser measured
+  decodes HEVC, and repackaging cannot change the picture. Verified: the same episode
+  answered `refuse` with "this client cannot decode HEVC video".
+
+So the web player is excellent for FILMS - Tim's Brave opens MKV, so 200 of 274 play
+untouched and the DTS and TrueHD ones now get rebuilt sound - and it is weak for his
+television, permanently, until something re-encodes video. **That is a finding about
+browsers, not about PearCinema**, and it makes the phone client more clearly the product
+than any argument had.
+
+## 2026-08-13 - CORRECTION: Chromium-based browsers DO open Matroska
 Tier: T2 (a measurement that corrects a claim repeated across this repo's docs)
 Context: Tim played his own 2.5 GB MKV of 2001 in the new web player and it said
 "straight from the file" rather than "repackaged" - and played perfectly. That should

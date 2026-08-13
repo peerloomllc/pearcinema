@@ -51,6 +51,9 @@ class PearCinemaHost {
     this.sourceFrom = 'none'
     this.source = this._readSource()
     this.sourceError = null
+    // Non-null while a scan is running, so the page can say "reading your library,
+    // 1,500 of 2,986" instead of showing an empty grid that looks like a bug.
+    this.scanning = null
 
     // The repackaging engine. Concurrency-capped, because remux is I/O bound rather
     // than CPU bound but three films at once on a Pi-class box is still three films
@@ -288,21 +291,45 @@ class PearCinemaHost {
 
   // --- lifecycle ------------------------------------------------------------
 
-  async ready ({ rescan = false } = {}) {
-    // A BAD SOURCE MUST NOT STOP THE HOST FROM STARTING. If the saved credentials
-    // are wrong or the drive is unplugged, scan() throws - and if that killed the
-    // process, the operator would be locked out of the very dashboard they need in
-    // order to fix it. Come up, serve, and say what is wrong.
+  // THE SCAN DOES NOT BLOCK THE HOST FROM COMING UP, and on a real library that is
+  // the difference between working and looking broken.
+  //
+  // Measured on the Umbrel against the actual 3 TB drive (2026-08-13): the first
+  // scan walks 2,986 films and episodes and probes every one with ffprobe, which
+  // takes MINUTES. Scanning first meant the DHT was silent and the web page did not
+  // exist for that whole time - so a fresh install answered nothing at all, which is
+  // indistinguishable from a broken one and is exactly the experience this app spends
+  // so much effort avoiding elsewhere.
+  //
+  // So: listen first, scan after, and report progress while it happens. A phone can
+  // pair during the scan, which is also the moment somebody is most likely to try.
+  async ready ({ rescan = false, waitForScan = false } = {}) {
+    await this.host.ready()
+
+    const scan = this._scan({ rescan })
+    if (waitForScan) await scan
+    return this
+  }
+
+  // A BAD SOURCE MUST NOT STOP THE HOST. If the credentials are wrong or the drive is
+  // unplugged, scan() throws - and if that propagated, the operator would be locked
+  // out of the very page they need in order to fix it. Come up, serve, say what is
+  // wrong.
+  async _scan ({ rescan = false } = {}) {
+    this.scanning = { done: 0, total: 0, startedAt: Date.now() }
     try {
-      const n = await this.adapter.scan({ force: rescan })
+      const n = await this.adapter.scan({
+        force: rescan,
+        onProgress: (done, total) => { this.scanning = { ...this.scanning, done, total } }
+      })
+      this.sourceError = null
       this.log('host:scanned', { source: this.adapter.kind, items: n })
     } catch (e) {
       this.sourceError = e.message
       this.log('host:source-failed', { source: this.adapter.kind, err: e.message })
+    } finally {
+      this.scanning = null
     }
-
-    await this.host.ready()
-    return this
   }
 
   startPairing (opts) { return this.host.startPairing(opts) }

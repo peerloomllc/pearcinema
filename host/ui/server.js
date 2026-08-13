@@ -175,7 +175,7 @@ async function collect (stream, limit = 8 * 1024 * 1024) {
 async function startDashboard ({
   host,
   bind = '127.0.0.1',
-  port = 8742,
+  port = 8751,
   password = '',
   passwordSource = 'none',
   version = null,
@@ -188,7 +188,7 @@ async function startDashboard ({
   requireSafeBind(bind, password, { envVar: 'PEARCINEMA_PASSWORD' })
 
   // The cookie is named per app by the package, because a box running PearTune on
-  // 8741 and PearCinema on 8742 shares an ORIGIN as far as cookies are concerned -
+  // 8741 and PearCinema on 8751 shares an ORIGIN as far as cookies are concerned -
   // they ignore the port. One cookie name would mean logging into one dashboard
   // logs you into the other.
   const auth = createDashboardAuth({ app: host.protocol.app, password })
@@ -246,6 +246,10 @@ async function startDashboard ({
           version,
           stats,
           sourceError: host.sourceError,
+          // Non-null while the library is being read. On the real 3 TB drive the
+          // first scan probes 2,986 files and takes minutes, and an empty grid for
+          // that long is indistinguishable from a broken app.
+          scanning: host.scanning || null,
           // The operator's own view of the source, which is NOT what a phone gets.
           // library.stats deliberately hides the folder paths from paired devices
           // (they are the shape of somebody's disk and no client needs them); the

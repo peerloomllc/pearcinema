@@ -33,7 +33,7 @@ What works today, proven end to end over a real DHT testnet in `test/first-pair.
 - **A plain folder works as a source**, with no server in the path at all. Measured
   against a real 3 TB drive: 2,986 items - 274 films, 29 shows, 2,712 episodes - read
   from filenames and the `.nfo` sidecars already sitting beside the media.
-- **A web interface with a player**, password-gated, at `http://localhost:8742`.
+- **A web interface with a player**, password-gated, at `http://localhost:8751`.
 
 What is not built yet:
 
@@ -48,7 +48,7 @@ Run it:
 npm install && npm run host
 ```
 
-Then open `http://localhost:8742`. Point it at a folder or a Jellyfin server from the
+Then open `http://localhost:8751`. Point it at a folder or a Jellyfin server from the
 first-run screen, and pair a phone by scanning the QR it draws.
 
 The command line still does all of it, which is the right answer over ssh:
@@ -65,7 +65,7 @@ npm run host -- --jellyfin http://your-server:8096 --user you --pass secret --pa
 
 ### The web interface
 
-`http://localhost:8742` by default; `PEARCINEMA_HTTP_HOST`, `PEARCINEMA_HTTP_PORT` and
+`http://localhost:8751` by default; `PEARCINEMA_HTTP_HOST`, `PEARCINEMA_HTTP_PORT` and
 `PEARCINEMA_PASSWORD` move it and lock it. It does the setup, the library browsing, the
 pairing QR, the device and people list with revoke - and it plays.
 

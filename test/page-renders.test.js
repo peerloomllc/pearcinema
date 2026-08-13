@@ -74,7 +74,7 @@ async function open () {
 
   const dom = new JSDOM(PAGE, {
     runScripts: 'dangerously',
-    url: 'http://localhost:8742/',
+    url: 'http://localhost:8751/',
     pretendToBeVisual: true,
     virtualConsole: vc
   })

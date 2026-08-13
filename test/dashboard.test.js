@@ -523,7 +523,7 @@ test('the built page is committed, self-contained and actually the app', async (
 
   // THE STALE-BUILD CHECK. Strings that only exist in the current source, so a
   // forgotten rebuild after adding a screen fails here rather than shipping.
-  for (const marker of ['Pair a device', 'Try anyway', 'Where the films are', 'Welcome to PearCinema', 'Repackaged for your browser']) {
+  for (const marker of ['Pair a device', 'Try anyway', 'Where the films are', 'Welcome to PearCinema', 'Repackaged for your browser', 'Reading your library']) {
     assert.ok(html.includes(marker), `the built page is stale: it is missing "${marker}"`)
   }
 })
@@ -655,4 +655,34 @@ test('the host refuses a fourth film rather than queueing it behind three', asyn
   assert.equal(res.status, 503)
   assert.match(res.json.error, /already repackaging/)
   host.remuxer.killAll()
+})
+
+test('THE PAGE IS SERVED WHILE THE LIBRARY IS STILL BEING READ', async (t) => {
+  // Measured on the Umbrel against the real 3 TB drive: the first scan walks 2,986
+  // films and episodes and probes every one with ffprobe, which takes about four
+  // minutes. Scanning before listening meant the DHT was silent and the page did not
+  // exist for that whole time, so a fresh install answered nothing at all - which is
+  // indistinguishable from a broken one.
+  const { c, host } = await loggedIn(t)
+
+  host.scanning = { done: 1500, total: 2986, startedAt: Date.now() }
+  const res = await c.req('GET', '/api/state')
+
+  assert.equal(res.status, 200, 'the page answers DURING a scan, not only after')
+  assert.deepEqual(res.json.scanning, { done: 1500, total: 2986, startedAt: host.scanning.startedAt })
+
+  host.scanning = null
+  assert.equal((await c.req('GET', '/api/state')).json.scanning, null)
+})
+
+test('a device can pair while the library is still being read', async (t) => {
+  // The moment somebody is MOST likely to try, on a fresh install. Pairing does not
+  // depend on the scan, so it must not wait for it.
+  const { c, host } = await loggedIn(t)
+  host.scanning = { done: 10, total: 2986, startedAt: Date.now() }
+
+  const res = await c.req('POST', '/api/pair/start', { body: {} })
+  assert.equal(res.status, 200)
+  assert.match(res.json.link, /^pear:\/\/pearcinema\/pair\?/)
+  host.stopPairing()
 })

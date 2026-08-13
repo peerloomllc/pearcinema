@@ -134,6 +134,30 @@ export default function Library ({ state, caps, search, onPlay }) {
     [season?.id]
   )
 
+  // READING THE LIBRARY takes minutes on a real drive - measured at about four for
+  // 2,986 films and episodes on a USB disk. The host now serves this page while it
+  // works rather than after, so this is what fills the gap. Without it the grid is
+  // simply empty, which reads as broken.
+  if (state.scanning) {
+    const { done = 0, total = 0 } = state.scanning
+    return (
+      <div class='empty'>
+        <h2>Reading your library…</h2>
+        <p>
+          {total
+            ? <>Looked at <b>{done.toLocaleString()}</b> of {total.toLocaleString()} files.</>
+            : <>Walking the folders.</>}
+        </p>
+        <p class='hint'>
+          Every file is opened to see what is actually inside it, which is what makes the
+          library know a film from an episode and an MKV from an MP4. It happens once -
+          the result is remembered, so restarts are instant. You can pair a phone while
+          this runs.
+        </p>
+      </div>
+    )
+  }
+
   if (state.source?.kind === 'empty') {
     return (
       <div class='empty'>

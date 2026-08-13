@@ -28,7 +28,7 @@ PearCinema host
   --dht-port <port>   pin the DHT's UDP port (only needed behind a manual port-forward)
 
   --http-host <addr>  where the web interface listens (PEARCINEMA_HTTP_HOST, default 127.0.0.1)
-  --http-port <port>  its port (PEARCINEMA_HTTP_PORT, default 8742)
+  --http-port <port>  its port (PEARCINEMA_HTTP_PORT, default 8751)
   --password <pw>     the web interface's password (PEARCINEMA_PASSWORD).
                       REQUIRED on a non-loopback bind - one is generated and saved if absent.
   --no-http           do not serve the web interface at all
@@ -177,7 +177,7 @@ async function main () {
   let dashboard = null
   if (!arg('no-http')) {
     const bind = arg('http-host', process.env.PEARCINEMA_HTTP_HOST || '127.0.0.1')
-    const httpPort = Number(arg('http-port', process.env.PEARCINEMA_HTTP_PORT || 8742))
+    const httpPort = Number(arg('http-port', process.env.PEARCINEMA_HTTP_PORT || 8751))
     const given = arg('password', process.env.PEARCINEMA_PASSWORD || '')
 
     // GENERATE-AND-PRINT rather than refuse. A platform install (Umbrel, Start9)
