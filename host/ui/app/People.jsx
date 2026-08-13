@@ -91,7 +91,7 @@ function DeviceRow ({ d, persons, reload }) {
         )}
         {!revoked && <button class='small destructive' onClick={revoke}>Cut off</button>}
         {revoked && <button class='small ghost' onClick={forget}>Remove row</button>}
-        <button class='iconbtn' onClick={() => setOpen(!open)} aria-label='More'>{open ? '▴' : '▾'}</button>
+        <button class='iconbtn' onClick={() => setOpen(!open)} aria-label='More'>{open ? '\u25b4' : '\u25be'}</button>
       </div>
 
       {open && (

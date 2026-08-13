@@ -18,6 +18,7 @@
 import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
 import { notify, askConfirm } from './ui'
+import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
 
 // WHAT A FOLDER HOLDS, in the words somebody would use about their own shelves.
 //
@@ -68,12 +69,12 @@ function FolderPicker ({ onPick, onClose }) {
           {busy && <div class='item'>Reading…</div>}
           {!busy && data?.mounts?.length > 0 && data.mounts.map(m => (
             <button class='item' key={'m' + m} onClick={() => go(m)}>
-              <span>💾</span><span class='mono'>{m}</span>
+              <Drive size={16} /><span class='mono'>{m}</span>
             </button>
           ))}
           {!busy && data?.dirs?.map(d => (
             <button class='item' key={d.path} onClick={() => go(d.path)}>
-              <span>{d.video ? '🎬' : '📁'}</span>
+              <span class='ic'>{d.video ? <Film size={16} /> : <Folder size={16} />}</span>
               <span style='flex:1'>{d.name}</span>
               {d.video && <span class='chip good'>video</span>}
             </button>
@@ -128,7 +129,7 @@ function Detected ({ onFolders, onServer }) {
 
       {folders.map(f => (
         <div class='dev' key={f.at}>
-          <span>🎬</span>
+          <span class='ic'><Drive size={18} /></span>
           <div class='who'>
             <b>{f.label}</b>
             {/* The detector matched these folders BY NAME, so it already knows which
@@ -144,7 +145,7 @@ function Detected ({ onFolders, onServer }) {
 
       {servers.map(sv => (
         <div class='dev' key={sv.url}>
-          <span>{sv.usable ? '🖥' : '🚫'}</span>
+          <span class='ic'>{sv.usable ? <Server size={18} /> : <Blocked size={18} />}</span>
           <div class='who'>
             <b>{sv.name}</b>
             <div>{sv.usable ? sv.url : sv.reason}</div>
@@ -275,7 +276,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
                     </option>
                   ))}
                 </select>
-                <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}>✕</button>
+                <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}><Close size={15} /></button>
               </div>
             ))}
             {!roots.length && <p class='hint'>No folders yet. Add the one your films are in.</p>}
@@ -335,7 +336,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
           <div class='modal'>
             <div class='modal-head'>
               <h3>Pick a folder</h3>
-              <button class='iconbtn' onClick={() => setPicking(false)} aria-label='Close'>✕</button>
+              <button class='iconbtn' onClick={() => setPicking(false)} aria-label='Close'><Close size={15} /></button>
             </div>
             <FolderPicker
               // A folder picked by hand starts at "work it out", where its own name

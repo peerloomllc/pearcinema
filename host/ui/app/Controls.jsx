@@ -21,6 +21,7 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { fmtClock } from './api'
+import { Captions, Volume, Muted } from './icons'
 
 export default function Controls ({ video, at, duration, onSeek, busy, subs, live }) {
   const [playing, setPlaying] = useState(true)
@@ -144,7 +145,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
         {subs.length > 0 && (
           <div class='submenu'>
-            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'>💬</button>
+            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={17} /></button>
             {subMenu && (
               <div class='menu'>
                 <button class={subOn === -1 ? 'on' : ''} onClick={() => pickSub(-1)}>Off</button>
@@ -159,7 +160,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         )}
 
         <button class='iconbtn' onClick={() => setMute(!muted)} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted || volume === 0 ? '🔇' : '🔊'}
+          {muted || volume === 0 ? <Muted size={17} /> : <Volume size={17} />}
         </button>
         <input
           class='vol' type='range' min='0' max='1' step='0.05'
@@ -168,7 +169,14 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
           aria-label='Volume'
         />
 
-        <button class='iconbtn' onClick={fullscreen} aria-label='Fullscreen'>{full ? '⤡' : '⤢'}</button>
+        <button class='iconbtn' onClick={fullscreen} aria-label='Fullscreen'>
+          <svg viewBox='0 0 24 24' width='17' height='17' fill='none' stroke='currentColor'
+            stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>
+            {full
+              ? <path d='M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' />
+              : <path d='M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5' />}
+          </svg>
+        </button>
       </div>
     </div>
   )

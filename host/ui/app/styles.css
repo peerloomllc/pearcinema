@@ -4,39 +4,55 @@
  * reverse of most dashboards, and right for a page you sit in front of a film in.
  * Tokens on [data-theme] so both are one stylesheet, and every colour has a value
  * on :root so nothing is stranded on one theme's background.
+ *
+ * THE PALETTE IS PEARTUNE'S, ON A DARKER GROUND (Tim, 2026-08-13). They are companion
+ * apps and read as one suite: the same amber and terracotta, the same warm greys, the
+ * same radial glow at the top of the page. What is deliberately NOT copied is the
+ * lightness - PearTune's ground is a warm near-black for a music dashboard you glance
+ * at, and this one sits behind a film, so it goes darker and lets the picture be the
+ * brightest thing on screen.
+ *
+ * Names are kept as PearCinema had them (`--accent`, `--card`, `--line`) rather than
+ * renamed to PearTune's (`--primary`, `--surface`, `--border`): a rename touches every
+ * rule in the file for no visible gain, and the shared-host extraction is where common
+ * ground belongs, not a copied stylesheet.
  */
 
 :root {
-  --bg: #0e0f13;
-  --bg-2: #14161d;
-  --card: #171922;
-  --card-2: #1d202b;
-  --line: #262a35;
-  --fg: #eceef4;
-  --muted: #8b90a0;
-  --accent: #6ea8fe;
-  --accent-fg: #0b1220;
-  --good: #5fbf8e;
-  --warn: #e2b04a;
+  --bg: #0c0a07;
+  --bg-2: #141009;
+  --bg-accent: radial-gradient(1200px 600px at 50% -12%, rgba(230, 178, 78, .09) 0%, transparent 60%);
+  --card: #191410;
+  --card-2: #201a13;
+  --line: #322a20;
+  --line-strong: #43392c;
+  --fg: #f3ede1;
+  --muted: #a2947d;
+  --accent: #e6b24e;
+  --accent-fg: #1c1305;
+  --good: #8bb877;
+  --warn: #f2b544;
   --danger: #e0705f;
-  --shadow: 0 10px 40px rgba(0, 0, 0, .45);
-  --radius: 12px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 40px rgba(0, 0, 0, .45);
+  --radius: 14px;
 }
 
 [data-theme='light'] {
-  --bg: #f6f7fa;
-  --bg-2: #eef0f5;
+  --bg: #faf6ee;
+  --bg-2: #f3ecdf;
+  --bg-accent: radial-gradient(1200px 600px at 50% -12%, rgba(156, 106, 18, .12) 0%, transparent 60%);
   --card: #ffffff;
-  --card-2: #f2f4f8;
-  --line: #dde1e9;
-  --fg: #1a1d24;
-  --muted: #667085;
-  --accent: #2f6fdd;
+  --card-2: #f3ecdf;
+  --line: #ddd2bf;
+  --line-strong: #ccbfa6;
+  --fg: #1c1710;
+  --muted: #6b6252;
+  --accent: #9c6a12;
   --accent-fg: #ffffff;
-  --good: #1f8a5c;
-  --warn: #9a6b0d;
-  --danger: #c0392b;
-  --shadow: 0 10px 30px rgba(20, 25, 40, .12);
+  --good: #3f7d3a;
+  --warn: #8a5a10;
+  --danger: #c1362b;
+  --shadow: 0 1px 2px rgba(27, 26, 22, .08), 0 10px 30px rgba(38, 36, 31, .08);
 }
 
 * { box-sizing: border-box }
@@ -45,7 +61,11 @@ html, body, #root { height: 100% }
 
 body {
   margin: 0;
-  background: var(--bg);
+  /* The glow is PearTune's, and it is the thing that makes the two read as one suite
+   * at a glance - a warm light at the top of the page rather than a flat field. Fixed
+   * so it stays with the top of the page rather than scrolling away. */
+  background: var(--bg-accent), var(--bg);
+  background-attachment: fixed;
   color: var(--fg);
   font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -525,3 +545,63 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   .ring .base { stroke: var(--accent) }
   .ring .dash { display: none }
 }
+
+/* ---- moving between screens ------------------------------------------------ */
+
+/* DEEPER COMES FROM THE RIGHT, BACK COMES FROM THE LEFT (Tim, 2026-08-13, choosing it
+ * over a plain cross-fade). A fade says only that something changed; this says WHERE
+ * YOU WENT, which is the actual difficulty with a library four levels deep - films,
+ * shows, seasons, episodes - and it is the idiom a phone already uses, so it will
+ * still be right when there is a phone app.
+ *
+ * Short, and on transform and opacity only: those two are the properties a browser can
+ * animate without laying the page out again, which is what keeps it smooth on the
+ * small boxes this host runs on. */
+.screen { animation: screen-deeper .26s cubic-bezier(.2, .7, .3, 1) both }
+.screen.back { animation-name: screen-back }
+
+@keyframes screen-deeper { from { opacity: 0; transform: translate3d(26px, 0, 0) } }
+@keyframes screen-back { from { opacity: 0; transform: translate3d(-26px, 0, 0) } }
+
+/* Movement is an attention-getter, and a viewer who has asked for less of it should
+ * get the content immediately rather than a slower version of the same thing. */
+@media (prefers-reduced-motion: reduce) {
+  .screen { animation: none }
+}
+
+/* ---- the list loads itself -------------------------------------------------- */
+
+/* A "Load more" button asks a question the page already knows the answer to: somebody
+ * at the bottom of their films wants the next hundred. This is the marker the list
+ * watches for - it says what is happening rather than being an invisible pixel, and it
+ * fades in only while a page is actually in flight. */
+.loadmore {
+  display: grid; place-items: center;
+  padding: 1.4rem 0 .6rem; min-height: 3rem;
+  color: var(--muted); font-size: .84rem;
+}
+.loadmore span { opacity: 0; transition: opacity .2s ease }
+.loadmore span.on { opacity: 1 }
+
+/* AND THE GRID FADES OUT AT ITS EDGES rather than being chopped off, so a long library
+ * reads as continuing past the fold instead of ending there. A mask, so it works over
+ * whatever is behind it - the warm glow at the top of the page included. */
+.content { -webkit-mask-image: var(--edge-fade); mask-image: var(--edge-fade) }
+:root {
+  --edge-fade: linear-gradient(to bottom,
+    transparent 0, #000 14px,
+    #000 calc(100% - 22px), transparent 100%);
+}
+
+/* ---- icons ------------------------------------------------------------------ */
+
+/* Inline SVG at the text's own colour and weight, which is the whole reason for
+ * dropping the emoji: they came in every platform's colours and none of them ours. */
+svg { flex: 0 0 auto }
+button svg, .viewtoggle svg { vertical-align: -.15em }
+.brand svg { color: var(--accent); margin-right: .1rem }
+.brand { display: flex; align-items: center; gap: .35rem }
+.dev .ic { display: grid; place-items: center; color: var(--muted); width: 1.6rem }
+.poster .art svg { color: color-mix(in srgb, var(--muted) 70%, transparent) }
+.searchbox svg { color: var(--muted) }
+.mark svg, .seen svg { display: block }

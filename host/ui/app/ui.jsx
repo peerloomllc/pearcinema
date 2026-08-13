@@ -4,6 +4,7 @@
 // importing each other, which is how a cycle starts.
 
 import { useState, useEffect } from 'preact/hooks'
+import { Close } from './icons'
 
 /* ---- theme ---------------------------------------------------------------- */
 
@@ -93,7 +94,7 @@ export function Modal ({ title, onClose, children, wide = false }) {
       <div class='modal' role='dialog' aria-modal='true' aria-label={title} style={wide ? 'max-width:44rem' : ''}>
         <div class='modal-head'>
           <h3>{title}</h3>
-          <button class='iconbtn' onClick={onClose} aria-label='Close'>✕</button>
+          <button class='iconbtn' onClick={onClose} aria-label='Close'><Close size={16} /></button>
         </div>
         {children}
       </div>

@@ -10,6 +10,7 @@ import { api } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
+import { Mark, Search, Close } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -119,6 +120,10 @@ export default function App () {
   const [queue, setQueue] = useState([])
   const [pairing, setPairing] = useState(false)
   const [wizard, setWizard] = useState(false)
+  // Where the library should open when we leave the player by climbing rather than by
+  // going all the way out. Held here because the library owns which show and season it
+  // is showing, and the player is a sibling of it rather than a child.
+  const [startAt, setStartAt] = useState(null)
 
   // Where this person got to, and what they have finished. SEPARATE from /api/state,
   // which is the operator's view of the box and polls every eight seconds - watch
@@ -157,7 +162,7 @@ export default function App () {
   return (
     <div class='shell'>
       <div class='topbar'>
-        <div class='brand'>Pear<span>Cinema</span></div>
+        <div class='brand'><Mark size={22} />Pear<span>Cinema</span></div>
         <div class='tabs'>
           <button class={'tab' + (tab === 'watch' ? ' on' : '')} onClick={() => { setTab('watch'); setPlaying(null) }}>Watch</button>
           <button class={'tab' + (tab === 'who' ? ' on' : '')} onClick={() => setTab('who')}>
@@ -168,12 +173,12 @@ export default function App () {
         <div class='spacer' />
         {tab === 'watch' && !playing && (
           <div class='searchbox'>
-            <span>🔍</span>
+            <Search size={15} />
             <input
               type='text' value={search} placeholder='Search the library'
               onInput={e => setSearch(e.currentTarget.value)}
             />
-            {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'>✕</button>}
+            {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>}
           </div>
         )}
         <button onClick={() => setPairing(true)}>Pair a device</button>
@@ -192,13 +197,25 @@ export default function App () {
                 watch={watch}
                 onWatchChange={reloadWatch}
                 onPlay={setPlaying}
+                onUp={(level) => { setStartAt({ level, item: playing }); setPlaying(null); reloadWatch() }}
                 // The shelf is rebuilt when the player closes rather than while it
                 // runs: a position written every fifteen seconds would otherwise
                 // reshuffle the row behind the film somebody is watching.
                 onClose={() => { setPlaying(null); reloadWatch() }}
               />
               )
-            : <Library state={state} caps={CAPS} search={search} watch={watch} onPlay={play} onWatchChange={reloadWatch} />
+            : (
+              <Library
+                state={state}
+                caps={CAPS}
+                search={search}
+                watch={watch}
+                startAt={startAt}
+                onStarted={() => setStartAt(null)}
+                onPlay={play}
+                onWatchChange={reloadWatch}
+              />
+              )
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}

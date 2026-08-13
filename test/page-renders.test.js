@@ -523,3 +523,91 @@ test('THE RING IS MEASURED AGAINST THE ARTWORK, which is what makes it hug the p
   assert.equal(win.getComputedStyle(art).position, 'relative',
     'and the artwork is what it is measured against')
 })
+
+/* ------------------------------------------------- the look and the movement -- */
+
+test('THE EMOJI ARE GONE, and what replaced them is drawn in our own colours', async (t) => {
+  // Every platform draws its own emoji, in its own colours, at its own weight - so a
+  // page that mixes them with real interface reads as half-finished, which is the one
+  // thing a control plane for somebody's film collection should not look like.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const art = doc.querySelector('.poster .art')
+  assert.ok(art.querySelector('svg'), 'a film with no poster gets a drawn placeholder')
+  assert.match(doc.body.innerHTML, /<svg/, 'and the page uses inline SVG rather than an icon font')
+
+  // No stray pictographs anywhere on screen. Ranges rather than a list, so a new one
+  // slipping in is caught too.
+  const text = doc.body.textContent
+  assert.doesNotMatch(text, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u, 'no emoji left on the page')
+})
+
+test('MOVING DEEPER AND COMING BACK SAY SO', async (t) => {
+  // A fade says only that something changed. The class is what carries the direction,
+  // and it is the whole reason this was chosen over a cross-fade: a library four levels
+  // deep - films, shows, seasons, episodes - is where "which way did I just go" starts
+  // to matter.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 1, episodeCount: 3, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/library/list?type=seasons&limit=100': { items: [], total: 0, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  assert.ok(doc.querySelector('.screen'), 'the library is an animated screen')
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok(doc.querySelector('.screen').classList.contains('deeper') ||
+            !doc.querySelector('.screen').classList.contains('back'), 'going in is "deeper"')
+
+  const crumb = [...doc.querySelectorAll('.crumbs button')].find(b => b.textContent === 'Shows')
+  crumb.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok(doc.querySelector('.screen').classList.contains('back'), 'and coming out is "back"')
+})
+
+test('THE LIST LOADS ITSELF - no button asking a question it knows the answer to', async (t) => {
+  const many = Array.from({ length: 4 }, (_, i) => ({ ...FILM, id: 'f' + i, title: 'Film ' + i }))
+  const { dom, doc, text } = await open(STATE, {
+    '/api/library/list?type=movies&limit=100': { items: many, total: 200, cursor: 4 }
+  })
+  t.after(() => dom.window.close())
+
+  assert.doesNotMatch(text(), /Load more/, 'the button is gone')
+  assert.ok(doc.querySelector('.loadmore'), 'and there is a marker for the list to watch for')
+})
+
+test('AN EPISODE CAN CLIMB BACK TO ITS SEASON AND ITS SHOW', async (t) => {
+  // A film has one place to go and "back to the library" says it. An episode is four
+  // levels down, and offering only the way to the very top means anybody who wanted the
+  // rest of the season has to walk back in from Shows.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2, seasonTitle: null,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const crumbs = [...doc.querySelectorAll('.crumbs button')].map(b => b.textContent)
+  assert.deepEqual(crumbs, ['Shows', 'The Wire', 'Season 1'], 'every level is reachable, not just the top')
+  assert.match(text(), /S01E02/, 'and where you are is named rather than linked')
+})

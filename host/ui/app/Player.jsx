@@ -29,8 +29,9 @@ import { useState, useEffect, useRef } from 'preact/hooks'
 import { api, fmtRuntime, fmtSize, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
+import { Blocked, Check } from './icons'
 
-export default function Player ({ item, caps, queue = [], onPlay, onClose, watch = null, onWatchChange = () => {} }) {
+export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {} }) {
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
   const [failed, setFailed] = useState(null)
@@ -175,7 +176,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
           {blocked
             ? (
               <div class='refusal'>
-                <div style='font-size:2rem'>🚫</div>
+                <div style='color:var(--danger)'><Blocked size={34} /></div>
                 <h3>This one cannot be played here</h3>
                 <p>{verdict.reason}</p>
                 <button class='ghost' onClick={() => { setFailed(null); setForced(true) }}>Try anyway</button>
@@ -270,6 +271,32 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
       </div>
 
       <div>
+        {/* CLIMBING BACK OUT, one level at a time. A film has one place to go and a
+            single "back to the library" says it; an EPISODE is four levels down, and
+            offering only the way to the very top means anybody wanting the rest of the
+            season has to walk back in from Shows (Tim, 2026-08-13).
+            The crumbs are the same ones the library draws, so the two read as one
+            navigation rather than two ideas about where you are. */}
+        <div class='crumbs'>
+          <button onClick={onClose}>{item.type === 'episode' ? 'Shows' : 'Library'}</button>
+          {item.type === 'episode' && onUp && (
+            <>
+              <span>/</span>
+              <button onClick={() => onUp('series')}>{item.seriesTitle || 'Show'}</button>
+              <span>/</span>
+              <button onClick={() => onUp('season')}>
+                {item.seasonNumber === 0
+                  ? 'Specials'
+                  : item.seasonNumber === null || item.seasonNumber === undefined
+                    ? 'Season'
+                    : 'Season ' + item.seasonNumber}
+              </button>
+            </>
+          )}
+          <span>/</span>
+          <span style='color:var(--fg)'>{episodeCode(item) || item.title}</span>
+        </div>
+
         <h2>{item.title}</h2>
         {heading && <p class='hint' style='margin-top:0'>{heading}</p>}
 
@@ -307,7 +334,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
             rather than a trip to a settings screen. */}
         <div class='row' style='margin:.6rem 0'>
           <button class={seen ? '' : 'ghost'} onClick={() => markWatched(!seen)}>
-            {seen ? '✓ Watched' : 'Mark as watched'}
+            {seen ? <><Check size={14} /> Watched</> : 'Mark as watched'}
           </button>
         </div>
 
