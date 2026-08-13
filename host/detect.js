@@ -24,6 +24,12 @@ const http = require('http')
 const fsp = require('fs/promises')
 const path = require('path')
 
+// SHARED WITH THE ADAPTER, deliberately. `names.rootTypeFromName` is the one place
+// that decides a folder called `TV Shows` holds television, so a root offered here
+// and a root typed during a scan can never disagree about the same word.
+// Destructured rather than bound as `names`, which is a local inside the walk below.
+const { rootTypeFromName, ROOT_FILM_NAMES: FILM_NAMES, ROOT_SHOW_NAMES: SHOW_NAMES } = require('./names')
+
 function fetchText (url, timeoutMs = 2500) {
   return new Promise((resolve) => {
     let u
@@ -118,9 +124,6 @@ const FOLDER_ROOTS = [
 // the same collection would be called two different unhelpful things.
 const GENERIC_PARENTS = /^(library|external|media|mnt|volumes|data|storage|video|videos)$/i
 
-const FILM_NAMES = /^(movies|films|cinema|movie)$/i
-const SHOW_NAMES = /^(tv ?shows?|series|television|shows)$/i
-
 // NAME IT SOMETHING THE OWNER RECOGNISES.
 //
 // The obvious answer - the folder holding Movies and TV Shows - is often meaningless:
@@ -172,9 +175,14 @@ async function findLibraryFolders (roots = FOLDER_ROOTS, maxDepth = 3) {
       const group = {
         at,
         label: labelFor(at, roots),
-        roots: roots.map(n => path.join(at, n))
+        // EACH ROOT CARRIES WHAT IT HOLDS. The detector matched these folders BY
+        // NAME, so it already knows which is films and which is television - and
+        // throwing that away was how 34 of a real 2,746-file television collection
+        // ended up in the Films list. The type travels with the path from here to
+        // the saved config, so "Use these" configures a typed library in one click.
+        roots: roots.map(n => ({ path: path.join(at, n), type: rootTypeFromName(n) || 'auto' }))
       }
-      const key = group.roots.join('|')
+      const key = group.roots.map(r => r.path).join('|')
       if (!seen.has(key)) { seen.add(key); found.push(group) }
       return // do not descend past a hit; the folders below are the library itself
     }

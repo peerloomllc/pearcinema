@@ -72,16 +72,57 @@ const SUBTITLE_REASON = {
 const stemOf = (name) => name.slice(0, name.lastIndexOf('.') === -1 ? name.length : name.lastIndexOf('.'))
 const extOf = (name) => name.slice(name.lastIndexOf('.')).toLowerCase()
 
+// WHAT A ROOT HOLDS, and it is the fix for a measured misfiling rather than a
+// preference. Against Tim's real drive (2026-08-12) a NESTED file with no parseable
+// episode code fell through to being a film, so 34 of 2,746 television files - the
+// MST3K box set, numbered `K05`, which no filename rule can settle - landed in the
+// Films list. No amount of parsing settles that, because the filename genuinely does
+// not say. The root does.
+//
+//   'movies'  everything under here is a film. No episode parsing at all, which also
+//             stops `Dune - Part 2.mkv` in its own folder becoming episode 2 of
+//             itself via the loose `Part N` fallback - the same bug pointing the
+//             other way. (`Part Two` spelled out is safe only by luck.)
+//   'shows'   everything under here is television. A file with no code is an episode
+//             of UNKNOWN NUMBERING filed under its show, never a film.
+//   'auto'    nobody said. Resolved from the root's own folder name (`TV Shows` is
+//             not a guess, it is what the person who made it wrote on the front),
+//             and where the name says nothing, the filename rules decide per file -
+//             exactly the behaviour that existed before roots had a type.
+const ROOT_TYPES = new Set(['movies', 'shows', 'auto'])
+
+// A root config entry, from either shape it may be saved in.
+//
+// A BARE STRING IS STILL VALID AND ALWAYS WILL BE. Every host in the field saved its
+// roots as strings, `PEARCINEMA_FOLDERS` is a colon-separated path list, and a config
+// this cannot read is a library that goes dark on upgrade.
+function normaliseRoot (r) {
+  const raw = typeof r === 'string' ? { path: r } : (r || {})
+  if (!raw.path) return null
+
+  const at = path.resolve(String(raw.path))
+  const type = ROOT_TYPES.has(raw.type) ? raw.type : 'auto'
+  return {
+    path: at,
+    // What the operator (or the detector) DECLARED.
+    type,
+    // What we will actually act on. Kept apart from `type` so the dashboard can say
+    // "work it out - this looks like TV shows" rather than silently rewriting the
+    // operator's choice into something they never picked.
+    holds: type === 'auto' ? names.rootTypeFromName(at) : type
+  }
+}
+
 class FolderAdapter {
-  // `roots` is a list of directories. MULTI-ROOT from the start, because a real
-  // collection is `Movies` on one disk and `TV Shows` on another more often than
-  // it is one tidy tree - and because a root that is missing must not take the
-  // others down with it.
+  // `roots` is a list of directories, each a path string or `{ path, type }`.
+  // MULTI-ROOT from the start, because a real collection is `Movies` on one disk and
+  // `TV Shows` on another more often than it is one tidy tree - and because a root
+  // that is missing must not take the others down with it.
   constructor ({ roots = [], dataDir = null, libraryId = null, ids, log = () => {}, ffprobe = 'ffprobe' } = {}) {
     if (!ids) throw new Error('FolderAdapter needs the protocol id factory')
 
     this.kind = 'folder'
-    this.roots = (Array.isArray(roots) ? roots : [roots]).filter(Boolean).map(r => path.resolve(String(r)))
+    this.roots = (Array.isArray(roots) ? roots : [roots]).map(normaliseRoot).filter(Boolean)
     this.dataDir = dataDir
     this.libraryId = libraryId
     this.ids = ids
@@ -120,17 +161,22 @@ class FolderAdapter {
   visibleRoots () {
     return this.roots.filter(root => {
       try {
-        return fs.statSync(root).isDirectory()
+        return fs.statSync(root.path).isDirectory()
       } catch {
         return false
       }
     })
   }
 
+  // The paths alone, for the sentences an operator reads.
+  rootPaths () {
+    return this.roots.map(r => r.path)
+  }
+
   async ping () {
     const visible = this.visibleRoots()
     if (!this.roots.length) return { ok: false, detail: 'no folders configured' }
-    if (!visible.length) return { ok: false, detail: `no configured folder is readable: ${this.roots.join(', ')}` }
+    if (!visible.length) return { ok: false, detail: `no configured folder is readable: ${this.rootPaths().join(', ')}` }
     return {
       ok: true,
       detail: visible.length === this.roots.length
@@ -162,20 +208,21 @@ class FolderAdapter {
       // A THROW, and deliberately: the dashboard's Test button and the startup log
       // both need to say "your drive is not there" rather than "your library is
       // empty". Those are different sentences and the second one is a lie.
-      throw new Error(`no configured folder is readable: ${this.roots.join(', ')}`)
+      throw new Error(`no configured folder is readable: ${this.rootPaths().join(', ')}`)
     }
     if (visible.length < this.roots.length) {
-      const missing = this.roots.filter(r => !visible.includes(r))
+      const missing = this.roots.filter(r => !visible.includes(r)).map(r => r.path)
       this.scanError = `not readable: ${missing.join(', ')}`
       this.log('folder:root-missing', { missing })
     } else {
       this.scanError = null
     }
 
-    // 1. Walk.
+    // 1. Walk. `root` travels with every file from here on, because what a root
+    // HOLDS decides how its files are read - see ROOT_TYPES.
     const files = []
     for (const root of visible) {
-      for await (const file of walkVideos(root)) files.push({ file, root })
+      for await (const file of walkVideos(root.path)) files.push({ file, root })
     }
     this.log('folder:walked', { files: files.length, roots: visible.length })
 
@@ -234,9 +281,9 @@ class FolderAdapter {
       // by the tree's depth, and every one of them is a directory we already know
       // exists.
       let at = dir
-      while (at.startsWith(root)) {
+      while (at.startsWith(root.path)) {
         want.add(at)
-        if (at === root) break
+        if (at === root.path) break
         at = path.dirname(at)
       }
     }
@@ -362,7 +409,10 @@ class FolderAdapter {
   }
 
   // One file: what is it, and what does the disk already say about it?
-  async _identify (file, root, probed, dirs) {
+  async _identify (file, rootEntry, probed, dirs) {
+    const root = rootEntry.path
+    const holds = rootEntry.holds // 'movies' | 'shows' | null. See ROOT_TYPES.
+
     const dir = path.dirname(file)
     const filename = path.basename(file)
     const stem = filename.replace(/\.[^.]+$/, '')
@@ -372,17 +422,40 @@ class FolderAdapter {
     // A file directly in a root is a film. Anything nested MIGHT be an episode, and
     // the top folder under the root is the show. That is the convention every
     // scanner uses and the one Tim's library follows.
-    //
-    // KNOWN GAP, measured against the real library (2026-08-12): a NESTED file with
-    // no parseable episode code falls through to being a film. On Tim's drive that
-    // is 34 of 2,746 television files - the MST3K box set numbered `K05` - and they
-    // land in the Films list rather than under their show. Wrong, but wrong in a
-    // visible and recoverable way rather than a silent one, and the fix is a root
-    // that declares whether it holds films or shows. See TODO.md.
     const seriesFolder = parts.length > 1 ? parts[0] : null
     const seasonFolder = parts.length > 2 ? parts[parts.length - 2] : null
 
-    const episode = names.parseEpisode(filename, { seriesFolder, seasonFolder })
+    // WHAT THE ROOT SAYS OUTRANKS WHAT THE FILENAME SAYS, in both directions, and
+    // that is the whole point of typing a root. A films root does no episode parsing
+    // at all; a shows root never produces a film.
+    let episode = holds === 'movies'
+      ? null
+      : names.parseEpisode(filename, { seriesFolder, seasonFolder, television: holds === 'shows' })
+
+    // Nothing parseable under a SHOWS root. This is the case that had 34 of Tim's
+    // 2,746 television files filed as films: an MST3K box set numbered `K05`, which
+    // no filename rule can settle because the filename genuinely does not say. It is
+    // an episode of unknown numbering - which the item model already carries, since
+    // `episodeCode` returns null rather than inventing "S??E01".
+    if (!episode && holds === 'shows') {
+      const guess = names.parseMovie(filename) // the title cleaner, not a film verdict
+      episode = {
+        type: 'episode',
+        series: seriesFolder ? seriesFolder : guess.title,
+        seriesYear: null,
+        season: seasonFolder !== null ? names.parseSeasonFolder(seasonFolder) : null,
+        episode: null,
+        episodeEnd: null,
+        title: guess.title,
+        folderSeason: null,
+        loose: false,
+        // The numbering is not merely inferred, it is ABSENT. Carried so the season
+        // below can be named after its folder rather than becoming one of several
+        // rows all labelled "Season".
+        unnumbered: true
+      }
+    }
+
     const sidecar = await this._readSidecar(dir, stem)
 
     // The id is derived from the path RELATIVE to its root, never the absolute one.
@@ -399,8 +472,18 @@ class FolderAdapter {
     if (episode) {
       const show = names.parseShowFolder(seriesFolder || episode.series)
       const merged = nfo.applyNfo(episode, sidecar)
+
+      // A season with no number is keyed by its FOLDER, so `MST3K DVD 18` and
+      // `MST3K DVD 19` stay two shelves instead of collapsing into one anonymous
+      // heap. Numbered seasons keep the exact preimage they always had - changing it
+      // would remint every episode id in every library in the field.
+      const numbered = merged.season !== null && merged.season !== undefined
+      const seasonKey = numbered
+        ? String(merged.season)
+        : (seasonFolder ? `dir:${seasonFolder}` : 'unnumbered')
+
       const seriesId = this.ids.itemId(this.libraryId, this.kind, `series:${root}:${seriesFolder || show.title}`)
-      const seasonId = this.ids.itemId(this.libraryId, this.kind, `season:${root}:${seriesFolder || show.title}:${merged.season}`)
+      const seasonId = this.ids.itemId(this.libraryId, this.kind, `season:${root}:${seriesFolder || show.title}:${seasonKey}`)
 
       // A show's poster lives in the show folder and a season's in the season
       // folder, so both are resolved here, off the same directory listings, and
@@ -419,6 +502,7 @@ class FolderAdapter {
           seriesTitle: show.title,
           seasonNumber: merged.season,
           episodeNumber: merged.episode,
+          seasonTitle: numbered ? null : seasonFolder,
           title: merged.title || stem,
           year: merged.year ?? show.year,
           runtime: merged.runtime ?? probed.duration,
@@ -555,8 +639,15 @@ class FolderAdapter {
       // Version 2 added artwork and subtitle discovery. A version 1 cache has none
       // of it, so a host loading one would come up with a library of grey
       // placeholders and no subtitles and no way to know why - rebuild instead.
-      if (raw.version !== 2) return false
-      // A cache built from different folders describes a different library.
+      //
+      // Version 3 added the root type. A version 2 cache was built with every root
+      // read as "work it out", so it holds exactly the misfiling this version fixes.
+      // Loading one would leave the operator having typed their roots and seen
+      // nothing change, which is worse than the wait.
+      if (raw.version !== 3) return false
+      // A cache built from different folders describes a different library - and a
+      // root whose TYPE changed describes the same files read a different way, which
+      // is just as stale. Both are covered by comparing the normalised roots.
       if (JSON.stringify(raw.roots) !== JSON.stringify(this.roots)) return false
       if (!raw.scannedAt || Date.now() - raw.scannedAt > SCAN_TTL_MS) return false
 
@@ -574,7 +665,7 @@ class FolderAdapter {
     try {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
-        version: 2,
+        version: 3,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,
@@ -759,7 +850,7 @@ class FolderAdapter {
     if (!file) return null
 
     const resolved = path.resolve(file)
-    const inRoot = this.roots.some(root => resolved === root || resolved.startsWith(root + path.sep))
+    const inRoot = this.roots.some(root => resolved === root.path || resolved.startsWith(root.path + path.sep))
     if (!inRoot) {
       this.log('folder:path-outside-root', { what, id: String(id).slice(0, 12) })
       return null
@@ -768,4 +859,4 @@ class FolderAdapter {
   }
 }
 
-module.exports = { FolderAdapter, SCAN_TTL_MS }
+module.exports = { FolderAdapter, SCAN_TTL_MS, ROOT_TYPES, normaliseRoot }

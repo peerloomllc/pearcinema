@@ -2,7 +2,79 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - DEPLOYED TO THE UMBREL, against the real 3 TB library, and it found four bugs
+## 2026-08-13 (latest) - A FOLDER SAYS WHAT IT HOLDS, and a folder's own NAME counts as saying it
+Tier: T2 (a classification change that reaches every existing install without being asked
+for, plus a latent bug in the item model)
+Context: measured against the real drive on 2026-08-12 and logged as its own TODO item. A
+nested file with no parseable episode code fell through to being a film, so **34 of Tim's
+2,746 television files** - an MST3K box set numbered `K05` - sat in the Films list. No
+filename rule settles that, because `MST3K - K05 - The Gunslinger.avi` genuinely does not
+say which episode it is. The adapter already knew the roots were given separately
+(`--folder .../Movies --folder .../TV Shows`); it just did not know what either one WAS.
+
+**Choice: a root carries a type - `movies`, `shows` or `auto` - and `auto` resolves from
+the root's own folder name.**
+
+- **`shows`**: everything under it is television. A file with no code is an episode of
+  UNKNOWN numbering filed under its show, never a film.
+- **`movies`**: everything under it is a film, with no episode parsing at all. This is the
+  same bug pointing the other way and it was live too: `Shelf/Dune Part 2/Dune - Part 2.mkv`
+  became episode 2 of itself, via the loose `Part N` fallback that exists for shows which
+  never write SxxExx.
+- **`auto`**: nobody said. `TV Shows` and `Movies` are read as what they say; a name that
+  says nothing (`Video`, `Elements (3)`, `Stuff`) falls back to the per-file rules exactly
+  as before.
+
+### Why the name counts, when this repo's instinct is to distrust inference
+
+Because it is not inference. A folder called `TV Shows` is not a guess about its contents,
+it is what the person who made it wrote on the front - and the source DETECTOR has always
+matched on exactly those words to offer a drive in the first place. It was computing the
+answer and throwing it away one line later. The rule now lives in `names.rootTypeFromName`
+and both callers share it, so an offered root and a scanned root cannot disagree.
+
+Two things keep it honest, and neither is optional:
+
+- **It is deliberately narrow.** `Movies|Films|Cinema` and `TV Shows|Series|Television`,
+  nothing else. A folder called `Video` holding somebody's phone recordings is not a film
+  library - the same restraint the detector already exercises for the same reason.
+- **The resolution is SHOWN, not silent.** The dashboard sends what was declared AND what
+  it resolved to, and the control reads "Work it out (tv shows)". A classification the
+  operator cannot see is one they cannot correct.
+
+The payoff is that this reaches the deployed Umbrel with nothing for anybody to do: its
+roots are `/library/Movies` and `/library/TV Shows`, saved as bare strings from the
+environment, and they type themselves on the next scan.
+
+### An unnumbered season is named after its folder
+
+The obvious version of this fix files all 34 files under one anonymous "Season", which is a
+different kind of wrong. `MST3K DVD 18` and `MST3K DVD 19` are two shelves and stay two:
+where the number is unknown, the season is keyed by its folder and titled with it. Numbered
+seasons keep the exact id preimage they always had - a test pins that declaring a root
+remints nothing, because every resume position on every phone is keyed by one.
+
+### The latent bug this uncovered: `Number(null)` is 0, and 0 is Specials
+
+`items.episode()` read a season number with `Number.isInteger(Number(v))`. Nothing had ever
+passed it a null, so nothing had noticed that null coerces to zero - and zero is not "no
+season", it is **Specials**. The first unnumbered episode in the world went straight into
+the Christmas specials of a show that may not have any. Fixed at the model with an explicit
+null check, which also covers a Jellyfin row whose `ParentIndexNumber` is missing.
+
+This is the second time a real library has found a bug that every synthetic case passed
+over. It is worth stating the pattern plainly: **the numbers 0 and null are different
+answers and JavaScript is happy to conflate them**, so any check that means "was a number
+given" has to test for the absence before it converts.
+
+### Cost, accepted
+
+The scan cache goes to version 3, so the first start after this walks the whole drive
+again - four minutes on the real 3 TB library. Serving the version 2 rows would show an
+operator who had just typed their folders precisely nothing changing, which is worse than
+the wait.
+
+## 2026-08-13 - DEPLOYED TO THE UMBREL, against the real 3 TB library, and it found four bugs
 Tier: T2 (measurements and a port reallocation that affect every install)
 Context: Tim's call, and it was right. "There are only MP4 files on this host. If there
 are HEVC files they are on the Elements drive attached to the Umbrel. If you're basing

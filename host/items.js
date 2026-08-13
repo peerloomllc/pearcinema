@@ -72,6 +72,17 @@ function year (v) {
   return n
 }
 
+// A whole number, or null. NOT `Number.isInteger(Number(v))` on its own, and the
+// difference is not academic: `Number(null)` is 0, and 0 is a real season - it is
+// SPECIALS. So an episode whose season is genuinely unknown was being filed under
+// the Christmas specials of a show it may not have. Found 2026-08-13, the moment a
+// shows root started producing episodes with no numbering at all.
+function intOrNull (v) {
+  if (v === null || v === undefined || v === '') return null
+  const n = Number(v)
+  return Number.isInteger(n) ? n : null
+}
+
 function count (v) {
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
@@ -191,7 +202,7 @@ function series (row = {}) {
 }
 
 function season (row = {}) {
-  const number = Number.isInteger(Number(row.number)) ? Number(row.number) : null
+  const number = intOrNull(row.number)
   return {
     type: 'season',
     id: String(row.id || ''),
@@ -208,8 +219,8 @@ function season (row = {}) {
 }
 
 function episode (row = {}) {
-  const seasonNumber = Number.isInteger(Number(row.seasonNumber)) ? Number(row.seasonNumber) : null
-  const episodeNumber = Number.isInteger(Number(row.episodeNumber)) ? Number(row.episodeNumber) : null
+  const seasonNumber = intOrNull(row.seasonNumber)
+  const episodeNumber = intOrNull(row.episodeNumber)
   return {
     type: 'episode',
     id: String(row.id || ''),
@@ -218,6 +229,12 @@ function episode (row = {}) {
     seriesTitle: clean(row.seriesTitle) || null,
     seasonNumber,
     episodeNumber,
+    // WHAT THE SEASON IS CALLED WHEN IT HAS NO NUMBER, carried on the episode
+    // because `buildTree` mints season rows from episodes and has no other way to
+    // learn it. A box set filed as `MST3K DVD 18` / `MST3K DVD 19` would otherwise
+    // become several seasons all labelled "Season", which is worse than the
+    // misfiling it replaced. Null on anything numbered, where the number names it.
+    seasonTitle: clean(row.seasonTitle, 120) || null,
     title: clean(row.title) || 'Untitled',
     year: year(row.year),
     runtime: runtime(row.runtime),
@@ -346,7 +363,11 @@ function buildTree (episodes) {
         id: e.seasonId,
         seriesId: e.seriesId,
         seriesTitle: e.seriesTitle,
-        number: e.seasonNumber
+        number: e.seasonNumber,
+        // Only ever used where there is no number - `season()` prefers an explicit
+        // title, so passing one on a numbered season would silently outrank
+        // "Season 3". Adapters leave it null unless the number is unknown.
+        title: e.seasonNumber === null ? e.seasonTitle : null
       }))
     }
     if (!episodesBySeason.has(e.seasonId)) episodesBySeason.set(e.seasonId, [])

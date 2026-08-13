@@ -19,6 +19,23 @@ import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
 import { notify, askConfirm } from './ui'
 
+// WHAT A FOLDER HOLDS, in the words somebody would use about their own shelves.
+//
+// It is not a tidiness setting. A file in a TV folder whose name carries no S01E01 -
+// a box set numbered `K05`, a disc rip, anything hand-named - has nothing in it for a
+// filename rule to read, so before this it landed in the Films list. Saying what the
+// folder holds is the only thing that settles it, and on the real library it was 34
+// television files sitting among the films.
+const TYPE_LABEL = { auto: 'Work it out', movies: 'Films', shows: 'TV shows' }
+const TYPE_ORDER = ['auto', 'movies', 'shows']
+
+// A root as the panel holds it. The host sends `{ path, type, holds }`; older saved
+// configs are bare path strings, and a fake state in a test may be either.
+const asRoot = (r) => (typeof r === 'string' ? { path: r, type: 'auto' } : { ...r })
+// What the operator PICKED, without the host's resolution of it - the pair that gets
+// saved, and the pair the dirty check compares.
+const picked = (r) => ({ path: r.path, type: r.type || 'auto' })
+
 function FolderPicker ({ onPick, onClose }) {
   const [at, setAt] = useState('/')
   const [data, setData] = useState(null)
@@ -114,7 +131,12 @@ function Detected ({ onFolders, onServer }) {
           <span>🎬</span>
           <div class='who'>
             <b>{f.label}</b>
-            <div class='mono'>{f.roots.join('  ·  ')}</div>
+            {/* The detector matched these folders BY NAME, so it already knows which
+                is films and which is television. Showing that here is what makes
+                "Use these" a one-click typed library rather than a path list. */}
+            {f.roots.map(r => (
+              <div class='mono' key={r.path}>{r.path} <span class='chip'>{TYPE_LABEL[r.type] || TYPE_LABEL.auto}</span></div>
+            ))}
           </div>
           <button class='small' onClick={() => onFolders(f.roots)}>Use these</button>
         </div>
@@ -139,7 +161,7 @@ function Detected ({ onFolders, onServer }) {
 export default function SourcePanel ({ state, reload, embedded = false }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
-  const [roots, setRoots] = useState(current.roots?.length ? current.roots : [])
+  const [roots, setRoots] = useState((current.roots || []).map(asRoot))
   const [url, setUrl] = useState(current.url || '')
   const [user, setUser] = useState(current.username || '')
   const [pass, setPass] = useState('')
@@ -147,7 +169,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
   const [busy, setBusy] = useState('')
 
   const cfg = () => kind === 'folder'
-    ? { kind: 'folder', roots }
+    ? { kind: 'folder', roots: roots.map(picked) }
     : { kind: 'jellyfin', url: url.trim(), username: user.trim(), password: pass }
 
   const describe = (r) => {
@@ -194,11 +216,25 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       confirmLabel: 'Remove',
       danger: true
     })) return
-    setRoots(roots.filter(x => x !== r))
+    setRoots(roots.filter(x => x.path !== r.path))
   }
 
+  const setRootType = (r, type) => setRoots(roots.map(x => (x.path === r.path ? { path: x.path, type } : x)))
+
+  const addRoots = (list) => {
+    const next = [...roots]
+    for (const r of list.map(asRoot)) {
+      // A folder already on the list keeps whatever the operator set it to. Re-adding
+      // it must not quietly overwrite a type they chose by hand.
+      if (!next.some(x => x.path === r.path)) next.push(r)
+    }
+    setRoots(next)
+  }
+
+  // Compared on what was PICKED. The host adds its own resolution of an `auto` root,
+  // and treating that as a change would leave Save lit up on a page nobody touched.
   const dirty = kind !== current.kind ||
-    (kind === 'folder' && JSON.stringify(roots) !== JSON.stringify(current.roots || [])) ||
+    (kind === 'folder' && JSON.stringify(roots.map(picked)) !== JSON.stringify((current.roots || []).map(asRoot).map(picked))) ||
     (kind === 'jellyfin' && (url.trim() !== (current.url || '') || user.trim() !== (current.username || '') || pass))
 
   const Body = (
@@ -206,7 +242,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       <Detected
         onFolders={(rs) => {
           setKind('folder')
-          setRoots([...new Set([...roots, ...rs])])
+          addRoots(rs)
         }}
         onServer={(sv) => {
           setKind('jellyfin')
@@ -223,9 +259,23 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
         <>
           <div class='roots'>
             {roots.map(r => (
-              <div class='root' key={r}>
-                <span>{r}</span>
-                <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r}>✕</button>
+              <div class='root' key={r.path}>
+                <span>{r.path}</span>
+                <select
+                  value={r.type || 'auto'}
+                  aria-label={'What is in ' + r.path}
+                  onChange={e => setRootType(r, e.currentTarget.value)}
+                >
+                  {TYPE_ORDER.map(t => (
+                    // "Work it out" says what it worked OUT, when the folder's own
+                    // name settled it. Silently reading `TV Shows` as television and
+                    // showing nothing would be a decision the operator cannot see.
+                    <option value={t} key={t}>
+                      {t === 'auto' && r.holds ? `${TYPE_LABEL.auto} (${TYPE_LABEL[r.holds].toLowerCase()})` : TYPE_LABEL[t]}
+                    </option>
+                  ))}
+                </select>
+                <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}>✕</button>
               </div>
             ))}
             {!roots.length && <p class='hint'>No folders yet. Add the one your films are in.</p>}
@@ -235,6 +285,16 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
             Add films and TV as separate folders if they live apart - that is the normal
             shape of a collection, and each one is scanned on its own so an unplugged
             drive does not take the rest down.
+          </p>
+          {/* SAYING WHAT A FOLDER HOLDS IS NOT TIDINESS. Some files are named in a way
+              nothing can read - a box set numbered K05, a disc rip - and without this
+              they end up in the wrong list. On the real library that was 34 television
+              files sitting among the films. */}
+          <p class='hint'>
+            Say what each folder holds and nothing has to be guessed from the file names.
+            In a TV folder, an episode whose name does not say which one it is still goes
+            under its show instead of turning up as a film. Leave it on "work it out" and
+            a folder called Movies or TV Shows is taken at its word.
           </p>
         </>
       )}
@@ -278,7 +338,10 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
               <button class='iconbtn' onClick={() => setPicking(false)} aria-label='Close'>✕</button>
             </div>
             <FolderPicker
-              onPick={(p) => setRoots(roots.includes(p) ? roots : [...roots, p])}
+              // A folder picked by hand starts at "work it out", where its own name
+              // may still settle it. addRoots leaves an already-listed folder alone,
+              // so re-picking one cannot wipe a type the operator chose.
+              onPick={(p) => addRoots([p])}
               onClose={() => setPicking(false)}
             />
           </div>

@@ -50,7 +50,20 @@ const STATE = {
   hostKey: 'hostkey',
   stats: { movies: 2, series: 1, seasons: 1, episodes: 1, source: 'folder' },
   sourceError: null,
-  source: { kind: 'folder', from: 'dashboard', roots: ['/library/Movies'], url: null, username: null },
+  // The host sends its ADAPTER's normalised roots: what the operator declared, and
+  // what that resolved to. A bare string is the shape every host in the field saved,
+  // and the panel still has to render it.
+  source: {
+    kind: 'folder',
+    from: 'dashboard',
+    roots: [
+      { path: '/library/Movies', type: 'movies', holds: 'movies' },
+      { path: '/library/TV Shows', type: 'auto', holds: 'shows' },
+      '/library/Elements'
+    ],
+    url: null,
+    username: null
+  },
   devices: [{ deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true, personId: null, claimedUser: 'Tim', lastSeen: Date.now(), scope: 'full' }],
   persons: [],
   pairing: { open: false },
@@ -62,7 +75,9 @@ const ROUTES = {
   '/api/state': STATE,
   '/api/library/list?type=movies&limit=100': { items: [FILM, MKV], total: 2, cursor: null },
   '/api/library/list?type=series&limit=100': { items: [], total: 0, cursor: null },
-  '/api/subtitles': { items: [] }
+  '/api/subtitles': { items: [] },
+  '/api/source/detect': { servers: [], folders: [] },
+  '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
 }
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
@@ -186,4 +201,56 @@ test('EVERY FILM GETS THE SAME CONTROLS, whether it is repackaged or not', async
   const v = doc.querySelector('video')
   assert.ok(v)
   assert.equal(v.hasAttribute('controls'), false, 'the native controls are gone, so there is only ever one bar')
+})
+
+test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read as', async (t) => {
+  // The setting exists because some filenames say nothing at all - a box set numbered
+  // K05 - and on the real library 34 television files were landing in the Films list
+  // for want of anybody saying which folder was which. A control nobody can find does
+  // not fix that, so this asserts it is on screen.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.match(text(), /\/library\/Movies/)
+
+  const selects = [...doc.querySelectorAll('.roots .root select')]
+  assert.equal(selects.length, 3, 'one per folder, including the bare string')
+  assert.deepEqual(selects.map(s => s.value), ['movies', 'auto', 'auto'])
+
+  // The resolution is SHOWN rather than silent: a folder called `TV Shows` left on
+  // "work it out" says out loud that it was read as television, so nobody has to
+  // reverse-engineer why their library sorted itself out.
+  assert.match(selects[1].textContent, /Work it out \(tv shows\)/)
+  // And a folder whose name says nothing claims nothing.
+  assert.doesNotMatch(selects[2].textContent, /Work it out \(/)
+})
+
+test('a folder picked by hand arrives with a type control of its own', async (t) => {
+  // The picker used to hand back a bare path, which is the shape the list held
+  // before folders had types. Anything that adds a root has to add a typed one or
+  // the row it produces has no control on it at all.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Use /library'))
+  assert.ok(use, 'the picker opened on what the host can see')
+  use.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const rows = [...doc.querySelectorAll('.roots .root')]
+  assert.equal(rows.length, 4, 'the three it had plus the one just picked')
+  assert.equal(rows.every(r => r.querySelector('select')), true, 'every folder can say what it holds')
+  assert.equal(rows[3].querySelector('select').value, 'auto')
 })

@@ -233,14 +233,18 @@ function parseMovie (filename) {
 // episode of itself.
 const LOOSE_EPISODE = /\b(?:chapter|part|episode|ep|pt)[\s._-]*(\d{1,3})\b/i
 
-function parseEpisode (filename, { seriesFolder = null, seasonFolder = null } = {}) {
+// `television` is the second way a caller can say "I already know this is a show":
+// the file sits under a root the operator DECLARED as television. Same guard, said
+// out loud rather than inferred from a folder being present, which matters for a
+// file sitting directly in a shows root with no series folder above it.
+function parseEpisode (filename, { seriesFolder = null, seasonFolder = null, television = false } = {}) {
   const base = String(filename).replace(/\.[a-z0-9]{1,5}$/i, '')
   const normalised = toWords(base)
 
   let code = parseEpisodeCode(normalised)
   let loose = false
 
-  if (!code && seriesFolder) {
+  if (!code && (seriesFolder || television)) {
     const m = normalised.match(LOOSE_EPISODE)
     if (m) {
       const folderSeason = seasonFolder !== null ? parseSeasonFolder(seasonFolder) : null
@@ -307,6 +311,29 @@ function parseShowFolder (name) {
   return { title: tidy(s), year }
 }
 
+// --- what a root holds -------------------------------------------------------
+
+// The names that mean "films" and "television" across every scanner people already
+// use. A root called `TV Shows` is not a guess about its contents - it is what the
+// person who made it wrote on the front, and it is the same evidence the source
+// detector uses to offer a drive in the first place.
+//
+// DELIBERATELY NARROW. A folder called `Video` holding somebody's phone recordings
+// is not a film library, and a folder called `Media` says nothing at all. Anything
+// not on these two lists resolves to "work it out", which is the behaviour that
+// existed before roots had a type.
+const ROOT_FILM_NAMES = /^(movies|movie|films|film|cinema)$/i
+const ROOT_SHOW_NAMES = /^(tv ?shows?|tv|series|television|shows|show)$/i
+
+// 'movies' | 'shows' | null, from a folder's own name. `null` is a real answer and
+// the common one - it means nobody said, so the filename rules decide per file.
+function rootTypeFromName (name) {
+  const base = String(name || '').split(/[/\\]/).filter(Boolean).pop() || ''
+  if (ROOT_FILM_NAMES.test(base)) return 'movies'
+  if (ROOT_SHOW_NAMES.test(base)) return 'shows'
+  return null
+}
+
 // --- artwork and subtitles --------------------------------------------------
 
 // Poster filenames, in the order they should win. `poster.jpg` and `folder.jpg` are
@@ -355,6 +382,9 @@ module.exports = {
   parseEpisodeCode,
   parseSeasonFolder,
   parseShowFolder,
+  rootTypeFromName,
+  ROOT_FILM_NAMES,
+  ROOT_SHOW_NAMES,
   isArtworkFor,
   parseSubtitleName,
   isTag,
