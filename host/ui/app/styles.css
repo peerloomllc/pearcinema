@@ -429,3 +429,33 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   font-size: .68rem; font-weight: 700; letter-spacing: .02em;
   background: var(--bg-2); color: var(--fg); border: 1px solid var(--line);
 }
+
+/* Mark watched, on the thing itself. The automatic rule will be wrong sometimes - a
+ * film watched on another device, an episode somebody else put on - so correcting it
+ * is one click where the mistake is, not a trip into the player.
+ *
+ * Dim until hovered or set, so a grid of two hundred posters is not two hundred
+ * ticks competing with the artwork. */
+.poster .mark {
+  position: absolute; top: .4rem; right: .4rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px; font-size: .8rem; font-weight: 700;
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.55);
+  border: 1px solid transparent; opacity: 0; transition: opacity .12s ease;
+}
+.poster:hover .mark, .poster:focus-within .mark { opacity: 1 }
+.poster .mark.on { opacity: 1; background: var(--accent); color: #fff }
+
+.eprow .mark {
+  margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px;
+  font-size: .75rem; background: transparent; color: var(--muted);
+  border: 1px solid var(--line);
+}
+.eprow .mark.on { background: var(--accent); color: #fff; border-color: transparent }
+
+/* The tile is a div now - a button inside a button is invalid, and browsers disagree
+ * about which one a click reaches. It still has to look and focus like a control. */
+.poster { cursor: pointer }
+.poster:focus-visible, .eprow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.eprow { cursor: pointer }

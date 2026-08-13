@@ -2,7 +2,64 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - UP NEXT: finish an episode and the next one is waiting
+## 2026-08-13 (latest) - A SEASON GETS A BADGE TOO, and marking by hand lives on the thing itself
+Tier: T1 (an existing rollup applied to a second level, and an existing write reached from
+more places)
+Context: Tim, on reading the up-next work - "what about an indicator on the season tile to
+say if all have been watched and also to show one that is in progress? Additionally, would
+be nice to have the capability to manually mark something as watched/unwatched, like in
+Plex."
+
+Both were real gaps. The rollup existed and was only ever applied to a SHOW, and marking by
+hand existed but only inside the player, which is the one place somebody is not when they
+realise the badge is wrong.
+
+**A season now answers the same question a show does** - a count of what is left, or a tick
+when there is nothing left to say. It is asked for while a show is open, the same shape and
+for the same reason as the show rollup: computing it walks episodes, which is free on a
+folder source and one HTTP call per season on a Jellyfin one.
+
+**Nothing is reported before anybody has watched anything.** A brand-new library would
+otherwise put "24 left" on every season the day it is installed, which is noise rather than
+information.
+
+### Marking a CONTAINER marks its episodes, because that is all it could mean
+
+A show is not watched in its own right - it is watched when its episodes are. A flag on the
+container would be a second source of truth that disagrees with the count on its own tile
+the first time an episode lands in a folder. So marking a season or a show writes every
+episode underneath, and unmarking clears them all.
+
+### The tile stopped being a `<button>`, and that is not cosmetic
+
+A button inside a button is invalid HTML and browsers do not agree about which one a click
+reaches. The tick is now a real control sitting on the poster, so the poster became a `div`
+with the keyboard behaviour a button had. The alternative - a context menu - is a second
+interaction to discover, for something that should cost one click.
+
+### Verified on the real library
+
+```
+Season 1 (24 episodes)  mark watched -> 24 items, complete
+Season 2                             -> untouched, 25 left
+The X-Files                          -> 24 of 201 watched
+up next                              -> "little green men", season 2 episode 1
+unmark the season                    -> 24 unwatched again
+```
+
+### And the test suite was hanging, which was not a leak
+
+`npm test` stalled about one run in three, and every test that ran passed - the last files
+scheduled simply never reported. **`node --test` defaults to one worker per core** (12 on
+this machine) and several files spawn real ffmpeg processes and real 3-node HyperDHT
+testnets. Twelve at once is several times oversubscribed, and the DHT ones are timing
+sensitive enough to stop making progress altogether.
+
+Capped at four workers: **14 seconds against a run that looked hung.** Worth recording
+because it presented as a hang rather than a failure, and the reflex there is to raise a
+timeout rather than to look.
+
+## 2026-08-13 - UP NEXT: finish an episode and the next one is waiting
 Tier: T1 (a lookup over data that already exists, on an existing route)
 Context: open question 4 of the watch-state proposal, which recommended leaving it out of
 that cut - "it needs the next-episode lookup rather than the resume store, and folding it in

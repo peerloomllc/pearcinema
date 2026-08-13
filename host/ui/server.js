@@ -583,9 +583,52 @@ async function startDashboard ({
         if (!who.owner) return json(res, 200, { ok: false, needsPerson: true })
 
         const yes = on !== false
-        await host.userState.setWatched(who.owner, String(itemId), yes, { auto: false })
-        if (yes) await host.userState.setResume(who.owner, String(itemId), 0, null)
-        return json(res, 200, { ok: true, watched: yes })
+        const id = String(itemId)
+
+        // MARKING A SHOW OR A SEASON MARKS ITS EPISODES, because that is the only
+        // thing it could honestly mean. A show is not watched in its own right - it
+        // is watched when its episodes are (DECISIONS: a rollup is derived, never
+        // stored), so a flag on the container would be a second source of truth that
+        // disagrees with the count on its own tile the moment an episode is added.
+        const item = await host.adapter.get({ id })
+        const container = item && (item.type === 'series' || item.type === 'season')
+
+        const targets = container
+          ? ((await host.adapter.list({
+              type: 'episodes',
+              seriesId: item.type === 'series' ? item.id : null,
+              seasonId: item.type === 'season' ? item.id : null,
+              limit: 500
+            })).items || []).map(e => e.id)
+          : [id]
+
+        for (const t of targets) {
+          await host.userState.setWatched(who.owner, t, yes, { auto: false })
+          if (yes) await host.userState.setResume(who.owner, t, 0, null)
+        }
+        return json(res, 200, { ok: true, watched: yes, items: targets.length })
+      }
+
+      // WHAT IS LEFT OF EACH SEASON of one show. Asked for while a show is open, the
+      // same shape and for the same reason as /api/watch/shows: computing it walks
+      // episodes, and doing that for every season in a library to draw one page would
+      // be one HTTP call per season on a Jellyfin source.
+      if (req.method === 'GET' && url.pathname === '/api/watch/seasons') {
+        const seriesId = url.searchParams.get('seriesId')
+        if (!seriesId) return json(res, 400, { error: 'seriesId required' })
+
+        const who = await watcher(req)
+        if (!who.owner) return json(res, 200, { seasons: {} })
+
+        const watched = await host.userState.watchedSet(who.owner)
+        const seasons = (await host.adapter.list({ type: 'seasons', seriesId, limit: 200 })).items || []
+
+        const out = {}
+        for (const s of seasons) {
+          const eps = (await host.adapter.list({ type: 'episodes', seasonId: s.id, limit: 500 })).items || []
+          out[s.id] = watch.rollup(eps, watched)
+        }
+        return json(res, 200, { seasons: out })
       }
 
       // Everything this person has going: the continue-watching shelf and the set of

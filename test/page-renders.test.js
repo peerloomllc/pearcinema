@@ -318,10 +318,13 @@ test('a film you have finished wears a tick, and one you have not does not', asy
   const nosferatu = posters.filter(p => p.textContent.includes('Nosferatu'))
   const metropolis = posters.filter(p => p.textContent.includes('Metropolis'))
 
-  assert.ok(nosferatu.some(p => p.querySelector('.seen')), 'the watched one is ticked')
+  // The tick IS the toggle now: one click on the thing itself corrects it, rather
+  // than a trip into the player. Set means watched.
+  assert.ok(nosferatu.some(p => p.querySelector('.mark.on')), 'the watched one is ticked')
   // Metropolis appears twice - once in the shelf, once in the grid - and neither is
   // ticked, because a half-watched film is not a finished one.
-  assert.equal(metropolis.some(p => p.querySelector('.seen')), false)
+  assert.equal(metropolis.some(p => p.querySelector('.mark.on')), false)
+  assert.ok(metropolis.every(p => p.querySelector('.mark')), 'but both can be marked by hand')
 })
 
 test('WITH ONE PERSON THERE IS NO CHOICE TO MAKE', async (t) => {
@@ -387,4 +390,30 @@ test('the next episode sits on the same shelf, saying it has not been started', 
   const shelf = [...doc.querySelectorAll('.grid')][0].querySelectorAll('.poster')
   assert.match(shelf[0].textContent, /Metropolis/)
   assert.match(shelf[1].textContent, /The Detail/)
+})
+
+test('MARKING A FILM WATCHED IS ONE CLICK ON THE FILM', async (t) => {
+  // The automatic rule will be wrong sometimes - a film watched on another device, an
+  // episode somebody else put on - so the correction lives where the mistake is.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const sent = []
+  const realFetch = win.fetch
+  win.fetch = async (url, opts) => {
+    if (String(url).includes('/api/watch/watched')) {
+      sent.push(JSON.parse(opts.body))
+      return { status: 200, ok: true, json: async () => ({ ok: true }) }
+    }
+    return realFetch(url, opts)
+  }
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.querySelector('.mark').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.deepEqual(sent, [{ itemId: 'film-2', watched: false }], 'a watched film is marked UNwatched')
+  // And the click must not have opened the player underneath it.
+  assert.equal(doc.querySelector('video'), null)
+  assert.equal(doc.querySelector('.refusal'), null)
 })
