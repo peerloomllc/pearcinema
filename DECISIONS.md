@@ -5,42 +5,63 @@ Append-only, newest on top. Per Constitution §4.
 ## 2026-08-12 (latest) - FIRST MEASUREMENT: direct-play-only is well founded, and remux beats transcode
 Tier: T2 (a measurement that shapes build order, not a change of scope)
 Context: v1 ships direct-play only precisely so this could be measured instead of guessed.
-First real run of `--codec-report`, against Tim's Umbrel Jellyfin (10.11.11), 16 films,
-17.3 GB. No TV episodes yet, which is the gap in this measurement.
+Run against Tim's Umbrel Jellyfin (10.11.11): **1 film + 24 episodes, 30.1 GB**, one series
+across four seasons.
 
 ```
-mp4 / h264 / aac    14 (88%)
-mkv / h264 / aac     1 (6%)
-mp4 / vp9  / aac     1 (6%)
+mp4 / h264 / aac    24 (96%)
+mkv / h264 / aac     1 (4%)
 ```
+
+100% H.264, 100% AAC, 100% 1080p.
 
 What it says, taking Android's ExoPlayer and iOS's AVPlayer as the two targets:
 
-- **Android direct-plays 100% of it.** ExoPlayer handles all three combinations,
-  MKV and VP9 included. The proposal's Android-first sequencing is validated by data
-  rather than by convenience.
-- **iOS direct-plays 88%.** The two misses fail for DIFFERENT reasons, and the difference
-  is the whole point:
-  - `mkv / h264 / aac` fails on the **container only**. The streams inside are already
-    what an iPhone wants. That is a REMUX - rewrap, no re-encode - which is cheap enough
-    to run on a Pi-class box and is not what the capacity doc's warnings are about.
-  - `mp4 / vp9 / aac` fails on the **codec**, and needs real transcoding.
+- **Android direct-plays 100% of it.** ExoPlayer handles both combinations, MKV
+  included. The proposal's Android-first sequencing is validated by data rather than by
+  convenience.
+- **iOS direct-plays 96%.** The single miss is `mkv / h264 / aac`, and it fails on the
+  **container only** - the streams inside are already exactly what an iPhone wants.
 
 **Consequence for build order: remux earns its place before transcode**, and by a wide
-margin. One file in sixteen needs an encoder; the other miss needs a container rewrite.
-Building the transcode pipeline first would have been building the expensive thing for
-6% of a library.
+margin. Not one file in this library needs an encoder. The only miss needs a container
+rewrite, which is cheap enough to run on a Pi-class box and is not what the capacity doc's
+warnings are about. Building the transcode pipeline first would have been building the
+expensive thing for zero percent of a real library.
 
-**The negative result matters as much.** There is no H.265 and no TrueHD or DTS anywhere
-in this library - the exact combination the proposal named as the underestimated one
-(`MKV + H.265 + TrueHD does not direct-play on iOS at all`) does not appear once.
+**The negative result matters as much.** No H.265, no TrueHD, no DTS anywhere - the exact
+combination the proposal named as the underestimated one (`MKV + H.265 + TrueHD does not
+direct-play on iOS at all`) does not appear once.
 
-**Do not over-read this.** Sixteen films is a small sample, there are zero TV episodes,
-and this library looks like downloaded content rather than ripped discs. Ripped Blu-rays
-are exactly where H.265, TrueHD, DTS and PGS subtitles live. So this does not retire the
-worry; it says Tim's current library does not exercise it, and that a client built against
-this data will meet the hard cases later rather than never. Re-run when there is TV in
-there and when a disc-ripped collection exists to point at.
+**Do not over-read this.** One series and one film is a small sample, and it is downloaded
+content rather than ripped discs. Tim has confirmed his wider collection also has MKV.
+Ripped Blu-rays are exactly where H.265, TrueHD, DTS and PGS subtitles live, so this does
+not retire the worry - it says his current library does not exercise it, and a client built
+against this data will meet the hard cases later rather than never.
+
+### Two findings that came out of running it, not out of reasoning about it
+
+**The first run reported 16 films and zero episodes, and that was the SERVER, not us.**
+Jellyfin had one library, typed `movies`, holding both the film and the show, so it
+classified every IT Crowd episode as a Movie and PearCinema faithfully repeated it. The
+files were named perfectly (`The IT Crowd/Season 01/The IT Crowd - S01E01 - ....mp4`) -
+Jellyfin simply never looked for a series. Fixed on the server by splitting Movies and
+Shows libraries, after which the tree came back flawless: 1 series, 4 seasons, 6 episodes
+each, correct numbering throughout.
+
+This is the strongest available argument for the folder adapter. A source can be confidently
+wrong about its own library, and there is a whole second question - whether PearCinema
+should ever second-guess a server that calls `S01E01` a film - logged in TODO.md.
+**Recommendation there: no for a server source** (Jellyfin is the authority on its own
+library and disagreeing would give two contradictory UIs on one machine), **yes for the
+folder adapter**, which has no server to defer to.
+
+**Resolution was being named by HEIGHT, and that filed most of cinema as 720p.** The 1080p
+copy of 2001 is 1918x864 - scope ratio, bars cropped rather than encoded - so it read
+"864p". Television is 16:9 and reads identically either way, which is why height looked
+correct right up until the library was films. Now named by width, and the library correctly
+reads 100% 1080p. Fixed in `items.resolutionLabel`, which the codec report defers to so the
+two can never disagree.
 
 ## 2026-08-12 - the operator brings their own metadata API key
 Tier: T2
