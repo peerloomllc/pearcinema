@@ -77,12 +77,20 @@ const ROUTES = {
   '/api/library/list?type=series&limit=100': { items: [], total: 0, cursor: null },
   '/api/subtitles': { items: [] },
   '/api/source/detect': { servers: [], folders: [] },
+  // Where this person got to. Metropolis is half watched, Nosferatu is finished.
+  '/api/watch/state': {
+    watching: { id: 'p1', name: 'Me' },
+    choose: [],
+    watched: ['film-2'],
+    continue: [{ ...FILM, resume: { positionMs: 76_500, playedAt: Date.now() } }]
+  },
+  '/api/watch/shows': { shows: {} },
   '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
 }
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
 // back the document.
-async function open (state = STATE) {
+async function open (state = STATE, extraRoutes = {}) {
   const errors = []
   const vc = new VirtualConsole()
   vc.on('jsdomError', e => errors.push(e))
@@ -97,7 +105,9 @@ async function open (state = STATE) {
   const win = dom.window
   win.fetch = async (url) => {
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
-    const body = key === '/api/state' ? state : (key ? ROUTES[key] : {})
+    const routes = { ...ROUTES, ...extraRoutes }
+    const hit = Object.keys(routes).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
+    const body = hit === '/api/state' ? state : (hit ? routes[hit] : {})
     return { status: 200, ok: true, json: async () => body }
   }
 
@@ -146,10 +156,12 @@ test('clicking a film opens the player, and an MKV lands on the refusal rather t
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const posters = [...doc.querySelectorAll('.poster')]
+  // The LIBRARY grid, not the continue-watching shelf above it - that one holds a
+  // second copy of anything half-watched.
+  const posters = [...doc.querySelectorAll('.grid')].slice(-1)[0].querySelectorAll('.poster')
   assert.equal(posters.length, 2)
 
-  const nosferatu = posters.find(p => p.textContent.includes('Nosferatu'))
+  const nosferatu = [...posters].find(p => p.textContent.includes('Nosferatu'))
   nosferatu.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
 
@@ -268,4 +280,85 @@ test('two folders holding the same file is said out loud, not absorbed', async (
 
   assert.match(text(), /hold the same files/)
   assert.match(text(), /only one copy of each is reachable/)
+})
+
+/* --------------------------------------- where you stopped, on the page -- */
+
+test('CONTINUE WATCHING IS ON SCREEN, with a bar showing how far through', async (t) => {
+  // The row people actually use, so it sits above the library rather than behind a
+  // tab. A shelf that renders empty would be a reproach, so it is only there when it
+  // has something in it - and this state has one thing.
+  const { dom, doc, text } = await open()
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /Continue watching/)
+
+  const bar = doc.querySelector('.resumebar i')
+  assert.ok(bar, 'a poster in the shelf shows how far through it is')
+  // Metropolis is 153 seconds and the position is 76.5 - half way, and the bar is
+  // computed from a runtime in SECONDS against a position in MILLISECONDS.
+  assert.equal(bar.style.width, '50%')
+})
+
+test('a film you have finished wears a tick, and one you have not does not', async (t) => {
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const posters = [...doc.querySelectorAll('.poster')]
+  const nosferatu = posters.filter(p => p.textContent.includes('Nosferatu'))
+  const metropolis = posters.filter(p => p.textContent.includes('Metropolis'))
+
+  assert.ok(nosferatu.some(p => p.querySelector('.seen')), 'the watched one is ticked')
+  // Metropolis appears twice - once in the shelf, once in the grid - and neither is
+  // ticked, because a half-watched film is not a finished one.
+  assert.equal(metropolis.some(p => p.querySelector('.seen')), false)
+})
+
+test('WITH ONE PERSON THERE IS NO CHOICE TO MAKE', async (t) => {
+  // A household of one must never be asked a question with one answer.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+  assert.equal(doc.querySelector('.watchas'), null)
+})
+
+test('a second person on the box brings out the chooser', async (t) => {
+  const { dom, doc, text } = await open(STATE, {
+    '/api/watch/state': {
+      watching: { id: 'p1', name: 'Me' },
+      choose: [{ id: 'p1', name: 'Me' }, { id: 'p2', name: 'Ben' }],
+      watched: [],
+      continue: []
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const sel = doc.querySelector('.watchas select')
+  assert.ok(sel, 'the control appears only once there is somebody else to be')
+  assert.match(text(), /Watching as/)
+  assert.deepEqual([...sel.options].map(o => o.textContent), ['Me', 'Ben'])
+})
+
+test('opening a half-watched film OFFERS to resume rather than jumping', async (t) => {
+  // Somebody who opened a film to watch the beginning again should not have to scrub
+  // backwards out of a jump they never asked for.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  // jsdom decodes nothing, so every file lands on the refusal - and a film that
+  // cannot play is not offered a resume, which is right. Force it open the way a
+  // viewer would when canPlayType is wrong about their browser.
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const offer = doc.querySelector('.resumeoffer')
+  assert.ok(offer, 'the card is there')
+  assert.match(offer.textContent, /You stopped at/)
+  assert.match(offer.textContent, /Resume/)
+  assert.match(offer.textContent, /Start over/)
+  assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
 })

@@ -44,6 +44,7 @@ const {
 const { browse } = require('../browse')
 const { detectSources } = require('../detect')
 const items = require('../items')
+const watch = require('../watch')
 
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
 const LOGIN_PAGE = require('./login')
@@ -161,6 +162,30 @@ function srtToVtt (text) {
   return body.startsWith('WEBVTT') ? body : 'WEBVTT\n\n' + body
 }
 
+// WHO IS WATCHING, in a browser.
+//
+// Every phone arrives with a grant, so the package derives its owner from the
+// Noise-authenticated connection and nothing has to be asked. The dashboard arrives
+// with a password and nothing else, and watch state is per PERSON by design (Tim,
+// 2026-08-13) - so the browser has to say which person it is watching as.
+//
+// THIS IS NOT AUTHENTICATION AND MUST NOT BE DRESSED UP AS IT. Anyone holding the
+// dashboard password can already see the whole library; choosing a person only
+// decides whose history a position is filed under. It selects an EXISTING person and
+// never becomes one, so there is no second identity system here - the `person:` rows
+// the operator already manages are the only ones.
+//
+// The cookie is separate from the session cookie on purpose: logging out must not
+// forget who was watching, and the session cookie is a credential where this is a
+// preference.
+const WATCH_COOKIE = 'pearcinema-person'
+
+function cookieValue (req, name) {
+  const raw = req.headers.cookie || ''
+  const hit = raw.split(';').map(s => s.trim()).find(s => s.startsWith(name + '='))
+  return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null
+}
+
 async function collect (stream, limit = 8 * 1024 * 1024) {
   const chunks = []
   let total = 0
@@ -208,6 +233,34 @@ async function startDashboard ({
   }
 
   let pwSource = passwordSource
+
+  // The person this browser is watching as, as an ownerId the state store accepts.
+  //
+  // LAZY, and that matters: a host nobody has ever watched anything on holds no
+  // person it did not need. The first write creates one, named plainly and
+  // renameable in People like any other, and a single-person household never meets a
+  // choice - which is what Tim asked for (2026-08-13). A second person on the box is
+  // what makes the dashboard's selector worth showing.
+  async function watcher (req, { create = false } = {}) {
+    const persons = (await host.grants.listPersons()).filter(p => !p.revokedAt)
+    const asked = cookieValue(req, WATCH_COOKIE)
+
+    // A cookie naming somebody who has since been deleted must not silently file a
+    // film under a stranger, so it is checked against the live list rather than
+    // trusted.
+    const chosen = asked && persons.find(p => p.id === asked)
+    if (chosen) return { owner: 'p:' + chosen.id, person: chosen, persons }
+
+    if (persons.length === 1) return { owner: 'p:' + persons[0].id, person: persons[0], persons }
+    // Several people and no choice made: do NOT guess. Watch state filed under the
+    // wrong person is worse than none, and the UI asks instead.
+    if (persons.length > 1) return { owner: null, person: null, persons }
+
+    if (!create) return { owner: null, person: null, persons }
+    const made = await host.grants.addPerson('Me')
+    log('dashboard:watcher-created', { person: made.id.slice(0, 8) })
+    return { owner: 'p:' + made.id, person: made, persons: [made] }
+  }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost')
@@ -495,6 +548,114 @@ async function startDashboard ({
         return out.session.stdout.pipe(res)
       }
 
+      // --- where you stopped, and what you have finished ------------------------
+      //
+      // The SAME store the phone writes through `resume.set` on the P2P channel, keyed
+      // by the same ownerId shape. Two implementations of "where did I get to" would be
+      // two answers to it, and the whole point is that a laptop and a phone agree.
+
+      if (req.method === 'POST' && url.pathname === '/api/watch/position') {
+        const { itemId, positionMs, ended } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+
+        const who = await watcher(req, { create: true })
+        if (!who.owner) return json(res, 200, { ok: false, needsPerson: true })
+
+        // The RUNTIME comes from the library, never from the browser - the same rule
+        // the P2P method follows, and for the same reason: a client that names its own
+        // duration can mark anything watched by claiming it is a second long.
+        const item = await host.adapter.get({ id: String(itemId) })
+        if (!item) return json(res, 404, { error: 'no such item' })
+
+        const verdict = watch.decide({ positionMs, runtimeSeconds: item.runtime, ended: !!ended })
+        if (verdict.finished) await host.userState.setWatched(who.owner, String(itemId), true, { auto: true })
+        await host.userState.setResume(who.owner, String(itemId), verdict.positionMs, verdict.durationMs, {
+          playedAt: Date.now()
+        })
+        return json(res, 200, { ok: true, finished: verdict.finished })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/watch/watched') {
+        const { itemId, watched: on } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+
+        const who = await watcher(req, { create: true })
+        if (!who.owner) return json(res, 200, { ok: false, needsPerson: true })
+
+        const yes = on !== false
+        await host.userState.setWatched(who.owner, String(itemId), yes, { auto: false })
+        if (yes) await host.userState.setResume(who.owner, String(itemId), 0, null)
+        return json(res, 200, { ok: true, watched: yes })
+      }
+
+      // Everything this person has going: the continue-watching shelf and the set of
+      // ids that get a tick. ONE call, because the library page needs both to draw a
+      // single screen and two round trips is two chances to render half of it.
+      if (req.method === 'GET' && url.pathname === '/api/watch/state') {
+        const who = await watcher(req)
+        if (!who.owner) {
+          return json(res, 200, {
+            watching: null,
+            // Several people and nobody chosen. The page asks rather than guessing.
+            choose: who.persons.map(p => ({ id: p.id, name: p.name })),
+            watched: [],
+            continue: []
+          })
+        }
+
+        const [watchedIds, rows] = await Promise.all([
+          host.userState.watchedSet(who.owner),
+          host.userState.listResume(who.owner, 20)
+        ])
+
+        // A position whose film has since left the library is dropped rather than
+        // drawn as a card that cannot be opened.
+        const cont = []
+        for (const r of rows) {
+          const item = await host.adapter.get({ id: r.itemId })
+          if (item) cont.push({ ...item, resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
+        }
+
+        return json(res, 200, {
+          watching: { id: who.person.id, name: who.person.name },
+          choose: who.persons.length > 1 ? who.persons.map(p => ({ id: p.id, name: p.name })) : [],
+          watched: [...watchedIds],
+          continue: cont
+        })
+      }
+
+      // HOW MUCH OF EACH SHOW IS LEFT. A separate route from /api/watch/state, and
+      // deliberately: answering it means walking every series' episodes, which the
+      // folder adapter holds in memory and a Jellyfin source does not - it is one
+      // HTTP call per show. So it is asked for only when the shows list is on screen,
+      // rather than folded into the call every library page makes.
+      if (req.method === 'GET' && url.pathname === '/api/watch/shows') {
+        const who = await watcher(req)
+        if (!who.owner) return json(res, 200, { shows: {} })
+
+        const watched = await host.userState.watchedSet(who.owner)
+        const series = (await host.adapter.list({ type: 'series', limit: 500 })).items || []
+
+        const shows = {}
+        for (const s of series) {
+          const eps = (await host.adapter.list({ type: 'episodes', seriesId: s.id, limit: 500 })).items || []
+          shows[s.id] = watch.rollup(eps, watched)
+        }
+        return json(res, 200, { shows })
+      }
+
+      // Switching who is watching. A preference, not a credential - see WATCH_COOKIE.
+      if (req.method === 'POST' && url.pathname === '/api/watch/as') {
+        const { personId } = await readBody(req)
+        const persons = (await host.grants.listPersons()).filter(p => !p.revokedAt)
+        const person = persons.find(p => p.id === String(personId || ''))
+        if (!person) return json(res, 400, { error: 'no such person' })
+
+        res.setHeader('set-cookie',
+          `${WATCH_COOKIE}=${encodeURIComponent(person.id)}; Path=/; SameSite=Strict; Max-Age=31536000`)
+        return json(res, 200, { watching: { id: person.id, name: person.name } })
+      }
+
       // --- the source ----------------------------------------------------------
       if (req.method === 'POST' && url.pathname === '/api/source/test') {
         const cfg = await readBody(req)
@@ -627,6 +788,28 @@ async function startDashboard ({
         const out = await host.setDeviceExpiry(deviceKey, expiresAt ?? null)
         if (!out.grant) return json(res, 404, { error: 'no such device' })
         return json(res, 200, { ok: true, killed: out.killed })
+      }
+
+      // A PERSON WITH NO DEVICE YET, added by the operator.
+      //
+      // Until now a person only came into existence when a paired device claimed a
+      // name, which was fine while people were only ever a way to group devices. It
+      // stops being fine the moment watch state is per person: a household that
+      // watches on one laptop has nobody but the auto-created "Me", so the "watching
+      // as" chooser could never appear and the second person in the house has nowhere
+      // to put their history. A device can be attached to them later, or never.
+      if (req.method === 'POST' && url.pathname === '/api/person') {
+        const { name } = await readBody(req)
+        const clean = String(name || '').trim()
+        if (!clean) return json(res, 400, { error: 'name required' })
+
+        // The same rule confirming a claim follows: two people of one name is a
+        // dashboard nobody can read, and it makes "revoke Sam" ambiguous.
+        const existing = (await host.grants.listPersons())
+          .find(p => !p.revokedAt && p.name.toLowerCase() === clean.toLowerCase())
+        if (existing) return json(res, 400, { error: `there is already somebody called ${existing.name}` })
+
+        return json(res, 200, await host.grants.addPerson(clean))
       }
 
       if (req.method === 'POST' && url.pathname === '/api/person/confirm') {

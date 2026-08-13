@@ -30,7 +30,7 @@ import { api, fmtRuntime, fmtSize, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 
-export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
+export default function Player ({ item, caps, queue = [], onPlay, onClose, watch = null, onWatchChange = () => {} }) {
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
   const [failed, setFailed] = useState(null)
@@ -39,7 +39,15 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
   // from zero on every restart, so the clock the viewer sees is this plus that.
   const [offset, setOffset] = useState(0)
   const [busy, setBusy] = useState(false)
+  // Non-null while the "you got to 42 minutes" card is up. NOTHING JUMPS ON ITS OWN:
+  // somebody who opened a film to watch the beginning again should not have to scrub
+  // backwards out of a resume they never asked for.
+  const [offer, setOffer] = useState(null)
+  const [seen, setSeen] = useState(false)
   const video = useRef(null)
+  // The last position WRITTEN, so the fifteen-second heartbeat can skip a write when
+  // nothing has moved - a paused film should not keep writing the same number.
+  const wrote = useRef(0)
 
   const verdict = verdictFor(item, caps)
   // The browser can see the common case without a round trip: the container is
@@ -70,10 +78,20 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
 
   useEffect(() => {
     setForced(false); setFailed(null); setAt(0); setOffset(0); setSubs([]); setBusy(false)
+    setOffer(null)
+    wrote.current = 0
     let live = true
     api('/api/subtitles?itemId=' + encodeURIComponent(item.id)).then(res => {
       if (live) setSubs(res.items || [])
     })
+
+    // Where this person got to, from the shelf we already have rather than a second
+    // round trip. `watch` is a snapshot from when the library last read it, which is
+    // exactly right: it is what was true when they clicked.
+    const prior = (watch?.continue || []).find(x => x.id === item.id)
+    if (prior?.resume?.positionMs > 0) setOffer(prior.resume.positionMs / 1000)
+    setSeen((watch?.watched || []).includes(item.id))
+
     return () => { live = false }
   }, [item.id])
 
@@ -98,6 +116,39 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
     }
 
     setBusy(true); setOffset(t); setAt(t)
+  }
+
+  // TELL THE HOST WHERE WE ARE. Every fifteen seconds, on pause, and on the way out -
+  // never on `timeupdate`, which fires four times a second and would be 28,800 writes
+  // across a two-hour film.
+  //
+  // The host decides what the number MEANS: whether it counts as started, whether it
+  // counts as finished, and what to do with a position past the end of a file that has
+  // been re-encoded since. None of that is decided here, because the phone will need
+  // the same answers and two copies of the rule is one copy that drifts.
+  const savePosition = async (ended = false) => {
+    const ms = Math.round(at * 1000)
+    if (!ended && Math.abs(ms - wrote.current) < 5000) return
+    wrote.current = ms
+    const res = await api('/api/watch/position', { itemId: item.id, positionMs: ms, ended })
+    if (res?.finished) setSeen(true)
+  }
+
+  useEffect(() => {
+    const t = setInterval(() => { if (!video.current?.paused) savePosition() }, 15000)
+    return () => {
+      clearInterval(t)
+      // The last write, on the way out. `at` is captured by this closure at teardown,
+      // which is the number the viewer actually stopped on.
+      const ms = Math.round(at * 1000)
+      if (ms > 0) api('/api/watch/position', { itemId: item.id, positionMs: ms })
+    }
+  }, [item.id, at])
+
+  const markWatched = async (on) => {
+    setSeen(on)
+    await api('/api/watch/watched', { itemId: item.id, watched: on })
+    onWatchChange()
   }
 
   const idx = queue.findIndex(q => q.id === item.id)
@@ -143,6 +194,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
                 }}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
+                onPause={() => savePosition()}
+                // The element reaching the end is believed whatever the clock says -
+                // a file whose header lies about its duration still finished.
+                onEnded={() => savePosition(true)}
                 onPlaying={() => setBusy(false)}
                 onError={() => {
                   setBusy(false)
@@ -167,6 +222,17 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
         {/* THE SAME CONTROLS FOR EVERY FILM. Whether the host is handing over the
             file or repackaging it as it goes is its business, not the viewer's, and
             two different sets of controls made that difference their problem. */}
+        {/* PICK UP WHERE YOU LEFT OFF, offered rather than done. Somebody who opened a
+            film to watch the start again should not have to scrub backwards out of a
+            jump they never asked for. */}
+        {offer !== null && !blocked && (
+          <div class='resumeoffer'>
+            <span>You stopped at <b>{fmtRuntime(Math.round(offer))}</b>.</span>
+            <button onClick={() => { seekTo(offer); setOffer(null) }}>Resume</button>
+            <button class='ghost' onClick={() => setOffer(null)}>Start over</button>
+          </div>
+        )}
+
         {!blocked && (
           <Controls
             video={video}
@@ -235,6 +301,15 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
             {!blocked && !remuxing && verdict.status === 'unknown' && <span class='chip'>unknown</span>}
           </dd>
         </dl>
+
+        {/* THE AUTOMATIC RULE WILL BE WRONG SOMETIMES - a film watched on another
+            device, an episode somebody else put on - so correcting it is one click
+            rather than a trip to a settings screen. */}
+        <div class='row' style='margin:.6rem 0'>
+          <button class={seen ? '' : 'ghost'} onClick={() => markWatched(!seen)}>
+            {seen ? '✓ Watched' : 'Mark as watched'}
+          </button>
+        </div>
 
         {(playableSubs.length > 0 || unplayableSubs.length > 0) && (
           <>

@@ -69,6 +69,16 @@ class PearCinemaHost {
       protocol: PROTOCOL,
       dataDir: this.dataDir,
       libraryName: this.libraryName,
+      // THE VOCABULARY IS THE APP'S. The store is inherited from a music host, where
+      // a favourite is of a track, an album or an artist; here it is of a film, an
+      // episode, a show or a season. `itemId` rather than `trackId` for the same
+      // reason - and the keys are unaffected either way, because they carry the id
+      // and not its name.
+      state: {
+        kinds: ['movie', 'episode', 'series', 'season'],
+        requestKinds: ['movie', 'series'],
+        idField: 'itemId'
+      },
       dht,
       bootstrap,
       dhtPort,
@@ -80,7 +90,11 @@ class PearCinemaHost {
           getAdapter: () => this.adapter,
           getLibraryName: () => this.libraryName,
           getSourceError: () => this.sourceError,
-          grants: this.host.grants
+          grants: this.host.grants,
+          // The per-person store, built by the package on its own Hyperbee. Safe to
+          // read here for the same reason `grants` is: `media` is a FUNCTION the
+          // package calls once the host exists, not an object built alongside it.
+          state: this.host.userState
         }),
         mutating: MUTATING,
         // media.stream stays in the package - gating a byte stream on a live grant
@@ -211,6 +225,10 @@ class PearCinemaHost {
   get publicKey () { return this.host.publicKey }
   get libraryId () { return this.host.libraryId }
   get grants () { return this.host.grants }
+  // The per-person store, on its own Hyperbee inside the package. The dashboard
+  // reaches it through here for the same reason the method table does: one store, so
+  // a browser and a phone can never disagree about where somebody got to.
+  get userState () { return this.host.userState }
   get pairing () { return this.host.pairing }
   // The open window itself, not just whether one is open - the dashboard draws its
   // link, its kind and its remaining time.

@@ -2,7 +2,100 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - THE SUBTITLES INSIDE THE FILE, and the two halves of a library fail in opposite ways
+## 2026-08-13 (latest) - CONTINUE WATCHING, and a watched badge, per person
+Tier: T2 (new Hyperbee keys, new methods, and an identity the browser did not have)
+Context: approved as `proposals/2026-08-13-watch-state.md`, requested by Tim - watched
+indicators like Plex keeps, **per user rather than per device**, the way PearTune already
+holds favourites and playlists.
+
+The store came across whole from PearTune (`@peerloom/host` phase 3). What was decided here
+is the part that is about video rather than about storage.
+
+### Watched is a FLAG at 95%, not a play count and not 100%
+
+PearTune increments a count when a track STARTS. A film that starts is not a film that has
+been watched, and a badge is only worth having if it is trustworthy - the whole point is to
+answer "have I seen this" without thinking about it. So it is a flag, and it is set at 95%
+of the runtime or when the player says `ended`.
+
+Ninety-five rather than a hundred because **nobody watches the credits**. A film that stops
+at 97% and never marks itself is exactly the small lie that makes people stop trusting the
+tick.
+
+The same threshold decides the other half: past it there is nothing to resume, so the
+position is dropped. A finished film sitting at the top of continue-watching wearing a
+watched badge is the state this avoids, and it falls out of the store's inherited
+delete-at-zero rule rather than needing a rule of its own.
+
+**And it can be taken back by hand.** "No, I have not seen this" is the affordance everybody
+reaches for when a housemate watched an episode, and a count cannot honestly be
+un-incremented. `auto` records who decided, so a later change to where the end is cannot
+silently overrule somebody's own mark.
+
+### The first minute is not watching it
+
+Below 60 seconds nothing is remembered. A continue-watching row full of things nobody
+actually began is a row people stop reading.
+
+### A series and a season are DERIVED, never stored
+
+A show's badge is a count of what is LEFT - "3 left" tells somebody to open it, a tick does
+not. Storing a rollup would mean two sources of truth for the same question and a
+reconciliation job the first time an episode lands in a folder.
+
+It is answered by its own route rather than folded into the call every library page makes,
+because computing it walks every series' episodes: free on a folder library, one HTTP call
+per show on a Jellyfin one. So it is asked for only while the shows list is on screen.
+
+### THE BROWSER NOW WATCHES AS A PERSON, and that revisits an earlier decision
+
+DECISIONS 2026-08-13 settled deliberately that the web interface is the operator's dashboard
+with playback added, **not a second client** - no accounts, no per-user state. Per-person
+watch state is the first thing that needed that revisited rather than merely extended.
+
+**Choice: the dashboard watches as one of the `person:` rows the operator already manages.**
+Auto-created on first use and named "Me", so a household of one is never asked a question
+with one answer; a "Watching as" control appears only once a second person exists (Tim's
+call). Several people and no choice made means it ASKS - filing a film under the wrong
+person is worse than filing it under nobody.
+
+**It is not authentication and must not be dressed up as one.** Anybody with the dashboard
+password already sees the whole library; choosing a person only decides whose history a
+position lands in. The cookie selects an existing person and never becomes one, so there is
+no second identity system - and it is separate from the session cookie, because logging out
+should not forget who was watching.
+
+**The rejected alternative** was a per-browser cookie identity, which is cheap and is exactly
+the per-device state the request asked not to have: a laptop and a phone belonging to one
+person would disagree about a film they were watching together.
+
+**A consequence that had to be built:** people only existed once a paired device claimed a
+name. That is fine while a person is a way to group devices and wrong the moment watch state
+is per person - a household watching on one laptop could never make a second person, so the
+chooser could never appear. The operator can now add one directly.
+
+### Verified against the real library
+
+Not on this laptop. On the Umbrel, through the dashboard, on a real 48-minute episode:
+
+```
+8 minutes in     -> continue watching shows it at 480000 ms
+97% of runtime   -> watched, and the shelf drops it
+a second episode -> the shelf shows that one instead
+The X-Files      -> 201 episodes, 1 watched, 200 left
+two people       -> Me sees 1 watched, Ben sees 0, same browser same password
+```
+
+The cache was **not** touched: watch state lives in the host's own Hyperbee beside the
+grants, so this forced no rescan of the 3 TB drive - unlike the three cache versions burned
+earlier the same day.
+
+**What is NOT proven yet, and cannot be:** that one PERSON's two DEVICES share a position.
+Two people on one browser proves the rows are independent; picking a phone up where a laptop
+stopped needs a phone. The design makes it free - both devices resolve to the same
+`ownerId` against the same store - but free is not the same as demonstrated.
+
+## 2026-08-13 - THE SUBTITLES INSIDE THE FILE, and the two halves of a library fail in opposite ways
 Tier: T2 (a new ffmpeg path on the host, and a third cache version in one day)
 Context: TODO carried this as "expect the PGS refusal to be the COMMON case on films - make
 sure the UI reaches for the external `.srt` files FIRST". Half of that was already shipped:

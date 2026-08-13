@@ -139,11 +139,32 @@ export default function People ({ state, reload }) {
     reload()
   }
 
+  // SOMEBODY WHO DOES NOT HAVE A DEVICE YET. A person used to appear only when a
+  // paired phone claimed a name, which was fine while people were just a way to group
+  // devices. It stops being fine now that what you have watched is kept per person: a
+  // household that watches on one laptop otherwise has nobody but "Me", and the second
+  // person in the house has nowhere to put their history.
+  const addPerson = async () => {
+    const name = window.prompt('What is their name?')
+    if (!name) return
+    const res = await api('/api/person', { name })
+    if (res.error) return notify('Not added', res.error)
+    reload()
+  }
+
   return (
     <>
       <div class='card'>
-        <h3>People</h3>
-        {!persons.length && <p class='hint'>Nobody yet. A person appears once a paired device says who it belongs to and you confirm it.</p>}
+        <div class='row' style='justify-content:space-between;align-items:center'>
+          <h3 style='margin:0'>People</h3>
+          <button class='small ghost' onClick={addPerson}>Add a person</button>
+        </div>
+        {!persons.length && (
+          <p class='hint'>
+            Nobody yet. A person appears when a paired device says who it belongs to and you
+            confirm it - or add one here, so what they watch is kept separately from what you do.
+          </p>
+        )}
         {persons.map(p => (
           <div class='dev' key={p.id}>
             <div class='who'>

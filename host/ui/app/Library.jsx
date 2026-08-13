@@ -13,7 +13,7 @@
 // from a real engine - this browser, asked about these files - and on a normal
 // collection it says something uncomfortable and true.
 
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useMemo } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 
@@ -42,9 +42,29 @@ function flagFor (v) {
   return null
 }
 
-function Poster ({ item, caps, onOpen, label = null }) {
+// HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
+// last decade has drawn it. A number would be exact and useless; the bar is read
+// without being looked at.
+function ResumeBar ({ positionMs, runtime }) {
+  // Runtimes are SECONDS here and positions are MILLISECONDS - see host/watch.js,
+  // where mixing the two would mean nothing is ever finished.
+  const total = Number(runtime) > 0 ? Number(runtime) * 1000 : 0
+  if (!total || !(positionMs > 0)) return null
+  const pct = Math.max(2, Math.min(100, Math.round((positionMs / total) * 100)))
+  return <span class='resumebar'><i style={`width:${pct}%`} /></span>
+}
+
+function Poster ({ item, caps, onOpen, label = null, watch = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
+
+  // A SHOW SAYS WHAT IS LEFT, not that it is finished. "3 left" tells somebody to
+  // open it; a tick does not. Computed by the host from the episodes it holds, never
+  // stored - see host/watch.js.
+  const left = item.type === 'series' ? (watch?.unwatched ?? null) : null
+  const seen = item.type !== 'series' && watch?.watched
+  const resume = item.type !== 'series' ? watch?.resume : null
+
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
     // An episode in a grid needs its NUMBER above all - a wall of thumbnails with
@@ -55,9 +75,60 @@ function Poster ({ item, caps, onOpen, label = null }) {
     <button class='poster' onClick={() => onOpen(item)}>
       <Art item={item} />
       {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
+      {seen && <span class='seen' title='You have watched this'>✓</span>}
+      {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
+      <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </button>
+  )
+}
+
+// WHO THIS BROWSER IS WATCHING AS.
+//
+// Only ever shown once a SECOND person exists on the box (Tim, 2026-08-13): a
+// household of one should never be asked a question with one answer. It is not a
+// login and must not look like one - anybody with the dashboard password already
+// sees the whole library, and this only decides whose history a position lands in.
+function WatchingAs ({ watch, onChange }) {
+  if (!watch?.choose?.length) return null
+  return (
+    <div class='watchas'>
+      <span class='hint'>Watching as</span>
+      <select
+        value={watch.watching?.id || ''}
+        aria-label='Who is watching'
+        onChange={async e => { await api('/api/watch/as', { personId: e.currentTarget.value }); onChange() }}
+      >
+        {!watch.watching && <option value=''>Choose…</option>}
+        {watch.choose.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    </div>
+  )
+}
+
+// PICK UP WHERE YOU LEFT OFF. The row people actually use, so it sits above the
+// library rather than inside a tab - and it is only there when it has something in
+// it, because an empty shelf labelled "continue watching" is a reproach.
+function ContinueRow ({ watch, caps, onOpen }) {
+  const list = watch?.continue || []
+  if (!list.length) return null
+  return (
+    <>
+      <h2 class='shelf'>Continue watching</h2>
+      <div class='grid'>
+        {list.map(i => (
+          <Poster
+            key={i.id}
+            item={i}
+            caps={caps}
+            label={i.type === 'episode' ? episodeCode(i) : null}
+            watch={{ resume: i.resume }}
+            onOpen={onOpen}
+          />
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -161,7 +232,7 @@ function ViewToggle ({ view, onChange }) {
   )
 }
 
-export default function Library ({ state, caps, search, onPlay }) {
+export default function Library ({ state, caps, search, onPlay, watch = null, onWatchChange = () => {} }) {
   // 'films' | 'shows', and where we are inside the show tree.
   const [root, setRoot] = useState('films')
   const [series, setSeries] = useState(null)
@@ -176,6 +247,17 @@ export default function Library ({ state, caps, search, onPlay }) {
 
   const stats = state.stats || {}
 
+  // An array on the wire, a Set here. A grid asks "has this been watched" once per
+  // poster and a linear scan per poster is the kind of thing that only bites on
+  // somebody else's library.
+  const seen = useMemo(() => new Set(watch?.watched || []), [watch])
+  const resumeOf = useMemo(() => {
+    const m = new Map()
+    for (const i of (watch?.continue || [])) m.set(i.id, i.resume)
+    return m
+  }, [watch])
+  const badge = (item) => ({ watched: seen.has(item.id), resume: resumeOf.get(item.id) })
+
   useEffect(() => {
     if (!search) { setHits(null); return }
     let live = true
@@ -185,6 +267,17 @@ export default function Library ({ state, caps, search, onPlay }) {
     }, 200)
     return () => { live = false; clearTimeout(t) }
   }, [search])
+
+  // WHAT IS LEFT OF EACH SHOW, asked for only while the shows list is on screen -
+  // answering it walks every series' episodes, which is free on a folder library and
+  // one HTTP call per show on a Jellyfin one.
+  const [shows_, setShows_] = useState({})
+  useEffect(() => {
+    if (root !== 'shows') return
+    let live = true
+    api('/api/watch/shows').then(r => { if (live && r?.shows) setShows_(r.shows) })
+    return () => { live = false }
+  }, [root, watch])
 
   const films = useList('/api/library/list?type=movies&limit=100', [root])
   const shows = useList('/api/library/list?type=series&limit=100', [root])
@@ -300,6 +393,7 @@ export default function Library ({ state, caps, search, onPlay }) {
                       item={e}
                       caps={caps}
                       label={episodeCode(e)}
+                      watch={badge(e)}
                       onOpen={() => onPlay(e, episodes.items)}
                     />
                   ))}
@@ -310,9 +404,10 @@ export default function Library ({ state, caps, search, onPlay }) {
                   {episodes.items.map(e => {
                     const flag = flagFor(verdictFor(e, caps))
                     return (
-                      <button class='eprow' key={e.id} onClick={() => onPlay(e, episodes.items)}>
+                      <button class={'eprow' + (seen.has(e.id) ? ' seen' : '')} key={e.id} onClick={() => onPlay(e, episodes.items)}>
                         <span class='code'>{episodeCode(e) || '-'}</span>
                         <span class='t'>{e.title}</span>
+                        {seen.has(e.id) && <span class='tick' title='Watched'>✓</span>}
                         {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
                         {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
                       </button>
@@ -332,7 +427,10 @@ export default function Library ({ state, caps, search, onPlay }) {
 
   return (
     <>
+      <ContinueRow watch={watch} caps={caps} onOpen={i => onPlay(i, watch.continue)} />
+
       <div class='row' style='margin-bottom:.6rem'>
+        <WatchingAs watch={watch} onChange={onWatchChange} />
         <button class={root === 'films' ? '' : 'ghost'} onClick={() => setRoot('films')}>
           Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
         </button>
@@ -348,7 +446,7 @@ export default function Library ({ state, caps, search, onPlay }) {
 
       <div class='grid' style='margin-top:.8rem'>
         {showing.items.map(i => (
-          <Poster key={i.id} item={i} caps={caps} onOpen={item => {
+          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onOpen={item => {
             if (item.type === 'series') setSeries(item)
             else onPlay(item, films.items)
           }} />
