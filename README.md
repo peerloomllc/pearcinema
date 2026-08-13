@@ -10,7 +10,8 @@ It is the video sibling of [PearTune](../peartune), and it is built on the same 
 
 ## Status
 
-**The host runs and pairs. No phone client yet, and no real source adapter yet.**
+**The host runs, reads a real library and you can watch it in a browser. No phone
+client yet.**
 
 Both T3 proposals are approved (`proposals/2026-08-12-video-deltas.md`, merged as PR #1,
 and `../proposals/2026-08-12-shared-host.md`, approved verbally). `@peerloom/host` is
@@ -29,28 +30,72 @@ What works today, proven end to end over a real DHT testnet in `test/first-pair.
 
 - **Jellyfin and Emby work as a source**, for films, shows, seasons and episodes,
   including subtitle listing and seeking.
+- **A plain folder works as a source**, with no server in the path at all. Measured
+  against a real 3 TB drive: 2,986 items - 274 films, 29 shows, 2,712 episodes - read
+  from filenames and the `.nfo` sidecars already sitting beside the media.
+- **A web interface with a player**, password-gated, at `http://localhost:8742`.
 
 What is not built yet:
 
-- The **folder adapter**, which is the moat and is in v1.
 - The phone client.
 - Continue-watching, which is inherited from PearTune's `resume.*` and arrives with the
   shared user-state store.
-- Casting and the dashboard.
+- Casting, remux and transcode.
 
 Run it:
 
 ```
-npm install && npm run host -- --pair
+npm install && npm run host
 ```
 
-Point it at a Jellyfin or Emby server:
+Then open `http://localhost:8742`. Point it at a folder or a Jellyfin server from the
+first-run screen, and pair a phone by scanning the QR it draws.
+
+The command line still does all of it, which is the right answer over ssh:
+
+```
+npm run host -- --folder /media/Movies --folder "/media/TV Shows" --pair
+```
 
 ```
 npm run host -- --jellyfin http://your-server:8096 --user you --pass secret --pair
 ```
 
-`--test` checks the credentials without saving them or starting the host.
+`--test` checks a source without saving it or starting the host.
+
+### The web interface
+
+`http://localhost:8742` by default; `PEARCINEMA_HTTP_HOST`, `PEARCINEMA_HTTP_PORT` and
+`PEARCINEMA_PASSWORD` move it and lock it. It does the setup, the library browsing, the
+pairing QR, the device and people list with revoke - and it plays.
+
+Two things about it are worth knowing before you judge it:
+
+- **It sits behind the password, not beside it**, because it serves the actual film
+  bytes. The host refuses to start if it would listen on anything but loopback without a
+  password. A bare Docker or systemd install with no password generates one, saves it
+  `0600` next to the identity seed, and prints it once.
+- **A browser refuses most of a normal collection, and that is the honest result.**
+  Chrome and Safari will not open Matroska, and 83% of the measured real library is
+  Matroska - the same refusal, for the same reason, an iPhone gives. So the player shows
+  roughly a tenth of a real collection and says plainly why for each file it will not
+  open, rather than showing a black rectangle. That is the clearest argument there is for
+  remux, which is the next thing to build.
+
+The page counts it for you: above each list it says how many of these files *this*
+browser can play. It is a second compatibility engine with published rules, run against
+the same library, which turns "which of my files actually work" from an opinion into a
+number.
+
+The folder picker browses what the **container** can see and there is no free-text path
+box, deliberately: typing the path your other app uses gets you zero files, which is
+indistinguishable from an empty library. That mistake cost PearTune an evening.
+
+Rebuild the page after changing anything under `host/ui/app/`, and commit the result:
+
+```
+npm run build:dashboard
+```
 
 ### What is actually in your library?
 
@@ -109,10 +154,11 @@ The same three-part shape as PearTune, with the host now shared:
 │    - hyperdht server + firewall gate     │
 │    - grant store (local, NOT replicated) │
 │    - pairing, people, revoke             │
-│    - Preact dashboard                    │
+│    - the dashboard LOCK (not the page)   │
 │  pearcinema video layer  (this repo)     │
 │    - Jellyfin / folder video adapters    │
 │    - direct play, remux, subtitles       │
+│    - the web interface, with a player    │
 └──────────────────────────────────────────┘
 ```
 

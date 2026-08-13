@@ -42,6 +42,12 @@ class PearCinemaHost {
     // the dashboard survives a restart even though the env var is still set.
     this.libraryName = this._readSettings().name || libraryName
 
+    // `sourceFrom` is WHO chose this source: 'dashboard' (saved to disk by an
+    // operator), 'env' (the container was started with one) or 'none'. The first-run
+    // wizard turns on it, so it must not be conflated with "is there a source" - an
+    // Umbrel install ships PEARCINEMA_FOLDERS and still deserves to be walked
+    // through pairing.
+    this.sourceFrom = 'none'
     this.source = this._readSource()
     this.sourceError = null
 
@@ -72,11 +78,7 @@ class PearCinemaHost {
         // direct-play only.
         openStream: async (params, ctx) => {
           if (!params.itemId) throw ctx.badParams('itemId required')
-          return this.adapter.stream({
-            itemId: String(params.itemId),
-            offset: Number(params.offset) || 0,
-            length: params.length ? Number(params.length) : undefined
-          })
+          return this.openStream(params)
         }
       })
     })
@@ -91,6 +93,25 @@ class PearCinemaHost {
       ids: PROTOCOL.ids,
       dataDir: this.dataDir,
       log
+    })
+  }
+
+  // THE ONE BYTE PATH, and it has exactly one caller shape.
+  //
+  // Both clients come through here: the phone over `media.stream` on the P2P
+  // channel, and the browser over `GET /api/stream` on the dashboard. Two
+  // implementations of "hand me bytes from offset N" is two places for a range
+  // arithmetic bug and two places for an id-to-path guard to be forgotten, and the
+  // second one is how `media.stream` becomes arbitrary file read. So the web player
+  // is a second TRANSPORT, never a second implementation.
+  //
+  // offset and length ride through untouched, which is why seeking inside a
+  // two-hour film needed no protocol change and why direct-play v1 is viable.
+  async openStream ({ itemId, offset = 0, length } = {}) {
+    return this.adapter.stream({
+      itemId: String(itemId),
+      offset: Number(offset) || 0,
+      length: length ? Number(length) : undefined
     })
   }
 
@@ -111,6 +132,7 @@ class PearCinemaHost {
 
     this.adapter = next
     this.source = cfg
+    this.sourceFrom = 'dashboard'
     this.sourceError = null
     fs.mkdirSync(this.dataDir, { recursive: true })
     fs.writeFileSync(path.join(this.dataDir, 'source.json'), JSON.stringify(cfg, null, 2), { mode: 0o600 })
@@ -138,6 +160,9 @@ class PearCinemaHost {
   get libraryId () { return this.host.libraryId }
   get grants () { return this.host.grants }
   get pairing () { return this.host.pairing }
+  // The open window itself, not just whether one is open - the dashboard draws its
+  // link, its kind and its remaining time.
+  get pairSession () { return this.host.pairSession }
 
   // --- settings -------------------------------------------------------------
 
@@ -187,9 +212,16 @@ class PearCinemaHost {
 
   _readSource () {
     try {
-      return JSON.parse(fs.readFileSync(path.join(this.dataDir, 'source.json'), 'utf8'))
+      const saved = JSON.parse(fs.readFileSync(path.join(this.dataDir, 'source.json'), 'utf8'))
+      this.sourceFrom = 'dashboard'
+      return saved
     } catch {
-      return this._sourceFromEnv() || { kind: 'empty' }
+      const env = this._sourceFromEnv()
+      if (env) {
+        this.sourceFrom = 'env'
+        return env
+      }
+      return { kind: 'empty' }
     }
   }
 
@@ -230,6 +262,13 @@ class PearCinemaHost {
   revokeDevice (k) { return this.host.revokeDevice(k) }
   leaveDevice (k) { return this.host.leaveDevice(k) }
   revokePerson (p) { return this.host.revokePerson(p) }
+  // Cleanup and edits the dashboard offers. Proxied rather than reached for through
+  // `.host`, so the web interface talks to PearCinemaHost and never has to know
+  // there is a LibraryHost underneath it.
+  deleteDevice (k) { return this.host.deleteDevice(k) }
+  setDeviceExpiry (k, at) { return this.host.setDeviceExpiry(k, at) }
+  deletePerson (p) { return this.host.deletePerson(p) }
+  notifyOwnersDevicesChanged () { return this.host.notifyOwnersDevicesChanged() }
 
   async close () { return this.host.close() }
 }
