@@ -53,6 +53,22 @@ The rollup now takes the resume ids as well and carries `inProgress` and `starte
 the counts. `unwatched` still means what it always meant - how many you have not FINISHED -
 so a part-watched episode is not quietly counted as done.
 
+### Three visual corrections, and one process lesson worth more than them
+
+The marker took four passes, all of them found by Tim looking at it rather than by a test:
+a box-shadow that enclosed the caption, a conic gradient whose bright arc vanished at each
+corner (a gradient sweeps by ANGLE; a rounded rectangle's edge does not), a ring with no
+positioning context so it sized itself to the whole tile again, and an outline a pixel shy
+of the artwork because `overflow: hidden` clips to the padding box. It is now a dash
+travelling a real rounded-rectangle path with `pathLength=100`, and the artwork's own border
+steps aside so the ring IS the edge.
+
+**The lesson is about the preview, not the CSS.** I hand-copied a slice of the stylesheet
+into a standalone page to show him, and wrote `position: relative` into that copy without
+noticing it was missing from the real one - so the preview looked perfect while the app was
+broken, and he found it. A preview built from a subset of the thing it previews is not a
+preview. It is generated from the whole stylesheet now, unedited.
+
 ### Verified on the real library
 
 ```
