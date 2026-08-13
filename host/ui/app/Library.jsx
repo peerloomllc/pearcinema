@@ -74,7 +74,11 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
   // in the same voice, and the one somebody is actually watching is the one they came
   // to the page for. So it is marked on the tile itself rather than by reading numbers
   // (Tim, 2026-08-13).
-  const started = !!rollup && rollup.watched > 0 && !rollup.complete
+  // `started` comes from the HOST, which knows about episodes somebody is part way
+  // through as well as ones they finished. Recomputing it here from `watched` alone
+  // is the bug this replaced: a season with one half-watched episode in it has no
+  // finished episodes and would have reported itself untouched.
+  const started = !!rollup && !!rollup.started && !rollup.complete
 
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
@@ -121,7 +125,11 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
           thing you are. On a film it is minutes; on a season it is episodes. */}
       {rollup
         ? (started && (
-          <span class='resumebar'><i style={`width:${Math.round((rollup.watched / rollup.total) * 100)}%`} /></span>
+          // A floor of 2%, so a season somebody has only just begun still shows a
+          // sliver rather than an empty groove that reads as a rendering fault.
+          <span class='resumebar'>
+            <i style={`width:${Math.max(2, Math.round((rollup.watched / rollup.total) * 100))}%`} />
+          </span>
           ))
         : <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />}
       <div class='t'>{item.title}</div>

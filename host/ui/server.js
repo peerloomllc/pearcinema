@@ -620,13 +620,17 @@ async function startDashboard ({
         const who = await watcher(req)
         if (!who.owner) return json(res, 200, { seasons: {} })
 
+        // BOTH SETS. A season somebody is half way through episode one of has no
+        // watched episodes at all, so counting only finished ones would report the
+        // season they are actually watching as untouched.
         const watched = await host.userState.watchedSet(who.owner)
+        const resumed = new Set((await host.userState.listResume(who.owner, 200)).map(r => r.itemId))
         const seasons = (await host.adapter.list({ type: 'seasons', seriesId, limit: 200 })).items || []
 
         const out = {}
         for (const s of seasons) {
           const eps = (await host.adapter.list({ type: 'episodes', seasonId: s.id, limit: 500 })).items || []
-          out[s.id] = watch.rollup(eps, watched)
+          out[s.id] = watch.rollup(eps, watched, resumed)
         }
         return json(res, 200, { seasons: out })
       }
@@ -704,12 +708,13 @@ async function startDashboard ({
         if (!who.owner) return json(res, 200, { shows: {} })
 
         const watched = await host.userState.watchedSet(who.owner)
+        const resumed = new Set((await host.userState.listResume(who.owner, 200)).map(r => r.itemId))
         const series = (await host.adapter.list({ type: 'series', limit: 500 })).items || []
 
         const shows = {}
         for (const s of series) {
           const eps = (await host.adapter.list({ type: 'episodes', seriesId: s.id, limit: 500 })).items || []
-          shows[s.id] = watch.rollup(eps, watched)
+          shows[s.id] = watch.rollup(eps, watched, resumed)
         }
         return json(res, 200, { shows })
       }

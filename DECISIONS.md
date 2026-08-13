@@ -37,9 +37,30 @@ reaches. The tick is now a real control sitting on the poster, so the poster bec
 with the keyboard behaviour a button had. The alternative - a context menu - is a second
 interaction to discover, for something that should cost one click.
 
+### The one you are in the middle of, and the bug in the first attempt
+
+A count of what is left cannot say which season somebody is watching: an untouched season
+and a half-done one both just show a number. So a started-and-unfinished container is marked
+on the tile.
+
+**The first attempt got it wrong in the way that mattered most.** It computed "started" from
+the WATCHED set alone - and Tim found it immediately by starting the X-Files pilot: the
+episode was on the continue-watching shelf, and Season 1 said nothing at all. A season
+somebody is half way through episode one of has **no finished episodes**, so a rollup
+counting only those reports the exact season they are watching as untouched.
+
+The rollup now takes the resume ids as well and carries `inProgress` and `started` beside
+the counts. `unwatched` still means what it always meant - how many you have not FINISHED -
+so a part-watched episode is not quietly counted as done.
+
 ### Verified on the real library
 
 ```
+Tim's own state, after he reported it:
+  pilot on the shelf   Season 1  started, 1 in progress, 0 watched, 24 left
+                       Season 2  not started
+                       The X-Files  started
+
 Season 1 (24 episodes)  mark watched -> 24 items, complete
 Season 2                             -> untouched, 25 left
 The X-Files                          -> 24 of 201 watched

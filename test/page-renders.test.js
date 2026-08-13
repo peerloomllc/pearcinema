@@ -95,7 +95,7 @@ const ROUTES = {
     }]
   },
   // A show half way through, so the tile can say which one is being watched.
-  '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, complete: false } } },
+  '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, inProgress: 0, started: true, complete: false } } },
   '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
 }
 
@@ -453,7 +453,7 @@ test('a show nobody has started is counted but not marked', async (t) => {
   }
   const { dom, doc, win } = await open(STATE, {
     '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
-    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, complete: false } } }
+    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, inProgress: 0, started: false, complete: false } } }
   })
   t.after(() => dom.window.close())
 
@@ -464,4 +464,27 @@ test('a show nobody has started is counted but not marked', async (t) => {
   const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
   assert.equal(tile.classList.contains('started'), false)
   assert.equal(tile.querySelector('.resumebar'), null, 'and no bar, because there is nothing to show')
+})
+
+test('a show with only a part-watched episode in it is STILL the one being watched', async (t) => {
+  // Nothing finished, so the count says "10 left" exactly like an untouched show. The
+  // tile is the only thing that can tell them apart.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, inProgress: 1, started: true, complete: false } } }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.ok(tile.classList.contains('started'))
+  // A sliver rather than an empty groove, which reads as a rendering fault.
+  assert.equal(tile.querySelector('.resumebar i').style.width, '2%')
 })

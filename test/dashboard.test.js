@@ -1032,3 +1032,20 @@ test('marking a season watched clears any position inside it', async (t) => {
   await c.req('POST', '/api/watch/watched', { body: { itemId: 'wire-s01', watched: true } })
   assert.deepEqual((await c.req('GET', '/api/watch/state')).json.continue, [])
 })
+
+test('STARTING AN EPISODE MARKS ITS SEASON AS THE ONE BEING WATCHED', async (t) => {
+  // Tim's report, end to end: start the pilot, see it on the shelf, and the season it
+  // belongs to has to say it is the one in progress - even though nothing in it is
+  // finished.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: EPISODES[0].id, positionMs: 480_000 } })
+
+  const seasons = (await c.req('GET', '/api/watch/seasons?seriesId=' + SHOW.id)).json.seasons
+  assert.equal(seasons['wire-s01'].started, true)
+  assert.equal(seasons['wire-s01'].inProgress, 1)
+  assert.equal(seasons['wire-s01'].watched, 0, 'and nothing is claimed as finished')
+
+  // The show one level up says the same thing.
+  const shows = (await c.req('GET', '/api/watch/shows')).json.shows
+  assert.equal(shows[SHOW.id].started, true)
+})

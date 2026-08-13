@@ -75,6 +75,32 @@ test('SECONDS AND MILLISECONDS ARE NOT MIXED UP, which would mean nothing is eve
 
 const eps = (n) => Array.from({ length: n }, (_, i) => ({ id: 'e' + i }))
 
+test('THE SEASON YOU ARE IN THE MIDDLE OF SAYS SO, even with nothing finished in it', () => {
+  // Found by Tim 2026-08-13: he started the X-Files pilot, saw it on the continue
+  // watching shelf, and Season 1 said nothing at all. A season somebody is half way
+  // through episode one of has NO finished episodes, so a rollup counting only those
+  // reports the exact season they are watching as untouched.
+  const r = watch.rollup(eps(24), new Set(), new Set(['e0']))
+  assert.equal(r.started, true)
+  assert.equal(r.inProgress, 1)
+  assert.equal(r.watched, 0)
+  // And "21 left" has to keep meaning twenty-one you have not FINISHED, so a
+  // part-watched episode is not quietly counted as done.
+  assert.equal(r.unwatched, 24)
+})
+
+test('nothing touched is nothing to say', () => {
+  const r = watch.rollup(eps(10), new Set(), new Set())
+  assert.equal(r.started, false)
+  assert.equal(r.inProgress, 0)
+})
+
+test('an episode both finished and holding a position counts once, as finished', () => {
+  const r = watch.rollup(eps(3), new Set(['e0']), new Set(['e0']))
+  assert.equal(r.watched, 1)
+  assert.equal(r.inProgress, 0)
+})
+
 test('A SHOW REPORTS WHAT IS LEFT, which is what is actually useful', () => {
   // "3 left" tells somebody to open it; a tick does not. And it is computed rather
   // than stored, so an episode landing in a folder cannot leave a rollup stale.
