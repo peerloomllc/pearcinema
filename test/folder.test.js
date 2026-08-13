@@ -573,6 +573,88 @@ test('a nonsense root type is read as "work it out" rather than trusted', async 
   assert.equal((await a.stats()).movies, 1)
 })
 
+// --- ids survive the drive moving -------------------------------------------
+//
+// The rule the whole id scheme rests on: a leaf id is minted from the path RELATIVE
+// to its root, so a drive that mounts at a different letter or mount point does not
+// orphan every watch position on every phone. Series and season ids carried the
+// ABSOLUTE root until 2026-08-13 and quietly broke it - a film survived a remount and
+// a SHOW did not, which is the half that continue-watching would have needed.
+
+// The same library, byte for byte, at two different mount points.
+async function twice (t, files) {
+  const a = await split(t, files)
+  const b = await split(t, files)
+  return [a, b]
+}
+
+test('A DRIVE THAT MOUNTS SOMEWHERE ELSE KEEPS EVERY ID - films, shows, seasons and episodes', async (t) => {
+  const files = {
+    'TV Shows/Firefly/Season 01/Firefly - s01e01.mkv': 'x',
+    'TV Shows/MST3K/MST3K - K05 - The Gunslinger.avi': 'x',
+    'Movies/Blade Runner (1982).mkv': 'x'
+  }
+  const [one, two] = await twice(t, files)
+
+  const read = async ({ root, dataDir }) => {
+    const a = typed({ roots: [path.join(root, 'TV Shows'), path.join(root, 'Movies')], dataDir })
+    await a.scan()
+    const series = (await a.list({ type: 'series' })).items
+    const seasons = (await Promise.all(series.map(s => a.list({ type: 'seasons', seriesId: s.id })))).flatMap(r => r.items)
+    const eps = (await Promise.all(seasons.map(s => a.list({ type: 'episodes', seasonId: s.id })))).flatMap(r => r.items)
+    return {
+      films: (await a.list({ type: 'movies' })).items.map(m => m.id),
+      series: series.map(s => s.id),
+      seasons: seasons.map(s => s.id),
+      episodes: eps.map(e => [e.id, e.seriesId, e.seasonId])
+    }
+  }
+
+  const first = await read(one)
+  const second = await read(two)
+
+  assert.ok(first.series.length && first.seasons.length && first.episodes.length, 'the fixture exercised all three')
+  assert.deepEqual(second, first, 'nothing about the mount point may reach an id')
+})
+
+test('THE SAME SHOW UNDER TWO ROOTS IS ONE SHOW, which is the point rather than the price', async (t) => {
+  // A collection split across two drives is a real shape - one disk filled up and the
+  // next seasons went on the next one. Two identical entries in the show list was
+  // never the better answer.
+  const { root, dataDir } = await split(t, {
+    'Disk 1/Firefly/Season 01/Firefly - s01e01.mkv': 'x',
+    'Disk 2/Firefly/Season 02/Firefly - s02e01.mkv': 'x'
+  })
+
+  const a = typed({ roots: [path.join(root, 'Disk 1'), path.join(root, 'Disk 2')], dataDir })
+  await a.scan()
+
+  const series = (await a.list({ type: 'series' })).items
+  assert.equal(series.length, 1, 'one Firefly, not two')
+  assert.equal(series[0].episodeCount, 2)
+
+  const seasons = await a.list({ type: 'seasons', seriesId: series[0].id })
+  assert.deepEqual(seasons.items.map(s => s.number), [1, 2], 'and both its seasons')
+})
+
+test('TWO ROOTS HOLDING THE SAME FILE IS REPORTED, not silently one file playing as another', async (t) => {
+  // The price of a relative id: two roots with the same relative path mint the same
+  // id, and the second would overwrite the first in the path map. Nothing anywhere
+  // would say so, and one film would quietly play as another.
+  const { root, dataDir } = await split(t, {
+    'Copy A/Blade Runner (1982).mkv': 'x',
+    'Copy B/Blade Runner (1982).mkv': 'x'
+  })
+
+  const a = typed({ roots: [path.join(root, 'Copy A'), path.join(root, 'Copy B')], dataDir })
+  await a.scan()
+  assert.equal(a.idCollisions, 1, 'the duplicate is counted rather than absorbed')
+
+  const clean = typed({ roots: [path.join(root, 'Copy A')], dataDir })
+  await clean.scan({ force: true })
+  assert.equal(clean.idCollisions, 0)
+})
+
 // --- the Umbrel default -----------------------------------------------------
 //
 // Two things these have to get right, both learned the hard way in this repo:

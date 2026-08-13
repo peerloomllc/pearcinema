@@ -131,6 +131,8 @@ class FolderAdapter {
 
     this.scannedAt = null
     this.scanError = null
+    // How many files claimed an id another file already had. See _index.
+    this.idCollisions = 0
 
     // The library, in memory. A film library is thousands of rows, not millions,
     // so holding it is cheaper and far simpler than a database - and a restart
@@ -475,15 +477,26 @@ class FolderAdapter {
 
       // A season with no number is keyed by its FOLDER, so `MST3K DVD 18` and
       // `MST3K DVD 19` stay two shelves instead of collapsing into one anonymous
-      // heap. Numbered seasons keep the exact preimage they always had - changing it
-      // would remint every episode id in every library in the field.
+      // heap.
       const numbered = merged.season !== null && merged.season !== undefined
       const seasonKey = numbered
         ? String(merged.season)
         : (seasonFolder ? `dir:${seasonFolder}` : 'unnumbered')
 
-      const seriesId = this.ids.itemId(this.libraryId, this.kind, `series:${root}:${seriesFolder || show.title}`)
-      const seasonId = this.ids.itemId(this.libraryId, this.kind, `season:${root}:${seriesFolder || show.title}:${seasonKey}`)
+      // NOTHING ABSOLUTE IN A PREIMAGE. These two carried the full root path until
+      // 2026-08-13, which quietly contradicted the rule three lines above: a film
+      // survived its drive being plugged in somewhere else and a SHOW did not, so a
+      // remount would have orphaned every television watch position while leaving
+      // the films alone. The show folder relative to its root is the portable name,
+      // which is the same thing the item id is built from.
+      //
+      // The consequence, and it is wanted rather than tolerated: the same show under
+      // two roots is now ONE show with both sets of seasons. A collection split
+      // across two drives is a real shape, and two identical entries in the show list
+      // was never the better answer.
+      const seriesKey = seriesFolder || show.title
+      const seriesId = this.ids.itemId(this.libraryId, this.kind, `series:${seriesKey}`)
+      const seasonId = this.ids.itemId(this.libraryId, this.kind, `season:${seriesKey}:${seasonKey}`)
 
       // A show's poster lives in the show folder and a season's in the season
       // folder, so both are resolved here, off the same directory listings, and
@@ -585,7 +598,18 @@ class FolderAdapter {
       ...episodes.map((e, i) => [e, cleanEpisodes[i]])
     ]
 
+    // TWO FILES CANNOT SHARE AN ID, and if they ever do it must not be silent.
+    //
+    // A leaf id is minted from the path RELATIVE to its root, which is what makes it
+    // survive a remount - and the price is that two roots holding the same relative
+    // path (`/a/Movies/Blade.mkv` and `/b/Movies/Blade.mkv`, one drive being a copy
+    // of another) mint the same id. The second would overwrite the first in the path
+    // map and one film would quietly play as the other, with nothing anywhere saying
+    // so. Rare, and precisely the kind of thing nobody would think to look for.
+    let collisions = 0
+
     for (const [raw, clean] of pairs) {
+      if (this._paths.has(clean.id)) collisions++
       this._byId.set(clean.id, clean)
       if (raw._file) this._paths.set(clean.id, raw._file)
       if (raw._artFile && clean.artId) this._artPaths.set(clean.artId, raw._artFile)
@@ -618,6 +642,13 @@ class FolderAdapter {
 
     for (const s of this._tree.series) this._byId.set(s.id, s)
     for (const s of this._tree.seasons) this._byId.set(s.id, s)
+
+    // Reported rather than repaired. Renaming somebody's files is not this program's
+    // business - the library is mounted `:ro` by design - and the honest fix is for
+    // the operator to drop one of two roots that hold the same collection. Kept on
+    // the adapter so the dashboard can say it, which is the whole point of noticing.
+    this.idCollisions = collisions
+    if (collisions) this.log('folder:id-collision', { count: collisions })
   }
 
   _episodeCount () {
@@ -644,7 +675,13 @@ class FolderAdapter {
       // read as "work it out", so it holds exactly the misfiling this version fixes.
       // Loading one would leave the operator having typed their roots and seen
       // nothing change, which is worse than the wait.
-      if (raw.version !== 3) return false
+      //
+      // Version 4 made series and season ids portable across a remount. A version 3
+      // cache holds the ids minted the old way, and they are internally consistent -
+      // so serving it looks fine right up until the drive moves and the shows a phone
+      // remembers are gone. The property is the whole point; a stale set of ids that
+      // does not have it is the bug, not a saving.
+      if (raw.version !== 4) return false
       // A cache built from different folders describes a different library - and a
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
@@ -665,7 +702,7 @@ class FolderAdapter {
     try {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
-        version: 3,
+        version: 4,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,
@@ -701,7 +738,12 @@ class FolderAdapter {
       // config directly rather than going through here.
       folders: this.roots.length,
       scannedAt: this.scannedAt,
-      sourceError: this.scanError
+      sourceError: this.scanError,
+      // How many files claimed an id another file already had - two roots holding
+      // the same collection. A COUNT, not the paths, for the same reason as above.
+      // Reported rather than repaired: the answer is to drop one of the roots, and
+      // that is the operator's call.
+      duplicates: this.idCollisions
     }
   }
 

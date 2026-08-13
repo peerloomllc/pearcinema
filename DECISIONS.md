@@ -2,7 +2,54 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - A FOLDER SAYS WHAT IT HOLDS, and a folder's own NAME counts as saying it
+## 2026-08-13 (latest) - NOTHING ABSOLUTE IN AN ID: a show survives a remount, the same way a film always did
+Tier: T2 (an id scheme change, which reminst every series and season once)
+Context: found while testing root types, by an assertion that compared two copies of the
+same library and failed for a reason that had nothing to do with the change under test.
+
+`_identify` mints an item id from the path RELATIVE to its root, with a comment saying
+exactly why: **a drive that mounts at a different letter or mount point must not orphan
+every resume position on every phone.** Six lines later the series and season ids
+interpolated the ABSOLUTE root. So a film survived the drive being plugged in somewhere
+else and a show did not.
+
+Nothing has broken yet because there is no phone and no `resume.*`. That is precisely why
+it is worth doing now: continue-watching is the next feature that consumes these, and after
+it lands a change here costs somebody their television history rather than nothing.
+
+**Choice: the series and season preimages are the show folder relative to its root**, the
+same portable name the item id is built from.
+
+### The consequence is wanted rather than tolerated
+
+The absolute root was doing one job: keeping two roots' identically-named shows apart. Drop
+it and **the same show under two roots becomes ONE show with both sets of seasons**. That
+is the better answer. A collection split across two drives is a real shape - one disk
+filled up and the next seasons went on the next one - and two identical entries in the show
+list was never what anybody wanted to see.
+
+### The price, which was already being paid silently
+
+A relative id means **two roots holding the same relative path mint the same id**. One drive
+being a copy of another, or one root sitting inside another, and the second file overwrites
+the first in the path map - one film quietly plays as another, with nothing anywhere saying
+so. That was true before this change and equally true after it; what is new is that it is
+COUNTED and reported, in the log, in `stats.duplicates` and as a banner on the source panel
+naming what to do about it.
+
+Not repaired, deliberately. The library is mounted `:ro` by design and renaming somebody's
+files is not this program's business. The fix is to drop one of two roots that hold the same
+collection, and that is the operator's call to make.
+
+### Cost, accepted
+
+The scan cache goes to version 4 and the drive is walked again - four minutes, the second
+time today. A version 3 cache holds ids minted the old way and they are internally
+consistent, so serving it looks fine right up until the drive moves and the shows a phone
+remembers are gone. **The portability is the whole point; a cached set of ids that does not
+have it is the bug rather than a saving.**
+
+## 2026-08-13 - A FOLDER SAYS WHAT IT HOLDS, and a folder's own NAME counts as saying it
 Tier: T2 (a classification change that reaches every existing install without being asked
 for, plus a latent bug in the item model)
 Context: measured against the real drive on 2026-08-12 and logged as its own TODO item. A
