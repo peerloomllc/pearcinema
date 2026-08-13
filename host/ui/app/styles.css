@@ -356,3 +356,24 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .submenu .menu button:hover { background: var(--card-2) }
 .submenu .menu button.on { color: var(--accent); font-weight: 650 }
+
+/* ---- the compatibility note ------------------------------------------------ */
+
+/* A number, and the reasoning folded behind it. It was three lines of prose about
+ * codecs standing between somebody and their films. */
+.compat { margin: 0 0 .5rem; font-size: .85rem; color: var(--muted) }
+.compat summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: .3rem }
+.compat summary::-webkit-details-marker { display: none }
+.compat summary::after { content: 'why?'; font-size: .72rem; color: var(--accent); border-bottom: 1px dotted var(--accent) }
+.compat[open] summary::after { content: 'hide' }
+.compat > div { margin-top: .4rem; max-width: 44rem }
+.compat p { margin: .3rem 0 }
+
+/* ---- list or grid ---------------------------------------------------------- */
+
+.viewtoggle { display: flex; gap: .15rem; background: var(--card-2); border: 1px solid var(--line); border-radius: 8px; padding: .15rem }
+.viewtoggle button {
+  background: none; border: none; color: var(--muted);
+  padding: .2rem .5rem; border-radius: 6px; font-size: .85rem; line-height: 1;
+}
+.viewtoggle button.on { background: var(--accent); color: var(--accent-fg) }

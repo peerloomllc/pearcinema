@@ -182,16 +182,12 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
 
         {failed && <div class='banner bad' style='margin-top:.7rem'>{failed}</div>}
 
-        {!blocked && remuxing && (
-          <div class='banner good' style='margin-top:.7rem'>
-            {verdict.status === 'nosound'
-              ? <><b>Sound rebuilt for your browser.</b> {verdict.reason} The picture is untouched and nothing was written to disk.</>
-              : <><b>Repackaged for your browser.</b> Your browser will not open a {containerName(m.container)} file,
-                  so the picture and sound are being put in one it will - untouched, as they stream,
-                  with nothing written to disk. Jumping to a new point takes a moment because
-                  of it.</>}
-          </div>
-        )}
+        {/* NO BANNER FOR A FILM THAT IS SIMPLY PLAYING. It used to announce
+            "Sound rebuilt for your browser" over every repackaged film, which is a
+            notice about the host's internals dressed up as news for the viewer -
+            and repackaging is the normal case on this library rather than an
+            exception. The quiet "repackaged" tag beside the clock is enough, and
+            the detail is on the right where the rest of the file's facts are. */}
         {!blocked && !remuxing && verdict.status === 'nosound' && (
           <div class='banner warn' style='margin-top:.7rem'>{verdict.reason}</div>
         )}
@@ -224,9 +220,18 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
           <dt>How it is playing</dt>
           <dd>
             {blocked && <span class='chip bad'>will not open</span>}
-            {!blocked && remuxing && <span class='chip accent'>repackaged</span>}
+            {!blocked && remuxing && (
+              <>
+                <span class='chip accent'>repackaged</span>
+                <div class='hint' style='margin-top:.3rem'>
+                  {verdict.status === 'nosound'
+                    ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
+                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will, untouched, as they stream.`}
+                  {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
+                </div>
+              </>
+            )}
             {!blocked && !remuxing && verdict.status === 'play' && <span class='chip good'>straight from the file</span>}
-            {!blocked && !remuxing && verdict.status === 'nosound' && <span class='chip warn'>picture only</span>}
             {!blocked && !remuxing && verdict.status === 'unknown' && <span class='chip'>unknown</span>}
           </dd>
         </dl>

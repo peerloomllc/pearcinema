@@ -523,7 +523,7 @@ test('the built page is committed, self-contained and actually the app', async (
 
   // THE STALE-BUILD CHECK. Strings that only exist in the current source, so a
   // forgotten rebuild after adding a screen fails here rather than shipping.
-  for (const marker of ['Pair a device', 'Try anyway', 'Where the films are', 'Welcome to PearCinema', 'Repackaged for your browser', 'Reading your library']) {
+  for (const marker of ['Pair a device', 'Try anyway', 'Where the films are', 'Welcome to PearCinema', 'repackaged', 'Reading your library']) {
     assert.ok(html.includes(marker), `the built page is stale: it is missing "${marker}"`)
   }
 })

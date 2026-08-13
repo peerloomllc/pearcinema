@@ -42,12 +42,14 @@ function flagFor (v) {
   return null
 }
 
-function Poster ({ item, caps, onOpen }) {
+function Poster ({ item, caps, onOpen, label = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
-    : [item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
+    // An episode in a grid needs its NUMBER above all - a wall of thumbnails with
+    // only titles under them is unreadable as an episode list.
+    : [label, item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
 
   return (
     <button class='poster' onClick={() => onOpen(item)}>
@@ -79,28 +81,42 @@ function ArtNote ({ list, source }) {
   )
 }
 
-// WHAT WILL ACTUALLY PLAY, which is not the same as what the browser alone can open.
-// A file the host repackages plays, so counting it as a failure would tell somebody
+// WHAT WILL ACTUALLY PLAY, which is not the same as what the browser alone can open -
+// a file the host repackages plays, and counting it as a failure would tell somebody
 // their library is broken while they are watching it.
+//
+// FOLDED AWAY BY DEFAULT. This started as three lines of explanation above every
+// grid, which is a paragraph about codecs standing between somebody and their films
+// (Tim, 2026-08-13). The number is genuinely useful and the reasoning behind it is
+// only useful once, so the number stays and the reasoning is one click away. `details`
+// rather than a tooltip, because a tooltip is unreachable on a phone.
 function CompatLine ({ list, caps }) {
   const t = tally(list, caps)
   if (!t.total) return null
 
   const plays = t.play + t.repackaged
-  if (plays === t.total) {
-    return (
-      <p class='hint'>
-        All {t.total} of these play here{t.repackaged ? `, ${t.repackaged} of them repackaged on the way` : ''}.
-      </p>
-    )
-  }
+  // Nothing to report when everything works. Silence is the right amount of interface
+  // for good news.
+  if (plays === t.total && !t.unknown) return null
+
   return (
-    <p class='hint'>
-      <b>{plays}</b> of these {t.total} play in this browser
-      {t.repackaged ? ` (${t.repackaged} repackaged as they stream)` : ''}
-      {t.refuse ? `. ${t.refuse} will not: this browser cannot decode what is inside them, and repackaging changes the wrapper, never the picture` : ''}
-      {t.unknown ? `. ${t.unknown} did not say what is inside them` : ''}.
-    </p>
+    <details class='compat'>
+      <summary>
+        <b>{plays}</b> of {t.total} play in this browser
+      </summary>
+      <div class='hint'>
+        {t.repackaged > 0 && (
+          <p>{t.repackaged} of them are repackaged as they stream, because your browser will
+            not open the file as it is on disk. The picture is never re-encoded.</p>
+        )}
+        {t.refuse > 0 && (
+          <p>{t.refuse} will not play here: your browser cannot decode what is inside them.
+            Repackaging changes the wrapper and never the picture, so those need re-encoding,
+            which this version does not do. They play on a phone.</p>
+        )}
+        {t.unknown > 0 && <p>{t.unknown} did not say what is inside them, so they may play.</p>}
+      </div>
+    </details>
   )
 }
 
@@ -126,12 +142,37 @@ function useList (query, deps) {
   return { items, cursor, busy, err, more: () => fetchPage(cursor) }
 }
 
+const VIEW_KEY = 'pearcinema.episodeview'
+const loadView = () => {
+  try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'list' } catch { return 'list' }
+}
+
+// List or grid for a season's episodes, and it is a real choice rather than a
+// preference we could pick for people: a list reads best when episodes are titled
+// and numbered, which is most television, and a grid reads best when they have
+// thumbnails worth looking at. Remembered in the BROWSER - how somebody likes a list
+// to look is not the host's business and does not belong in its data dir.
+function ViewToggle ({ view, onChange }) {
+  return (
+    <div class='viewtoggle' role='group' aria-label='How to show episodes'>
+      <button class={view === 'list' ? 'on' : ''} onClick={() => onChange('list')} aria-label='List'>☰ List</button>
+      <button class={view === 'grid' ? 'on' : ''} onClick={() => onChange('grid')} aria-label='Grid'>▦ Grid</button>
+    </div>
+  )
+}
+
 export default function Library ({ state, caps, search, onPlay }) {
   // 'films' | 'shows', and where we are inside the show tree.
   const [root, setRoot] = useState('films')
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
   const [hits, setHits] = useState(null)
+  const [view, setView] = useState(loadView)
+
+  const chooseView = (v) => {
+    setView(v)
+    try { localStorage.setItem(VIEW_KEY, v) } catch {}
+  }
 
   const stats = state.stats || {}
 
@@ -243,22 +284,42 @@ export default function Library ({ state, caps, search, onPlay }) {
 
         {season && (
           <>
-            <h2>{season.title}</h2>
+            <div class='row' style='justify-content:space-between'>
+              <h2>{season.title}</h2>
+              <ViewToggle view={view} onChange={chooseView} />
+            </div>
             <CompatLine list={episodes.items} caps={caps} />
             <ArtNote list={episodes.items} source={state.source?.kind} />
-            <div class='rows' style='margin-top:.8rem'>
-              {episodes.items.map(e => {
-                const flag = flagFor(verdictFor(e, caps))
-                return (
-                  <button class='eprow' key={e.id} onClick={() => onPlay(e, episodes.items)}>
-                    <span class='code'>{episodeCode(e) || '-'}</span>
-                    <span class='t'>{e.title}</span>
-                    {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
-                    {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
-                  </button>
+
+            {view === 'grid'
+              ? (
+                <div class='grid' style='margin-top:.8rem'>
+                  {episodes.items.map(e => (
+                    <Poster
+                      key={e.id}
+                      item={e}
+                      caps={caps}
+                      label={episodeCode(e)}
+                      onOpen={() => onPlay(e, episodes.items)}
+                    />
+                  ))}
+                </div>
                 )
-              })}
-            </div>
+              : (
+                <div class='rows' style='margin-top:.8rem'>
+                  {episodes.items.map(e => {
+                    const flag = flagFor(verdictFor(e, caps))
+                    return (
+                      <button class='eprow' key={e.id} onClick={() => onPlay(e, episodes.items)}>
+                        <span class='code'>{episodeCode(e) || '-'}</span>
+                        <span class='t'>{e.title}</span>
+                        {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
+                        {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+                )}
             {episodes.busy && <div class='empty'>Loading…</div>}
             {episodes.cursor && <button class='ghost' onClick={episodes.more} style='margin-top:1rem'>Load more</button>}
           </>
