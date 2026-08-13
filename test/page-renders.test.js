@@ -440,6 +440,13 @@ test('THE ONE YOU ARE IN THE MIDDLE OF IS MARKED, not just counted', async (t) =
   assert.ok(tile, 'the show is on screen')
   assert.ok(tile.classList.contains('started'), 'and it says it is the one being watched')
 
+  // THE RING IS INSIDE THE PICTURE, not around the whole tile. Around the tile it
+  // encloses the caption too, which reads as a focus rectangle rather than a mark of
+  // progress - Tim sent a screenshot of exactly that.
+  const ring = tile.querySelector('.ring')
+  assert.ok(ring, 'the ring is there')
+  assert.equal(ring.parentElement.className, 'art', 'and it is drawn on the artwork')
+
   // The same bar as a half-watched film, meaning the same thing at a different scale:
   // four episodes of ten.
   assert.equal(tile.querySelector('.resumebar i').style.width, '40%')
@@ -463,6 +470,7 @@ test('a show nobody has started is counted but not marked', async (t) => {
 
   const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
   assert.equal(tile.classList.contains('started'), false)
+  assert.equal(tile.querySelector('.ring'), null, 'and no ring on something nobody has begun')
   assert.equal(tile.querySelector('.resumebar'), null, 'and no bar, because there is nothing to show')
 })
 

@@ -17,13 +17,34 @@ import { useState, useEffect, useMemo } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 
-function Art ({ item }) {
+// The ring that says "this is the one you are in the middle of".
+//
+// INSIDE THE ART, not around the whole tile. The tile is a picture with a caption
+// under it, and an outline around both draws a square box around the words as well -
+// which is what the first attempt did, and it looked like a focus rectangle rather
+// than a mark of progress (Tim, 2026-08-13, with a screenshot).
+//
+// The travelling highlight is a conic gradient on a square child, spun by transform
+// and masked to a 2px rim - deliberately not an animated `@property` angle, which is
+// newer than everything else this page relies on. A steady low ring sits under it so
+// the whole border is always faintly there rather than only where the arc is.
+function Ring () {
+  return <span class='ring' aria-hidden='true'><i /></span>
+}
+
+function Art ({ item, started = false }) {
   const [bad, setBad] = useState(false)
   if (!item.artId || bad) {
-    return <div class='art'>{item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}</div>
+    return (
+      <div class='art'>
+        {started && <Ring />}
+        {item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}
+      </div>
+    )
   }
   return (
     <div class='art'>
+      {started && <Ring />}
       <img src={'/api/art?id=' + encodeURIComponent(item.artId)} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
@@ -99,7 +120,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
       onClick={open}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } }}
     >
-      <Art item={item} />
+      <Art item={item} started={started} />
       {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
       {badge && <span class='next'>{badge}</span>}
 

@@ -462,6 +462,45 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* THE ONE YOU ARE IN THE MIDDLE OF. A count of what is left cannot say it - a season
  * nobody has touched and a season half done both just show a number - and the one
- * somebody is actually watching is the one they came to the page for. */
-.poster.started { box-shadow: 0 0 0 2px var(--accent) }
-.poster.started .art { border-radius: 8px 8px 0 0 }
+ * somebody is actually watching is the one they came to the page for.
+ *
+ * ON THE PICTURE, NOT THE WHOLE TILE. The first attempt put a box-shadow on `.poster`,
+ * which wraps the caption too: a square outline around the artwork AND the words under
+ * it, reading as a focus rectangle rather than a mark of progress.
+ *
+ * A steady low ring, with a bright arc travelling around it. The arc is a conic
+ * gradient on a square child spun by `transform` and masked to a 2px rim - not an
+ * animated `@property` angle, which is newer than anything else this page leans on. */
+.poster.started .art { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)) }
+
+.ring {
+  position: absolute; inset: 0; border-radius: inherit;
+  overflow: hidden; pointer-events: none; z-index: 3;
+  /* Only the rim: the box minus its own middle. */
+  padding: 2px;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.ring i {
+  position: absolute; left: 50%; top: 50%;
+  width: 180%; aspect-ratio: 1; translate: -50% -50%;
+  background: conic-gradient(
+    transparent 0turn .58turn,
+    color-mix(in srgb, var(--accent) 70%, transparent) .70turn,
+    #fff .75turn,
+    color-mix(in srgb, var(--accent) 70%, transparent) .80turn,
+    transparent .92turn 1turn
+  );
+  animation: pc-trace 3.2s linear infinite;
+}
+@keyframes pc-trace { to { rotate: 360deg } }
+
+/* A moving outline is an attention-getter, and somebody who has asked for less of
+ * that gets the steady ring on its own rather than nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .ring { background: var(--accent) }
+  .ring i { display: none }
+}
