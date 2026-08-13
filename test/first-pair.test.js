@@ -342,16 +342,25 @@ test('a renamed library reaches every paired phone, and survives a restart', asy
   conn.destroy()
 
   // The persisted rename wins over the constructor default on the next start.
+  //
+  // The second host's lifecycle is managed INLINE rather than in a t.after hook.
+  // It opens a Corestore in the same directory the outer hook is about to delete,
+  // and a store that is still open when the delete runs is an ENOTEMPTY on
+  // store/db - RocksDB has files open that no amount of retrying will release.
+  // That is exactly how this test failed: intermittently, in cleanup, pointing at
+  // a directory rather than at anything it was testing.
   const dir = h.dataDir
   await h.close()
+
   const again = new PearCinemaHost({
     dataDir: dir,
     libraryName: 'ignored default',
     bootstrap: testnet.bootstrap,
     log: () => {}
   })
-  t.after(() => again.close())
   assert.equal(again.libraryName, 'Tim\'s Films')
+  await again.ready()
+  await again.close()
 })
 
 test('a host with NO SOURCE still starts, still pairs, and says so', async (t) => {

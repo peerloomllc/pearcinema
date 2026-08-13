@@ -83,11 +83,23 @@ test('the combination is what gets counted, because the combination is what deci
   assert.equal(h264[1], 166 + 26)
 })
 
-test('resolutions bucket the way a person would say them', () => {
-  assert.equal(bucket(2160), '4K')
-  assert.equal(bucket(1080), '1080p')
-  assert.equal(bucket(720), '720p')
-  assert.equal(bucket(480), 'SD')
+test('RESOLUTION IS BUCKETED BY WIDTH, or every scope film is filed as 720p', () => {
+  // Caught on the first real library. A 1080p copy of 2001: A Space Odyssey is
+  // 1920x864 - the film is 2.20:1 and the bars are cropped rather than encoded - so
+  // a height-based bucket called it 864p and filed it under 720p. It would do that
+  // to most of cinema.
+  assert.equal(bucket({ width: 1920, height: 864 }), '1080p')
+  assert.equal(bucket({ width: 3840, height: 1600 }), '4K')
+
+  // Television is 16:9 and reads the same either way, which is why height LOOKED
+  // right until the library was films.
+  assert.equal(bucket({ width: 1920, height: 1080 }), '1080p')
+  assert.equal(bucket({ width: 1280, height: 720 }), '720p')
+  assert.equal(bucket({ width: 720, height: 576 }), 'SD')
+
+  // Height is the fallback for a source that reports only one dimension.
+  assert.equal(bucket({ height: 1080 }), '1080p')
+  assert.equal(bucket({}), '(unknown)')
   assert.equal(bucket(null), '(unknown)')
 })
 

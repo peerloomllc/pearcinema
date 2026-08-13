@@ -123,10 +123,33 @@ function media (m = {}) {
 // A short, honest label for what this file is, for the UI and the operator's own
 // eyes. NOT a playability verdict - we do not have the data to make one yet, and
 // pretending otherwise would answer the exact question v1 was built to ask.
+// RESOLUTION IS NAMED BY WIDTH, NOT HEIGHT, AND FOR FILMS THAT IS NOT A DETAIL.
+//
+// Caught on the first real library, 2026-08-12. A 1080p copy of 2001: A Space
+// Odyssey is 1920x864, because the film is 2.20:1 and the black bars are cropped
+// off rather than encoded. Bucketing by height called it "864p" and filed it as
+// 720p - and it would do the same to every scope-ratio film ever released, which
+// is most of the interesting ones.
+//
+// Television is mostly 16:9 and reads the same either way, so height LOOKS correct
+// right up until the library is films. Width is what a release is actually named
+// by: 1920 wide is 1080p whatever shape the picture is.
+//
+// Height is the fallback, for a source that reports one dimension and not the other.
+function resolutionLabel ({ width, height } = {}) {
+  const w = width || (height ? Math.round(height * 16 / 9) : null)
+  if (!w) return null
+  if (w >= 3000) return '4K'
+  if (w >= 1800) return '1080p'
+  if (w >= 1200) return '720p'
+  return 'SD'
+}
+
 function mediaLabel (m) {
   if (!m) return ''
   const parts = []
-  if (m.height) parts.push(m.height >= 2000 ? '4K' : `${m.height}p`)
+  const res = resolutionLabel(m)
+  if (res) parts.push(res)
   if (m.videoCodec) parts.push(m.videoCodec.toUpperCase())
   if (m.audioCodec) parts.push(m.audioCodec.toUpperCase())
   if (m.container) parts.push(m.container.toUpperCase())
@@ -401,6 +424,7 @@ module.exports = {
   normalize,
   media,
   mediaLabel,
+  resolutionLabel,
 
   episodeCode,
   displayTitle,

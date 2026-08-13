@@ -2,7 +2,47 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-12 (latest) - the operator brings their own metadata API key
+## 2026-08-12 (latest) - FIRST MEASUREMENT: direct-play-only is well founded, and remux beats transcode
+Tier: T2 (a measurement that shapes build order, not a change of scope)
+Context: v1 ships direct-play only precisely so this could be measured instead of guessed.
+First real run of `--codec-report`, against Tim's Umbrel Jellyfin (10.11.11), 16 films,
+17.3 GB. No TV episodes yet, which is the gap in this measurement.
+
+```
+mp4 / h264 / aac    14 (88%)
+mkv / h264 / aac     1 (6%)
+mp4 / vp9  / aac     1 (6%)
+```
+
+What it says, taking Android's ExoPlayer and iOS's AVPlayer as the two targets:
+
+- **Android direct-plays 100% of it.** ExoPlayer handles all three combinations,
+  MKV and VP9 included. The proposal's Android-first sequencing is validated by data
+  rather than by convenience.
+- **iOS direct-plays 88%.** The two misses fail for DIFFERENT reasons, and the difference
+  is the whole point:
+  - `mkv / h264 / aac` fails on the **container only**. The streams inside are already
+    what an iPhone wants. That is a REMUX - rewrap, no re-encode - which is cheap enough
+    to run on a Pi-class box and is not what the capacity doc's warnings are about.
+  - `mp4 / vp9 / aac` fails on the **codec**, and needs real transcoding.
+
+**Consequence for build order: remux earns its place before transcode**, and by a wide
+margin. One file in sixteen needs an encoder; the other miss needs a container rewrite.
+Building the transcode pipeline first would have been building the expensive thing for
+6% of a library.
+
+**The negative result matters as much.** There is no H.265 and no TrueHD or DTS anywhere
+in this library - the exact combination the proposal named as the underestimated one
+(`MKV + H.265 + TrueHD does not direct-play on iOS at all`) does not appear once.
+
+**Do not over-read this.** Sixteen films is a small sample, there are zero TV episodes,
+and this library looks like downloaded content rather than ripped discs. Ripped Blu-rays
+are exactly where H.265, TrueHD, DTS and PGS subtitles live. So this does not retire the
+worry; it says Tim's current library does not exercise it, and that a client built against
+this data will meet the hard cases later rather than never. Re-run when there is TV in
+there and when a disc-ripped collection exists to point at.
+
+## 2026-08-12 - the operator brings their own metadata API key
 Tier: T2
 Context: the opt-in online metadata pull needs a credential. Ship a PeerLoom one, or ask
 the operator for theirs.

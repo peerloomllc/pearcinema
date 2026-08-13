@@ -29,12 +29,12 @@ function top (map, limit = 20) {
     .slice(0, limit)
 }
 
-function bucket (height) {
-  if (!height) return '(unknown)'
-  if (height >= 2000) return '4K'
-  if (height >= 1000) return '1080p'
-  if (height >= 700) return '720p'
-  return 'SD'
+// By WIDTH, not height. A 1080p film is 1920 wide and often well under 1080 tall,
+// because scope ratios are cropped rather than letterboxed into the file - so a
+// height-based bucket files most of cinema as 720p. See items.resolutionLabel,
+// which this defers to so the report and the item label can never disagree.
+function bucket (media) {
+  return items.resolutionLabel(media || {}) || '(unknown)'
 }
 
 // Walk every leaf in the library. Both roots: films are a flat list, episodes hang
@@ -91,7 +91,7 @@ function summarize (leaves) {
     bump(containers, m.container)
     bump(videoCodecs, m.videoCodec)
     bump(audioCodecs, m.audioCodec)
-    bump(resolutions, bucket(m.height))
+    bump(resolutions, bucket(m))
     bump(combos, `${m.container || '?'} / ${m.videoCodec || '?'} / ${m.audioCodec || '?'}`)
     bytes += m.size || 0
   }
