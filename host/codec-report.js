@@ -75,7 +75,12 @@ async function collect (adapter, { onProgress = () => {} } = {}) {
   return leaves
 }
 
-function summarize (leaves) {
+// `classified` says whether the caller actually knows a film from an episode. A
+// library walk through an adapter does; a flat ffprobe scan of a directory tree
+// does NOT - it sees files. Reporting "12197 films, 0 episodes" off a flat scan is
+// a confident lie about a library that is half television, so the split is only
+// printed when someone is in a position to know it.
+function summarize (leaves, { classified = true } = {}) {
   const containers = new Map()
   const videoCodecs = new Map()
   const audioCodecs = new Map()
@@ -98,6 +103,7 @@ function summarize (leaves) {
 
   return {
     total: leaves.length,
+    classified,
     movies: leaves.filter(l => l.type === 'movie').length,
     episodes: leaves.filter(l => l.type === 'episode').length,
     // A library whose source reports no media facts at all cannot answer the
@@ -126,7 +132,9 @@ function render (s) {
   // reads as a direct-play claim - which is the exact confusion this whole file is
   // written to avoid. These are the things you can press play on; whether the press
   // works is what the report cannot say.
-  out.push(`LIBRARY: ${s.total} items - ${s.movies} films, ${s.episodes} episodes, ${gb(s.bytes)}`)
+  out.push(s.classified
+    ? `LIBRARY: ${s.total} items - ${s.movies} films, ${s.episodes} episodes, ${gb(s.bytes)}`
+    : `LIBRARY: ${s.total} video files, ${gb(s.bytes)} (a flat scan - films and episodes are not told apart)`)
 
   if (s.unknownMedia) {
     out.push('')
