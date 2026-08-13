@@ -355,6 +355,17 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
   return (
     <div class='card'>
       <h3>Where the films are</h3>
+      {state.stats?.duplicates > 0 && (
+        <div class='banner bad'>
+          <b>Two of these folders hold the same {state.stats.duplicates === 1 ? 'file' : 'files'}.</b>{' '}
+          {state.stats.duplicates} {state.stats.duplicates === 1 ? 'file is' : 'files are'} in more than one
+          of your folders, so only one copy of each is reachable.
+          <div class='hint'>
+            Usually one folder is a copy of another, or one sits inside the other. Remove
+            whichever you do not want and rescan.
+          </div>
+        </div>
+      )}
       {state.sourceError && (
         <div class='banner bad'>
           <b>The source is not answering.</b> {state.sourceError}

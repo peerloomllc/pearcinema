@@ -82,7 +82,7 @@ const ROUTES = {
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
 // back the document.
-async function open () {
+async function open (state = STATE) {
   const errors = []
   const vc = new VirtualConsole()
   vc.on('jsdomError', e => errors.push(e))
@@ -97,7 +97,7 @@ async function open () {
   const win = dom.window
   win.fetch = async (url) => {
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
-    const body = key ? ROUTES[key] : {}
+    const body = key === '/api/state' ? state : (key ? ROUTES[key] : {})
     return { status: 200, ok: true, json: async () => body }
   }
 
@@ -253,4 +253,19 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   assert.equal(rows.length, 4, 'the three it had plus the one just picked')
   assert.equal(rows.every(r => r.querySelector('select')), true, 'every folder can say what it holds')
   assert.equal(rows[3].querySelector('select').value, 'auto')
+})
+
+test('two folders holding the same file is said out loud, not absorbed', async (t) => {
+  // A leaf id is minted from the path relative to its root, so two roots holding the
+  // same collection mint the same id and only one copy stays reachable. Silence there
+  // looks exactly like a library with fewer films in it than the drive has.
+  const { dom, doc, win, text } = await open({ ...STATE, stats: { ...STATE.stats, duplicates: 3 } })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.match(text(), /hold the same files/)
+  assert.match(text(), /only one copy of each is reachable/)
 })
