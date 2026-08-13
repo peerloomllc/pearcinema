@@ -2,17 +2,20 @@
 //
 // The PearCinema host daemon.
 //
-// Starts the library, prints the host key, and - with `--pair` - opens a pairing
-// window and draws the QR in the terminal. That last part is the whole of "first
-// pair" before there is a dashboard: the operator runs this, points a phone at the
-// code, and the phone is in.
+// Starts the library, serves the web interface, and prints the host key. `--pair`
+// still opens a pairing window and draws the QR in the terminal, which is how first
+// pair worked before there was a page to draw it on and is still the right answer
+// over ssh.
 
 const path = require('path')
 const z32 = require('z32')
 const qrcode = require('qrcode-terminal')
 
+const { resolveDashboardPassword } = require('@peerloom/host')
+
 const { PearCinemaHost } = require('./server')
 const { codecReport } = require('./codec-report')
+const { startDashboard } = require('./ui/server')
 
 const USAGE = `
 PearCinema host
@@ -23,6 +26,12 @@ PearCinema host
   --owner             make it an OWNER window (a device paired through it can manage the library)
   --guest <minutes>   make it a GUEST window, access expiring after this many minutes
   --dht-port <port>   pin the DHT's UDP port (only needed behind a manual port-forward)
+
+  --http-host <addr>  where the web interface listens (PEARCINEMA_HTTP_HOST, default 127.0.0.1)
+  --http-port <port>  its port (PEARCINEMA_HTTP_PORT, default 8742)
+  --password <pw>     the web interface's password (PEARCINEMA_PASSWORD).
+                      REQUIRED on a non-loopback bind - one is generated and saved if absent.
+  --no-http           do not serve the web interface at all
 
   --jellyfin <url>    point the library at a Jellyfin or Emby server and save it
   --user <name>       Jellyfin username
@@ -142,6 +151,53 @@ async function main () {
     })
   }
 
+  // THE WEB INTERFACE. Everything above this line was reachable only by a phone that
+  // had already been paired, which on a packaged install is a chicken-and-egg
+  // problem: PearTune pairs by scanning a QR on its dashboard, and until this
+  // existed an Umbrel install of PearCinema could be started and never actually
+  // reached.
+  //
+  // Started AFTER host.ready(), so the page never renders a library that has not
+  // finished coming up.
+  let dashboard = null
+  if (!arg('no-http')) {
+    const bind = arg('http-host', process.env.PEARCINEMA_HTTP_HOST || '127.0.0.1')
+    const httpPort = Number(arg('http-port', process.env.PEARCINEMA_HTTP_PORT || 8742))
+    const given = arg('password', process.env.PEARCINEMA_PASSWORD || '')
+
+    // GENERATE-AND-PRINT rather than refuse. A platform install (Umbrel, Start9)
+    // mints ${APP_PASSWORD} and takes the 'explicit' path; a bare `docker run` on a
+    // NAS has no platform to mint one, and there "refuse to start" would just mean
+    // "the install is broken". So a non-loopback bind with no password gets one
+    // generated and persisted 0600 to the data dir. requireSafeBind still runs
+    // inside startDashboard, so the fail-closed invariant is intact - it is simply
+    // never reached now.
+    const { password, source } = resolveDashboardPassword({
+      password: typeof given === 'string' ? given : '',
+      bind,
+      dataDir
+    })
+
+    const dash = dashboard = await startDashboard({
+      host,
+      bind,
+      port: httpPort,
+      password,
+      passwordSource: source,
+      version: require('../package.json').version,
+      log
+    })
+
+    log('http:ready', { url: dash.url, locked: !!password })
+    if (source === 'generated') {
+      process.stdout.write(
+        `\n  PearCinema's web page is at ${dash.url}\n` +
+        `  Password: ${password}\n` +
+        `  (saved in ${path.join(dataDir, 'dashboard-password')} - it will not be printed again)\n\n`
+      )
+    }
+  }
+
   if (arg('pair')) {
     const link = host.startPairing({
       owner: !!arg('owner'),
@@ -155,6 +211,7 @@ async function main () {
   // The pairing window closes itself after five minutes; the host keeps running.
   const shutdown = async (sig) => {
     log('host:shutdown', { sig })
+    if (dashboard) await dashboard.close().catch(() => {})
     await host.close()
     process.exit(0)
   }

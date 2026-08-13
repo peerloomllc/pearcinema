@@ -1,0 +1,15 @@
+{
+  "//": [
+    "NOT A PACKAGE. This exists for one reason: it marks host/ui/app/ as ESM so",
+    "Node can `await import()` the pure modules in here (playback.js, setup.js,",
+    "api.js) from the CommonJS test suite. Without it Node reads the repo's",
+    "package.json, sees no `type`, treats a .js file as CommonJS and throws on the",
+    "first `export`.",
+    "",
+    "The rules in playback.js decide which of somebody's films the player will",
+    "refuse and what it says about them. That is exactly the kind of logic that",
+    "must be testable without a browser, and this is the whole cost of making it so."
+  ],
+  "type": "module",
+  "private": true
+}

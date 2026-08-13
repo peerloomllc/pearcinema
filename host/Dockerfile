@@ -64,7 +64,15 @@ ENV PEARCINEMA_DATA=/data \
 VOLUME /data
 
 # A HEALTHCHECK that only proves the process is up would be worse than none - the
-# failure mode that matters is a host that is running and unreachable. Left out
-# until the dashboard exists to answer one honestly.
+# failure mode that matters is a host that is running and unreachable. Now that the
+# web interface exists there is something honest to ask: it answers 200 with either
+# the login page or the app, and a 401 or a refused connection means the operator
+# genuinely cannot get in.
+#
+# 127.0.0.1 rather than the bind address, because network_mode: host means loopback
+# reaches it whatever PEARCINEMA_HTTP_HOST says. start-period covers the folder scan,
+# which on a 3 TB drive is minutes on a cold cache.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+  CMD node -e "require('http').get({host:'127.0.0.1',port:process.env.PEARCINEMA_HTTP_PORT||8742,path:'/'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 ENTRYPOINT ["node", "host/index.js"]

@@ -2,7 +2,70 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-12 (latest) - THE WHOLE LIBRARY, 12,197 files: iOS NEEDS REMUX, it is not optional
+## 2026-08-13 (latest) - the web interface is the operator's dashboard WITH playback, and the player is one transport rather than a second implementation
+Tier: T2
+Context: the TODO item asked the question outright and said to answer it before
+building: is this the operator's dashboard with playback added, or a genuine second
+client? And a player needs bytes, which the phone already has a path for.
+
+**Choice (a): the dashboard with playback added.** No accounts, no per-user state, no
+resume, no separate client identity. The browser is the OPERATOR - the person holding the
+dashboard password - not a device with a grant.
+
+Why: the cheap answer is also the correct one here, and the expensive one would have been
+wrong rather than merely dear. A "second client" implies a subject: somebody whose
+watch state, permissions and revocability are tracked. Every one of those already has an
+owner in this system (the grant store, `resume.*`, the pairing windows) and duplicating
+them for browsers would mean two answers to "who is watching" - which is precisely the
+kind of divergence the shared-host extraction exists to prevent.
+
+**The consequence to keep in view: revoke does not reach a browser, and is not supposed
+to.** A browser holds a session cookie, not a grant, so the revoke-kills-live-connections
+rule says nothing about it. Anyone reading "revoke cuts access within a second" should
+read it as being about paired devices. Logged in TODO as a question worth revisiting, not
+as a bug.
+
+**Choice (b): `/api/stream` is HTTP wrapped around the SAME `host.openStream` the phone's
+`media.stream` calls.** Not an adapter call of its own.
+
+Why: the range arithmetic is the part that decides whether seeking inside a two-hour film
+works, and the id-to-path guard is the part that decides whether `media.stream` is a media
+server or arbitrary file read. Two copies of either is one copy that gets fixed and one
+that does not. A test asserts the browser's `Range` header reaches the adapter as the same
+`{offset, length}` the P2P path produces, so the claim is pinned rather than intended.
+
+**Choice (c): a built Preact app, not a hand-written page.** The donor's dashboard was a
+700-line template literal until a syntax error inside the string produced a completely
+blank control plane that every test passed - because a string is a string, and nothing
+ever parsed it. Building catches that class at build time. It does NOT catch a runtime
+error in the first render, which is the same blank page from a different cause, so there
+is now a test that loads the committed HTML into a real DOM and clicks through it.
+Preact rather than React purely on size: 49 kb against the donor's 440 kb, same escaping
+behaviour, and the host had no other client-side dependency pulling React in.
+
+### The finding that makes this more than a convenience: a browser is a second compatibility engine
+
+The player refuses most of a real collection. That is not a defect in it - Chrome and
+Safari will not open Matroska, and per the measurement below 83% of the library is
+Matroska. **Two independent engines, a browser and an iPhone, refusing the same 83% of
+files at the container for the same reason is evidence rather than a prediction**, and it
+is the strongest argument yet that remux is the release and not an optimisation.
+
+So the refusal is treated as a FEATURE OF THE UI rather than something to hide:
+
+- Every list carries a count of how many of these files *this* browser can play, computed
+  from `canPlayType` rather than from our own opinion of what browsers do.
+- Every refusal names the container, says the file is fine, and points at remux.
+- A codec the browser cannot decode is a refusal; an AUDIO codec it cannot decode is
+  "picture, no sound" and still plays. Those are genuinely different outcomes and
+  collapsing them would have hidden DTS and TrueHD files that are perfectly watchable.
+- "Play anyway" is always offered, because `canPlayType` answers about a codec family and
+  can be wrong in both directions. A wrong refusal should cost one click.
+
+The rules live in `host/ui/app/playback.js` with the browser injected, so they are unit
+tested against what Chrome would answer and what Edge would answer without opening either.
+
+## 2026-08-12 - THE WHOLE LIBRARY, 12,197 files: iOS NEEDS REMUX, it is not optional
 Tier: T2 (a measurement that revises build order and one of the proposal's framings)
 Context: the Jellyfin measurement below was 25 files. This is Tim's actual collection on
 the Elements drive, scanned file by file with ffprobe by `host/probe.js` - no Jellyfin in
