@@ -89,6 +89,7 @@ class PearCinemaHost {
     this.adapter = buildAdapter(this.source, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
+      dataDir: this.dataDir,
       log
     })
   }
@@ -103,6 +104,7 @@ class PearCinemaHost {
     const next = buildAdapter(cfg, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
+      dataDir: this.dataDir,
       log: this.log
     })
     const leaves = await next.scan() // throws on a bad URL, bad credentials, no folder
@@ -124,6 +126,7 @@ class PearCinemaHost {
     const probe = buildAdapter(cfg, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
+      dataDir: this.dataDir,
       log: () => {}
     })
     const leaves = await probe.scan()

@@ -27,6 +27,11 @@ PearCinema host
   --jellyfin <url>    point the library at a Jellyfin or Emby server and save it
   --user <name>       Jellyfin username
   --pass <password>   Jellyfin password
+
+  --folder <dir>      point the library at a folder of films and shows and save it
+                      (repeatable: --folder /a/Movies --folder /b/TV)
+  --rescan            walk the folder again instead of using the cached scan
+
   --test              check the source works WITHOUT saving it, then exit
 
   --codec-report      walk the library, print what is actually in it, and exit
@@ -64,6 +69,28 @@ async function main () {
   // Configuring or checking a source happens BEFORE the host listens. There is
   // nothing to serve until the operator has told us where the films are, and a
   // --test run should never announce itself on the DHT.
+  // Repeatable, because a real collection is `Movies` on one disk and `TV Shows`
+  // on another more often than it is one tidy tree.
+  const folders = process.argv.reduce((out, a, i) => {
+    if (a === '--folder' && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')) out.push(process.argv[i + 1])
+    return out
+  }, [])
+
+  if (folders.length) {
+    const cfg = { kind: 'folder', roots: folders }
+    if (arg('test')) {
+      try {
+        log('source:ok', await host.testSource(cfg))
+      } catch (e) {
+        process.stderr.write(`source failed: ${e.message}\n`)
+        process.exitCode = 1
+      }
+      await host.close()
+      return
+    }
+    log('source:saved', await host.setSource(cfg))
+  }
+
   const jellyfin = arg('jellyfin')
   if (typeof jellyfin === 'string') {
     const cfg = {
@@ -90,7 +117,7 @@ async function main () {
   }
 
   if (arg('codec-report')) {
-    await host.adapter.scan()
+    await host.adapter.scan(arg('rescan') ? { force: true } : {})
     const { text } = await codecReport(host.adapter, {
       onProgress: (n) => { if (n % 500 === 0) log('report:walking', { items: n }) }
     })
