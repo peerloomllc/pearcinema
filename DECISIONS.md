@@ -2,7 +2,99 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-12 (latest) - FIRST MEASUREMENT: direct-play-only is well founded, and remux beats transcode
+## 2026-08-12 (latest) - THE WHOLE LIBRARY, 12,197 files: iOS NEEDS REMUX, it is not optional
+Tier: T2 (a measurement that revises build order and one of the proposal's framings)
+Context: the Jellyfin measurement below was 25 files. This is Tim's actual collection on
+the Elements drive, scanned file by file with ffprobe by `host/probe.js` - no Jellyfin in
+the path, because the collection was never in Jellyfin.
+
+**Read the folder split before the totals, because the totals lie.**
+
+| Folder | Files | Size |
+| --- | --- | --- |
+| Home Videos | 9,211 | ~1 TB |
+| TV Shows | 2,746 | 2.0 TB |
+| Movies | 240 | 1.0 TB |
+
+The first pass reported the whole tree at once and produced a cheerful "76% is
+mov/h264/aac". **That was home videos** - phone recordings, uniformly the friendliest
+format there is - drowning out the actual library three to one. A media player's
+compatibility question is about the media library, so the numbers below exclude Home
+Videos and cover the **2,986 films and episodes**.
+
+### The container is the problem, and it is nearly everything
+
+```
+MOVIES (240)                       TV SHOWS (2,746)
+matroska  220 (92%)                matroska  2262 (82%)
+mov        20 (8%)                 mov        266 (10%)
+                                   avi        218 (8%)
+```
+
+**83% of the media library is in a container an iPhone will not open.** Not a codec it
+cannot decode - a box it cannot unwrap.
+
+### What that means per platform
+
+- **Android direct-plays essentially all of it.** ExoPlayer handles Matroska, AVI, HEVC and
+  MPEG-4 Part 2. The genuine misses are DTS (14 files) and TrueHD (5), and AC-3/E-AC-3
+  (~620) is device-dependent. Call it 99%.
+- **iOS direct-plays about 10%** - the 286 `mov` files and nothing else.
+
+**A direct-play-only iOS build would show a user one tenth of their own collection.**
+That is not a shippable iOS experience, and it is the finding that matters most here.
+
+### The repair ladder, cheapest first
+
+- **Remux only** (rewrap, no re-encode): the large majority. Every Matroska file whose
+  streams an iPhone already accepts - H.264 or HEVC video with AAC audio - which is 190 of
+  the movies and 1,635 of the episodes. **~61% of the library is a container rewrite and
+  nothing else.**
+- **Remux plus AUDIO-only re-encode**: ~650 files, dominated by HEVC+AC-3 television.
+  Audio is a rounding error against video to encode, so this is still cheap. **Uncertain by
+  how much**: Apple does support Dolby Digital and Dolby Digital Plus in MP4, so a good part
+  of this bucket may survive a plain remux. The client settles it; do not plan around either
+  answer.
+- **Full video transcode**: the 218 AVI/MPEG-4-Part-2 files, 7% of the library, all in TV
+  Shows. The only bucket that needs a real encoder.
+
+**Consequence: remux is not an optimisation, it is the iOS release.** The order is
+container first, audio second, video encoding last - and video encoding could be skipped
+entirely for a long time without most of the library noticing.
+
+### HEVC was underestimated, exactly as the proposal warned
+
+**HEVC is 64% of the television library** (1,766 of 2,746). The proposal named it as the
+underestimated one and it was right. It is not a problem for Android or for iOS-in-MP4;
+it is a problem for anything that assumed H.264 and for any transcode sizing done on
+audio-era numbers.
+
+### Subtitles: the image-based case is common, not exotic
+
+```
+MOVIES: 232 PGS tracks across 240 films - about one per film, and only 57 SRT
+TV:     1,429 PGS against 2,715 SRT
+```
+
+The proposal said embedded PGS is image-based and forces a full transcode to burn in, so
+v1 lists it and refuses it. **On the Movies collection that refusal is the common case, not
+the edge case** - most film subtitle tracks here are the unusable kind. The saving grace is
+383 external `.srt` files on disk, which the folder adapter can serve directly and which do
+not need any of this.
+
+### And the bandwidth assumption was pessimistic
+
+44% of the whole tree is SD and exactly ONE file is 4K. The no-relay arithmetic assumed
+8 Mbps throughout. That assumption is safe as a worst case and wrong as a typical one,
+which is worth knowing before anyone sizes anything on it.
+
+### Do not over-read this either
+
+One person's collection. It skews toward television, and its Movies folder is small and
+disc-ripped where its TV is downloaded. What it does establish beyond argument is that
+**the container question dominates**, and that an iOS build without remux is not a product.
+
+## 2026-08-12 - FIRST MEASUREMENT (25 files, superseded above): direct-play-only is well founded, and remux beats transcode
 Tier: T2 (a measurement that shapes build order, not a change of scope)
 Context: v1 ships direct-play only precisely so this could be measured instead of guessed.
 Run against Tim's Umbrel Jellyfin (10.11.11): **1 film + 24 episodes, 30.1 GB**, one series
