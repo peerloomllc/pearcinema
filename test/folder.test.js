@@ -365,3 +365,94 @@ test('get answers by id and misses cleanly', async (t) => {
 test('the adapter refuses to be built without the protocol id factory', () => {
   assert.throws(() => new FolderAdapter({ roots: ['/x'] }), /needs the protocol id factory/)
 })
+
+// --- the Umbrel default -----------------------------------------------------
+//
+// Two things these have to get right, both learned the hard way in this repo:
+//
+//   1. A real PearCinemaHost builds a real HyperDHT. Left on the public bootstrap
+//      a unit test dials the actual network and keeps the process alive long after
+//      the assertions passed. Each gets a private testnet.
+//
+//   2. THE HOST IS CLOSED INLINE, not in a `t.after` hook. node:test runs
+//      after-hooks in REGISTRATION order, and `library()` registers its directory
+//      delete first - so a hook-registered close runs after the data directory is
+//      already gone, and RocksDB still holding files turns cleanup into an
+//      intermittent ENOTEMPTY that points at a directory rather than at anything
+//      under test. Exactly the failure first-pair.test.js had.
+
+async function envHost (dataDir) {
+  const createTestnet = require('hyperdht/testnet')
+  const { PearCinemaHost } = require('../host/server')
+  const testnet = await createTestnet(3)
+  const host = new PearCinemaHost({ dataDir, bootstrap: testnet.bootstrap, log: () => {} })
+  return {
+    host,
+    async close () {
+      await host.close()
+      await testnet.destroy()
+    }
+  }
+}
+
+// Set, run, restore - so one test's environment cannot leak into the next.
+async function withFolders (value, fn) {
+  const before = process.env.PEARCINEMA_FOLDERS
+  if (value === null) delete process.env.PEARCINEMA_FOLDERS
+  else process.env.PEARCINEMA_FOLDERS = value
+  try {
+    return await fn()
+  } finally {
+    if (before === undefined) delete process.env.PEARCINEMA_FOLDERS
+    else process.env.PEARCINEMA_FOLDERS = before
+  }
+}
+
+test('PEARCINEMA_FOLDERS gives a fresh install a library with no dashboard', async (t) => {
+  // On Umbrel every install is a fresh one, and without this a brand-new app shows
+  // an empty library and looks broken while the files sit right there in the mount.
+  const { root, dataDir } = await library(t)
+
+  await withFolders(`${path.join(root, 'Blurays')}:${path.join(root, 'The Legend of Korra')}`, async () => {
+    const { host, close } = await envHost(dataDir)
+    assert.equal(host.source.kind, 'folder')
+    assert.equal(host.source.roots.length, 2)
+    await close()
+  })
+})
+
+test('a folder in the env that this box does not have is dropped, not fatal', async (t) => {
+  const { root, dataDir } = await library(t)
+
+  await withFolders(`${path.join(root, 'Blurays')}:/definitely/not/mounted`, async () => {
+    const { host, close } = await envHost(dataDir)
+    assert.deepEqual(host.source.roots, [path.join(root, 'Blurays')])
+    await close()
+  })
+})
+
+test('NONE of them present falls back to empty rather than a source that throws', async (t) => {
+  const { dataDir } = await library(t)
+
+  await withFolders('/nope/one:/nope/two', async () => {
+    const { host, close } = await envHost(dataDir)
+    assert.equal(host.source.kind, 'empty', 'an empty library is honest; a source that cannot scan is not')
+    await close()
+  })
+})
+
+test('A SAVED SOURCE WINS over the environment', async (t) => {
+  // The container still sets the env var it was installed with, so an operator's
+  // dashboard choice has to survive a restart.
+  const { root, dataDir } = await library(t)
+  await fsp.writeFile(
+    path.join(dataDir, 'source.json'),
+    JSON.stringify({ kind: 'folder', roots: [path.join(root, 'Blurays')] })
+  )
+
+  await withFolders(root, async () => {
+    const { host, close } = await envHost(dataDir)
+    assert.deepEqual(host.source.roots, [path.join(root, 'Blurays')], 'the saved choice, not the env default')
+    await close()
+  })
+})

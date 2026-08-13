@@ -158,11 +158,38 @@ class PearCinemaHost {
     return next
   }
 
+  // A SAVED source wins over the environment, always. The operator's choice in the
+  // dashboard has to survive a restart even though the container still sets the env
+  // var it was installed with - the same precedence the library name uses.
+  //
+  // The env var exists for the install where nobody has opened a dashboard yet. On
+  // Umbrel that is every fresh install, and without it a brand-new app shows an
+  // empty library and looks broken while the files sit right there in the mount.
+  //
+  // Colon-separated, like PATH, because a real collection is `Movies` on one disk
+  // and `TV Shows` on another. Paths with spaces are fine; only `:` separates.
+  _sourceFromEnv () {
+    const raw = process.env.PEARCINEMA_FOLDERS
+    if (!raw) return null
+    const roots = raw.split(':').map(s => s.trim()).filter(Boolean)
+    if (!roots.length) return null
+    // Only the ones that actually exist. A default that lists a mount this box does
+    // not have would make every scan throw "not readable" on a library that is
+    // otherwise fine.
+    const present = roots.filter(r => { try { return fs.statSync(r).isDirectory() } catch { return false } })
+    if (!present.length) {
+      this.log('source:env-folders-missing', { roots })
+      return null
+    }
+    this.log('source:from-env', { roots: present.length })
+    return { kind: 'folder', roots: present }
+  }
+
   _readSource () {
     try {
       return JSON.parse(fs.readFileSync(path.join(this.dataDir, 'source.json'), 'utf8'))
     } catch {
-      return { kind: 'empty' }
+      return this._sourceFromEnv() || { kind: 'empty' }
     }
   }
 

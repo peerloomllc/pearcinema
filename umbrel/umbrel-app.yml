@@ -1,0 +1,72 @@
+manifestVersion: 1
+id: peerloom-pearcinema
+name: PearCinema
+tagline: Your films and shows, playable anywhere - and shareable with family
+category: media
+version: "0.1.0"
+port: 8742
+description: >-
+  Watch the films and shows on your Umbrel from anywhere, without exposing your
+  server to the internet.
+
+
+  PearCinema connects your phone straight to this machine over an encrypted
+  peer-to-peer connection (the Hypercore Protocol). No port forwarding, no VPN, no
+  dynamic DNS, no account, and no copy of your library in anyone's cloud. Your files
+  never leave your hardware: they stream through the live connection while they play,
+  and you can skip to any point in a film without downloading it first.
+
+
+  It reads your library where it already is. Point it at the Jellyfin or Emby you
+  already run and it uses that - your posters, your descriptions, your seasons and
+  episodes. Or point it at a plain folder of files and PearCinema reads them itself:
+  it works out films from shows, sorts episodes into seasons, and picks up the
+  descriptions and posters that Kodi, Sonarr or Radarr already left on the disk. That
+  means a folder is a real library rather than a list of filenames - and it needs no
+  internet lookup and no account with anyone, so nothing about what you own leaves
+  this machine.
+
+
+  YOU decide who gets in. Every device that pairs appears here with a name it chose
+  and a person it belongs to. Revoke a device and playback stops within a second,
+  mid-film - not "on next login". Revoke a person and every device they hold dies at
+  once. There are no shared passwords or bearer tokens anywhere in the design: every
+  connection is authenticated by the device's own key.
+
+
+  That is what makes SHARING safe. Let a friend or a family member in and they get
+  their own place here, with their own devices and their own place in whatever they
+  were watching - and no login to pass around. Hand out a guest pass that expires by
+  itself, or cut someone off the moment you want to. They never get a copy of a
+  single file.
+
+
+  Pair a device by scanning the QR code on this dashboard with the PearCinema app.
+developer: PeerLoom
+website: https://peerloomllc.com
+dependencies: []
+repo: https://github.com/peerloomllc/pearcinema
+support: https://github.com/peerloomllc/pearcinema/issues
+gallery: []
+releaseNotes: |-
+  First release. What works today:
+  - Play films and shows from a Jellyfin or Emby server, or straight from a folder.
+  - Skip to any point in a film without downloading it first.
+  - Pair a device by scanning a code. Revoke it and playback stops within a second.
+  - Guest passes that expire by themselves.
+
+  Good to know:
+  - The phone apps are not in the app stores yet.
+  - This version plays your files as they are and does not convert them. Android
+    handles almost everything; some files will not play on an iPhone yet.
+  - Films kept on an external drive work, including drives you plug in later.
+path: ""
+defaultUsername: ""
+# umbrelOS replaces defaultPassword with the derived value when this is set - it is
+# the ONLY supported way to show a generated password. `defaultPassword: $APP_PASSWORD`
+# was never a token umbrelOS substitutes: the compose DOES get the real value, so the
+# app worked, but the UI printed the literal string "$APP_PASSWORD" and nobody could
+# log in (found on a real PearTune store install, 2026-07-31).
+deterministicPassword: true
+submitter: PeerLoom
+submission: https://github.com/peerloomllc/pearcinema

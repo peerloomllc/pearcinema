@@ -1,0 +1,83 @@
+version: "3.7"
+
+services:
+  # NO app_proxy, and that is not an oversight.
+  #
+  # The host MUST run with network_mode: host. Measured on a real Umbrel, twice,
+  # with PearTune's real image: under Docker's default bridge the firewall admits
+  # the phone (gate:allow-for-pairing) and the connection then dies before the pair
+  # channel opens. Bridge NAT is a second layer of NAT and holepunching does not
+  # survive it. The same protocol runs here, so the same rule applies.
+  #
+  # app_proxy is itself a container on a bridge network, so it cannot front a
+  # host-networked service - which is why Umbrel's own host-networked apps (Plex,
+  # Home Assistant) do not use it either. The proxy WAS the only thing standing in
+  # for our missing auth, so the dashboard carries its own: PEARCINEMA_PASSWORD,
+  # which umbrelOS fills with the app password shown next to PearCinema in the app
+  # list. The host must refuse to start on a non-loopback bind without it.
+  app:
+    # PIN BY DIGEST before this ships. The digest IS the rollback plan: reverting a
+    # bad release is re-pinning the previous one, a one-line change to a file that
+    # already works that way.
+    image: ghcr.io/peerloomllc/pearcinema-host:0.1.0
+    restart: on-failure
+    stop_grace_period: 1m
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PEARCINEMA_HTTP_HOST: 0.0.0.0
+      # 8742, NOT 8741: PearTune has 8741 and PearCircle's seeder has 8731. A box
+      # running both PearTune and PearCinema is an expected setup.
+      PEARCINEMA_HTTP_PORT: "8742"
+      PEARCINEMA_PASSWORD: ${APP_PASSWORD}
+      PEARCINEMA_NAME: My Library
+      PEARCINEMA_DATA: /data
+      # The DEFAULT folders, for an install where nobody has opened the dashboard
+      # yet. These are paths INSIDE the container and they point at the mounts
+      # below. The operator can pick different ones later; the dashboard browses
+      # what the container can actually see, which is the only way to avoid the
+      # "I typed the path my other app uses and got zero files" trap.
+      PEARCINEMA_FOLDERS: /library/Movies:/library/TV Shows
+    volumes:
+      # The host identity seed, the grant store, and the folder scan cache. Losing
+      # this means every device must re-pair; leaking the seed means somebody can
+      # impersonate your library.
+      #
+      # The scan cache matters more here than it would for music: re-probing a 3 TB
+      # drive with ffprobe is twenty minutes of disk, and without this volume that
+      # happens on every restart.
+      - ${APP_DATA_DIR}/data:/data
+
+      # WHERE AN UMBREL USER'S VIDEO ACTUALLY LIVES - and for film libraries that is
+      # usually NOT the internal disk. Films are hundreds of gigabytes; the measured
+      # real library is 3 TB on a USB drive.
+      #
+      # So both are mounted, read-only always: PearCinema plays video, it has no
+      # business writing to it.
+      - ${UMBREL_ROOT}/home/Downloads:/library:ro
+
+      # EXTERNAL DRIVES, and `propagation: rslave` is the load-bearing part.
+      #
+      # Without it, a drive plugged in AFTER this container started is invisible
+      # inside it - the mount happens in the host's namespace and never propagates.
+      # The failure looks exactly like an empty library, which sends an operator
+      # hunting through the app instead of at the mount. This is the same gap
+      # already logged against PearTune, and it matters far more here because an
+      # external drive is the normal case for video rather than an unusual one.
+      - type: bind
+        source: ${UMBREL_ROOT}/external
+        target: /external
+        read_only: true
+        bind:
+          propagation: rslave
+
+    # NO /dev/dri YET, deliberately. v1 is direct play only - there is no transcode
+    # to accelerate, and a device passthrough that nothing uses is surface for
+    # nothing. When remux and transcode land, this is the line that gets added:
+    #
+    #   devices:
+    #     - /dev/dri:/dev/dri
+    #
+    # The mounts above were chosen so that stays a compose edit rather than a
+    # redesign.
