@@ -59,7 +59,11 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
   // Movies collection that refusal is the COMMON case (roughly one PGS track per
   // film), and hiding it would leave somebody hunting for subtitles the file
   // demonstrably contains. External .srt comes first for the same reason.
-  const playableSubs = subs.filter(s => s.playable)
+  // EXTERNAL FIRST, and that ordering is a measurement rather than a preference:
+  // the real Movies collection carries 232 embedded PGS tracks against 383 `.srt`
+  // files on disk. Lead with the embedded one and most films look like they have
+  // subtitles that do not work.
+  const playableSubs = subs.filter(s => s.playable).sort((a, b) => (b.external ? 1 : 0) - (a.external ? 1 : 0))
   const unplayableSubs = subs.filter(s => !s.playable)
 
   return (

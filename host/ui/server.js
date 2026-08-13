@@ -326,7 +326,12 @@ async function startDashboard ({
         const artId = url.searchParams.get('id')
         const stream = artId ? toNodeStream(await host.adapter.art({ artId, size: 400 }).catch(() => null)) : null
         if (!stream) { res.writeHead(404); return res.end() }
-        res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=300' })
+        // The folder adapter hangs the real type on the stream (a poster on disk can
+        // be a PNG); Jellyfin always re-encodes to JPEG and says nothing.
+        res.writeHead(200, {
+          'content-type': stream.contentType || 'image/jpeg',
+          'cache-control': 'private, max-age=300'
+        })
         res.on('close', () => stream.destroy?.())
         return stream.pipe(res)
       }
