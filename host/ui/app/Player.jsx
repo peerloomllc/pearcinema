@@ -4,9 +4,10 @@
 //
 //   /api/stream  - the actual file, byte-ranged. Free, exact, and seekable by the
 //                  native scrubber. Used whenever the browser will open the file.
-//   /api/remux   - the same picture and sound, repackaged into MP4 on the fly. Used
-//                  when the browser refuses the CONTAINER, which on the measured
-//                  library is 83% of it.
+//   /api/remux   - repackaged into MP4 on the fly, and the soundtrack rebuilt if the
+//                  browser cannot decode it. Used when the browser refuses the
+//                  container or the audio - never for the picture, which is never
+//                  re-encoded.
 //
 // The HOST decides which. A client can describe itself and cannot demand to be
 // repackaged, because direct play is free and exact and remux is neither.
@@ -43,7 +44,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
   // The browser can see the common case without a round trip: the container is
   // refused and the streams inside it are ones it can decode. The host still makes
   // the real decision and will answer 409 if it disagrees.
-  const remuxing = (verdict.status === 'refuse' && verdict.remuxable) || forced
+  // Repackage when it is the only way to play it AND when it is the only way to HEAR
+  // it. A silent film is broken, and rebuilding a soundtrack is cheap - so a
+  // 'nosound' verdict is fixed rather than merely reported.
+  const remuxing = ((verdict.status === 'refuse' || verdict.status === 'nosound') && verdict.remuxable) || forced
   const blocked = verdict.status === 'refuse' && !verdict.remuxable && !forced
 
   const duration = (item.runtime || 0) * 60
@@ -145,9 +149,11 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose }) {
 
         {!blocked && remuxing && (
           <div class='banner good' style='margin-top:.7rem'>
-            <b>Repackaged for your browser.</b> This file is {containerName(m.container)}, which no
-            browser will open. The picture and sound are untouched - only the wrapper around
-            them changed, on the fly, and nothing was written to disk.
+            {verdict.status === 'nosound'
+              ? <><b>Sound rebuilt for your browser.</b> {verdict.reason} Nothing was written to disk.</>
+              : <><b>Repackaged for your browser.</b> Your browser will not open a {containerName(m.container)}
+                  file. The picture and sound are untouched - only the wrapper around them
+                  changed, on the fly, and nothing was written to disk.</>}
           </div>
         )}
         {!blocked && !remuxing && verdict.status === 'nosound' && (

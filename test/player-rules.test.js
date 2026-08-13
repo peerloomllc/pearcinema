@@ -86,15 +86,20 @@ test('an ordinary MP4 plays - and ffprobe calls that container `mov`', async () 
   assert.equal(verdictFor(film({ container: 'mov', videoCodec: 'h264', audioCodec: 'aac' }), caps).status, 'play')
 })
 
-test('a DTS or TrueHD track is picture-without-sound, NOT a refusal', async () => {
+test('a DTS or TrueHD track is a SOUND problem, not a refusal - and it gets fixed', async () => {
   const { probeCapabilities, verdictFor } = await playback()
   const caps = probeCapabilities(chrome)
 
+  // The distinction is real rather than theoretical: iOS was measured doing exactly
+  // this on 2026-08-13 - reporting DTS as unsupported, then playing the picture and
+  // dropping the audio. A player that folded this into a refusal would hide a film
+  // that plays; one that merely reported it would leave the viewer with silence.
   for (const audio of ['dts', 'truehd']) {
     const v = verdictFor(film({ container: 'mp4', videoCodec: 'h264', audioCodec: audio }), caps)
     assert.equal(v.status, 'nosound', audio + ' should still show a picture')
-    assert.match(v.reason, /no sound/)
-    assert.match(v.reason, /On a phone this track is usually fine/)
+    assert.equal(v.remuxable, true, 'and the soundtrack is rebuilt rather than lost')
+    assert.match(v.reason, /cannot decode/)
+    assert.match(v.reason, /picture is untouched/)
   }
 })
 
@@ -188,4 +193,68 @@ test('the password step is offered only when we are the ones who own the passwor
   assert.equal(has('explicit'), false)
   // Loopback, no gate, nothing to change.
   assert.equal(has('none'), false)
+})
+
+/* --------------------------------------------- what browsers actually answer -- */
+
+// Measured 2026-08-13 against Brave/Chromium 149, which is what Tim runs. The
+// surprise is the first line: Chromium DOES open Matroska, which the repo's docs had
+// been denying. The code was already right because it asks canPlayType rather than
+// modelling it, and this test pins that the asking still happens.
+const chromium = (type) => {
+  if (/x-matroska/.test(type)) return /codecs/.test(type) ? 'probably' : 'maybe'
+  if (/hvc1|ac-3|ec-3|x-msvideo|mp2t|x-ms-/.test(type)) return ''
+  if (/avc1|mp4a|audio\/mpeg|vp8|vp9|av01|opus|vorbis|flac|video\/mp4|video\/webm/.test(type)) return 'probably'
+  return ''
+}
+
+test('AN MKV OF H.264 AND AAC PLAYS UNTOUCHED IN CHROMIUM - do not repackage it', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const v = verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }), probeCapabilities(chromium))
+
+  // Tim's own copy of 2001. Repackaging it would spend a child process producing
+  // bytes identical in every way that matters to the ones already on disk.
+  assert.equal(v.status, 'play')
+})
+
+test('but Chromium still refuses HEVC, which is 64% of the television library', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = probeCapabilities(chromium)
+  const v = verdictFor(film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }), caps)
+
+  assert.equal(v.status, 'refuse')
+  // And repackaging cannot help, because it cannot change the picture. This is the
+  // bucket that remains genuinely unplayable until there is a video encoder.
+  assert.equal(v.remuxable, false)
+})
+
+test('A SOUNDTRACK THE BROWSER CANNOT DECODE IS REBUILT, not reported as silence', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = probeCapabilities(chromium)
+
+  // An AC-3 film in Chromium: the picture is fine and the sound is not. Reporting
+  // "picture only" and stopping there left the cheapest win on the table - rebuilding
+  // a soundtrack is rung two, which the 2026-08-13 measurement showed is a rounding
+  // error of the library.
+  const v = verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'ac3' }), caps)
+  assert.equal(v.status, 'nosound')
+  assert.equal(v.remuxable, true, 'the player repackages this rather than playing it silent')
+  assert.match(v.reason, /picture is untouched/)
+
+  // DTS and TrueHD are the same story.
+  for (const a of ['dts', 'truehd']) {
+    assert.equal(verdictFor(film({ container: 'mp4', videoCodec: 'h264', audioCodec: a }), caps).remuxable, true)
+  }
+})
+
+test('the capability query tells the host what this browser opens, MKV included', async () => {
+  const { probeCapabilities, capabilityQuery } = await playback()
+  const q = new URLSearchParams(capabilityQuery(probeCapabilities(chromium)))
+
+  // A host that was not told about Matroska would repackage files this browser can
+  // already open.
+  assert.match(q.get('containers'), /matroska/)
+  assert.match(q.get('video'), /h264/)
+  assert.doesNotMatch(q.get('video'), /hevc/)
+  assert.doesNotMatch(q.get('audio'), /ac3/)
 })

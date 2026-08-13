@@ -5,12 +5,17 @@
 // against the same library the phone reads - so "which of my files actually play"
 // stops being an opinion and becomes an answer.
 //
-// The answer is bleak, and that is not a bug in the player. Chrome and Safari will
-// not open Matroska, and 83% of the measured real library (2,986 films and
-// episodes, DECISIONS 2026-08-12) is Matroska. A browser therefore shows roughly
-// the same tenth of a collection an iPhone would. That similarity is the point:
-// two independent engines refusing the same files for the same reason is the
-// argument for remux, and it is evidence rather than a prediction.
+// AND BROWSERS DISAGREE WITH EACH OTHER, which is exactly why this file ASKS rather
+// than assumes. Measured 2026-08-13 against a real browser: Chromium-based ones
+// (Chrome, Brave, Edge) answer `maybe` for `video/x-matroska` and genuinely play an
+// MKV holding H.264 and AAC. Safari and iOS do not. So "no browser opens Matroska"
+// was too strong a claim, and a hard-coded refusal would have made PearCinema
+// repackage films that were already playing perfectly.
+//
+// What every browser measured DOES refuse is HEVC and Dolby audio - and HEVC is 64%
+// of the real television library. So the remux case is not smaller than it looked,
+// it is differently shaped: fewer container refusals, and the codec ones are what
+// remain.
 //
 // So the rule everywhere below: SAY WHY, and never hide an item we cannot play.
 // A film that silently fails to start sends someone hunting through their router
@@ -174,9 +179,14 @@ export function verdictFor (item, caps) {
   }
 
   if (audio && !caps[audio]) {
+    // FIXABLE, and cheaply. Rebuilding a soundtrack is rung two and per the
+    // 2026-08-13 measurement it is a rounding error of the library - so a browser
+    // that cannot decode this audio should be given sound rather than told to
+    // accept a silent film. The picture is still never touched.
     return {
       status: 'nosound',
-      reason: `The picture will play but there will be no sound: your browser cannot decode ${String(m.audioCodec).toUpperCase()} audio. On a phone this track is usually fine.`
+      remuxable: MP4_VIDEO.has(video) || !video,
+      reason: `Your browser cannot decode ${String(m.audioCodec).toUpperCase()} sound. The picture is untouched; only the soundtrack is rebuilt, which is quick.`
     }
   }
 

@@ -75,12 +75,13 @@ Two things about it are worth knowing before you judge it:
   bytes. The host refuses to start if it would listen on anything but loopback without a
   password. A bare Docker or systemd install with no password generates one, saves it
   `0600` next to the identity seed, and prints it once.
-- **A browser refuses most of a normal collection, and that is the honest result.**
-  Chrome and Safari will not open Matroska, and 83% of the measured real library is
-  Matroska - the same refusal, for the same reason, an iPhone gives. So the player shows
-  roughly a tenth of a real collection and says plainly why for each file it will not
-  open, rather than showing a black rectangle. That is the clearest argument there is for
-  remux, which is the next thing to build.
+- **It repackages what your browser will not open, and browsers disagree about that.**
+  Measured rather than assumed: Chromium-based browsers (Chrome, Brave, Edge) do open an
+  MKV holding H.264 and AAC, while Safari and iOS do not - and none of them decode HEVC
+  or Dolby audio, which between them cover most of a real television library. So
+  PearCinema asks each browser what it can open and repackages only what it must, on the
+  fly, without ever re-encoding the picture. Anything that genuinely cannot be played
+  says which part is the problem instead of showing a black rectangle.
 
 The page counts it for you: above each list it says how many of these files *this*
 browser can play. It is a second compatibility engine with published rules, run against
