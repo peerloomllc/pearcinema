@@ -389,13 +389,23 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* ---- where you stopped, and what you have finished ------------------------ */
 
-/* HOW FAR THROUGH, across the bottom of the poster. Read without being looked at,
- * which a percentage never is. */
-.poster .resumebar {
-  position: absolute; left: 0; right: 0; bottom: 2.6rem; height: 3px;
-  background: rgba(0,0,0,.45);
+/* HOW FAR THROUGH, across the bottom of the PICTURE. Read without being looked at,
+ * which a percentage never is.
+ *
+ * Inside the artwork and inset from its edges, so it clears the ring: as a child of
+ * the tile it ran the full width, a couple of pixels proud of the ring on each side,
+ * and sat at a fixed distance from the bottom of the whole tile - which is guessing at
+ * the height of the caption underneath.
+ *
+ * The inset is a PERCENTAGE because the ring is stroked in the artwork's own
+ * coordinates and thickens with the tile; a fixed 4px would sit inside the stroke on a
+ * large one. */
+.art .resumebar {
+  position: absolute; left: 4%; right: 4%; bottom: 4%; height: 3px;
+  border-radius: 999px; overflow: hidden; z-index: 2;
+  background: rgba(0,0,0,.5);
 }
-.poster .resumebar i { display: block; height: 100%; background: var(--accent) }
+.art .resumebar i { display: block; height: 100%; background: var(--accent); border-radius: inherit }
 
 /* A tick for a film you have finished, a COUNT for a show you have not. "3 left"
  * tells somebody to open it; a tick does not. */
@@ -477,10 +487,16 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
  * A steady low ring, with a bright arc travelling around it. The arc is a conic
  * gradient on a square child spun by `transform` and masked to a 2px rim - not an
  * animated `@property` angle, which is newer than anything else this page leans on. */
-/* NO SECOND BORDER. The artwork already draws a 1px line of its own, so a ring inside
- * it reads as two edges - which is what Tim saw. While a tile is marked, the ring IS
- * the border and the art's own one gets out of the way. */
-.poster.started .art, .poster.started:hover .art { border-color: transparent }
+/* NO SECOND BORDER, AND NO GAP EITHER. The artwork draws a 1px line of its own, so a
+ * ring inside it reads as two edges. Making that border merely TRANSPARENT was not
+ * enough: `overflow: hidden` clips to the padding box, so the ring could not reach out
+ * over the border and ended up a pixel shy of the tile all the way round - which is
+ * exactly what Tim saw when he zoomed in.
+ *
+ * So the border goes entirely while a tile is marked, and the ring becomes the edge.
+ * Everything here is `box-sizing: border-box`, so the tile does not change size and
+ * nothing in the grid shifts. */
+.poster.started .art, .poster.started:hover .art { border: none }
 
 .ring {
   position: absolute; inset: 0; width: 100%; height: 100%;

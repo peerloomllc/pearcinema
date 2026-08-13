@@ -17,6 +17,17 @@ import { useState, useEffect, useMemo } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 
+// How far through, as a percentage, or null when there is nothing to say.
+//
+// Runtimes are SECONDS here and positions are MILLISECONDS - see host/watch.js, where
+// mixing the two would mean nothing is ever finished. The floor of 2% is so something
+// only just begun shows a sliver rather than an empty groove that reads as a fault.
+function progressOf ({ positionMs, runtime }) {
+  const total = Number(runtime) > 0 ? Number(runtime) * 1000 : 0
+  if (!total || !(positionMs > 0)) return null
+  return Math.max(2, Math.min(100, Math.round((positionMs / total) * 100)))
+}
+
 // The ring that says "this is the one you are in the middle of".
 //
 // INSIDE THE ART, not around the whole tile: the tile is a picture with a caption
@@ -32,28 +43,44 @@ import { verdictFor, tally } from './playback'
 // follows the corners because it IS the corners, and `pathLength=100` normalises the
 // perimeter so the dash is a fixed fraction of it and moves at one speed the whole way
 // round, whatever shape the tile ends up.
+//
+// The stroke is 4 wide CENTRED on a path inset by 2, so its outer edge lands exactly on
+// the viewBox edge - which is the tile's edge, once the artwork's own border has got
+// out of the way. `rx` is 14 of 200 to match the artwork's 10px corner at the size these
+// are usually drawn.
 function Ring () {
   return (
     <svg class='ring' viewBox='0 0 200 300' aria-hidden='true' focusable='false'>
-      <rect class='base' x='2' y='2' width='196' height='296' rx='13' pathLength='100' />
-      <rect class='dash' x='2' y='2' width='196' height='296' rx='13' pathLength='100' />
+      <rect class='base' x='2' y='2' width='196' height='296' rx='14' pathLength='100' />
+      <rect class='dash' x='2' y='2' width='196' height='296' rx='14' pathLength='100' />
     </svg>
   )
 }
 
-function Art ({ item, started = false }) {
+// THE BAR BELONGS TO THE PICTURE, not to the tile. Rendered here rather than beside
+// `<Art>` because as a child of `.poster` it spanned the whole tile - a couple of
+// pixels wider than the ring on each side, and placed vertically by guessing at the
+// caption's height (Tim, 2026-08-13, with a screenshot of it poking out).
+function Art ({ item, started = false, progress = null }) {
   const [bad, setBad] = useState(false)
+  const inner = (
+    <>
+      {started && <Ring />}
+      {progress !== null && <span class='resumebar'><i style={`width:${progress}%`} /></span>}
+    </>
+  )
+
   if (!item.artId || bad) {
     return (
       <div class='art'>
-        {started && <Ring />}
+        {inner}
         {item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}
       </div>
     )
   }
   return (
     <div class='art'>
-      {started && <Ring />}
+      {inner}
       <img src={'/api/art?id=' + encodeURIComponent(item.artId)} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
@@ -75,15 +102,6 @@ function flagFor (v) {
 // HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
 // last decade has drawn it. A number would be exact and useless; the bar is read
 // without being looked at.
-function ResumeBar ({ positionMs, runtime }) {
-  // Runtimes are SECONDS here and positions are MILLISECONDS - see host/watch.js,
-  // where mixing the two would mean nothing is ever finished.
-  const total = Number(runtime) > 0 ? Number(runtime) * 1000 : 0
-  if (!total || !(positionMs > 0)) return null
-  const pct = Math.max(2, Math.min(100, Math.round((positionMs / total) * 100)))
-  return <span class='resumebar'><i style={`width:${pct}%`} /></span>
-}
-
 function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
@@ -110,6 +128,12 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
   // finished episodes and would have reported itself untouched.
   const started = !!rollup && !!rollup.started && !rollup.complete
 
+  // ONE BAR, TWO MEANINGS, which are the same meaning at different scales: minutes on
+  // a film, episodes on a season.
+  const progress = rollup
+    ? (started ? Math.max(2, Math.round((rollup.watched / rollup.total) * 100)) : null)
+    : progressOf({ positionMs: resume?.positionMs, runtime: item.runtime })
+
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
     // An episode in a grid needs its NUMBER above all - a wall of thumbnails with
@@ -129,7 +153,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
       onClick={open}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } }}
     >
-      <Art item={item} started={started} />
+      <Art item={item} started={started} progress={progress} />
       {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
       {badge && <span class='next'>{badge}</span>}
 
@@ -151,17 +175,6 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
 
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
 
-      {/* One bar, two meanings, and they are the same meaning: how far through this
-          thing you are. On a film it is minutes; on a season it is episodes. */}
-      {rollup
-        ? (started && (
-          // A floor of 2%, so a season somebody has only just begun still shows a
-          // sliver rather than an empty groove that reads as a rendering fault.
-          <span class='resumebar'>
-            <i style={`width:${Math.max(2, Math.round((rollup.watched / rollup.total) * 100))}%`} />
-          </span>
-          ))
-        : <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />}
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </div>
