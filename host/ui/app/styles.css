@@ -459,3 +459,9 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .poster { cursor: pointer }
 .poster:focus-visible, .eprow:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
 .eprow { cursor: pointer }
+
+/* THE ONE YOU ARE IN THE MIDDLE OF. A count of what is left cannot say it - a season
+ * nobody has touched and a season half done both just show a number - and the one
+ * somebody is actually watching is the one they came to the page for. */
+.poster.started { box-shadow: 0 0 0 2px var(--accent) }
+.poster.started .art { border-radius: 8px 8px 0 0 }

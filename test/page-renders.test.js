@@ -94,7 +94,8 @@ const ROUTES = {
       upNext: true
     }]
   },
-  '/api/watch/shows': { shows: {} },
+  // A show half way through, so the tile can say which one is being watched.
+  '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, complete: false } } },
   '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
 }
 
@@ -416,4 +417,51 @@ test('MARKING A FILM WATCHED IS ONE CLICK ON THE FILM', async (t) => {
   // And the click must not have opened the player underneath it.
   assert.equal(doc.querySelector('video'), null)
   assert.equal(doc.querySelector('.refusal'), null)
+})
+
+test('THE ONE YOU ARE IN THE MIDDLE OF IS MARKED, not just counted', async (t) => {
+  // A count of what is left cannot say it: a show nobody has touched and a show half
+  // done both just show a number, and the one somebody is actually watching is the
+  // one they came to the page for.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.ok(tile, 'the show is on screen')
+  assert.ok(tile.classList.contains('started'), 'and it says it is the one being watched')
+
+  // The same bar as a half-watched film, meaning the same thing at a different scale:
+  // four episodes of ten.
+  assert.equal(tile.querySelector('.resumebar i').style.width, '40%')
+  assert.match(tile.textContent, /6/, 'and still says how many are left')
+})
+
+test('a show nobody has started is counted but not marked', async (t) => {
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, complete: false } } }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.equal(tile.classList.contains('started'), false)
+  assert.equal(tile.querySelector('.resumebar'), null, 'and no bar, because there is nothing to show')
 })

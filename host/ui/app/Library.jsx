@@ -69,6 +69,13 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
   const left = rollup && !rollup.complete ? rollup.unwatched : 0
   const resume = rollup ? null : watch?.resume
 
+  // WHICH ONE AM I IN THE MIDDLE OF. A count of what is left cannot answer that: a
+  // season nobody has touched and a season half done both say "24 left" and "12 left"
+  // in the same voice, and the one somebody is actually watching is the one they came
+  // to the page for. So it is marked on the tile itself rather than by reading numbers
+  // (Tim, 2026-08-13).
+  const started = !!rollup && rollup.watched > 0 && !rollup.complete
+
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
     // An episode in a grid needs its NUMBER above all - a wall of thumbnails with
@@ -82,7 +89,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
   const open = () => onOpen(item)
   return (
     <div
-      class='poster'
+      class={'poster' + (started ? ' started' : '')}
       role='button'
       tabIndex={0}
       onClick={open}
@@ -109,7 +116,14 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
         : (seen && <span class='seen' title='You have watched this'>✓</span>)}
 
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
-      <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />
+
+      {/* One bar, two meanings, and they are the same meaning: how far through this
+          thing you are. On a film it is minutes; on a season it is episodes. */}
+      {rollup
+        ? (started && (
+          <span class='resumebar'><i style={`width:${Math.round((rollup.watched / rollup.total) * 100)}%`} /></span>
+          ))
+        : <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />}
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </div>
