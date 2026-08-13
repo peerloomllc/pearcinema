@@ -162,25 +162,34 @@ export default function App () {
   return (
     <div class='shell'>
       <div class='topbar'>
-        <div class='brand'><Mark size={22} />Pear<span>Cinema</span></div>
-        <div class='tabs'>
-          <button class={'tab' + (tab === 'watch' ? ' on' : '')} onClick={() => { setTab('watch'); setPlaying(null) }}>Watch</button>
-          <button class={'tab' + (tab === 'who' ? ' on' : '')} onClick={() => setTab('who')}>
-            Devices{online ? ` · ${online} on` : ''}
-          </button>
-          <button class={'tab' + (tab === 'settings' ? ' on' : '')} onClick={() => setTab('settings')}>Settings</button>
-        </div>
-        <div class='spacer' />
-        {tab === 'watch' && !playing && (
-          <div class='searchbox'>
-            <Search size={15} />
-            <input
-              type='text' value={search} placeholder='Search the library'
-              onInput={e => setSearch(e.currentTarget.value)}
-            />
-            {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>}
+        <div class='barleft'>
+          <div class='brand'><Mark size={22} />Pear<span>Cinema</span></div>
+          <div class='tabs'>
+            <button class={'tab' + (tab === 'watch' ? ' on' : '')} onClick={() => { setTab('watch'); setPlaying(null) }}>Watch</button>
+            <button class={'tab' + (tab === 'who' ? ' on' : '')} onClick={() => setTab('who')}>
+              Devices{online ? ` · ${online} on` : ''}
+            </button>
+            <button class={'tab' + (tab === 'settings' ? ' on' : '')} onClick={() => setTab('settings')}>Settings</button>
           </div>
-        )}
+        </div>
+        {/* THE SEARCH SITS IN THE MIDDLE OF THE BAR AND THE BAR NEVER CHANGES HEIGHT.
+            It used to be rendered only on the Watch tab, so opening Devices or Settings
+            took the box out and the whole header shrank - the page jumped under the
+            pointer every time somebody changed tab (Tim, 2026-08-13). It is always
+            here now, and merely INERT where searching means nothing, so the bar keeps
+            one height and the middle keeps one thing in it. */}
+        <div class='searchslot'>
+          {tab === 'watch' && !playing && (
+            <div class='searchbox'>
+              <Search size={15} />
+              <input
+                type='text' value={search} placeholder='Search the library'
+                onInput={e => setSearch(e.currentTarget.value)}
+              />
+              {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>}
+            </div>
+          )}
+        </div>
         <button onClick={() => setPairing(true)}>Pair a device</button>
       </div>
 

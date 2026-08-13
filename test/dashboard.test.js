@@ -1069,3 +1069,22 @@ test('THE DOOR AND THE ROOM ARE THE SAME COLOURS', async (t) => {
   }
   assert.ok(!/#6ea8fe|#0e0f13/.test(page), 'and none of the palette it used to have')
 })
+
+test('A CODE ALREADY UP COMES BACK WITH ITS QR, not an empty white panel', async (t) => {
+  // A window opened before the page loaded - a reload, a second tab, the phone being
+  // carried to the machine - has to show the SAME code rather than silently opening a
+  // second one. The link always came back; the picture of it did not.
+  const { c } = await loggedIn(t)
+
+  const started = await c.req('POST', '/api/pair/start', { body: {} })
+  assert.equal(started.status, 200)
+  assert.match(started.json.svg, /^<svg/)
+
+  const state = await c.req('GET', '/api/state')
+  assert.equal(state.json.pairing.open, true)
+  assert.equal(state.json.pairing.link, started.json.link)
+  assert.equal(state.json.pairing.svg, started.json.svg, 'the same code, not a fresh one')
+
+  await c.req('POST', '/api/pair/stop', { body: {} })
+  assert.equal((await c.req('GET', '/api/state')).json.pairing.open, false)
+})

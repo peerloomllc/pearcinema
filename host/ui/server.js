@@ -234,6 +234,12 @@ async function startDashboard ({
 
   let pwSource = passwordSource
 
+  // THE CODE FOR THE WINDOW THAT IS CURRENTLY OPEN, so a page loaded after it was
+  // opened - a reload, a second tab, a phone brought to the machine - shows the same
+  // QR rather than an empty white panel. Keyed by the link, so a stale one from a
+  // previous window can never be handed out for a new one.
+  let openQr = null
+
   // The person this browser is watching as, as an ownerId the state store accepts.
   //
   // LAZY, and that matters: a host nobody has ever watched anything on holds no
@@ -332,6 +338,8 @@ async function startDashboard ({
             ? {
                 open: true,
                 link: host.pairSession.link,
+                // Only when it is a code for THIS window.
+                svg: openQr?.link === host.pairSession.link ? openQr.svg : null,
                 guest: !!host.pairSession.expiresMs,
                 owner: !!host.pairSession.owner,
                 expiresMs: host.pairSession.expiresMs || null
@@ -822,6 +830,7 @@ async function startDashboard ({
         // startPairing enforces owner XOR guest.
         const link = host.startPairing({ expiresMs, owner: !!body.owner })
         const svg = await QRCode.toString(link, { type: 'svg', margin: 4, errorCorrectionLevel: 'M' })
+        openQr = { link, svg }
         return json(res, 200, {
           link,
           svg,
@@ -833,6 +842,7 @@ async function startDashboard ({
       }
 
       if (req.method === 'POST' && url.pathname === '/api/pair/stop') {
+        openQr = null
         host.stopPairing()
         return json(res, 200, { ok: true })
       }

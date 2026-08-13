@@ -77,9 +77,13 @@ a { color: var(--accent) }
 
 .shell { min-height: 100%; display: flex; flex-direction: column }
 
+/* THREE COLUMNS AND ONE HEIGHT. The middle column is the search, so it is centred on
+ * the BAR rather than on whatever happens to be left over beside the tabs - and it is
+ * always present, so the bar cannot change height when a tab has nothing to search. */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: .75rem;
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .75rem;
+  min-height: 3.3rem;
   padding: .7rem 1rem;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
@@ -89,7 +93,21 @@ a { color: var(--accent) }
 .brand { font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap }
 .brand span { color: var(--accent) }
 
-.tabs { display: flex; gap: .25rem; margin-left: .5rem; flex-wrap: wrap }
+.barleft { display: flex; align-items: center; gap: .9rem; min-width: 0 }
+.searchslot { display: flex; justify-content: center; min-height: 2.1rem; align-items: center }
+
+.tabs { display: flex; gap: .25rem; flex-wrap: wrap }
+
+/* Narrow: the middle column has nowhere to be, so the bar wraps into rows and the
+ * search takes a line of its own rather than squeezing the tabs off screen. */
+@media (max-width: 780px) {
+  .topbar { grid-template-columns: 1fr auto; row-gap: .5rem }
+  .barleft { grid-column: 1 }
+  .topbar > button { grid-column: 2 }
+  .searchslot { grid-column: 1 / -1; justify-content: stretch }
+  .searchslot .searchbox { width: 100% }
+  .searchbox input { width: 100% }
+}
 
 .tab {
   border: none; background: transparent; color: var(--muted);
@@ -342,14 +360,72 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .confirm-actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem }
 .confirm-actions.center { justify-content: center }
 
-.qr { background: #fff; padding: .8rem; border-radius: 12px; width: fit-content; margin: 0 auto }
-.qr svg { display: block; width: 220px; height: 220px }
+/* ---- pairing -------------------------------------------------------------
+ *
+ * PEARTUNE'S, ALMOST VERBATIM, and deliberately (Tim, 2026-08-13): pairing is the one
+ * flow somebody meets in both apps, usually minutes apart and usually with a phone in
+ * the other hand. Two different shapes for the same act is where a companion app stops
+ * feeling like one.
+ */
 
-.linkbox {
-  word-break: break-all; background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: .5rem; font-family: ui-monospace, monospace; font-size: .72rem;
-  margin-top: .7rem;
+.stack { display: flex; flex-direction: column; gap: .75rem }
+.stack.center { align-items: center; text-align: center }
+.center { text-align: center }
+
+/* The access-type toggle must FILL the modal, or a centred stack shrink-wraps it and
+ * "Full access" and "Guest pass" come out different widths. */
+.seg {
+  display: flex; background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px; gap: 2px;
 }
+.seg.wide { width: 100% }
+.seg button {
+  flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border: none; background: transparent; color: var(--muted);
+  border-radius: 999px; padding: .45rem .5rem; font-size: .82rem; font-weight: 550;
+}
+.seg button.on { background: var(--accent); color: var(--accent-fg) }
+
+/* A LIGHT PANEL AROUND THE CODE, IN BOTH THEMES, and it is not decoration: a phone
+ * camera's auto-exposure meters what surrounds the code, so a small white card
+ * floating in a dark modal gets blown out and the modules wash into grey. Widening the
+ * light region is what makes it scan in a dark room - which is where somebody sets up
+ * a film library. */
+.qrpanel {
+  background: #fff; border-radius: 18px; padding: 1.3rem 1.5rem;
+  display: inline-flex; flex-direction: column; align-items: center; gap: .6rem;
+}
+.qr { background: #fff; border-radius: 12px; width: fit-content }
+.qr svg { display: block; width: 232px; height: 232px }
+/* The caption rides INSIDE the panel, so it is legible against white in dark mode. */
+.qrpanel .qrcap { color: #3a3a3a; font-size: .78rem; line-height: 1.45; max-width: 260px }
+
+.keyrow { display: flex; align-items: center; gap: .5rem; width: 100% }
+.key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+  color: var(--muted); word-break: break-all; overflow-wrap: anywhere;
+  background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: .5rem .6rem; width: 100%; text-align: center;
+}
+.keyrow .key { flex: 1 1 auto; min-width: 0 }
+
+.pairdone { margin: 0; font-size: 1rem }
+/* Equal width, and no wrapping: the row is content-width, so a flex-basis of zero lets
+ * "New code" break across two lines and make the pair uneven. */
+.pairacts { display: flex; gap: .5rem; justify-content: center; width: 100% }
+.pairacts button {
+  flex: 1 1 0; justify-content: center; display: inline-flex; align-items: center;
+  gap: .35rem; white-space: nowrap;
+}
+
+.pairicon {
+  display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 999px;
+  background: var(--card-2); color: var(--muted); border: 1px solid var(--line);
+}
+.pairicon.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent) }
+
+.dur { display: inline-flex; align-items: center; gap: .4rem; margin: 0 }
+.dur select { font-size: .82rem }
 
 /* ---- folder picker -------------------------------------------------------- */
 

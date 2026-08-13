@@ -913,3 +913,46 @@ test('the length in the sheet is exact, not rounded to the minute', async (t) =>
   // 153 seconds. "3m" rounds away more than half of what it is.
   assert.match(doc.querySelector('.sheet').textContent, /2 m 33 s/)
 })
+
+test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
+  // The search box used to be rendered only on Watch, so opening Devices took it out
+  // and the whole bar shrank - the page jumped under the pointer on every tab change.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const slot = doc.querySelector('.topbar .searchslot')
+  assert.ok(slot, 'the middle of the bar always holds the search')
+  assert.ok(slot.querySelector('.searchbox'), 'and on Watch there is a box in it')
+
+  const devices = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Devices'))
+  devices.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.ok(doc.querySelector('.topbar .searchslot'), 'the slot survives the tab change')
+  assert.equal(doc.querySelector('.topbar .searchslot .searchbox'), null,
+    'empty where searching means nothing, rather than gone')
+})
+
+test('THE PAIRING MODAL IS PEARTUNE\'S, down to the words', async (t) => {
+  // Pairing is the one flow somebody meets in both apps, usually minutes apart and
+  // usually with a phone in the other hand. Two shapes for the same act is where a
+  // companion app stops feeling like one.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const pair = [...doc.querySelectorAll('button')].find(b => b.textContent === 'Pair a device')
+  pair.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const seg = doc.querySelector('.seg.wide')
+  assert.ok(seg, 'the segmented control, full width so its options are equal')
+  assert.deepEqual([...seg.querySelectorAll('button')].map(b => b.textContent),
+    ['Full access', 'Guest pass', 'Owner'])
+
+  assert.match(text(), /Permanent access\. Scan the code in PearCinema on your phone\./)
+  assert.match(text(), /Show pairing code/)
+
+  // The stack of three cards it used to be is gone.
+  assert.doesNotMatch(text(), /Open a window/)
+  assert.doesNotMatch(text(), /Lend it for a while/)
+})
