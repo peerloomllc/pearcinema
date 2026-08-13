@@ -2,7 +2,136 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - CONTINUE WATCHING, and a watched badge, per person
+## 2026-08-13 (latest) - A SEASON GETS A BADGE TOO, and marking by hand lives on the thing itself
+Tier: T1 (an existing rollup applied to a second level, and an existing write reached from
+more places)
+Context: Tim, on reading the up-next work - "what about an indicator on the season tile to
+say if all have been watched and also to show one that is in progress? Additionally, would
+be nice to have the capability to manually mark something as watched/unwatched, like in
+Plex."
+
+Both were real gaps. The rollup existed and was only ever applied to a SHOW, and marking by
+hand existed but only inside the player, which is the one place somebody is not when they
+realise the badge is wrong.
+
+**A season now answers the same question a show does** - a count of what is left, or a tick
+when there is nothing left to say. It is asked for while a show is open, the same shape and
+for the same reason as the show rollup: computing it walks episodes, which is free on a
+folder source and one HTTP call per season on a Jellyfin one.
+
+**Nothing is reported before anybody has watched anything.** A brand-new library would
+otherwise put "24 left" on every season the day it is installed, which is noise rather than
+information.
+
+### Marking a CONTAINER marks its episodes, because that is all it could mean
+
+A show is not watched in its own right - it is watched when its episodes are. A flag on the
+container would be a second source of truth that disagrees with the count on its own tile
+the first time an episode lands in a folder. So marking a season or a show writes every
+episode underneath, and unmarking clears them all.
+
+### The tile stopped being a `<button>`, and that is not cosmetic
+
+A button inside a button is invalid HTML and browsers do not agree about which one a click
+reaches. The tick is now a real control sitting on the poster, so the poster became a `div`
+with the keyboard behaviour a button had. The alternative - a context menu - is a second
+interaction to discover, for something that should cost one click.
+
+### The one you are in the middle of, and the bug in the first attempt
+
+A count of what is left cannot say which season somebody is watching: an untouched season
+and a half-done one both just show a number. So a started-and-unfinished container is marked
+on the tile.
+
+**The first attempt got it wrong in the way that mattered most.** It computed "started" from
+the WATCHED set alone - and Tim found it immediately by starting the X-Files pilot: the
+episode was on the continue-watching shelf, and Season 1 said nothing at all. A season
+somebody is half way through episode one of has **no finished episodes**, so a rollup
+counting only those reports the exact season they are watching as untouched.
+
+The rollup now takes the resume ids as well and carries `inProgress` and `started` beside
+the counts. `unwatched` still means what it always meant - how many you have not FINISHED -
+so a part-watched episode is not quietly counted as done.
+
+### Three visual corrections, and one process lesson worth more than them
+
+The marker took four passes, all of them found by Tim looking at it rather than by a test:
+a box-shadow that enclosed the caption, a conic gradient whose bright arc vanished at each
+corner (a gradient sweeps by ANGLE; a rounded rectangle's edge does not), a ring with no
+positioning context so it sized itself to the whole tile again, and an outline a pixel shy
+of the artwork because `overflow: hidden` clips to the padding box. It is now a dash
+travelling a real rounded-rectangle path with `pathLength=100`, and the artwork's own border
+steps aside so the ring IS the edge.
+
+**The lesson is about the preview, not the CSS.** I hand-copied a slice of the stylesheet
+into a standalone page to show him, and wrote `position: relative` into that copy without
+noticing it was missing from the real one - so the preview looked perfect while the app was
+broken, and he found it. A preview built from a subset of the thing it previews is not a
+preview. It is generated from the whole stylesheet now, unedited.
+
+### Verified on the real library
+
+```
+Tim's own state, after he reported it:
+  pilot on the shelf   Season 1  started, 1 in progress, 0 watched, 24 left
+                       Season 2  not started
+                       The X-Files  started
+
+Season 1 (24 episodes)  mark watched -> 24 items, complete
+Season 2                             -> untouched, 25 left
+The X-Files                          -> 24 of 201 watched
+up next                              -> "little green men", season 2 episode 1
+unmark the season                    -> 24 unwatched again
+```
+
+### And the test suite was hanging, which was not a leak
+
+`npm test` stalled about one run in three, and every test that ran passed - the last files
+scheduled simply never reported. **`node --test` defaults to one worker per core** (12 on
+this machine) and several files spawn real ffmpeg processes and real 3-node HyperDHT
+testnets. Twelve at once is several times oversubscribed, and the DHT ones are timing
+sensitive enough to stop making progress altogether.
+
+Capped at four workers: **14 seconds against a run that looked hung.** Worth recording
+because it presented as a hang rather than a failure, and the reflex there is to raise a
+timeout rather than to look.
+
+## 2026-08-13 - UP NEXT: finish an episode and the next one is waiting
+Tier: T1 (a lookup over data that already exists, on an existing route)
+Context: open question 4 of the watch-state proposal, which recommended leaving it out of
+that cut - "it needs the next-episode lookup rather than the resume store, and folding it in
+is how a two-week piece becomes a month". Built straight after, on Tim's call.
+
+**Choice: the first UNWATCHED episode of a show somebody recently finished something in.**
+
+Three rules, each of which stops a wrong card going up:
+
+- **The same episode is never offered twice.** Half way through S01E02 it is already on the
+  shelf under its own name with a bar showing how far through; a "Next: S01E02" card beside
+  it is worse than offering nothing.
+- **A gap is not skipped.** Somebody who watched 1 and 3 has not seen 2, and calling 4 the
+  next one quietly writes off an episode they never saw.
+- **A finished show stops appearing** rather than looping back to episode one.
+
+### Bounded by RECENCY, not by the library
+
+Answering "what is next" for every show would walk every series' episodes - free on a folder
+source, one HTTP call per show on a Jellyfin one. So it looks only at shows the person
+recently finished something in, which is a handful rather than the twenty-eight on the real
+drive, and it needed one new thing in the store: `recentWatched`, because a Set of watched
+ids cannot answer "which show did they just finish an episode of".
+
+### Verified on the real library
+
+```
+before finishing  -> continue: [deep throat, 2001]   up next: []
+after finishing   -> continue: [2001]                up next: [squeeze]
+```
+
+`deep throat` was half-watched, so it was on the shelf under its own name and nothing was
+offered. Finishing it moved it off and put episode three up.
+
+## 2026-08-13 - CONTINUE WATCHING, and a watched badge, per person
 Tier: T2 (new Hyperbee keys, new methods, and an identity the browser did not have)
 Context: approved as `proposals/2026-08-13-watch-state.md`, requested by Tim - watched
 indicators like Plex keeps, **per user rather than per device**, the way PearTune already

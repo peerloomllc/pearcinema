@@ -17,13 +17,70 @@ import { useState, useEffect, useMemo } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 
-function Art ({ item }) {
+// How far through, as a percentage, or null when there is nothing to say.
+//
+// Runtimes are SECONDS here and positions are MILLISECONDS - see host/watch.js, where
+// mixing the two would mean nothing is ever finished. The floor of 2% is so something
+// only just begun shows a sliver rather than an empty groove that reads as a fault.
+function progressOf ({ positionMs, runtime }) {
+  const total = Number(runtime) > 0 ? Number(runtime) * 1000 : 0
+  if (!total || !(positionMs > 0)) return null
+  return Math.max(2, Math.min(100, Math.round((positionMs / total) * 100)))
+}
+
+// The ring that says "this is the one you are in the middle of".
+//
+// INSIDE THE ART, not around the whole tile: the tile is a picture with a caption
+// under it, and an outline around both draws a square box around the words as well.
+//
+// A STROKED PATH, not a spinning gradient. The gradient version fell apart exactly
+// where it was hardest to notice in a screenshot and impossible to miss in motion -
+// the bright arc thinned and vanished at each corner, because a conic gradient sweeps
+// by ANGLE while a rounded rectangle's edge does not, and the rim it was masked into
+// was a square inner box against rounded outer corners.
+//
+// A dash travelling along the real rounded-rectangle path has neither problem. It
+// follows the corners because it IS the corners, and `pathLength=100` normalises the
+// perimeter so the dash is a fixed fraction of it and moves at one speed the whole way
+// round, whatever shape the tile ends up.
+//
+// The stroke is 4 wide CENTRED on a path inset by 2, so its outer edge lands exactly on
+// the viewBox edge - which is the tile's edge, once the artwork's own border has got
+// out of the way. `rx` is 14 of 200 to match the artwork's 10px corner at the size these
+// are usually drawn.
+function Ring () {
+  return (
+    <svg class='ring' viewBox='0 0 200 300' aria-hidden='true' focusable='false'>
+      <rect class='base' x='2' y='2' width='196' height='296' rx='14' pathLength='100' />
+      <rect class='dash' x='2' y='2' width='196' height='296' rx='14' pathLength='100' />
+    </svg>
+  )
+}
+
+// THE BAR BELONGS TO THE PICTURE, not to the tile. Rendered here rather than beside
+// `<Art>` because as a child of `.poster` it spanned the whole tile - a couple of
+// pixels wider than the ring on each side, and placed vertically by guessing at the
+// caption's height (Tim, 2026-08-13, with a screenshot of it poking out).
+function Art ({ item, started = false, progress = null }) {
   const [bad, setBad] = useState(false)
+  const inner = (
+    <>
+      {started && <Ring />}
+      {progress !== null && <span class='resumebar'><i style={`width:${progress}%`} /></span>}
+    </>
+  )
+
   if (!item.artId || bad) {
-    return <div class='art'>{item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}</div>
+    return (
+      <div class='art'>
+        {inner}
+        {item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}
+      </div>
+    )
   }
   return (
     <div class='art'>
+      {inner}
       <img src={'/api/art?id=' + encodeURIComponent(item.artId)} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
@@ -45,25 +102,37 @@ function flagFor (v) {
 // HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
 // last decade has drawn it. A number would be exact and useless; the bar is read
 // without being looked at.
-function ResumeBar ({ positionMs, runtime }) {
-  // Runtimes are SECONDS here and positions are MILLISECONDS - see host/watch.js,
-  // where mixing the two would mean nothing is ever finished.
-  const total = Number(runtime) > 0 ? Number(runtime) * 1000 : 0
-  if (!total || !(positionMs > 0)) return null
-  const pct = Math.max(2, Math.min(100, Math.round((positionMs / total) * 100)))
-  return <span class='resumebar'><i style={`width:${pct}%`} /></span>
-}
-
-function Poster ({ item, caps, onOpen, label = null, watch = null }) {
+function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
 
-  // A SHOW SAYS WHAT IS LEFT, not that it is finished. "3 left" tells somebody to
-  // open it; a tick does not. Computed by the host from the episodes it holds, never
-  // stored - see host/watch.js.
-  const left = item.type === 'series' ? (watch?.unwatched ?? null) : null
-  const seen = item.type !== 'series' && watch?.watched
-  const resume = item.type !== 'series' ? watch?.resume : null
+  // A CONTAINER SAYS WHAT IS LEFT; A LEAF SAYS WHETHER IT IS DONE.
+  //
+  // Both a show and a season get a rollup - `{ total, watched, unwatched, complete }` -
+  // computed by the host from the episodes underneath, never stored. "3 left" tells
+  // somebody to open it where a tick does not, and a finished one gets the tick
+  // because at that point there is nothing left to say.
+  const rollup = watch && watch.total !== undefined ? watch : null
+  const seen = rollup ? rollup.complete : !!watch?.watched
+  const left = rollup && !rollup.complete ? rollup.unwatched : 0
+  const resume = rollup ? null : watch?.resume
+
+  // WHICH ONE AM I IN THE MIDDLE OF. A count of what is left cannot answer that: a
+  // season nobody has touched and a season half done both say "24 left" and "12 left"
+  // in the same voice, and the one somebody is actually watching is the one they came
+  // to the page for. So it is marked on the tile itself rather than by reading numbers
+  // (Tim, 2026-08-13).
+  // `started` comes from the HOST, which knows about episodes somebody is part way
+  // through as well as ones they finished. Recomputing it here from `watched` alone
+  // is the bug this replaced: a season with one half-watched episode in it has no
+  // finished episodes and would have reported itself untouched.
+  const started = !!rollup && !!rollup.started && !rollup.complete
+
+  // ONE BAR, TWO MEANINGS, which are the same meaning at different scales: minutes on
+  // a film, episodes on a season.
+  const progress = rollup
+    ? (started ? Math.max(2, Math.round((rollup.watched / rollup.total) * 100)) : null)
+    : progressOf({ positionMs: resume?.positionMs, runtime: item.runtime })
 
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
@@ -71,16 +140,44 @@ function Poster ({ item, caps, onOpen, label = null, watch = null }) {
     // only titles under them is unreadable as an episode list.
     : [label, item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
 
+  // A DIV RATHER THAN A BUTTON, and only because of the tick in the corner: a button
+  // inside a button is invalid, and the browsers that tolerate it do not agree on
+  // which one a click reaches. The whole tile is still one click target, with the
+  // keyboard behaviour a button would have had.
+  const open = () => onOpen(item)
   return (
-    <button class='poster' onClick={() => onOpen(item)}>
-      <Art item={item} />
+    <div
+      class={'poster' + (started ? ' started' : '')}
+      role='button'
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } }}
+    >
+      <Art item={item} started={started} progress={progress} />
       {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
-      {seen && <span class='seen' title='You have watched this'>✓</span>}
+      {badge && <span class='next'>{badge}</span>}
+
+      {/* THE AUTOMATIC RULE WILL BE WRONG SOMETIMES - a film watched on another
+          device, an episode somebody else put on - so correcting it is one click on
+          the thing itself rather than a trip into the player. On a show or a season
+          it marks every episode underneath, because that is the only thing it could
+          honestly mean. */}
+      {onWatched
+        ? (
+          <button
+            class={'mark' + (seen ? ' on' : '')}
+            title={seen ? 'Mark as unwatched' : 'Mark as watched'}
+            aria-label={(seen ? 'Mark as unwatched: ' : 'Mark as watched: ') + item.title}
+            onClick={e => { e.stopPropagation(); onWatched(item, !seen) }}
+          >✓</button>
+          )
+        : (seen && <span class='seen' title='You have watched this'>✓</span>)}
+
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
-      <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />
+
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
-    </button>
+    </div>
   )
 }
 
@@ -110,8 +207,11 @@ function WatchingAs ({ watch, onChange }) {
 // PICK UP WHERE YOU LEFT OFF. The row people actually use, so it sits above the
 // library rather than inside a tab - and it is only there when it has something in
 // it, because an empty shelf labelled "continue watching" is a reproach.
-function ContinueRow ({ watch, caps, onOpen }) {
-  const list = watch?.continue || []
+function ContinueRow ({ watch, caps, onOpen, onWatched }) {
+  // MID-FILM FIRST, then what to start next. Both are "carry on", but one is something
+  // somebody literally stopped in the middle of and the other is a suggestion - and
+  // burying the first under the second would be wrong.
+  const list = [...(watch?.continue || []), ...(watch?.upNext || [])]
   if (!list.length) return null
   return (
     <>
@@ -124,6 +224,12 @@ function ContinueRow ({ watch, caps, onOpen }) {
             caps={caps}
             label={i.type === 'episode' ? episodeCode(i) : null}
             watch={{ resume: i.resume }}
+            // A card for an episode nobody has started yet says so, rather than
+            // looking like something abandoned half way.
+            badge={i.upNext ? 'Next' : null}
+            // Markable from the shelf too. "I finished this on the telly" is exactly
+            // the thought somebody has while looking at a card offering to resume it.
+            onWatched={onWatched}
             onOpen={onOpen}
           />
         ))}
@@ -258,6 +364,14 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
   }, [watch])
   const badge = (item) => ({ watched: seen.has(item.id), resume: resumeOf.get(item.id) })
 
+  // One toggle for every grid on the page, so a film, an episode, a season and a show
+  // all behave the same way and there is one place for the reload to happen.
+  const mark = async (item, on) => {
+    await api('/api/watch/watched', { itemId: item.id, watched: on })
+    onWatchChange()
+    setSeasonRollups({})
+  }
+
   useEffect(() => {
     if (!search) { setHits(null); return }
     let live = true
@@ -272,12 +386,24 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
   // answering it walks every series' episodes, which is free on a folder library and
   // one HTTP call per show on a Jellyfin one.
   const [shows_, setShows_] = useState({})
+  const [seasonRollups, setSeasonRollups] = useState({})
   useEffect(() => {
     if (root !== 'shows') return
     let live = true
     api('/api/watch/shows').then(r => { if (live && r?.shows) setShows_(r.shows) })
     return () => { live = false }
   }, [root, watch])
+
+  // AND WHAT IS LEFT OF EACH SEASON, while a show is open. Same shape and same reason
+  // as the shows call above: computing it walks episodes, so it is asked for when the
+  // seasons are actually on screen rather than folded into every library page load.
+  useEffect(() => {
+    if (!series?.id) return
+    let live = true
+    api('/api/watch/seasons?seriesId=' + encodeURIComponent(series.id))
+      .then(r => { if (live && r?.seasons) setSeasonRollups(r.seasons) })
+    return () => { live = false }
+  }, [series?.id, watch])
 
   const films = useList('/api/library/list?type=movies&limit=100', [root])
   const shows = useList('/api/library/list?type=series&limit=100', [root])
@@ -369,7 +495,16 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
             <h2>{series.title}</h2>
             {series.overview && <p class='hint'>{series.overview}</p>}
             <div class='grid' style='margin-top:1rem'>
-              {seasons.items.map(s => <Poster key={s.id} item={s} caps={caps} onOpen={setSeason} />)}
+              {seasons.items.map(s => (
+                <Poster
+                  key={s.id}
+                  item={s}
+                  caps={caps}
+                  watch={seasonRollups[s.id]}
+                  onWatched={mark}
+                  onOpen={setSeason}
+                />
+              ))}
             </div>
             {seasons.busy && <div class='empty'>Loading…</div>}
           </>
@@ -394,6 +529,7 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
                       caps={caps}
                       label={episodeCode(e)}
                       watch={badge(e)}
+                      onWatched={mark}
                       onOpen={() => onPlay(e, episodes.items)}
                     />
                   ))}
@@ -404,13 +540,25 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
                   {episodes.items.map(e => {
                     const flag = flagFor(verdictFor(e, caps))
                     return (
-                      <button class={'eprow' + (seen.has(e.id) ? ' seen' : '')} key={e.id} onClick={() => onPlay(e, episodes.items)}>
+                      <div
+                        class={'eprow' + (seen.has(e.id) ? ' seen' : '')}
+                        key={e.id}
+                        role='button'
+                        tabIndex={0}
+                        onClick={() => onPlay(e, episodes.items)}
+                        onKeyDown={ev => { if (ev.key === 'Enter') onPlay(e, episodes.items) }}
+                      >
                         <span class='code'>{episodeCode(e) || '-'}</span>
                         <span class='t'>{e.title}</span>
-                        {seen.has(e.id) && <span class='tick' title='Watched'>✓</span>}
                         {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
                         {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
-                      </button>
+                        <button
+                          class={'mark' + (seen.has(e.id) ? ' on' : '')}
+                          title={seen.has(e.id) ? 'Mark as unwatched' : 'Mark as watched'}
+                          aria-label={(seen.has(e.id) ? 'Mark as unwatched: ' : 'Mark as watched: ') + e.title}
+                          onClick={ev => { ev.stopPropagation(); mark(e, !seen.has(e.id)) }}
+                        >✓</button>
+                      </div>
                     )
                   })}
                 </div>
@@ -427,7 +575,12 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
 
   return (
     <>
-      <ContinueRow watch={watch} caps={caps} onOpen={i => onPlay(i, watch.continue)} />
+      <ContinueRow
+        watch={watch}
+        caps={caps}
+        onWatched={mark}
+        onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
+      />
 
       <div class='row' style='margin-bottom:.6rem'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
@@ -446,7 +599,7 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
 
       <div class='grid' style='margin-top:.8rem'>
         {showing.items.map(i => (
-          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onOpen={item => {
+          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onOpen={item => {
             if (item.type === 'series') setSeries(item)
             else onPlay(item, films.items)
           }} />

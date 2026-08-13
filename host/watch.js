@@ -64,19 +64,63 @@ function decide ({ positionMs, runtimeSeconds, ended = false }) {
 // rollup would mean two sources of truth for the same question and a reconciliation
 // job the first time an episode lands in a folder.
 //
-// `episodes` is the leaves under the container; `watched` is the owner's set.
-function rollup (episodes, watched) {
+// `episodes` is the leaves under the container; `watched` is the owner's set; and
+// `resumed` is the ids they are part way through.
+//
+// RESUMED IS NOT OPTIONAL DECORATION. "Which season am I in the middle of" is the
+// question a viewer actually has, and a season where somebody is half way through
+// episode one has NO watched episodes at all - so a rollup that counts only finished
+// ones answers "not started" about the exact season they are watching. Found by Tim
+// 2026-08-13, playing the X-Files pilot and seeing nothing on Season 1.
+function rollup (episodes, watched, resumed = new Set()) {
   const total = episodes.length
   let seen = 0
-  for (const e of episodes) if (watched.has(e.id)) seen++
+  let going = 0
+  for (const e of episodes) {
+    if (watched.has(e.id)) seen++
+    else if (resumed.has(e.id)) going++
+  }
   return {
     total,
     watched: seen,
     unwatched: total - seen,
+    // How many are part way through. Kept apart from `watched` rather than folded in,
+    // because "12 left" has to keep meaning twelve you have not finished.
+    inProgress: going,
+    // Anything at all has happened here. The one thing a count cannot say.
+    started: seen > 0 || going > 0,
     // A show with no episodes is not a watched show. Said explicitly because
     // `seen === total` is true for zero and would put a tick on an empty shelf.
     complete: total > 0 && seen === total
   }
 }
 
-module.exports = { decide, isFinished, rollup, FINISHED_AT, STARTED_AFTER_MS }
+// THE NEXT ONE, out of a show's episodes in order.
+//
+// Finish S01E01 and S01E02 should be waiting. Deliberately left out of the first cut
+// of watch state (open question 4 of the proposal) because it is not the resume store
+// at all - it is a lookup over the tree, and the two get conflated because they land
+// on the same shelf.
+//
+// `episodes` must already be in structural order; the adapter sorts them by season
+// then number, which is the order somebody watches in and the only order this rule
+// makes sense in.
+//
+// SKIPPED, and each of these is a case that would otherwise put the wrong card up:
+//
+//   - anything already watched, obviously
+//   - anything with a position, because it is ALREADY on the shelf under its own
+//     name and offering the same episode twice is worse than not offering it
+//
+// Null when there is nothing left, which is how a finished show quietly stops
+// appearing rather than looping back to episode one.
+function nextEpisode (episodes, watched, resumed = new Set()) {
+  for (const e of episodes) {
+    if (watched.has(e.id)) continue
+    if (resumed.has(e.id)) return null
+    return e
+  }
+  return null
+}
+
+module.exports = { decide, isFinished, rollup, nextEpisode, FINISHED_AT, STARTED_AFTER_MS }

@@ -10,10 +10,23 @@
   },
   "scripts": {
     "host": "node host/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=4 test/*.test.js",
     "build:dashboard": "node scripts/build-dashboard.mjs",
-    "verify": "node --test test/*.test.js && npm run build:dashboard"
+    "verify": "node --test --test-concurrency=4 test/*.test.js && npm run build:dashboard"
   },
+  "//test-concurrency": [
+    "FOUR WORKERS, NOT ONE PER CORE, and it is the difference between 14 seconds and",
+    "a run that looks hung. node --test defaults to os.availableParallelism(), which",
+    "is 12 here - and these are not ordinary unit tests. Several files spawn REAL",
+    "ffmpeg processes and REAL 3-node HyperDHT testnets, so twelve workers is twelve",
+    "times that, several times oversubscribed, and the DHT ones are timing-sensitive",
+    "enough that they simply stop making progress.",
+    "",
+    "It presents as a HANG rather than a failure: every test that ran passes, the",
+    "last files scheduled never report, and the reflex is to raise a timeout rather",
+    "than look. Diagnosed 2026-08-13 after it swallowed several runs."
+  ],
+
   "//": [
     "THE HOST HAS ITS OWN DEPENDENCY SET and it is deliberately small, because",
     "almost everything it does is inherited from @peerloom/host: the HyperDHT",

@@ -82,9 +82,20 @@ const ROUTES = {
     watching: { id: 'p1', name: 'Me' },
     choose: [],
     watched: ['film-2'],
-    continue: [{ ...FILM, resume: { positionMs: 76_500, playedAt: Date.now() } }]
+    continue: [{ ...FILM, resume: { positionMs: 76_500, playedAt: Date.now() } }],
+    upNext: [{
+      ...FILM,
+      id: 'wire-s01e02',
+      type: 'episode',
+      seriesTitle: 'The Wire',
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: 'The Detail',
+      upNext: true
+    }]
   },
-  '/api/watch/shows': { shows: {} },
+  // A show half way through, so the tile can say which one is being watched.
+  '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, inProgress: 0, started: true, complete: false } } },
   '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
 }
 
@@ -308,10 +319,13 @@ test('a film you have finished wears a tick, and one you have not does not', asy
   const nosferatu = posters.filter(p => p.textContent.includes('Nosferatu'))
   const metropolis = posters.filter(p => p.textContent.includes('Metropolis'))
 
-  assert.ok(nosferatu.some(p => p.querySelector('.seen')), 'the watched one is ticked')
+  // The tick IS the toggle now: one click on the thing itself corrects it, rather
+  // than a trip into the player. Set means watched.
+  assert.ok(nosferatu.some(p => p.querySelector('.mark.on')), 'the watched one is ticked')
   // Metropolis appears twice - once in the shelf, once in the grid - and neither is
   // ticked, because a half-watched film is not a finished one.
-  assert.equal(metropolis.some(p => p.querySelector('.seen')), false)
+  assert.equal(metropolis.some(p => p.querySelector('.mark.on')), false)
+  assert.ok(metropolis.every(p => p.querySelector('.mark')), 'but both can be marked by hand')
 })
 
 test('WITH ONE PERSON THERE IS NO CHOICE TO MAKE', async (t) => {
@@ -361,4 +375,151 @@ test('opening a half-watched film OFFERS to resume rather than jumping', async (
   assert.match(offer.textContent, /Resume/)
   assert.match(offer.textContent, /Start over/)
   assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
+})
+
+test('the next episode sits on the same shelf, saying it has not been started', async (t) => {
+  const { dom, doc, text } = await open()
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /The Detail/)
+  const next = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  assert.ok(next.querySelector('.next'), 'a card for something unstarted says Next')
+  assert.equal(next.querySelector('.resumebar'), null, 'and carries no how-far-through bar')
+
+  // Mid-film first, then what to start next: one was stopped in the middle and the
+  // other is a suggestion.
+  const shelf = [...doc.querySelectorAll('.grid')][0].querySelectorAll('.poster')
+  assert.match(shelf[0].textContent, /Metropolis/)
+  assert.match(shelf[1].textContent, /The Detail/)
+})
+
+test('MARKING A FILM WATCHED IS ONE CLICK ON THE FILM', async (t) => {
+  // The automatic rule will be wrong sometimes - a film watched on another device, an
+  // episode somebody else put on - so the correction lives where the mistake is.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const sent = []
+  const realFetch = win.fetch
+  win.fetch = async (url, opts) => {
+    if (String(url).includes('/api/watch/watched')) {
+      sent.push(JSON.parse(opts.body))
+      return { status: 200, ok: true, json: async () => ({ ok: true }) }
+    }
+    return realFetch(url, opts)
+  }
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.querySelector('.mark').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.deepEqual(sent, [{ itemId: 'film-2', watched: false }], 'a watched film is marked UNwatched')
+  // And the click must not have opened the player underneath it.
+  assert.equal(doc.querySelector('video'), null)
+  assert.equal(doc.querySelector('.refusal'), null)
+})
+
+test('THE ONE YOU ARE IN THE MIDDLE OF IS MARKED, not just counted', async (t) => {
+  // A count of what is left cannot say it: a show nobody has touched and a show half
+  // done both just show a number, and the one somebody is actually watching is the
+  // one they came to the page for.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.ok(tile, 'the show is on screen')
+  assert.ok(tile.classList.contains('started'), 'and it says it is the one being watched')
+
+  // THE RING IS INSIDE THE PICTURE, not around the whole tile. Around the tile it
+  // encloses the caption too, which reads as a focus rectangle rather than a mark of
+  // progress - Tim sent a screenshot of exactly that.
+  const ring = tile.querySelector('.ring')
+  assert.ok(ring, 'the ring is there')
+  assert.equal(ring.parentElement.className, 'art', 'and it is drawn on the artwork')
+
+  // The same bar as a half-watched film, meaning the same thing at a different scale:
+  // four episodes of ten.
+  assert.equal(tile.querySelector('.resumebar i').style.width, '40%')
+  assert.match(tile.textContent, /6/, 'and still says how many are left')
+})
+
+test('a show nobody has started is counted but not marked', async (t) => {
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, inProgress: 0, started: false, complete: false } } }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.equal(tile.classList.contains('started'), false)
+  assert.equal(tile.querySelector('.ring'), null, 'and no ring on something nobody has begun')
+  assert.equal(tile.querySelector('.resumebar'), null, 'and no bar, because there is nothing to show')
+})
+
+test('a show with only a part-watched episode in it is STILL the one being watched', async (t) => {
+  // Nothing finished, so the count says "10 left" exactly like an untouched show. The
+  // tile is the only thing that can tell them apart.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 0, unwatched: 10, inProgress: 1, started: true, complete: false } } }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  assert.ok(tile.classList.contains('started'))
+  // A sliver rather than an empty groove, which reads as a rendering fault.
+  assert.equal(tile.querySelector('.resumebar i').style.width, '2%')
+})
+
+test('THE RING IS MEASURED AGAINST THE ARTWORK, which is what makes it hug the picture', async (t) => {
+  // Tim caught this twice from screenshots - once as square corners around the caption,
+  // once as rounded ones - and both times the DOM was right and the CSS was not. The
+  // ring is absolutely positioned, so without a positioned `.art` its containing block
+  // is `.poster`, which is the picture AND the words under it.
+  //
+  // Being in the right parent is not enough; there has to be something to be measured
+  // against. That is the half a screenshot shows and a DOM assertion does not.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const art = doc.querySelector('.poster.started .art')
+  assert.ok(art.querySelector('.ring'), 'the ring is inside the artwork')
+  assert.equal(win.getComputedStyle(art).position, 'relative',
+    'and the artwork is what it is measured against')
 })

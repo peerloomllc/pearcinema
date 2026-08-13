@@ -583,9 +583,56 @@ async function startDashboard ({
         if (!who.owner) return json(res, 200, { ok: false, needsPerson: true })
 
         const yes = on !== false
-        await host.userState.setWatched(who.owner, String(itemId), yes, { auto: false })
-        if (yes) await host.userState.setResume(who.owner, String(itemId), 0, null)
-        return json(res, 200, { ok: true, watched: yes })
+        const id = String(itemId)
+
+        // MARKING A SHOW OR A SEASON MARKS ITS EPISODES, because that is the only
+        // thing it could honestly mean. A show is not watched in its own right - it
+        // is watched when its episodes are (DECISIONS: a rollup is derived, never
+        // stored), so a flag on the container would be a second source of truth that
+        // disagrees with the count on its own tile the moment an episode is added.
+        const item = await host.adapter.get({ id })
+        const container = item && (item.type === 'series' || item.type === 'season')
+
+        const targets = container
+          ? ((await host.adapter.list({
+              type: 'episodes',
+              seriesId: item.type === 'series' ? item.id : null,
+              seasonId: item.type === 'season' ? item.id : null,
+              limit: 500
+            })).items || []).map(e => e.id)
+          : [id]
+
+        for (const t of targets) {
+          await host.userState.setWatched(who.owner, t, yes, { auto: false })
+          if (yes) await host.userState.setResume(who.owner, t, 0, null)
+        }
+        return json(res, 200, { ok: true, watched: yes, items: targets.length })
+      }
+
+      // WHAT IS LEFT OF EACH SEASON of one show. Asked for while a show is open, the
+      // same shape and for the same reason as /api/watch/shows: computing it walks
+      // episodes, and doing that for every season in a library to draw one page would
+      // be one HTTP call per season on a Jellyfin source.
+      if (req.method === 'GET' && url.pathname === '/api/watch/seasons') {
+        const seriesId = url.searchParams.get('seriesId')
+        if (!seriesId) return json(res, 400, { error: 'seriesId required' })
+
+        const who = await watcher(req)
+        if (!who.owner) return json(res, 200, { seasons: {} })
+
+        // BOTH SETS. A season somebody is half way through episode one of has no
+        // watched episodes at all, so counting only finished ones would report the
+        // season they are actually watching as untouched.
+        const watched = await host.userState.watchedSet(who.owner)
+        const resumed = new Set((await host.userState.listResume(who.owner, 200)).map(r => r.itemId))
+        const seasons = (await host.adapter.list({ type: 'seasons', seriesId, limit: 200 })).items || []
+
+        const out = {}
+        for (const s of seasons) {
+          const eps = (await host.adapter.list({ type: 'episodes', seasonId: s.id, limit: 500 })).items || []
+          out[s.id] = watch.rollup(eps, watched, resumed)
+        }
+        return json(res, 200, { seasons: out })
       }
 
       // Everything this person has going: the continue-watching shelf and the set of
@@ -616,11 +663,38 @@ async function startDashboard ({
           if (item) cont.push({ ...item, resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
         }
 
+        // AND THE NEXT EPISODE OF ANYTHING RECENTLY FINISHED.
+        //
+        // Bounded by RECENCY rather than by the library: only shows this person has
+        // just finished something in are looked at, which is a handful rather than
+        // the twenty-eight on the real drive. Walking every series to find one card
+        // would be free on a folder source and one HTTP call per show on a Jellyfin
+        // one, which is the same trap `/api/watch/shows` is kept separate for.
+        const resumed = new Set(cont.map(i => i.id))
+        const seenSeries = new Set()
+        const upNext = []
+
+        for (const row of await host.userState.recentWatched(who.owner, 12)) {
+          const done = await host.adapter.get({ id: row.itemId })
+          if (!done || done.type !== 'episode' || !done.seriesId) continue
+          if (seenSeries.has(done.seriesId)) continue
+          seenSeries.add(done.seriesId)
+
+          const eps = (await host.adapter.list({ type: 'episodes', seriesId: done.seriesId, limit: 500 })).items || []
+          const next = watch.nextEpisode(eps, watchedIds, resumed)
+          if (next) upNext.push({ ...next, upNext: true })
+          if (upNext.length >= 6) break
+        }
+
         return json(res, 200, {
           watching: { id: who.person.id, name: who.person.name },
           choose: who.persons.length > 1 ? who.persons.map(p => ({ id: p.id, name: p.name })) : [],
           watched: [...watchedIds],
-          continue: cont
+          // MID-FILM FIRST, then what to start next. Both are "carry on", but one is
+          // something the person literally stopped in the middle of and the other is
+          // a suggestion, and burying the first under the second would be wrong.
+          continue: cont,
+          upNext
         })
       }
 
@@ -634,12 +708,13 @@ async function startDashboard ({
         if (!who.owner) return json(res, 200, { shows: {} })
 
         const watched = await host.userState.watchedSet(who.owner)
+        const resumed = new Set((await host.userState.listResume(who.owner, 200)).map(r => r.itemId))
         const series = (await host.adapter.list({ type: 'series', limit: 500 })).items || []
 
         const shows = {}
         for (const s of series) {
           const eps = (await host.adapter.list({ type: 'episodes', seriesId: s.id, limit: 500 })).items || []
-          shows[s.id] = watch.rollup(eps, watched)
+          shows[s.id] = watch.rollup(eps, watched, resumed)
         }
         return json(res, 200, { shows })
       }

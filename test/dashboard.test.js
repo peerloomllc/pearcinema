@@ -52,6 +52,20 @@ const MP4 = items.movie({
   media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: BYTES.length }
 })
 
+const SHOW = items.series({ id: 'the-wire', title: 'The Wire' })
+const SEASON = items.season({ id: 'wire-s01', seriesId: 'the-wire', seriesTitle: 'The Wire', number: 1 })
+const EPISODES = [1, 2, 3].map(n => items.episode({
+  id: 'wire-s01e0' + n,
+  seriesId: SHOW.id,
+  seasonId: 'wire-s01',
+  seriesTitle: 'The Wire',
+  seasonNumber: 1,
+  episodeNumber: n,
+  title: 'Episode ' + n,
+  runtime: 3600,
+  media: { container: 'mkv', videoCodec: 'h264', audioCodec: 'aac', size: BYTES.length }
+}))
+
 class TestAdapter {
   constructor () {
     this.kind = 'test'
@@ -61,8 +75,17 @@ class TestAdapter {
   async ping () { return { ok: true, detail: 'test' } }
   async scan () { return 2 }
   async stats () { return { movies: 2, series: 0, seasons: 0, episodes: 0, source: 'test' } }
-  async list ({ type }) { return items.page(type === 'movies' ? [FILM, MP4] : [], {}) }
-  async get ({ id }) { return [FILM, MP4].find(f => f.id === id) || null }
+  // A show with three episodes, so the next-episode shelf has something to be about.
+  // Everything else in this file is films; a tree is what "up next" means.
+  async list ({ type, seriesId, seasonId }) {
+    if (type === 'movies') return items.page([FILM, MP4], {})
+    if (type === 'series') return items.page([SHOW], {})
+    if (type === 'seasons' && seriesId === SHOW.id) return items.page([SEASON], {})
+    if (type === 'episodes' && (seriesId === SHOW.id || seasonId === SEASON.id)) return items.page(EPISODES, {})
+    return items.page([], {})
+  }
+
+  async get ({ id }) { return [FILM, MP4, SHOW, SEASON, ...EPISODES].find(f => f.id === id) || null }
   async search ({ q }) {
     return { items: [FILM, MP4].filter(f => f.title.toLowerCase().includes(String(q).toLowerCase())) }
   }
@@ -908,4 +931,121 @@ test('two people of one name is refused, because "revoke Sam" has to mean someth
   assert.match(dup.json.error, /already somebody called Ben/)
 
   assert.equal((await c.req('POST', '/api/person', { body: { name: '  ' } })).status, 400)
+})
+
+test('FINISH AN EPISODE AND THE NEXT ONE IS WAITING', async (t) => {
+  // Deliberately left out of the first cut of watch state and built after, because it
+  // is not the resume store at all - it is a lookup over the show's episodes that
+  // happens to land on the same shelf.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: EPISODES[0].id, watched: true } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.upNext.map(i => i.id), [EPISODES[1].id])
+  assert.equal(state.json.upNext[0].upNext, true, 'and it says it has not been started')
+})
+
+test('THE SAME EPISODE IS NEVER OFFERED TWICE', async (t) => {
+  // Half way through episode two it is already on the shelf under its own name, with a
+  // bar showing how far through. A "Next" card for it beside that would be worse than
+  // offering nothing.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: EPISODES[0].id, watched: true } })
+  await c.req('POST', '/api/watch/position', { body: { itemId: EPISODES[1].id, positionMs: 600_000 } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.continue.map(i => i.id), [EPISODES[1].id])
+  assert.deepEqual(state.json.upNext, [])
+})
+
+test('a finished show stops appearing rather than looping back to episode one', async (t) => {
+  const { c } = await loggedIn(t)
+  for (const e of EPISODES) {
+    await c.req('POST', '/api/watch/watched', { body: { itemId: e.id, watched: true } })
+  }
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.upNext, [])
+})
+
+test('a finished FILM does not put up a next episode of anything', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: FILM.id, watched: true } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.upNext, [])
+})
+
+test('A SEASON SAYS WHAT IS LEFT OF IT, and a finished one says nothing more', async (t) => {
+  // The show tile answers "is this worth opening"; the season tile answers "which one
+  // am I on". Both are rollups over the episodes underneath, computed rather than
+  // stored, so an episode landing in a folder cannot leave either one stale.
+  const { c } = await loggedIn(t)
+
+  // NOTHING BEFORE ANYBODY HAS WATCHED ANYTHING. A brand-new library has no person
+  // yet, so every season would report "all of it left" - which is noise rather than
+  // information, and it would put a number on every tile the day somebody installs.
+  assert.deepEqual((await c.req('GET', '/api/watch/seasons?seriesId=' + SHOW.id)).json.seasons, {})
+
+  await c.req('POST', '/api/watch/watched', { body: { itemId: EPISODES[0].id, watched: true } })
+  let seasons
+  seasons = (await c.req('GET', '/api/watch/seasons?seriesId=' + SHOW.id)).json.seasons
+  assert.equal(seasons['wire-s01'].unwatched, 2)
+  assert.equal(seasons['wire-s01'].complete, false)
+
+  for (const e of EPISODES.slice(1)) {
+    await c.req('POST', '/api/watch/watched', { body: { itemId: e.id, watched: true } })
+  }
+  seasons = (await c.req('GET', '/api/watch/seasons?seriesId=' + SHOW.id)).json.seasons
+  assert.equal(seasons['wire-s01'].complete, true)
+  assert.equal(seasons['wire-s01'].unwatched, 0)
+})
+
+test('MARKING A SEASON WATCHED MARKS ITS EPISODES, because that is all it could mean', async (t) => {
+  // A show is not watched in its own right - it is watched when its episodes are. A
+  // flag on the container would be a second source of truth that disagrees with the
+  // count on its own tile the first time an episode is added.
+  const { c } = await loggedIn(t)
+  const res = await c.req('POST', '/api/watch/watched', { body: { itemId: 'wire-s01', watched: true } })
+  assert.equal(res.json.items, 3)
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.watched.sort(), EPISODES.map(e => e.id).sort())
+
+  // And back again, which is the half people actually need - somebody else watched a
+  // season on your login.
+  await c.req('POST', '/api/watch/watched', { body: { itemId: 'wire-s01', watched: false } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.watched, [])
+})
+
+test('marking a whole SHOW watched reaches every episode in it', async (t) => {
+  const { c } = await loggedIn(t)
+  const res = await c.req('POST', '/api/watch/watched', { body: { itemId: SHOW.id, watched: true } })
+  assert.equal(res.json.items, 3)
+  assert.equal((await c.req('GET', '/api/watch/state')).json.watched.length, 3)
+
+  // A show whose episodes are all watched has nothing to offer next.
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.upNext, [])
+})
+
+test('marking a season watched clears any position inside it', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: EPISODES[1].id, positionMs: 600_000 } })
+  assert.equal((await c.req('GET', '/api/watch/state')).json.continue.length, 1)
+
+  await c.req('POST', '/api/watch/watched', { body: { itemId: 'wire-s01', watched: true } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.continue, [])
+})
+
+test('STARTING AN EPISODE MARKS ITS SEASON AS THE ONE BEING WATCHED', async (t) => {
+  // Tim's report, end to end: start the pilot, see it on the shelf, and the season it
+  // belongs to has to say it is the one in progress - even though nothing in it is
+  // finished.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: EPISODES[0].id, positionMs: 480_000 } })
+
+  const seasons = (await c.req('GET', '/api/watch/seasons?seriesId=' + SHOW.id)).json.seasons
+  assert.equal(seasons['wire-s01'].started, true)
+  assert.equal(seasons['wire-s01'].inProgress, 1)
+  assert.equal(seasons['wire-s01'].watched, 0, 'and nothing is claimed as finished')
+
+  // The show one level up says the same thing.
+  const shows = (await c.req('GET', '/api/watch/shows')).json.shows
+  assert.equal(shows[SHOW.id].started, true)
 })

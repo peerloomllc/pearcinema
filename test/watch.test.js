@@ -75,6 +75,32 @@ test('SECONDS AND MILLISECONDS ARE NOT MIXED UP, which would mean nothing is eve
 
 const eps = (n) => Array.from({ length: n }, (_, i) => ({ id: 'e' + i }))
 
+test('THE SEASON YOU ARE IN THE MIDDLE OF SAYS SO, even with nothing finished in it', () => {
+  // Found by Tim 2026-08-13: he started the X-Files pilot, saw it on the continue
+  // watching shelf, and Season 1 said nothing at all. A season somebody is half way
+  // through episode one of has NO finished episodes, so a rollup counting only those
+  // reports the exact season they are watching as untouched.
+  const r = watch.rollup(eps(24), new Set(), new Set(['e0']))
+  assert.equal(r.started, true)
+  assert.equal(r.inProgress, 1)
+  assert.equal(r.watched, 0)
+  // And "21 left" has to keep meaning twenty-one you have not FINISHED, so a
+  // part-watched episode is not quietly counted as done.
+  assert.equal(r.unwatched, 24)
+})
+
+test('nothing touched is nothing to say', () => {
+  const r = watch.rollup(eps(10), new Set(), new Set())
+  assert.equal(r.started, false)
+  assert.equal(r.inProgress, 0)
+})
+
+test('an episode both finished and holding a position counts once, as finished', () => {
+  const r = watch.rollup(eps(3), new Set(['e0']), new Set(['e0']))
+  assert.equal(r.watched, 1)
+  assert.equal(r.inProgress, 0)
+})
+
 test('A SHOW REPORTS WHAT IS LEFT, which is what is actually useful', () => {
   // "3 left" tells somebody to open it; a tick does not. And it is computed rather
   // than stored, so an episode landing in a folder cannot leave a rollup stale.
@@ -100,4 +126,42 @@ test('AN EMPTY SHELF IS NOT A WATCHED SHOW', () => {
 
 test('a watched id that is not in this season does not count towards it', () => {
   assert.equal(watch.rollup(eps(2), new Set(['e0', 'somebody-elses-episode'])).watched, 1)
+})
+
+// --- the next one ----------------------------------------------------------------
+
+const ep = (id, season, number) => ({ id, type: 'episode', seasonNumber: season, episodeNumber: number })
+const SEASON = [ep('e1', 1, 1), ep('e2', 1, 2), ep('e3', 1, 3)]
+
+test('FINISH ONE AND THE NEXT IS WAITING', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1'])).id, 'e2')
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e2'])).id, 'e3')
+})
+
+test('a show nobody has started offers its first episode', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set()).id, 'e1')
+})
+
+test('A FINISHED SHOW QUIETLY STOPS APPEARING rather than looping to episode one', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e2', 'e3'])), null)
+})
+
+test('THE SAME EPISODE IS NEVER OFFERED TWICE', () => {
+  // Half way through S01E02 it is already on the shelf under its own name, with a bar
+  // showing how far through. Adding a "Next: S01E02" card beside it would be worse
+  // than offering nothing.
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1']), new Set(['e2'])), null)
+})
+
+test('a gap is not skipped past - the FIRST unwatched one is the next one', () => {
+  // Somebody who watched 1 and 3 has not seen 2, and telling them the next one is 4
+  // would quietly write off an episode they never saw.
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e3'])).id, 'e2')
+})
+
+test('it follows the order it was given, across seasons', () => {
+  // The adapter sorts by season then number - the order somebody watches in, and the
+  // only order this rule means anything in.
+  const across = [ep('s1e2', 1, 2), ep('s2e1', 2, 1)]
+  assert.equal(watch.nextEpisode(across, new Set(['s1e2'])).id, 's2e1')
 })
