@@ -66,13 +66,20 @@ export function fmtDur (ms) {
   return Math.max(1, Math.round(ms / 60000)) + ' minutes'
 }
 
-// Minutes to "1h 47m". Runtimes are in minutes throughout the item model - the .nfo
-// reader converts Kodi's minutes on the way in, which is the trap that once turned
-// King Kong into a three-minute film.
-export function fmtRuntime (min) {
-  if (!min) return ''
-  const h = Math.floor(min / 60)
-  const m = Math.round(min % 60)
+// RUNTIMES ARE SECONDS, everywhere, and this file used to read them as minutes -
+// which showed the 116-minute film 300 as "116h 33m". Tim caught it 2026-08-13.
+//
+// Seconds is the host's deliberate choice and it is written down in nfo.js: Kodi
+// stores runtime in MINUTES and a resume position in seconds, so everything is
+// normalised to seconds on the way in and nobody downstream has to remember which is
+// which. `probed.duration` from ffprobe is seconds, `_seconds(RunTimeTicks)` from
+// Jellyfin is seconds, and `runtimeSeconds()` from a sidecar is seconds. Only the
+// display was wrong.
+export function fmtRuntime (seconds) {
+  if (!seconds) return ''
+  const total = Math.round(seconds / 60)
+  const h = Math.floor(total / 60)
+  const m = total % 60
   return h ? `${h}h ${m}m` : `${m}m`
 }
 

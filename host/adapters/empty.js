@@ -29,6 +29,8 @@ class EmptyAdapter {
     return 0
   }
 
+  // Accepted and ignored, like every option: there is nothing to report progress on.
+
   async stats () {
     return { movies: 0, series: 0, seasons: 0, episodes: 0 }
   }

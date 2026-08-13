@@ -42,6 +42,7 @@ const {
 } = require('@peerloom/host')
 
 const { browse } = require('../browse')
+const { detectSources } = require('../detect')
 const items = require('../items')
 
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
@@ -175,7 +176,7 @@ async function collect (stream, limit = 8 * 1024 * 1024) {
 async function startDashboard ({
   host,
   bind = '127.0.0.1',
-  port = 8742,
+  port = 8751,
   password = '',
   passwordSource = 'none',
   version = null,
@@ -188,7 +189,7 @@ async function startDashboard ({
   requireSafeBind(bind, password, { envVar: 'PEARCINEMA_PASSWORD' })
 
   // The cookie is named per app by the package, because a box running PearTune on
-  // 8741 and PearCinema on 8742 shares an ORIGIN as far as cookies are concerned -
+  // 8741 and PearCinema on 8751 shares an ORIGIN as far as cookies are concerned -
   // they ignore the port. One cookie name would mean logging into one dashboard
   // logs you into the other.
   const auth = createDashboardAuth({ app: host.protocol.app, password })
@@ -246,6 +247,10 @@ async function startDashboard ({
           version,
           stats,
           sourceError: host.sourceError,
+          // Non-null while the library is being read. On the real 3 TB drive the
+          // first scan probes 2,986 files and takes minutes, and an empty grid for
+          // that long is indistinguishable from a broken app.
+          scanning: host.scanning || null,
           // The operator's own view of the source, which is NOT what a phone gets.
           // library.stats deliberately hides the folder paths from paired devices
           // (they are the shape of somebody's disk and no client needs them); the
@@ -421,6 +426,67 @@ async function startDashboard ({
         return stream.pipe(res)
       }
 
+      // --- REPACKAGED BYTES ----------------------------------------------------
+      //
+      // The other half of the player, and the one that turns a tenth of a real
+      // library into nearly all of it: 83% of the measured collection is in a
+      // container Chrome and Safari will not open, and this hands them the same
+      // picture in a box they will.
+      //
+      // NOT SEEKABLE BY RANGE, and it says so. These bytes are generated, so there
+      // is no byte 2,400,000,000 to ask for until everything before it has been
+      // made. Seeking is the client re-requesting with a new `t`, which is why the
+      // response carries the offset it actually started at - `-ss` with `-c copy`
+      // lands on the nearest keyframe at or before the asked-for time, and a player
+      // that assumed otherwise would show a clock that lies.
+      if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/api/remux') {
+        const id = url.searchParams.get('id')
+        if (!id) return json(res, 400, { error: 'id required' })
+        const at = Math.max(0, Number(url.searchParams.get('t')) || 0)
+
+        // What the CLIENT says it can open. The host decides from it; a client
+        // cannot ask to be remuxed, only describe itself.
+        const caps = {
+          containers: (url.searchParams.get('containers') || 'mp4').split(',').filter(Boolean),
+          videoCodecs: (url.searchParams.get('video') || 'h264').split(',').filter(Boolean),
+          audioCodecs: (url.searchParams.get('audio') || 'aac').split(',').filter(Boolean)
+        }
+
+        let out
+        try {
+          out = await host.openRemux({ itemId: String(id), at, capabilities: caps })
+        } catch (e) {
+          // BUSY is a real answer, not a failure. A viewer told the host is busy can
+          // try again; a viewer watching a spinner assumes it is broken.
+          if (e.code === 'BUSY') return json(res, 503, { error: e.message })
+          throw e
+        }
+
+        if (!out) return json(res, 404, { error: 'no such item' })
+        if (out.mode !== 'remux') {
+          // Direct play would work, or nothing will. Either way this route has
+          // nothing to do, and saying which is the whole point.
+          return json(res, 409, { mode: out.mode, reason: out.reason })
+        }
+
+        res.writeHead(200, {
+          'content-type': 'video/mp4',
+          'accept-ranges': 'none',
+          'cache-control': 'no-store',
+          'x-pearcinema-start': String(out.session.at),
+          'x-pearcinema-audio': out.session.audio
+        })
+        if (req.method === 'HEAD') { out.session.kill(); return res.end() }
+
+        // THE PROCESS DIES WITH THE RESPONSE. A browser abandons this the instant
+        // the viewer drags the scrubber or closes the tab, and an ffmpeg that
+        // outlives its reader is an orphan holding a file handle on the library
+        // drive. On a Pi-class box a few of those is the whole box.
+        res.on('close', () => out.session.kill())
+        out.session.stdout.on('error', () => out.session.kill())
+        return out.session.stdout.pipe(res)
+      }
+
       // --- the source ----------------------------------------------------------
       if (req.method === 'POST' && url.pathname === '/api/source/test') {
         const cfg = await readBody(req)
@@ -452,6 +518,13 @@ async function startDashboard ({
           host.sourceError = e.message
           return json(res, 400, { error: e.message })
         }
+      }
+
+      // WHAT IS ALREADY ON THIS BOX. Servers and folders together, because the
+      // operator is asking one question - where are the films - and does not care
+      // which shape the answer takes.
+      if (req.method === 'GET' && url.pathname === '/api/source/detect') {
+        return json(res, 200, await detectSources().catch(() => ({ servers: [], folders: [] })))
       }
 
       // The folder picker. Directory names only, never file contents.

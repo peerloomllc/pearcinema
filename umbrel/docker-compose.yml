@@ -27,9 +27,14 @@ services:
       - no-new-privileges:true
     environment:
       PEARCINEMA_HTTP_HOST: 0.0.0.0
-      # 8742, NOT 8741: PearTune has 8741 and PearCircle's seeder has 8731. A box
-      # running both PearTune and PearCinema is an expected setup.
-      PEARCINEMA_HTTP_PORT: "8742"
+      # 8751. THE SUITE'S PORT MAP, because a box running several of these at once
+      # is the expected setup: 8731 PearCircle seeder, 8741 PearTune dashboard,
+      # 8742 PearTune CAST, 8751 this, 8752 reserved for PearCinema's cast.
+      #
+      # It was 8742 until 2026-08-13, chosen because "PearTune has 8741". PearTune
+      # binds BOTH - the second is its Chromecast media server - and the collision
+      # was invisible until the image ran on a real Umbrel next to a real PearTune.
+      PEARCINEMA_HTTP_PORT: "8751"
       PEARCINEMA_PASSWORD: ${APP_PASSWORD}
       PEARCINEMA_NAME: My Library
       PEARCINEMA_DATA: /data

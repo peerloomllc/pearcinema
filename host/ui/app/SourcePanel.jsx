@@ -79,6 +79,63 @@ function FolderPicker ({ onPick, onClose }) {
   )
 }
 
+// WHAT WE FOUND ON THIS MACHINE, offered before either manual path.
+//
+// This is the shortest route from a fresh install to a working library, and on the
+// boxes PearCinema ships to it usually gets it right in one click: a Jellyfin on
+// localhost, or an external drive with Movies and TV Shows on it.
+//
+// The Plex row is the interesting one. Plex is the likeliest thing to be running
+// next to this and it CANNOT be read - it has its own API and needs its own reader -
+// so it is shown, disabled, with the reason and with the thing to do instead. Hiding
+// it would look like PearCinema had failed to notice the media server sitting right
+// there, which is worse than an honest no.
+function Detected ({ onFolders, onServer }) {
+  const [found, setFound] = useState(null)
+
+  useEffect(() => {
+    let live = true
+    api('/api/source/detect').then(r => { if (live) setFound(r || {}) })
+    return () => { live = false }
+  }, [])
+
+  if (!found) return <p class='hint'>Looking for films on this machine…</p>
+
+  const servers = found.servers || []
+  const folders = found.folders || []
+  if (!servers.length && !folders.length) return null
+
+  return (
+    <div style='margin-bottom:1rem'>
+      <h3>Already on this machine</h3>
+
+      {folders.map(f => (
+        <div class='dev' key={f.at}>
+          <span>🎬</span>
+          <div class='who'>
+            <b>{f.label}</b>
+            <div class='mono'>{f.roots.join('  ·  ')}</div>
+          </div>
+          <button class='small' onClick={() => onFolders(f.roots)}>Use these</button>
+        </div>
+      ))}
+
+      {servers.map(sv => (
+        <div class='dev' key={sv.url}>
+          <span>{sv.usable ? '🖥' : '🚫'}</span>
+          <div class='who'>
+            <b>{sv.name}</b>
+            <div>{sv.usable ? sv.url : sv.reason}</div>
+          </div>
+          {sv.usable
+            ? <button class='small' onClick={() => onServer(sv)}>Use this</button>
+            : <span class='chip'>not readable</span>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function SourcePanel ({ state, reload, embedded = false }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
@@ -146,6 +203,17 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
 
   const Body = (
     <>
+      <Detected
+        onFolders={(rs) => {
+          setKind('folder')
+          setRoots([...new Set([...roots, ...rs])])
+        }}
+        onServer={(sv) => {
+          setKind('jellyfin')
+          setUrl(sv.url)
+        }}
+      />
+
       <div class='row' style='margin-bottom:.9rem'>
         <button class={kind === 'folder' ? '' : 'ghost'} onClick={() => setKind('folder')}>A folder of films</button>
         <button class={kind === 'jellyfin' ? '' : 'ghost'} onClick={() => setKind('jellyfin')}>Jellyfin or Emby</button>

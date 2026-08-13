@@ -16,6 +16,7 @@ const { createProtocol, LibraryHost } = require('@peerloom/host')
 
 const { buildAdapter } = require('./adapters')
 const { createMethods, MUTATING } = require('./methods')
+const remux = require('./remux')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
@@ -50,6 +51,19 @@ class PearCinemaHost {
     this.sourceFrom = 'none'
     this.source = this._readSource()
     this.sourceError = null
+    // Non-null while a scan is running, so the page can say "reading your library,
+    // 1,500 of 2,986" instead of showing an empty grid that looks like a bug.
+    this.scanning = null
+
+    // The repackaging engine. Concurrency-capped, because remux is I/O bound rather
+    // than CPU bound but three films at once on a Pi-class box is still three films
+    // at once, and an unbounded count of child processes is how a host stops being a
+    // host. Nothing is written to disk - see host/remux.js.
+    this.remuxer = new remux.Remuxer({
+      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      maxConcurrent: Number(process.env.PEARCINEMA_MAX_REMUX) || 3,
+      log
+    })
 
     this.host = new LibraryHost({
       protocol: PROTOCOL,
@@ -113,6 +127,40 @@ class PearCinemaHost {
       offset: Number(offset) || 0,
       length: length ? Number(length) : undefined
     })
+  }
+
+  // REPACKAGE a film into something this client will open, starting at `at` seconds.
+  //
+  // Rung one of proposals/2026-08-13-remux.md: the container changes, the picture
+  // never does. It sits beside openStream rather than inside it because the two
+  // answer different questions - openStream says "which bytes of the file", this says
+  // "make me some bytes" - and folding a process spawn into the byte path would put a
+  // child process behind the one method where a mistake hands out the library.
+  //
+  // THE HOST DECIDES. `capabilities` is what the client says it can open; direct play
+  // always wins where it works, because it is free and it is the actual file.
+  async openRemux ({ itemId, at = 0, capabilities = {} } = {}) {
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return null
+
+    const verdict = remux.decide(item.media, capabilities)
+    if (verdict.mode !== 'remux') return { ...verdict, session: null, item }
+
+    if (!this.adapter.ffmpegInput) {
+      return { mode: 'refuse', reason: 'this source cannot be repackaged', session: null, item }
+    }
+    const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })
+    if (!source) return null
+
+    const session = this.remuxer.start({
+      input: source.input,
+      headers: source.headers || null,
+      at: Math.max(0, Number(at) || 0),
+      audio: verdict.audio || 'copy'
+    })
+
+    this.log('host:remux', { at, audio: verdict.audio, running: this.remuxer.running })
+    return { ...verdict, session, item }
   }
 
   // Change where the films come from, live, without a restart.
@@ -243,21 +291,45 @@ class PearCinemaHost {
 
   // --- lifecycle ------------------------------------------------------------
 
-  async ready ({ rescan = false } = {}) {
-    // A BAD SOURCE MUST NOT STOP THE HOST FROM STARTING. If the saved credentials
-    // are wrong or the drive is unplugged, scan() throws - and if that killed the
-    // process, the operator would be locked out of the very dashboard they need in
-    // order to fix it. Come up, serve, and say what is wrong.
+  // THE SCAN DOES NOT BLOCK THE HOST FROM COMING UP, and on a real library that is
+  // the difference between working and looking broken.
+  //
+  // Measured on the Umbrel against the actual 3 TB drive (2026-08-13): the first
+  // scan walks 2,986 films and episodes and probes every one with ffprobe, which
+  // takes MINUTES. Scanning first meant the DHT was silent and the web page did not
+  // exist for that whole time - so a fresh install answered nothing at all, which is
+  // indistinguishable from a broken one and is exactly the experience this app spends
+  // so much effort avoiding elsewhere.
+  //
+  // So: listen first, scan after, and report progress while it happens. A phone can
+  // pair during the scan, which is also the moment somebody is most likely to try.
+  async ready ({ rescan = false, waitForScan = false } = {}) {
+    await this.host.ready()
+
+    const scan = this._scan({ rescan })
+    if (waitForScan) await scan
+    return this
+  }
+
+  // A BAD SOURCE MUST NOT STOP THE HOST. If the credentials are wrong or the drive is
+  // unplugged, scan() throws - and if that propagated, the operator would be locked
+  // out of the very page they need in order to fix it. Come up, serve, say what is
+  // wrong.
+  async _scan ({ rescan = false } = {}) {
+    this.scanning = { done: 0, total: 0, startedAt: Date.now() }
     try {
-      const n = await this.adapter.scan({ force: rescan })
+      const n = await this.adapter.scan({
+        force: rescan,
+        onProgress: (done, total) => { this.scanning = { ...this.scanning, done, total } }
+      })
+      this.sourceError = null
       this.log('host:scanned', { source: this.adapter.kind, items: n })
     } catch (e) {
       this.sourceError = e.message
       this.log('host:source-failed', { source: this.adapter.kind, err: e.message })
+    } finally {
+      this.scanning = null
     }
-
-    await this.host.ready()
-    return this
   }
 
   startPairing (opts) { return this.host.startPairing(opts) }
@@ -274,7 +346,13 @@ class PearCinemaHost {
   deletePerson (p) { return this.host.deletePerson(p) }
   notifyOwnersDevicesChanged () { return this.host.notifyOwnersDevicesChanged() }
 
-  async close () { return this.host.close() }
+  async close () {
+    // BEFORE the host, and unconditionally. An ffmpeg left running after the daemon
+    // exits is an orphan holding a file handle on somebody's library drive, and on a
+    // small box it is the whole box.
+    this.remuxer.killAll()
+    return this.host.close()
+  }
 }
 
 module.exports = { PearCinemaHost, PROTOCOL }

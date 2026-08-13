@@ -143,13 +143,13 @@ class FolderAdapter {
 
   // One scan at a time. A cold host answering a screen of requests would otherwise
   // start a dozen, and each one walks the whole disk.
-  async scan ({ force = false } = {}) {
+  async scan ({ force = false, onProgress = null } = {}) {
     if (this._scanning) return this._scanning
-    this._scanning = this._scan({ force }).finally(() => { this._scanning = null })
+    this._scanning = this._scan({ force, onProgress }).finally(() => { this._scanning = null })
     return this._scanning
   }
 
-  async _scan ({ force }) {
+  async _scan ({ force, onProgress = null }) {
     if (!this.roots.length) throw new Error('no folders configured')
 
     if (!force && await this._loadCache()) {
@@ -184,7 +184,10 @@ class FolderAdapter {
       concurrency: PROBE_CONCURRENCY,
       ffprobe: this.ffprobe,
       onProgress: (n, total) => {
+        // The log every 500; the caller on EVERY file, because the page shows a
+        // count and a number that moves once a minute reads as a hang.
         if (n % 500 === 0) this.log('folder:probing', { done: n, total })
+        if (onProgress) onProgress(n, total)
       }
     })
     if (failed.length) this.log('folder:unreadable', { count: failed.length })
@@ -668,6 +671,21 @@ class FolderAdapter {
     // kind of small lie that eventually meets something stricter than a browser.
     stream.contentType = ART_MIME[extOf(file)] || 'image/jpeg'
     return stream
+  }
+
+  // WHAT FFMPEG SHOULD OPEN for this item, for remux only.
+  //
+  // This is the one place a path leaves the adapter, and it is deliberate rather than
+  // a hole: repackaging a film means handing ffmpeg something seekable, and a pipe is
+  // not seekable - `-ss` on a pipe would decode from the start of a two-hour film to
+  // reach the seek point. So the remux engine gets a path, from the SAME chokepoint
+  // `media.stream` uses, and nothing else does.
+  //
+  // It never travels. host/server.js calls it and hands the result to ffmpeg's argv;
+  // no method table exposes it, and no response carries it.
+  async ffmpegInput ({ itemId } = {}) {
+    const file = this._resolve(itemId)
+    return file ? { input: file } : null
   }
 
   async subtitles ({ itemId } = {}) {

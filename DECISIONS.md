@@ -2,7 +2,183 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - MEASURED: Dolby Digital survives a plain rewrap into MP4, DTS does not
+## 2026-08-13 (latest) - DEPLOYED TO THE UMBREL, against the real 3 TB library, and it found four bugs
+Tier: T2 (measurements and a port reallocation that affect every install)
+Context: Tim's call, and it was right. "There are only MP4 files on this host. If there
+are HEVC files they are on the Elements drive attached to the Umbrel. If you're basing
+everything on that full library then we should be building and testing the Host server
+dashboard as an Umbrel app from the Umbrel where it can actually see those files."
+
+Everything before this had been developed against a folder of two files on a laptop,
+which tests the mechanism perfectly and tests nothing about the library.
+
+**The image had never actually run.** It was accepted in PR #9 because it BUILT.
+
+### Four bugs, none of which any test could have found
+
+**1. The container died at startup, every time.** `@peerloom/host` declares its runtime
+packages as devDependencies plus peerDependencies, and the Dockerfile installed them with
+`--omit=dev` - which installed nothing. The first `require` out of the package was
+MODULE_NOT_FOUND. It works in a checkout because npm links the `file:` dependency and
+Node resolves through the symlink into a directory where a plain `npm install` HAS put
+them. Fixed by not omitting dev there, with the reasoning written down.
+
+**2. PORT 8742 WAS ALREADY PEARTUNE'S.** PearCinema chose it on the reasoning that
+"PearTune has 8741". PearTune binds BOTH: `host/cast.js` runs its Chromecast media server
+on 8742. So the host came up, scanned the whole library, and died with EADDRINUSE. The
+suite now has a written port map rather than a next-free-number habit:
+
+```
+8731  PearCircle seeder
+8741  PearTune dashboard      8742  PearTune cast
+8751  PearCinema dashboard    8752  PearCinema cast (reserved)
+```
+
+**3. The page did not exist until the scan finished** - about four minutes for 2,986
+files on a USB drive. `ready()` scanned and THEN listened, so a fresh install answered
+nothing at all for minutes, which is indistinguishable from a broken one and is exactly
+the experience this app works hard to avoid everywhere else. Now it listens first and
+scans after, reporting progress, and **a phone can pair while it works** - which is the
+moment somebody is most likely to try.
+
+**4. A deploy that failed printed a cheerful "open http://..." underneath a stack
+trace.** The check looked for any 200; something else on the box answered 8742 with a 404
+while our container crash-looped. It now looks for OUR page and exits non-zero.
+
+### What the real library actually looks like to a player
+
+274 films, 29 shows, 160 seasons, 2,712 episodes. Sampled through the running host:
+
+```
+FILMS (274)                        EPISODES (902 sampled)
+182  matroska/h264/aac             315  matroska/hevc/aac
+ 40  avi/mpeg4/mp3                 211  matroska/hevc/ac3
+ 18  mov/h264/aac                  138  mov/h264/aac
+ 14  matroska/h264/dts              87  mov/hevc/aac
+  5  matroska/hevc/aac              76  matroska/h264/aac
+  5  matroska/h264/truehd           75  matroska/hevc/eac3
+  3  matroska/h264/ac3
+```
+
+**HEVC is 76% of the sampled television**, which confirms the earlier 64% figure and
+sharpens it. And that single fact splits the two clients completely:
+
+- **An iPhone gets essentially all of it after remux.** iOS decodes HEVC and Dolby, so
+  every episode above is a container rewrite; only the 40 AVI films are out of reach.
+  Verified on real files: a `matroska/hevc/ac3` episode remuxed with the audio COPIED.
+- **A desktop browser gets about a quarter of the television.** No browser measured
+  decodes HEVC, and repackaging cannot change the picture. Verified: the same episode
+  answered `refuse` with "this client cannot decode HEVC video".
+
+So the web player is excellent for FILMS - Tim's Brave opens MKV, so 200 of 274 play
+untouched and the DTS and TrueHD ones now get rebuilt sound - and it is weak for his
+television, permanently, until something re-encodes video. **That is a finding about
+browsers, not about PearCinema**, and it makes the phone client more clearly the product
+than any argument had.
+
+## 2026-08-13 - CORRECTION: Chromium-based browsers DO open Matroska
+Tier: T2 (a measurement that corrects a claim repeated across this repo's docs)
+Context: Tim played his own 2.5 GB MKV of 2001 in the new web player and it said
+"straight from the file" rather than "repackaged" - and played perfectly. That should
+have been impossible under the claim this repo had been making.
+
+**The claim was too strong.** Measured against a real browser on 2026-08-13:
+
+```
+Brave / Chromium 149      video/x-matroska                          -> maybe
+                          video/x-matroska; codecs="avc1,mp4a"      -> probably
+                          video/mp4; codecs="hvc1..."  (HEVC)       -> NO
+                          audio/mp4; codecs="ac-3"                  -> NO
+                          video/x-msvideo (AVI)                     -> NO
+```
+
+So **Chrome, Brave and Edge open an MKV holding H.264 and AAC**, and Tim's 2001 is
+exactly that. Safari and iOS do not, which is where the original claim came from. Firefox
+was not measured - it would not report headlessly - so nothing is claimed about it.
+
+**The code was already right, and that is the point worth keeping.** `playback.js` probes
+`canPlayType` rather than hard-coding a table, so it correctly sent the file untouched.
+Had it assumed the Chrome-refuses-Matroska claim, PearCinema would have spent a child
+process repackaging a film that was already playing perfectly. **Ask the engine, do not
+model the engine.**
+
+### What this does and does not change about remux
+
+It does NOT shrink the case for remux; it changes its shape.
+
+- Container refusals are fewer than believed **on Chromium**, and unchanged on Safari and
+  iOS - which is the platform remux was always principally for.
+- **The codec refusals are what remain, and they are large.** No measured browser decodes
+  HEVC, and HEVC is 64% of the real television library. Those files are not remuxable
+  either, because repackaging cannot change the picture - they are rung three.
+- **Dolby audio is refused by every browser measured**, so an AC-3 film in Chromium plays
+  the picture and nothing else. That was being reported as "picture only" and accepted.
+
+### The gap it exposed, now fixed
+
+A soundtrack the browser cannot decode is **cheap to rebuild** - that is rung two, and per
+the same day's measurement it is a rounding error of the library. Reporting a silent film
+rather than fixing one was leaving the easiest win on the table. A `nosound` verdict is
+now repackaged with the audio rebuilt and the picture untouched, and says so.
+
+## 2026-08-13 - remux ships as a PIPE, not as HLS, and three real-file traps
+Tier: T2 (a mechanism change inside an approved T3, recorded rather than made quietly)
+Context: `proposals/2026-08-13-remux.md` chose HLS with an on-disk rolling segment window,
+because a `<video>` element and AVPlayer both seek by BYTE range and generated bytes have
+no stable byte offsets. Building it produced a simpler answer for the client that exists.
+
+**Choice: ffmpeg's output goes straight down the socket. Nothing is written to disk.**
+Seeking is the player asking the host to start again at a new time, with the offset added
+to the element's own clock.
+
+Why this is not the option the proposal rejected. It rejected restart-at-seek on the
+grounds that a NATIVE player seeks by byte range and would need a byte-to-time map faked
+from average bitrate. That is still true and still disqualifying - **for a native player**.
+The browser's player is OURS: it can intercept a scrub and re-source. So the objection
+applies to the phone, which does not exist yet, and not to the client that does.
+
+What it buys, and it is not small: **the proposal's hardest constraint disappears rather
+than being managed.** There is no segment cache, so there is no cap to enforce, no rolling
+window to get wrong, no disk to fill, and no cleanup path that can leak a gigabyte per
+abandoned session on a box whose root filesystem filling up is a brick. The section of the
+proposal that worried most is answered by there being nothing to worry about.
+
+**HLS is still the plan for the phone**, unchanged, and this is a deviation to record
+rather than a decision to reverse. The seam is right for it: `decide()` already answers
+what a client needs, and a playlist path is additive next to a pipe path.
+
+Cost, accepted: a moment's rebuffer on every seek, and the host cannot resume a stream it
+has already produced - it produces it again. Remux is cheap enough that this is measured in
+seconds. On Tim's real 2.5 GB copy of 2001, seeking an hour in delivered playable bytes in
+**3.5 seconds**.
+
+### Three traps that only a real file could have found
+
+**1. `delay_moov`, and its absence is SILENT.** Copying AC-3 into a streamed fragmented
+MP4 produced a file ffmpeg was perfectly happy to write, exited 0 on, and nothing could
+open: `invalid size 0 in stsd`. An AC-3 track's `stsd` entry needs a `dac3` box whose
+contents come from the first audio frame, and `empty_moov` writes the header before a
+single packet has been read. The same copy into a normal seekable MP4 worked perfectly -
+which is exactly why the earlier Dolby measurement, done with files on disk, could not
+have caught it. **This very nearly cost the entire Dolby win**, the ~620 files that are
+the reason rung two shrank to 19.
+
+**2. Chapters become a phantom `bin_data` track.** ffmpeg copies chapters by default and
+the MP4 muxer writes them as a third stream. Tim's copy of 2001 carries 34 chapter marks,
+so the output had three streams in a fragmented MP4 where a strict player has every right
+to object. Invisible to every synthetic clip, because a clip ffmpeg just made has no
+chapters. Now `-map_chapters -1`.
+
+**3. `mkv` and `matroska` are the same container and the two sources disagree.** ffprobe
+says `matroska`, Jellyfin says `mkv`, and ffprobe collapses the whole ISO base media
+family to `mov`. A client declaring one spelling against a file carrying the other means
+remuxing files it could already open. Aliased in one table.
+
+The general lesson, and it is the third time this repo has learned it: **the tests that
+found these were the ones that produced actual bytes.** Everything that only inspected an
+argv passed.
+
+## 2026-08-13 - MEASURED: Dolby Digital survives a plain rewrap into MP4, DTS does not
 Tier: T2 (a measurement that decides how much of the remux proposal has to be built)
 Context: open question 1 of `proposals/2026-08-13-remux.md`. The repair ladder puts ~650
 files on rung two, "container rewrite PLUS an audio re-encode", almost all of it HEVC +

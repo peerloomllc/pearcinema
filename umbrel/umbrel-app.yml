@@ -4,7 +4,7 @@ name: PearCinema
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
 version: "0.1.0"
-port: 8742
+port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
   server to the internet.
