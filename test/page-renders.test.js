@@ -688,3 +688,119 @@ test('SWITCHING FILMS AND SHOWS LEAVES THE SHELF AND THE SWITCH ALONE', async (t
   assert.ok([...doc.querySelectorAll('h2')].some(h => h.textContent === 'Continue watching'),
     'so the shelf survives the switch')
 })
+
+test('THE DETAILS ARE ONE BUTTON AWAY, and cover nothing until asked', async (t) => {
+  // The file's technical facts used to hold a permanent right-hand column, which made
+  // the picture smaller on every screen to keep room for something most people never
+  // read.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const sheet = doc.querySelector('.sheet')
+  assert.ok(sheet, 'the sheet exists')
+  assert.equal(sheet.classList.contains('open'), false, 'and starts shut')
+  assert.equal(sheet.getAttribute('aria-hidden'), 'true')
+
+  const details = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+  details.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  assert.ok(doc.querySelector('.sheet').classList.contains('open'), 'and opens when asked')
+  assert.match(text(), /How it is playing/, 'with the facts in it')
+})
+
+test('PREVIOUS AND NEXT ARE A TELEVISION IDEA', async (t) => {
+  // On a film the queue is whatever list it was opened from, so "next" would mean the
+  // next film alphabetically - not a thing anybody wants offered. Hidden rather than
+  // disabled: a permanently greyed-out control is still a control to read past.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const acts = [...doc.querySelectorAll('.acts button')].map(b => b.textContent.trim())
+  assert.equal(acts.some(t => /Previous|Next/.test(t)), false, 'a film gets neither')
+
+  // And the two that remain are icons carrying a state that has to be readable.
+  // Nosferatu is watched in this state, so the control is set - and the label says
+  // which way pressing it goes rather than what it currently is, because a tick on its
+  // own means both "done" and "mark done".
+  const watched = doc.querySelector('.acts button.icon[aria-pressed]')
+  assert.ok(watched, 'the watched control says whether it is set')
+  assert.equal(watched.getAttribute('aria-pressed'), 'true')
+  assert.equal(watched.getAttribute('aria-label'), 'Mark as unwatched')
+  assert.ok(watched.classList.contains('on'), 'and it is filled rather than outline')
+})
+
+test('an episode gets Previous and Next, and they are the same width as the rest', async (t) => {
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const acts = [...doc.querySelectorAll('.acts button')]
+  assert.deepEqual(acts.slice(0, 2).map(b => b.textContent.trim()), ['Previous', 'Next'],
+    'named plainly - "Next episode" said the obvious twice')
+  assert.equal(acts.length, 4, 'four controls: previous, next, watched, details')
+})
+
+test('the list view shows how far through an episode is, like the grid does', async (t) => {
+  // The grid has said this since the shelf existed and the list said nothing, so the
+  // same episode looked untouched in one view and half-watched in the other.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 1,
+    title: 'The Target', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const SHOW = { type: 'series', id: 'show-1', title: 'The Wire', seasonCount: 1, episodeCount: 1, artId: null, genres: [], overview: null, year: 2002 }
+  const SEASON = { type: 'season', id: 'season-1', seriesId: 'show-1', number: 1, title: 'Season 1', episodeCount: 1, artId: null }
+
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': {
+      watching: { id: 'p1', name: 'Me' }, choose: [], watched: [], upNext: [],
+      continue: [{ ...EP, resume: { positionMs: 900_000, playedAt: Date.now() } }]
+    },
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/library/list?type=seasons&limit=100': { items: [SEASON], total: 1, cursor: null },
+    '/api/library/list?type=episodes&limit=200': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Season 1'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const list = [...doc.querySelectorAll('button')].find(b => b.textContent.trim().endsWith('List'))
+  if (list) list.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const row = doc.querySelector('.eprow')
+  assert.ok(row, 'the episode is in the list')
+  const bar = row.querySelector('.rowbar i')
+  assert.ok(bar, 'and it says how far through it is')
+  assert.equal(bar.style.width, '25%', '15 minutes of an hour')
+})

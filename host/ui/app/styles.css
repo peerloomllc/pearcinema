@@ -236,8 +236,58 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* ---- the player ----------------------------------------------------------- */
 
-.playerwrap { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr) }
-@media (max-width: 860px) { .playerwrap { grid-template-columns: 1fr } }
+/* THE PICTURE IS THE PAGE (Tim, 2026-08-13, choosing it over the two columns that were
+ * here). The file's technical facts used to hold a permanent right-hand column, which
+ * made the picture smaller on every screen to keep room for something most people never
+ * read - and made the whole thing read as a file inspector that happens to play video.
+ *
+ * They are one button away now, in a sheet that covers nothing until it is asked for.
+ * It is also the layout that still works when the player goes full screen, or ends up
+ * on a television, where a side column has nowhere to be. */
+.playerwrap { max-width: 1000px; margin: 0 auto }
+
+.titlebar { display: flex; align-items: flex-start; gap: 1rem; margin-top: .7rem }
+.titlebar .grow { flex: 1; min-width: 0 }
+.overview { font-size: .92rem; max-width: 68ch; margin: .5rem 0 0 }
+
+/* FOUR CONTROLS OF ONE WIDTH. Previous and Next only exist on television - on a film
+ * the queue is whatever list it was opened from, so "next" would mean the next film
+ * alphabetically. The other two are icons so the row comes out even rather than a
+ * stack of mixed-width buttons. */
+.acts { display: flex; gap: .4rem; flex: 0 0 auto }
+.acts button { min-width: 5.6rem; justify-content: center; display: inline-flex; align-items: center }
+.acts button.icon { min-width: 2.6rem; padding: .45rem 0; border: 1px solid var(--line); background: transparent; color: var(--muted) }
+.acts button.icon:hover { color: var(--fg); border-color: var(--line-strong) }
+/* An icon carrying a STATE has to be unmistakable, or a tick means both "done" and
+ * "mark done". Filled while watched, outline while not. */
+.acts button.icon.on { background: var(--accent); color: var(--accent-fg); border-color: transparent }
+
+@media (max-width: 640px) {
+  .titlebar { flex-direction: column; gap: .6rem }
+  .acts { width: 100%; }
+  .acts button { flex: 1 }
+}
+
+/* The details sheet: over the page, from the right, and gone again. */
+.sheet {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 40;
+  width: min(360px, 88vw); padding: 1rem 1.1rem; overflow: auto;
+  background: var(--card); border-left: 1px solid var(--line);
+  transform: translateX(101%); transition: transform .26s cubic-bezier(.2, .7, .3, 1);
+}
+.sheet.open { transform: none }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .4rem }
+.sheet-head h3 { margin: 0 }
+
+.scrim {
+  position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .55);
+  opacity: 0; pointer-events: none; transition: opacity .2s ease;
+}
+.scrim.on { opacity: 1; pointer-events: auto }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet { transition: none }
+}
 
 .stage {
   background: #000; border-radius: var(--radius); overflow: hidden;
@@ -605,3 +655,16 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 .poster .art svg { color: color-mix(in srgb, var(--muted) 70%, transparent) }
 .searchbox svg { color: var(--muted) }
 .mark svg, .seen svg { display: block }
+
+/* How far through, in the LIST view. The grid has shown this since the shelf existed
+ * and the list showed nothing, so one episode looked untouched in one view and
+ * half-watched in the other.
+ *
+ * Along the bottom EDGE of the row rather than beside the text: same language as the
+ * poster's bar, and it cannot push the title around when it appears. */
+.eprow { position: relative; overflow: hidden }
+.eprow .rowbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: rgba(0, 0, 0, .35);
+}
+.eprow .rowbar i { display: block; height: 100%; background: var(--accent) }

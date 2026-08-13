@@ -130,3 +130,7 @@ export function ArtIcon ({ type, size = 34 }) {
   if (type === 'episode' || type === 'season') return <Frames size={size} />
   return <Film size={size} />
 }
+
+export const Info = (p) => (
+  <S {...p}><circle cx='12' cy='12' r='8.5' /><path d='M12 11v5.5' /><path d='M12 7.8h.01' /></S>
+)

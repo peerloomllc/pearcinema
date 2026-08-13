@@ -647,6 +647,18 @@ export default function Library ({
                       >
                         <span class='code'>{episodeCode(e) || '-'}</span>
                         <span class='t'>{e.title}</span>
+                        {/* HOW FAR THROUGH, IN THE LIST TOO. The grid has said this
+                            since the shelf existed and the list said nothing, so the
+                            same episode looked untouched in one view and half-watched
+                            in the other (Tim, 2026-08-13). A bar along the bottom edge
+                            of the row rather than beside the text: it is the same
+                            language as the poster's, and it does not push the title
+                            around when it appears. */}
+                        {progressOf({ positionMs: resumeOf.get(e.id)?.positionMs, runtime: e.runtime }) !== null && (
+                          <span class='rowbar'>
+                            <i style={`width:${progressOf({ positionMs: resumeOf.get(e.id)?.positionMs, runtime: e.runtime })}%`} />
+                          </span>
+                        )}
                         {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
                         {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
                         <button
