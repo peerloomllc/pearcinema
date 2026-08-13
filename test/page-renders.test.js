@@ -382,7 +382,7 @@ test('opening a half-watched film OFFERS to resume rather than jumping', async (
   // AN EXACT TIME. Somebody deciding whether to resume is looking for the moment they
   // stopped, and "1m" does not tell them which of two attempts this was.
   assert.match(offer.textContent, /Resume at 1:16\?/)
-  assert.match(offer.textContent, /Start over/)
+  assert.match(offer.textContent, /Start Over/)
   assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
 })
 
@@ -860,4 +860,56 @@ test('nothing in the controls is an emoji', async (t) => {
   const controls = doc.querySelector('.controls')
   assert.doesNotMatch(controls.textContent, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
   assert.ok(controls.querySelectorAll('svg').length >= 5, 'they are drawn instead')
+})
+
+test('THE DETAILS SHEET STATES FACTS RATHER THAN BADGING THEM', async (t) => {
+  // A coloured pill reads as a status somebody is meant to act on. These are
+  // explanations - and "on the player" beside every usable subtitle was a label for the
+  // obvious, since that list IS the list you can turn on.
+  const { dom, doc, win } = await open(STATE, {
+    '/api/subtitles': {
+      items: [
+        { id: 's1', title: 'English', language: 'en', external: true, playable: true, reason: null },
+        { id: 's2', title: 'French', language: 'fr', external: false, playable: false, reason: 'These subtitles are pictures rather than text.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  ;[...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  const sheet = doc.querySelector('.sheet')
+  assert.doesNotMatch(sheet.textContent, /on the player/, 'no badge on the ones that work')
+  assert.equal(sheet.querySelectorAll('.chip').length, 0, 'and no pills anywhere in the sheet')
+
+  // What earns its place is the opposite: the ones you cannot have, and why.
+  assert.match(sheet.textContent, /not available/)
+  assert.match(sheet.textContent, /pictures rather than text/)
+
+  // The length is exact, because this panel was opened to see the facts about a file.
+  // Nosferatu has no runtime in the fixture; Metropolis does - 153 seconds.
+  assert.match(sheet.textContent, /How it is playing/)
+})
+
+test('the length in the sheet is exact, not rounded to the minute', async (t) => {
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  ;[...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  // 153 seconds. "3m" rounds away more than half of what it is.
+  assert.match(doc.querySelector('.sheet').textContent, /2 m 33 s/)
 })

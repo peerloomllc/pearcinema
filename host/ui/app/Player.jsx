@@ -26,7 +26,7 @@
 // directions.
 
 import { useState, useEffect, useRef } from 'preact/hooks'
-import { api, fmtRuntime, fmtSize, fmtClock, episodeCode } from './api'
+import { api, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import { Blocked, Check, Close, Info } from './icons'
@@ -278,7 +278,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
           <div class='resumeover'>
             <div class='card'>
               <h3>Resume at {fmtClock(offer)}?</h3>
-              <div class='row'>
+              <div class='row two'>
                 <button onClick={() => {
                   wantPlay.current = true
                   seekTo(offer)
@@ -293,7 +293,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   seekTo(0)
                   setOffer(null)
                   if (!remuxing) video.current?.play().catch(() => {})
-                }}>Start over</button>
+                }}>Start Over</button>
               </div>
             </div>
           </div>
@@ -375,49 +375,57 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
         </div>
 
         <dl class='meta'>
-          {item.runtime ? <><dt>Length</dt><dd>{fmtRuntime(item.runtime)}</dd></> : null}
+          {item.runtime ? <><dt>Length</dt><dd>{fmtExact(item.runtime)}</dd></> : null}
           <dt>File</dt>
           <dd>
             {[containerName(m.container), m.videoCodec && m.videoCodec.toUpperCase(), m.audioCodec && m.audioCodec.toUpperCase()]
               .filter(Boolean).join(' · ') || 'not reported'}
             {m.size ? <span class='hint'> · {fmtSize(m.size)}</span> : null}
           </dd>
+          {/* IN WORDS, NOT PILLS. A coloured badge reads as a status somebody is
+              meant to act on; this is an explanation, and the only reason it earns a
+              place at all is that it answers a real question - why jumping takes a
+              moment on some films and not others (Tim, 2026-08-13). */}
           <dt>How it is playing</dt>
           <dd>
-            {blocked && <span class='chip bad'>will not open</span>}
+            {blocked && 'Your browser will not open this one at all.'}
             {!blocked && remuxing && (
               <>
-                <span class='chip accent'>repackaged</span>
-                <div class='hint' style='margin-top:.3rem'>
-                  {verdict.status === 'nosound'
-                    ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
-                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will, untouched, as they stream.`}
-                  {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
-                </div>
+                {verdict.status === 'nosound'
+                  ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
+                  : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will - untouched - as they stream.`}
+                {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
               </>
             )}
-            {!blocked && !remuxing && verdict.status === 'play' && <span class='chip good'>straight from the file</span>}
-            {!blocked && !remuxing && verdict.status === 'unknown' && <span class='chip'>unknown</span>}
+            {!blocked && !remuxing && verdict.status === 'play' && 'Straight from the file, exactly as it is on the disk.'}
+            {!blocked && !remuxing && verdict.status === 'unknown' && 'Your browser has not said whether it can open this one.'}
           </dd>
         </dl>
 
         {(playableSubs.length > 0 || unplayableSubs.length > 0) && (
           <>
+            {/* NO BADGE ON THE ONES THAT WORK. This list IS the list of subtitles you
+                can turn on - saying "on the player" beside each is a label for the
+                obvious, in a colour that suggests something happened. What earns its
+                place is the opposite: the ones you cannot have, and why. */}
             <h3 style='margin-top:1rem'>Subtitles</h3>
             <div class='tracklist'>
               {playableSubs.map(s => (
                 <div class='sub' key={s.id}>
-                  <span>{s.title || s.language || 'Subtitles'}{s.external ? ' (file)' : ''}</span>
-                  <span class='chip good'>on the player</span>
+                  <span>{s.title || s.language || 'Subtitles'}</span>
+                  <span class='hint'>{s.external ? 'file on the disk' : 'in the film'}</span>
                 </div>
               ))}
               {unplayableSubs.map(s => (
                 <div class='sub off' key={s.id} title={s.reason || ''}>
                   <span>{s.title || s.language || 'Subtitles'}</span>
-                  <span class='chip bad'>not available</span>
+                  <span class='hint'>not available</span>
                 </div>
               ))}
             </div>
+            {playableSubs.length > 0 && (
+              <p class='hint'>Turn one on with the subtitles button in the player.</p>
+            )}
             {unplayableSubs.length > 0 && <p class='hint'>{unplayableSubs[0].reason}</p>}
           </>
         )}

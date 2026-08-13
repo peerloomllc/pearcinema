@@ -421,8 +421,23 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .controls .vol { width: 5rem }
 
-.controls .iconbtn { font-size: 1rem; padding: .2rem .35rem }
-.controls .iconbtn.big { font-size: 1.25rem }
+/* BIGGER ON A DESKTOP, where there is room and a pointer has to land on them
+ * (Tim, 2026-08-13). Sized in the button rather than the icon so the target grows with
+ * it - a 20px glyph in a 24px button is still a 24px thing to hit. The touch sizes are
+ * left alone: they were already at the edge of what fits across a phone. */
+.controls .iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.1rem; height: 2.1rem; padding: 0; border-radius: 8px;
+}
+.controls .iconbtn:hover { background: var(--card-2) }
+.controls .iconbtn.big { width: 2.6rem; height: 2.6rem }
+
+@media (min-width: 861px) {
+  .controls { padding: .6rem .8rem .7rem }
+  .controls .row { gap: .5rem }
+  .controls .iconbtn { width: 2.5rem; height: 2.5rem }
+  .controls .iconbtn.big { width: 3.1rem; height: 3.1rem }
+}
 
 .submenu { position: relative }
 .submenu .menu {
@@ -522,6 +537,11 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .resumeover h3 { margin: 0 0 .8rem; font-size: 1.05rem }
 .resumeover .row { justify-content: center }
+/* TWO OF ONE WIDTH. "Resume" is four letters and "Start Over" is ten, so left to
+ * themselves they come out as a big button and a small one - which reads as a
+ * recommendation rather than a pair. */
+.row.two { display: flex; gap: .5rem }
+.row.two button { flex: 1 1 0; min-width: 8rem; justify-content: center }
 
 @keyframes fade-in { from { opacity: 0 } }
 @media (prefers-reduced-motion: reduce) { .resumeover { animation: none } }

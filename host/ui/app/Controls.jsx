@@ -135,10 +135,10 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
       <div class='row'>
         <button class='iconbtn big' onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-          {playing ? <Pause size={20} /> : <Play size={20} />}
+          {playing ? <Pause size={22} /> : <Play size={22} />}
         </button>
-        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'><Back10 size={18} /></button>
-        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'><Forward10 size={18} /></button>
+        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'><Back10 size={20} /></button>
+        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'><Forward10 size={20} /></button>
 
         <span class='hint mono'>
           {fmtClock(at)}{duration ? ' / ' + fmtClock(duration) : ''}
@@ -153,7 +153,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
         {subs.length > 0 && (
           <div class='submenu'>
-            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={17} /></button>
+            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={19} /></button>
             {subMenu && (
               <div class='menu'>
                 <button class={subOn === -1 ? 'on' : ''} onClick={() => pickSub(-1)}>Off</button>
@@ -168,7 +168,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         )}
 
         <button class='iconbtn' onClick={() => setMute(!muted)} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted || volume === 0 ? <Muted size={17} /> : <Volume size={17} />}
+          {muted || volume === 0 ? <Muted size={19} /> : <Volume size={19} />}
         </button>
         <input
           class='vol' type='range' min='0' max='1' step='0.05'
@@ -178,7 +178,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         />
 
         <button class='iconbtn' onClick={fullscreen} aria-label='Fullscreen'>
-          <svg viewBox='0 0 24 24' width='17' height='17' fill='none' stroke='currentColor'
+          <svg viewBox='0 0 24 24' width='19' height='19' fill='none' stroke='currentColor'
             stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>
             {full
               ? <path d='M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' />
