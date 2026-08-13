@@ -2,7 +2,42 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - CONTINUE WATCHING, and a watched badge, per person
+## 2026-08-13 (latest) - UP NEXT: finish an episode and the next one is waiting
+Tier: T1 (a lookup over data that already exists, on an existing route)
+Context: open question 4 of the watch-state proposal, which recommended leaving it out of
+that cut - "it needs the next-episode lookup rather than the resume store, and folding it in
+is how a two-week piece becomes a month". Built straight after, on Tim's call.
+
+**Choice: the first UNWATCHED episode of a show somebody recently finished something in.**
+
+Three rules, each of which stops a wrong card going up:
+
+- **The same episode is never offered twice.** Half way through S01E02 it is already on the
+  shelf under its own name with a bar showing how far through; a "Next: S01E02" card beside
+  it is worse than offering nothing.
+- **A gap is not skipped.** Somebody who watched 1 and 3 has not seen 2, and calling 4 the
+  next one quietly writes off an episode they never saw.
+- **A finished show stops appearing** rather than looping back to episode one.
+
+### Bounded by RECENCY, not by the library
+
+Answering "what is next" for every show would walk every series' episodes - free on a folder
+source, one HTTP call per show on a Jellyfin one. So it looks only at shows the person
+recently finished something in, which is a handful rather than the twenty-eight on the real
+drive, and it needed one new thing in the store: `recentWatched`, because a Set of watched
+ids cannot answer "which show did they just finish an episode of".
+
+### Verified on the real library
+
+```
+before finishing  -> continue: [deep throat, 2001]   up next: []
+after finishing   -> continue: [2001]                up next: [squeeze]
+```
+
+`deep throat` was half-watched, so it was on the shelf under its own name and nothing was
+offered. Finishing it moved it off and put episode three up.
+
+## 2026-08-13 - CONTINUE WATCHING, and a watched badge, per person
 Tier: T2 (new Hyperbee keys, new methods, and an identity the browser did not have)
 Context: approved as `proposals/2026-08-13-watch-state.md`, requested by Tim - watched
 indicators like Plex keeps, **per user rather than per device**, the way PearTune already

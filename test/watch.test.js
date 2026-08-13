@@ -101,3 +101,41 @@ test('AN EMPTY SHELF IS NOT A WATCHED SHOW', () => {
 test('a watched id that is not in this season does not count towards it', () => {
   assert.equal(watch.rollup(eps(2), new Set(['e0', 'somebody-elses-episode'])).watched, 1)
 })
+
+// --- the next one ----------------------------------------------------------------
+
+const ep = (id, season, number) => ({ id, type: 'episode', seasonNumber: season, episodeNumber: number })
+const SEASON = [ep('e1', 1, 1), ep('e2', 1, 2), ep('e3', 1, 3)]
+
+test('FINISH ONE AND THE NEXT IS WAITING', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1'])).id, 'e2')
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e2'])).id, 'e3')
+})
+
+test('a show nobody has started offers its first episode', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set()).id, 'e1')
+})
+
+test('A FINISHED SHOW QUIETLY STOPS APPEARING rather than looping to episode one', () => {
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e2', 'e3'])), null)
+})
+
+test('THE SAME EPISODE IS NEVER OFFERED TWICE', () => {
+  // Half way through S01E02 it is already on the shelf under its own name, with a bar
+  // showing how far through. Adding a "Next: S01E02" card beside it would be worse
+  // than offering nothing.
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1']), new Set(['e2'])), null)
+})
+
+test('a gap is not skipped past - the FIRST unwatched one is the next one', () => {
+  // Somebody who watched 1 and 3 has not seen 2, and telling them the next one is 4
+  // would quietly write off an episode they never saw.
+  assert.equal(watch.nextEpisode(SEASON, new Set(['e1', 'e3'])).id, 'e2')
+})
+
+test('it follows the order it was given, across seasons', () => {
+  // The adapter sorts by season then number - the order somebody watches in, and the
+  // only order this rule means anything in.
+  const across = [ep('s1e2', 1, 2), ep('s2e1', 2, 1)]
+  assert.equal(watch.nextEpisode(across, new Set(['s1e2'])).id, 's2e1')
+})

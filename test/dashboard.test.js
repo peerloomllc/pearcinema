@@ -52,6 +52,19 @@ const MP4 = items.movie({
   media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: BYTES.length }
 })
 
+const SHOW = items.series({ id: 'the-wire', title: 'The Wire' })
+const EPISODES = [1, 2, 3].map(n => items.episode({
+  id: 'wire-s01e0' + n,
+  seriesId: SHOW.id,
+  seasonId: 'wire-s01',
+  seriesTitle: 'The Wire',
+  seasonNumber: 1,
+  episodeNumber: n,
+  title: 'Episode ' + n,
+  runtime: 3600,
+  media: { container: 'mkv', videoCodec: 'h264', audioCodec: 'aac', size: BYTES.length }
+}))
+
 class TestAdapter {
   constructor () {
     this.kind = 'test'
@@ -61,8 +74,16 @@ class TestAdapter {
   async ping () { return { ok: true, detail: 'test' } }
   async scan () { return 2 }
   async stats () { return { movies: 2, series: 0, seasons: 0, episodes: 0, source: 'test' } }
-  async list ({ type }) { return items.page(type === 'movies' ? [FILM, MP4] : [], {}) }
-  async get ({ id }) { return [FILM, MP4].find(f => f.id === id) || null }
+  // A show with three episodes, so the next-episode shelf has something to be about.
+  // Everything else in this file is films; a tree is what "up next" means.
+  async list ({ type, seriesId }) {
+    if (type === 'movies') return items.page([FILM, MP4], {})
+    if (type === 'series') return items.page([SHOW], {})
+    if (type === 'episodes' && seriesId === SHOW.id) return items.page(EPISODES, {})
+    return items.page([], {})
+  }
+
+  async get ({ id }) { return [FILM, MP4, SHOW, ...EPISODES].find(f => f.id === id) || null }
   async search ({ q }) {
     return { items: [FILM, MP4].filter(f => f.title.toLowerCase().includes(String(q).toLowerCase())) }
   }
@@ -908,4 +929,43 @@ test('two people of one name is refused, because "revoke Sam" has to mean someth
   assert.match(dup.json.error, /already somebody called Ben/)
 
   assert.equal((await c.req('POST', '/api/person', { body: { name: '  ' } })).status, 400)
+})
+
+test('FINISH AN EPISODE AND THE NEXT ONE IS WAITING', async (t) => {
+  // Deliberately left out of the first cut of watch state and built after, because it
+  // is not the resume store at all - it is a lookup over the show's episodes that
+  // happens to land on the same shelf.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: EPISODES[0].id, watched: true } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.upNext.map(i => i.id), [EPISODES[1].id])
+  assert.equal(state.json.upNext[0].upNext, true, 'and it says it has not been started')
+})
+
+test('THE SAME EPISODE IS NEVER OFFERED TWICE', async (t) => {
+  // Half way through episode two it is already on the shelf under its own name, with a
+  // bar showing how far through. A "Next" card for it beside that would be worse than
+  // offering nothing.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: EPISODES[0].id, watched: true } })
+  await c.req('POST', '/api/watch/position', { body: { itemId: EPISODES[1].id, positionMs: 600_000 } })
+
+  const state = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(state.json.continue.map(i => i.id), [EPISODES[1].id])
+  assert.deepEqual(state.json.upNext, [])
+})
+
+test('a finished show stops appearing rather than looping back to episode one', async (t) => {
+  const { c } = await loggedIn(t)
+  for (const e of EPISODES) {
+    await c.req('POST', '/api/watch/watched', { body: { itemId: e.id, watched: true } })
+  }
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.upNext, [])
+})
+
+test('a finished FILM does not put up a next episode of anything', async (t) => {
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/watched', { body: { itemId: FILM.id, watched: true } })
+  assert.deepEqual((await c.req('GET', '/api/watch/state')).json.upNext, [])
 })

@@ -79,4 +79,32 @@ function rollup (episodes, watched) {
   }
 }
 
-module.exports = { decide, isFinished, rollup, FINISHED_AT, STARTED_AFTER_MS }
+// THE NEXT ONE, out of a show's episodes in order.
+//
+// Finish S01E01 and S01E02 should be waiting. Deliberately left out of the first cut
+// of watch state (open question 4 of the proposal) because it is not the resume store
+// at all - it is a lookup over the tree, and the two get conflated because they land
+// on the same shelf.
+//
+// `episodes` must already be in structural order; the adapter sorts them by season
+// then number, which is the order somebody watches in and the only order this rule
+// makes sense in.
+//
+// SKIPPED, and each of these is a case that would otherwise put the wrong card up:
+//
+//   - anything already watched, obviously
+//   - anything with a position, because it is ALREADY on the shelf under its own
+//     name and offering the same episode twice is worse than not offering it
+//
+// Null when there is nothing left, which is how a finished show quietly stops
+// appearing rather than looping back to episode one.
+function nextEpisode (episodes, watched, resumed = new Set()) {
+  for (const e of episodes) {
+    if (watched.has(e.id)) continue
+    if (resumed.has(e.id)) return null
+    return e
+  }
+  return null
+}
+
+module.exports = { decide, isFinished, rollup, nextEpisode, FINISHED_AT, STARTED_AFTER_MS }

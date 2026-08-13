@@ -616,11 +616,38 @@ async function startDashboard ({
           if (item) cont.push({ ...item, resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
         }
 
+        // AND THE NEXT EPISODE OF ANYTHING RECENTLY FINISHED.
+        //
+        // Bounded by RECENCY rather than by the library: only shows this person has
+        // just finished something in are looked at, which is a handful rather than
+        // the twenty-eight on the real drive. Walking every series to find one card
+        // would be free on a folder source and one HTTP call per show on a Jellyfin
+        // one, which is the same trap `/api/watch/shows` is kept separate for.
+        const resumed = new Set(cont.map(i => i.id))
+        const seenSeries = new Set()
+        const upNext = []
+
+        for (const row of await host.userState.recentWatched(who.owner, 12)) {
+          const done = await host.adapter.get({ id: row.itemId })
+          if (!done || done.type !== 'episode' || !done.seriesId) continue
+          if (seenSeries.has(done.seriesId)) continue
+          seenSeries.add(done.seriesId)
+
+          const eps = (await host.adapter.list({ type: 'episodes', seriesId: done.seriesId, limit: 500 })).items || []
+          const next = watch.nextEpisode(eps, watchedIds, resumed)
+          if (next) upNext.push({ ...next, upNext: true })
+          if (upNext.length >= 6) break
+        }
+
         return json(res, 200, {
           watching: { id: who.person.id, name: who.person.name },
           choose: who.persons.length > 1 ? who.persons.map(p => ({ id: p.id, name: p.name })) : [],
           watched: [...watchedIds],
-          continue: cont
+          // MID-FILM FIRST, then what to start next. Both are "carry on", but one is
+          // something the person literally stopped in the middle of and the other is
+          // a suggestion, and burying the first under the second would be wrong.
+          continue: cont,
+          upNext
         })
       }
 

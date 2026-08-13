@@ -54,7 +54,7 @@ function ResumeBar ({ positionMs, runtime }) {
   return <span class='resumebar'><i style={`width:${pct}%`} /></span>
 }
 
-function Poster ({ item, caps, onOpen, label = null, watch = null }) {
+function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
 
@@ -75,6 +75,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null }) {
     <button class='poster' onClick={() => onOpen(item)}>
       <Art item={item} />
       {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
+      {badge && <span class='next'>{badge}</span>}
       {seen && <span class='seen' title='You have watched this'>✓</span>}
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
       <ResumeBar positionMs={resume?.positionMs} runtime={item.runtime} />
@@ -111,7 +112,10 @@ function WatchingAs ({ watch, onChange }) {
 // library rather than inside a tab - and it is only there when it has something in
 // it, because an empty shelf labelled "continue watching" is a reproach.
 function ContinueRow ({ watch, caps, onOpen }) {
-  const list = watch?.continue || []
+  // MID-FILM FIRST, then what to start next. Both are "carry on", but one is something
+  // somebody literally stopped in the middle of and the other is a suggestion - and
+  // burying the first under the second would be wrong.
+  const list = [...(watch?.continue || []), ...(watch?.upNext || [])]
   if (!list.length) return null
   return (
     <>
@@ -124,6 +128,9 @@ function ContinueRow ({ watch, caps, onOpen }) {
             caps={caps}
             label={i.type === 'episode' ? episodeCode(i) : null}
             watch={{ resume: i.resume }}
+            // A card for an episode nobody has started yet says so, rather than
+            // looking like something abandoned half way.
+            badge={i.upNext ? 'Next' : null}
             onOpen={onOpen}
           />
         ))}
@@ -427,7 +434,7 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
 
   return (
     <>
-      <ContinueRow watch={watch} caps={caps} onOpen={i => onPlay(i, watch.continue)} />
+      <ContinueRow watch={watch} caps={caps} onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])} />
 
       <div class='row' style='margin-bottom:.6rem'>
         <WatchingAs watch={watch} onChange={onWatchChange} />

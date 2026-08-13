@@ -420,3 +420,12 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
   font-size: .9rem;
 }
+
+/* An episode nobody has started yet, on the same shelf as things half-watched. It
+ * says so rather than looking like something abandoned in the middle. */
+.poster .next {
+  position: absolute; top: .4rem; left: .4rem;
+  padding: .1rem .4rem; border-radius: 999px;
+  font-size: .68rem; font-weight: 700; letter-spacing: .02em;
+  background: var(--bg-2); color: var(--fg); border: 1px solid var(--line);
+}

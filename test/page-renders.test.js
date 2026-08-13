@@ -82,7 +82,17 @@ const ROUTES = {
     watching: { id: 'p1', name: 'Me' },
     choose: [],
     watched: ['film-2'],
-    continue: [{ ...FILM, resume: { positionMs: 76_500, playedAt: Date.now() } }]
+    continue: [{ ...FILM, resume: { positionMs: 76_500, playedAt: Date.now() } }],
+    upNext: [{
+      ...FILM,
+      id: 'wire-s01e02',
+      type: 'episode',
+      seriesTitle: 'The Wire',
+      seasonNumber: 1,
+      episodeNumber: 2,
+      title: 'The Detail',
+      upNext: true
+    }]
   },
   '/api/watch/shows': { shows: {} },
   '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
@@ -361,4 +371,20 @@ test('opening a half-watched film OFFERS to resume rather than jumping', async (
   assert.match(offer.textContent, /Resume/)
   assert.match(offer.textContent, /Start over/)
   assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
+})
+
+test('the next episode sits on the same shelf, saying it has not been started', async (t) => {
+  const { dom, doc, text } = await open()
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /The Detail/)
+  const next = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  assert.ok(next.querySelector('.next'), 'a card for something unstarted says Next')
+  assert.equal(next.querySelector('.resumebar'), null, 'and carries no how-far-through bar')
+
+  // Mid-film first, then what to start next: one was stopped in the middle and the
+  // other is a suggestion.
+  const shelf = [...doc.querySelectorAll('.grid')][0].querySelectorAll('.poster')
+  assert.match(shelf[0].textContent, /Metropolis/)
+  assert.match(shelf[1].textContent, /The Detail/)
 })
