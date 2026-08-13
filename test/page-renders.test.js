@@ -496,3 +496,30 @@ test('a show with only a part-watched episode in it is STILL the one being watch
   // A sliver rather than an empty groove, which reads as a rendering fault.
   assert.equal(tile.querySelector('.resumebar i').style.width, '2%')
 })
+
+test('THE RING IS MEASURED AGAINST THE ARTWORK, which is what makes it hug the picture', async (t) => {
+  // Tim caught this twice from screenshots - once as square corners around the caption,
+  // once as rounded ones - and both times the DOM was right and the CSS was not. The
+  // ring is absolutely positioned, so without a positioned `.art` its containing block
+  // is `.poster`, which is the picture AND the words under it.
+  //
+  // Being in the right parent is not enough; there has to be something to be measured
+  // against. That is the half a screenshot shows and a DOM assertion does not.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const art = doc.querySelector('.poster.started .art')
+  assert.ok(art.querySelector('.ring'), 'the ring is inside the artwork')
+  assert.equal(win.getComputedStyle(art).position, 'relative',
+    'and the artwork is what it is measured against')
+})

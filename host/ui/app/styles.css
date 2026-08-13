@@ -174,6 +174,12 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .poster .art {
   aspect-ratio: 2 / 3; width: 100%;
+  /* THE POSITIONING CONTEXT FOR THE RING, and its absence is why the ring wrapped the
+   * caption too: without this the nearest positioned ancestor is `.poster`, which is
+   * the picture AND the words under it. Tim caught it in a screenshot twice - once as
+   * square corners, once as rounded ones - because the first fix moved the ring into
+   * the artwork in the DOM without giving it anything to be measured against. */
+  position: relative;
   border-radius: 10px; overflow: hidden;
   background: linear-gradient(160deg, var(--card-2), var(--card));
   border: 1px solid var(--line);
@@ -471,36 +477,35 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
  * A steady low ring, with a bright arc travelling around it. The arc is a conic
  * gradient on a square child spun by `transform` and masked to a 2px rim - not an
  * animated `@property` angle, which is newer than anything else this page leans on. */
-.poster.started .art { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)) }
+/* NO SECOND BORDER. The artwork already draws a 1px line of its own, so a ring inside
+ * it reads as two edges - which is what Tim saw. While a tile is marked, the ring IS
+ * the border and the art's own one gets out of the way. */
+.poster.started .art, .poster.started:hover .art { border-color: transparent }
 
 .ring {
-  position: absolute; inset: 0; border-radius: inherit;
-  overflow: hidden; pointer-events: none; z-index: 3;
-  /* Only the rim: the box minus its own middle. */
-  padding: 2px;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  background: color-mix(in srgb, var(--accent) 40%, transparent);
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 3; overflow: visible;
 }
-.ring i {
-  position: absolute; left: 50%; top: 50%;
-  width: 180%; aspect-ratio: 1; translate: -50% -50%;
-  background: conic-gradient(
-    transparent 0turn .58turn,
-    color-mix(in srgb, var(--accent) 70%, transparent) .70turn,
-    #fff .75turn,
-    color-mix(in srgb, var(--accent) 70%, transparent) .80turn,
-    transparent .92turn 1turn
-  );
-  animation: pc-trace 3.2s linear infinite;
+.ring rect { fill: none; stroke-width: 4; stroke-linecap: round }
+
+/* Always the whole way round, faintly, so the tile is marked even between passes. */
+.ring .base { stroke: color-mix(in srgb, var(--accent) 38%, transparent) }
+
+/* And a bright quarter travelling along it. `pathLength=100` means the dash is a
+ * fraction of the perimeter rather than a length in pixels, so it keeps one speed all
+ * the way round - including through the corners, which is where the gradient version
+ * fell apart. */
+.ring .dash {
+  stroke: var(--accent);
+  stroke-dasharray: 24 76;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 70%, transparent));
+  animation: pc-trace 3s linear infinite;
 }
-@keyframes pc-trace { to { rotate: 360deg } }
+@keyframes pc-trace { to { stroke-dashoffset: -100 } }
 
 /* A moving outline is an attention-getter, and somebody who has asked for less of
  * that gets the steady ring on its own rather than nothing. */
 @media (prefers-reduced-motion: reduce) {
-  .ring { background: var(--accent) }
-  .ring i { display: none }
+  .ring .base { stroke: var(--accent) }
+  .ring .dash { display: none }
 }

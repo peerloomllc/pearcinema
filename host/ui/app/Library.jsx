@@ -19,17 +19,26 @@ import { verdictFor, tally } from './playback'
 
 // The ring that says "this is the one you are in the middle of".
 //
-// INSIDE THE ART, not around the whole tile. The tile is a picture with a caption
-// under it, and an outline around both draws a square box around the words as well -
-// which is what the first attempt did, and it looked like a focus rectangle rather
-// than a mark of progress (Tim, 2026-08-13, with a screenshot).
+// INSIDE THE ART, not around the whole tile: the tile is a picture with a caption
+// under it, and an outline around both draws a square box around the words as well.
 //
-// The travelling highlight is a conic gradient on a square child, spun by transform
-// and masked to a 2px rim - deliberately not an animated `@property` angle, which is
-// newer than everything else this page relies on. A steady low ring sits under it so
-// the whole border is always faintly there rather than only where the arc is.
+// A STROKED PATH, not a spinning gradient. The gradient version fell apart exactly
+// where it was hardest to notice in a screenshot and impossible to miss in motion -
+// the bright arc thinned and vanished at each corner, because a conic gradient sweeps
+// by ANGLE while a rounded rectangle's edge does not, and the rim it was masked into
+// was a square inner box against rounded outer corners.
+//
+// A dash travelling along the real rounded-rectangle path has neither problem. It
+// follows the corners because it IS the corners, and `pathLength=100` normalises the
+// perimeter so the dash is a fixed fraction of it and moves at one speed the whole way
+// round, whatever shape the tile ends up.
 function Ring () {
-  return <span class='ring' aria-hidden='true'><i /></span>
+  return (
+    <svg class='ring' viewBox='0 0 200 300' aria-hidden='true' focusable='false'>
+      <rect class='base' x='2' y='2' width='196' height='296' rx='13' pathLength='100' />
+      <rect class='dash' x='2' y='2' width='196' height='296' rx='13' pathLength='100' />
+    </svg>
+  )
 }
 
 function Art ({ item, started = false }) {
