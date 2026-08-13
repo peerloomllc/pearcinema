@@ -36,16 +36,26 @@
 
 const { EmptyAdapter } = require('./empty')
 const { JellyfinAdapter } = require('./jellyfin')
+const { FolderAdapter } = require('./folder')
 
-const KINDS = new Set(['empty', 'jellyfin'])
+const KINDS = new Set(['empty', 'jellyfin', 'folder'])
 
 // Build an adapter from a saved source config. Unknown kinds fall back to the
 // empty adapter rather than throwing, because a host that will not start is a host
 // whose dashboard the operator cannot reach to fix the config.
-function buildAdapter (cfg, { libraryId, ids, log = () => {} } = {}) {
+function buildAdapter (cfg, { libraryId, ids, dataDir = null, log = () => {} } = {}) {
   const kind = cfg?.kind || 'empty'
 
   switch (kind) {
+    case 'folder':
+      return new FolderAdapter({
+        roots: cfg.roots || (cfg.root ? [cfg.root] : []),
+        dataDir,
+        libraryId,
+        ids,
+        log
+      })
+
     case 'jellyfin':
       return new JellyfinAdapter({
         url: cfg.url,
@@ -63,4 +73,4 @@ function buildAdapter (cfg, { libraryId, ids, log = () => {} } = {}) {
   }
 }
 
-module.exports = { buildAdapter, KINDS, EmptyAdapter, JellyfinAdapter }
+module.exports = { buildAdapter, KINDS, EmptyAdapter, JellyfinAdapter, FolderAdapter }
