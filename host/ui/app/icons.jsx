@@ -134,3 +134,28 @@ export function ArtIcon ({ type, size = 34 }) {
 export const Info = (p) => (
   <S {...p}><circle cx='12' cy='12' r='8.5' /><path d='M12 11v5.5' /><path d='M12 7.8h.01' /></S>
 )
+
+export const Pause = (p) => (
+  <S {...p} fill='currentColor' stroke='none'>
+    <rect x='7' y='5' width='3.6' height='14' rx='1.1' />
+    <rect x='13.4' y='5' width='3.6' height='14' rx='1.1' />
+  </S>
+)
+
+// Ten seconds either way. An arrow curling back over a "10" - the shape every player
+// uses, and the one people reach for without reading it.
+export const Back10 = (p) => (
+  <S {...p}>
+    <path d='M11.5 5.5 8 8.6l3.5 3' />
+    <path d='M8.2 8.6H13a6 6 0 1 1-6 6' />
+    <text x='12' y='17.6' font-size='7' font-weight='700' text-anchor='middle' fill='currentColor' stroke='none'>10</text>
+  </S>
+)
+
+export const Forward10 = (p) => (
+  <S {...p}>
+    <path d='M12.5 5.5 16 8.6l-3.5 3' />
+    <path d='M15.8 8.6H11a6 6 0 1 0 6 6' />
+    <text x='12' y='17.6' font-size='7' font-weight='700' text-anchor='middle' fill='currentColor' stroke='none'>10</text>
+  </S>
+)

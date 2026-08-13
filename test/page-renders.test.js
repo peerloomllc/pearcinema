@@ -375,10 +375,13 @@ test('opening a half-watched film OFFERS to resume rather than jumping', async (
   if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  const offer = doc.querySelector('.resumeoffer')
-  assert.ok(offer, 'the card is there')
-  assert.match(offer.textContent, /You stopped at/)
-  assert.match(offer.textContent, /Resume/)
+  // OVER THE PICTURE, not in a strip under it: a banner below the player is a notice
+  // about the film, where this is a question about watching it.
+  const offer = doc.querySelector('.stage .resumeover')
+  assert.ok(offer, 'the prompt is over the picture itself')
+  // AN EXACT TIME. Somebody deciding whether to resume is looking for the moment they
+  // stopped, and "1m" does not tell them which of two attempts this was.
+  assert.match(offer.textContent, /Resume at 1:16\?/)
   assert.match(offer.textContent, /Start over/)
   assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
 })
@@ -803,4 +806,58 @@ test('the list view shows how far through an episode is, like the grid does', as
   const bar = row.querySelector('.rowbar i')
   assert.ok(bar, 'and it says how far through it is')
   assert.equal(bar.style.width, '25%', '15 minutes of an hour')
+})
+
+test('THE DETAILS SHEET IS NOT CLIPPED OUT OF EXISTENCE', async (t) => {
+  // What Tim screenshotted: a page-sized dim overlay with nothing in it. The edge fade
+  // was a MASK on the content, and a mask - like a filter or a transform - makes its
+  // element the containing block for anything `position: fixed` inside it and clips it.
+  // The sheet starts translated off to the right, so it was clipped away entirely and
+  // only its scrim showed.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const content = doc.querySelector('.content')
+  const style = dom.window.getComputedStyle(content)
+  assert.equal(style.maskImage || 'none', 'none', 'the content masks nothing')
+  assert.equal(style.webkitMaskImage || 'none', 'none')
+
+  // The fade is still there, as strips beside the content rather than over it.
+  assert.ok(doc.querySelector('.edge.top'), 'the top fade')
+  assert.ok(doc.querySelector('.edge.bottom'), 'and the bottom one')
+})
+
+test('A PAUSED FILM SHOWS A PLAY BUTTON', async (t) => {
+  // It used to assume playing, which was true while the element carried `autoplay` and
+  // became a lie the moment it did not.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const big = doc.querySelector('.controls .iconbtn.big')
+  assert.ok(big, 'the transport button is there')
+  assert.equal(big.getAttribute('aria-label'), 'Play', 'and it offers to start, not to stop')
+})
+
+test('nothing in the controls is an emoji', async (t) => {
+  // The skip buttons were still ⏪ and ⏩ after everything else had been drawn.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const controls = doc.querySelector('.controls')
+  assert.doesNotMatch(controls.textContent, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+  assert.ok(controls.querySelectorAll('svg').length >= 5, 'they are drawn instead')
 })

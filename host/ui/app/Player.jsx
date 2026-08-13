@@ -26,7 +26,7 @@
 // directions.
 
 import { useState, useEffect, useRef } from 'preact/hooks'
-import { api, fmtRuntime, fmtSize, episodeCode } from './api'
+import { api, fmtRuntime, fmtSize, fmtClock, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import { Blocked, Check, Close, Info } from './icons'
@@ -266,20 +266,40 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 ))}
               </video>
               )}
-        </div>
 
+        {/* PICK UP WHERE YOU LEFT OFF, over the picture rather than in a strip under
+            it. A banner below the player was a notice about the film; this is a
+            question ABOUT to watching it, and it belongs where the eye already is
+            (Tim, 2026-08-13).
+            The time is exact - "12:34", not "12m". Somebody deciding whether to
+            resume is looking for the moment they stopped, and a rounded number does
+            not tell them which of two attempts this was. */}
         {offer !== null && !blocked && (
-          <div class='resumeoffer'>
-            <span>You stopped at <b>{fmtRuntime(Math.round(offer))}</b>.</span>
-            <button onClick={() => {
-              wantPlay.current = true
-              seekTo(offer)
-              setOffer(null)
-              if (!remuxing) video.current?.play().catch(() => {})
-            }}>Resume</button>
-            <button class='ghost' onClick={() => setOffer(null)}>Start over</button>
+          <div class='resumeover'>
+            <div class='card'>
+              <h3>Resume at {fmtClock(offer)}?</h3>
+              <div class='row'>
+                <button onClick={() => {
+                  wantPlay.current = true
+                  seekTo(offer)
+                  setOffer(null)
+                  if (!remuxing) video.current?.play().catch(() => {})
+                }}>Resume</button>
+                <button class='ghost' onClick={() => {
+                  // START OVER MEANS FROM ZERO, and it used to mean only "stop asking"
+                  // - which left the element wherever it happened to be. On a file that
+                  // is the start, so it looked right; on a repackaged stream it is not.
+                  wantPlay.current = true
+                  seekTo(0)
+                  setOffer(null)
+                  if (!remuxing) video.current?.play().catch(() => {})
+                }}>Start over</button>
+              </div>
+            </div>
           </div>
         )}
+
+        </div>
 
         {!blocked && (
           <Controls

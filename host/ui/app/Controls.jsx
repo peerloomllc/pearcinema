@@ -21,10 +21,14 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { fmtClock } from './api'
-import { Captions, Volume, Muted } from './icons'
+import { Captions, Volume, Muted, Play, Pause, Back10, Forward10 } from './icons'
 
 export default function Controls ({ video, at, duration, onSeek, busy, subs, live }) {
-  const [playing, setPlaying] = useState(true)
+  // FALSE, because nothing starts on its own any more. It used to assume playing,
+  // which was true while the element carried `autoplay` and became a lie the moment it
+  // did not: a film sitting paused on open showed a pause button (Tim, 2026-08-13).
+  // The effect below then keeps it honest off the element's own events.
+  const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
@@ -41,6 +45,10 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
     if (!v) return
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
+    // Read where it actually IS as well as listening for changes. A new element (every
+    // seek of a repackaged film is one) fires nothing until something happens to it,
+    // so state carried over from the old one would be stale until the first event.
+    setPlaying(!v.paused)
     v.addEventListener('play', onPlay)
     v.addEventListener('pause', onPause)
     v.volume = volume
@@ -127,10 +135,10 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
       <div class='row'>
         <button class='iconbtn big' onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-          {playing ? '⏸' : '▶'}
+          {playing ? <Pause size={20} /> : <Play size={20} />}
         </button>
-        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'>⏪</button>
-        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'>⏩</button>
+        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'><Back10 size={18} /></button>
+        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'><Forward10 size={18} /></button>
 
         <span class='hint mono'>
           {fmtClock(at)}{duration ? ' / ' + fmtClock(duration) : ''}

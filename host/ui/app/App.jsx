@@ -184,6 +184,13 @@ export default function App () {
         <button onClick={() => setPairing(true)}>Pair a device</button>
       </div>
 
+      {/* The fade at the top and bottom of the scroll. Fixed strips rather than a mask
+          on the content: a mask makes its element the containing block for anything
+          `position: fixed` inside it AND clips it, which erased the details sheet and
+          left only its scrim on screen. */}
+      <div class='edge top' aria-hidden='true' />
+      <div class='edge bottom' aria-hidden='true' />
+
       <div class='content'>
         {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} />}
 

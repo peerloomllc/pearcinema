@@ -290,6 +290,8 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 
 .stage {
+  /* Positioned, because the resume prompt sits over the picture and nothing else. */
+  position: relative;
   background: #000; border-radius: var(--radius); overflow: hidden;
   border: 1px solid var(--line); aspect-ratio: 16 / 9;
   display: flex; align-items: center; justify-content: center;
@@ -499,13 +501,30 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .watchas { display: flex; align-items: center; gap: .4rem; margin-right: .6rem }
 .watchas select { font-size: .8rem; padding: .25rem .35rem }
 
-/* Offered, never done. */
-.resumeoffer {
-  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
-  margin-top: .6rem; padding: .5rem .7rem;
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
-  font-size: .9rem;
+/* OFFERED, NEVER DONE - and over the picture rather than in a strip under it. A banner
+ * below the player is a notice about the film; this is a question about watching it,
+ * and it belongs where the eye already is.
+ *
+ * The stage is `position: relative` already, so this covers exactly the picture and
+ * nothing else - the controls underneath stay reachable, which matters because
+ * somebody may want the volume set before they resume. */
+.resumeover {
+  position: absolute; inset: 0; z-index: 4;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(2px);
+  animation: fade-in .18s ease both;
 }
+.resumeover .card {
+  margin: 0; text-align: center; min-width: min(22rem, 86%);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow);
+}
+.resumeover h3 { margin: 0 0 .8rem; font-size: 1.05rem }
+.resumeover .row { justify-content: center }
+
+@keyframes fade-in { from { opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .resumeover { animation: none } }
 
 /* An episode nobody has started yet, on the same shelf as things half-watched. It
  * says so rather than looking like something abandoned in the middle. */
@@ -634,14 +653,20 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .loadmore span.on { opacity: 1 }
 
 /* AND THE GRID FADES OUT AT ITS EDGES rather than being chopped off, so a long library
- * reads as continuing past the fold instead of ending there. A mask, so it works over
- * whatever is behind it - the warm glow at the top of the page included. */
-.content { -webkit-mask-image: var(--edge-fade); mask-image: var(--edge-fade) }
-:root {
-  --edge-fade: linear-gradient(to bottom,
-    transparent 0, #000 14px,
-    #000 calc(100% - 22px), transparent 100%);
+ * reads as continuing past the fold instead of ending there.
+ *
+ * TWO FIXED STRIPS, NOT A MASK ON THE CONTENT. A mask (like a filter or a transform)
+ * makes its element the containing block for anything `position: fixed` inside it AND
+ * clips it - so the details sheet, which starts translated off to the right, was
+ * clipped out of existence and only its scrim showed. Tim screenshotted a page-sized
+ * dim overlay with nothing in it. Strips are siblings of the content rather than
+ * ancestors, so nothing inside is affected. */
+.edge {
+  position: fixed; left: 0; right: 0; height: 26px; z-index: 15;
+  pointer-events: none;
 }
+.edge.top { top: 3.3rem; background: linear-gradient(to bottom, var(--bg), transparent) }
+.edge.bottom { bottom: 0; height: 40px; background: linear-gradient(to top, var(--bg), transparent) }
 
 /* ---- icons ------------------------------------------------------------------ */
 
