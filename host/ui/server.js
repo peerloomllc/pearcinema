@@ -42,6 +42,7 @@ const {
 } = require('@peerloom/host')
 
 const { browse } = require('../browse')
+const { detectSources } = require('../detect')
 const items = require('../items')
 
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
@@ -517,6 +518,13 @@ async function startDashboard ({
           host.sourceError = e.message
           return json(res, 400, { error: e.message })
         }
+      }
+
+      // WHAT IS ALREADY ON THIS BOX. Servers and folders together, because the
+      // operator is asking one question - where are the films - and does not care
+      // which shape the answer takes.
+      if (req.method === 'GET' && url.pathname === '/api/source/detect') {
+        return json(res, 200, await detectSources().catch(() => ({ servers: [], folders: [] })))
       }
 
       // The folder picker. Directory names only, never file contents.

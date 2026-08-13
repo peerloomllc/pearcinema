@@ -113,15 +113,18 @@ test('the page mounts and shows the library, rather than a blank control plane',
 })
 
 test('the compatibility line is on screen, and it is honest about the MKV', async (t) => {
-  const { dom, text } = await open()
+  const { dom, doc, text } = await open()
   t.after(() => dom.window.close())
 
   // jsdom's canPlayType answers '' to everything, so it stands in for the strictest
   // possible browser: NOTHING is playable and nothing is repackageable either, since
-  // repackaging still needs the browser to decode the picture. The line must still be
-  // there and must still count honestly rather than quietly claiming a full library.
+  // repackaging still needs the browser to decode the picture.
+  //
+  // The COUNT is always shown; the reasoning is folded behind it, because three lines
+  // of prose about codecs above every grid stands between somebody and their films.
   assert.match(text(), /play in this browser/)
-  assert.match(text(), /repackaging changes the wrapper, never the picture/)
+  assert.ok(doc.querySelector('details.compat'), 'the reasoning is one click away, not in the way')
+  assert.match(doc.querySelector('details.compat').textContent, /never the picture/)
 })
 
 test('clicking a film opens the player, and an MKV lands on the refusal rather than a black box', async (t) => {
