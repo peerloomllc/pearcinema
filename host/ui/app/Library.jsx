@@ -29,8 +29,22 @@ function Art ({ item }) {
   )
 }
 
+// A BADGE IS A PROMISE ABOUT WHAT WILL HAPPEN, not a note about what the browser
+// alone could do. Once a verdict is `remuxable` the host fixes it and the film plays,
+// so flagging it "no sound" or "browser: no" is simply wrong - Tim hit exactly this
+// on The Batman, which wore a "no sound" badge and then played with sound.
+//
+// Only genuinely unplayable files get a flag now.
+function flagFor (v) {
+  if (!v || v.remuxable) return null
+  if (v.status === 'refuse') return { cls: 'bad', text: 'cannot play' }
+  if (v.status === 'nosound') return { cls: 'warn', text: 'no sound' }
+  return null
+}
+
 function Poster ({ item, caps, onOpen }) {
   const v = item.media ? verdictFor(item, caps) : null
+  const flag = flagFor(v)
   const sub = item.type === 'series'
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
     : [item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
@@ -38,8 +52,7 @@ function Poster ({ item, caps, onOpen }) {
   return (
     <button class='poster' onClick={() => onOpen(item)}>
       <Art item={item} />
-      {v && v.status === 'refuse' && <span class='flag bad'>browser: no</span>}
-      {v && v.status === 'nosound' && <span class='flag warn'>no sound</span>}
+      {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </button>
@@ -66,17 +79,26 @@ function ArtNote ({ list, source }) {
   )
 }
 
+// WHAT WILL ACTUALLY PLAY, which is not the same as what the browser alone can open.
+// A file the host repackages plays, so counting it as a failure would tell somebody
+// their library is broken while they are watching it.
 function CompatLine ({ list, caps }) {
   const t = tally(list, caps)
   if (!t.total) return null
-  if (t.play === t.total) {
-    return <p class='hint'>Your browser can play all {t.total} of these.</p>
+
+  const plays = t.play + t.repackaged
+  if (plays === t.total) {
+    return (
+      <p class='hint'>
+        All {t.total} of these play here{t.repackaged ? `, ${t.repackaged} of them repackaged on the way` : ''}.
+      </p>
+    )
   }
   return (
     <p class='hint'>
-      Your browser can play <b>{t.play}</b> of these {t.total}
-      {t.nosound ? `, plus ${t.nosound} with no sound` : ''}
-      {t.refuse ? `. ${t.refuse} are in a container it refuses to open - the same refusal an iPhone gives, and what remux is for` : ''}
+      <b>{plays}</b> of these {t.total} play in this browser
+      {t.repackaged ? ` (${t.repackaged} repackaged as they stream)` : ''}
+      {t.refuse ? `. ${t.refuse} will not: this browser cannot decode what is inside them, and repackaging changes the wrapper, never the picture` : ''}
       {t.unknown ? `. ${t.unknown} did not say what is inside them` : ''}.
     </p>
   )
@@ -226,14 +248,13 @@ export default function Library ({ state, caps, search, onPlay }) {
             <ArtNote list={episodes.items} source={state.source?.kind} />
             <div class='rows' style='margin-top:.8rem'>
               {episodes.items.map(e => {
-                const v = verdictFor(e, caps)
+                const flag = flagFor(verdictFor(e, caps))
                 return (
                   <button class='eprow' key={e.id} onClick={() => onPlay(e, episodes.items)}>
                     <span class='code'>{episodeCode(e) || '-'}</span>
                     <span class='t'>{e.title}</span>
                     {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
-                    {v.status === 'refuse' && <span class='chip bad'>browser: no</span>}
-                    {v.status === 'nosound' && <span class='chip warn'>no sound</span>}
+                    {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
                   </button>
                 )
               })}

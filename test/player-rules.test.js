@@ -139,7 +139,11 @@ test('the tally counts what it knows and never inflates the playable number', as
     { type: 'series', id: 's', title: 'A show' } // no media at all - not a leaf
   ]
 
-  assert.deepEqual(tally(list, caps), { total: 5, play: 1, nosound: 1, refuse: 2, unknown: 1 })
+  // `repackaged` counts what the HOST will fix, across statuses - the MKV refusal it
+  // can rewrap and the DTS soundtrack it can rebuild. It is deliberately not folded
+  // into `play`, because the two are different claims: one plays untouched and the
+  // other plays because the host worked.
+  assert.deepEqual(tally(list, caps), { total: 5, play: 1, nosound: 1, refuse: 2, unknown: 1, repackaged: 2 })
 })
 
 test('AVI is refused too - 218 files of the real library are exactly this', async () => {
@@ -257,4 +261,46 @@ test('the capability query tells the host what this browser opens, MKV included'
   assert.match(q.get('video'), /h264/)
   assert.doesNotMatch(q.get('video'), /hevc/)
   assert.doesNotMatch(q.get('audio'), /ac3/)
+})
+
+test('RUNTIMES ARE SECONDS, and reading them as minutes made 300 a 116-HOUR film', async () => {
+  const { fmtRuntime } = await import(APP + 'api.js')
+
+  // 300, straight off Tim's drive: ffprobe reports 6993 seconds. It showed as
+  // "116h 33m" because the formatter treated the number as minutes. Seconds is the
+  // host's deliberate convention (nfo.js normalises Kodi's minutes on the way in, so
+  // that nothing downstream has to remember which unit it is holding).
+  assert.equal(fmtRuntime(6993), '1h 57m')
+  assert.equal(fmtRuntime(1303), '22m')
+  assert.equal(fmtRuntime(9180), '2h 33m')
+  assert.equal(fmtRuntime(0), '')
+  assert.equal(fmtRuntime(null), '')
+})
+
+test('a badge is a promise about what will HAPPEN, so a repackaged file wears none', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = probeCapabilities(chromium)
+
+  // The Batman: TrueHD, which no browser decodes. It wore a "no sound" badge and then
+  // played with sound, because the host rebuilds the soundtrack. The badge was
+  // describing what the browser could do alone rather than what the app does.
+  const batman = verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'truehd' }), caps)
+  assert.equal(batman.status, 'nosound')
+  assert.equal(batman.remuxable, true, 'so no badge - it plays, with sound')
+
+  // Only a file nothing can fix keeps a flag.
+  const hevc = verdictFor(film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }), caps)
+  assert.equal(hevc.remuxable, false)
+})
+
+test('an .mp4 holding HEVC says WHY the familiar extension did not help', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+
+  // Blade on the real drive: `mov/hevc/aac`. It looks like it ought to play, and does
+  // not, and the reason is invisible unless it is said - the extension names the box.
+  const v = verdictFor(film({ container: 'mov', videoCodec: 'hevc', audioCodec: 'aac' }), probeCapabilities(chromium))
+  assert.equal(v.status, 'refuse')
+  assert.equal(v.remuxable, false)
+  assert.match(v.reason, /HEVC/)
+  assert.match(v.reason, /the name describes the box, not what is inside it/)
 })

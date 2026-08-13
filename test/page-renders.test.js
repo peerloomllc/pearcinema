@@ -117,10 +117,11 @@ test('the compatibility line is on screen, and it is honest about the MKV', asyn
   t.after(() => dom.window.close())
 
   // jsdom's canPlayType answers '' to everything, so it stands in for the strictest
-  // possible browser: NOTHING is playable. The line must still be there and must
-  // still count correctly rather than quietly showing a full library.
-  assert.match(text(), /Your browser can play/)
-  assert.match(text(), /remux/, 'the refusal has to point at the fix, not just refuse')
+  // possible browser: NOTHING is playable and nothing is repackageable either, since
+  // repackaging still needs the browser to decode the picture. The line must still be
+  // there and must still count honestly rather than quietly claiming a full library.
+  assert.match(text(), /play in this browser/)
+  assert.match(text(), /repackaging changes the wrapper, never the picture/)
 })
 
 test('clicking a film opens the player, and an MKV lands on the refusal rather than a black box', async (t) => {
