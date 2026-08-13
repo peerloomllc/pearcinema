@@ -881,8 +881,29 @@ class FolderAdapter {
     return file ? { input: file } : null
   }
 
+  // CAN THIS TRACK BE SHOWN, and if not, why - decided when it is ASKED FOR rather
+  // than when it was scanned.
+  //
+  // The verdict is a fact about what this VERSION can do, not about the file. Baking
+  // it into the scan means a cache written today still says "cannot show" after the
+  // day something learns to burn a picture track in, and the operator's only route
+  // out is a rescan they have no reason to suspect they need. It also bit
+  // immediately: the reason wording was fixed hours after a cache was written with
+  // the old one, and a cached host would have gone on saying the useless version.
+  _verdict (track) {
+    if (track.external) {
+      const playable = SUBTITLE_PLAYABLE.has(track.codec)
+      return {
+        playable,
+        reason: playable ? null : (SUBTITLE_REASON[track.codec] || `unsupported subtitle format: ${track.codec}`)
+      }
+    }
+    const reason = subtitles.reasonFor(track.codec)
+    return { playable: !reason, reason }
+  }
+
   async subtitles ({ itemId } = {}) {
-    return this._subs.get(String(itemId)) || []
+    return (this._subs.get(String(itemId)) || []).map(t => ({ ...t, ...this._verdict(t) }))
   }
 
   async subtitle ({ itemId, subtitleId } = {}) {
@@ -896,7 +917,9 @@ class FolderAdapter {
     // A track that was listed as unshowable is not served, whatever asks for it. The
     // list is honest about PGS precisely so a client can say why; handing one over
     // anyway would produce a player showing an empty subtitle track and no reason.
-    if (!track.playable) return null
+    // Re-decided here rather than read off the row, so this cannot disagree with the
+    // list the client was given - see _verdict.
+    if (!this._verdict(track).playable) return null
 
     // INSIDE THE FILE. One ffmpeg, reading a text track out and converting it to
     // WebVTT - kilobytes of text, no decoding, nothing written to disk. The video

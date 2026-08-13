@@ -60,6 +60,20 @@ test('TEXT IS SHOWABLE AND PICTURES ARE NOT, and the difference is said in words
   assert.match(subtitles.reasonFor('something-new'), /unsupported subtitle format/)
 })
 
+test('BOTH SPELLINGS OF PGS, because the two sources do not agree on the word', () => {
+  // Found on the real library, minutes after this first ran there: the list was
+  // inherited from the Jellyfin adapter, which sees `PGSSUB`, while ffprobe calls the
+  // same track `hdmv_pgs_subtitle`. 53 of 58 film tracks fell through to "unsupported
+  // subtitle format: hdmv_pgs_subtitle" - technically true, useless to read, and
+  // exactly the silence this feature exists to replace.
+  const plain = /pictures rather than text/
+  for (const codec of ['hdmv_pgs_subtitle', 'pgssub', 'dvd_subtitle', 'dvdsub', 'dvb_subtitle', 'xsub']) {
+    assert.match(subtitles.reasonFor(codec), plain, codec)
+  }
+  assert.equal(subtitles.IMAGE_SUBTITLE_CODECS.has('hdmv_pgs_subtitle'), true,
+    'the spelling a real ffprobe actually returns')
+})
+
 test('a track is named from whatever the file bothered to record', () => {
   assert.equal(subtitles.titleFor({ title: 'English (SDH)', language: 'eng' }), 'English (SDH)')
   assert.equal(subtitles.titleFor({ language: 'fre' }), 'FRE')

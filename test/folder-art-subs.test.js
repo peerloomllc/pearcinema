@@ -388,3 +388,37 @@ test('the tracks inside a file survive a restart from the cache', async (t) => {
   assert.equal(subs.length, 2)
   assert.equal(subs.filter(s => s.playable).length, 1)
 })
+
+test('THE VERDICT IS DECIDED WHEN A TRACK IS ASKED FOR, not when it was scanned', async (t) => {
+  // "Can this be shown" is a fact about what this VERSION can do, not about the file.
+  // Baking it into the scan means a cache written today still says "cannot show"
+  // after the day something learns to burn a picture track in - with no reason for
+  // the operator to suspect a rescan would help. It bit immediately, too: the PGS
+  // wording was fixed hours after a cache had been written with the old one.
+  const { root, dataDir } = await library(t, { 'Tenet/Tenet.subs-subrip-pgssub.mkv': 'x' })
+
+  // Reach into the cache and put a stale verdict in it, which is exactly what an
+  // older build left behind.
+  const file = path.join(dataDir, 'folder-scan.json')
+  const raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+  for (const m of raw.movies) {
+    for (const s of (m._subs || [])) { s.playable = !s.playable; s.reason = 'stale nonsense' }
+  }
+  await fsp.writeFile(file, JSON.stringify(raw))
+
+  const b = new FolderAdapter({ roots: [root], dataDir, libraryId: LIB, ids: protocol.ids, ffprobe: FAKE_FFPROBE })
+  await b.scan()
+
+  const film = (await b.list({ type: 'movies' })).items.find(m => m.title.startsWith('Tenet'))
+  const subs = await b.subtitles({ itemId: film.id })
+  const text = subs.find(s => s.codec === 'subrip')
+  const image = subs.find(s => s.codec === 'pgssub')
+
+  assert.equal(text.playable, true)
+  assert.equal(text.reason, null, 'the stale reason did not survive')
+  assert.equal(image.playable, false)
+  assert.match(image.reason, /pictures rather than text/)
+
+  // And serving agrees with listing, rather than trusting the same stale row.
+  assert.equal(await b.subtitle({ itemId: film.id, subtitleId: image.id }), null)
+})

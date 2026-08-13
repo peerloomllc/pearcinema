@@ -23,7 +23,20 @@ const TEXT_SUBTITLE_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', '
 
 // Pictures pretending to be subtitles. Every one of these needs the video re-encoded
 // to burn it in, which is rung three of the remux ladder and not built.
-const IMAGE_SUBTITLE_CODECS = new Set(['pgssub', 'pgs', 'dvdsub', 'dvd_subtitle', 'dvbsub', 'dvb_subtitle', 'xsub'])
+//
+// TWO VOCABULARIES, AND THE ONE THIS LIST WAS MISSING IS THE COMMON ONE. Jellyfin
+// reports PGS as `PGSSUB`; ffprobe calls the same track `hdmv_pgs_subtitle`. The list
+// was inherited from the Jellyfin adapter, so the moment the folder adapter started
+// reading real files, 53 of 58 film tracks fell through to the generic "unsupported
+// subtitle format: hdmv_pgs_subtitle" - technically true, useless to read, and
+// exactly the silence this feature exists to replace. Found on the real library
+// 2026-08-13, minutes after it first ran there.
+const IMAGE_SUBTITLE_CODECS = new Set([
+  // ffprobe's spellings, which is what the folder adapter meets
+  'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle', 'dvb_teletext', 'xsub',
+  // Jellyfin's, which is what the server adapter meets
+  'pgssub', 'pgs', 'dvdsub', 'dvbsub'
+])
 
 // Why a track will not appear, in the words somebody reading a player would want.
 // One sentence, no codec names where a plain word will do, and it always says what
