@@ -134,8 +134,11 @@ test('clicking a film opens the player, and an MKV lands on the refusal rather t
   nosferatu.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
 
-  assert.match(text(), /will not play in a browser/)
-  assert.match(text(), /Play anyway/)
+  // jsdom's canPlayType answers '' to everything, so it stands in for a browser that
+  // can decode NOTHING - which means even repackaging cannot help it, and the player
+  // has to say which half is the problem rather than spinning.
+  assert.match(text(), /cannot be played here/)
+  assert.match(text(), /Try anyway/)
   // And no <video> was created, so nothing is quietly buffering a film the browser
   // cannot show.
   assert.equal(doc.querySelector('video'), null)

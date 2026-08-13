@@ -21,6 +21,25 @@
 // mpegts, wmv, flv - is refused at the box, before a codec is ever considered.
 export const BROWSER_CONTAINERS = new Set(['mp4', 'm4v', 'mov', 'webm', 'ogv', 'ogg'])
 
+// What an MP4 can legally carry. Mirrors host/remux.js deliberately rather than
+// sharing a module: this file is bundled into a browser and that one runs in Node,
+// and the two answer different questions - "will this browser play it" against "can
+// we put it in an MP4". A test pins them together so the copies cannot drift.
+export const MP4_VIDEO = new Set(['h264', 'hevc', 'av1'])
+export const MP4_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3', 'flac', 'alac', 'opus'])
+
+// What this browser tells the host it can open, as a query string. The host decides
+// the mode from it; the client never asks to be repackaged.
+export function capabilityQuery (caps) {
+  const video = ['h264', 'hevc', 'av1', 'vp9', 'vp8'].filter(c => caps[c])
+  const audio = ['aac', 'mp3', 'ac3', 'eac3', 'opus', 'flac', 'vorbis'].filter(c => caps[c])
+  return new URLSearchParams({
+    containers: 'mp4' + (caps.matroska ? ',matroska' : ''),
+    video: video.join(',') || 'h264',
+    audio: audio.join(',') || 'aac'
+  }).toString()
+}
+
 // A short, human name for a container, for the sentence we show. ffprobe's
 // `matroska` and Jellyfin's `mkv` are the same thing to a person.
 const CONTAINER_NAME = {
@@ -125,9 +144,18 @@ export function verdictFor (item, caps) {
     // Chrome answer is every browser's answer.
     const mkv = container === 'matroska' || container === 'mkv' || container === 'matroska,webm'
     if (!(mkv && caps.matroska)) {
+      // IS THIS FIXABLE BY REPACKAGING? Only if the streams inside are ones this
+      // browser can already decode AND an MP4 can carry them. That is the whole of
+      // rung one, and on the measured library it is true of nearly everything - which
+      // is why this flag turns most of a collection from a refusal into a film.
+      const remuxable = (!video || (caps[video] && MP4_VIDEO.has(video))) &&
+                        (!audio || MP4_AUDIO.has(audio))
       return {
         status: 'refuse',
-        reason: `Your browser will not open ${name} files. Nothing is wrong with the film - Chrome and Safari refuse this container, the same way an iPhone does. Playing it here needs remux, which repackages the video without re-encoding it.`
+        remuxable,
+        reason: remuxable
+          ? `Your browser will not open ${name} files - the same refusal an iPhone gives. The picture and sound inside are fine, so PearCinema repackages them into a container it will open, without re-encoding anything.`
+          : `Your browser will not open ${name} files, and what is inside cannot simply be repackaged either: ${!video || caps[video] ? `an MP4 cannot carry ${String(m.audioCodec || '').toUpperCase()} audio` : `your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video`}. Playing this one needs re-encoding, which this version does not do.`
       }
     }
   }
@@ -137,9 +165,11 @@ export function verdictFor (item, caps) {
   // direction: the player always offers Play anyway, so a false refusal costs one
   // click, where a false promise costs a black screen with no explanation.
   if (video && !caps[video]) {
+    // Repackaging cannot change the picture, so this one is not fixable by it.
     return {
       status: 'refuse',
-      reason: `Your browser cannot decode ${String(m.videoCodec).toUpperCase()} video.`
+      remuxable: false,
+      reason: `Your browser cannot decode ${String(m.videoCodec).toUpperCase()} video. Repackaging cannot change the picture, so this needs re-encoding, which this version does not do.`
     }
   }
 

@@ -670,6 +670,21 @@ class FolderAdapter {
     return stream
   }
 
+  // WHAT FFMPEG SHOULD OPEN for this item, for remux only.
+  //
+  // This is the one place a path leaves the adapter, and it is deliberate rather than
+  // a hole: repackaging a film means handing ffmpeg something seekable, and a pipe is
+  // not seekable - `-ss` on a pipe would decode from the start of a two-hour film to
+  // reach the seek point. So the remux engine gets a path, from the SAME chokepoint
+  // `media.stream` uses, and nothing else does.
+  //
+  // It never travels. host/server.js calls it and hands the result to ffmpeg's argv;
+  // no method table exposes it, and no response carries it.
+  async ffmpegInput ({ itemId } = {}) {
+    const file = this._resolve(itemId)
+    return file ? { input: file } : null
+  }
+
   async subtitles ({ itemId } = {}) {
     return this._subs.get(String(itemId)) || []
   }

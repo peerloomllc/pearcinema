@@ -536,6 +536,26 @@ class JellyfinAdapter {
     return res.body
   }
 
+  // WHAT FFMPEG SHOULD OPEN for this item, for remux only.
+  //
+  // A URL rather than a path, and that is the whole reason this seam is a method on
+  // the adapter instead of a field on the item: ffmpeg opens an http input as happily
+  // as a file, and seeks it with Range requests, so remux works against a Jellyfin
+  // source with no local copy of anything.
+  //
+  // `static=true` for the same reason media.stream demands it - ask for the original
+  // file, not whatever Jellyfin decided to make. Remuxing a stream Jellyfin already
+  // transcoded would be repackaging a re-encode.
+  async ffmpegInput ({ itemId } = {}) {
+    const remote = await this._remoteId(itemId)
+    if (!remote) return null
+    await this._auth()
+    return {
+      input: this._url(`/Videos/${remote}/stream`, { static: true }),
+      headers: this._authHeaders()
+    }
+  }
+
   // --- id resolution --------------------------------------------------------
 
   // Our ids are hashes, so they cannot be reversed - they can only be recomputed

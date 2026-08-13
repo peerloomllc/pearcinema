@@ -37,17 +37,37 @@ async function playback () { return import(APP + 'playback.js') }
 
 const film = (media) => ({ type: 'movie', id: 'x', title: 'A film', media })
 
-test('an MKV is refused, and the reason names remux rather than blaming the file', async () => {
+test('an MKV the browser refuses is marked REMUXABLE, which is what makes it playable', async () => {
   const { probeCapabilities, verdictFor } = await playback()
   const caps = probeCapabilities(chrome)
 
+  // The 83% case. The browser will not open the box, but it can decode everything
+  // inside it - so the host repackages and the film plays. `remuxable` is the flag
+  // the player turns on to do that, and it is the difference between a refusal and
+  // a film.
   const v = verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }), caps)
   assert.equal(v.status, 'refuse')
+  assert.equal(v.remuxable, true)
   assert.match(v.reason, /MKV/)
-  assert.match(v.reason, /Nothing is wrong with the film/)
-  assert.match(v.reason, /remux/)
+  assert.match(v.reason, /repackages/)
+  assert.match(v.reason, /without re-encoding/)
   // The comparison that makes this evidence rather than an apology.
   assert.match(v.reason, /iPhone/)
+})
+
+test('a refusal repackaging CANNOT fix says so, and says which half is the problem', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = probeCapabilities(chrome)
+
+  // Rung three: the 218 AVI files. Repackaging cannot change the picture.
+  const avi = verdictFor(film({ container: 'avi', videoCodec: 'mpeg4', audioCodec: 'mp3' }), caps)
+  assert.equal(avi.status, 'refuse')
+  assert.equal(avi.remuxable, false)
+  assert.match(avi.reason, /re-encoding/)
+
+  // HEVC this browser cannot decode, in a container it cannot open either.
+  const hevc = verdictFor(film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }), caps)
+  assert.equal(hevc.remuxable, false)
 })
 
 test('the same MKV plays in a browser that opens Matroska', async () => {
@@ -121,7 +141,19 @@ test('AVI is refused too - 218 files of the real library are exactly this', asyn
   const { probeCapabilities, verdictFor } = await playback()
   const v = verdictFor(film({ container: 'avi', videoCodec: 'mpeg4', audioCodec: 'mp3' }), probeCapabilities(chrome))
   assert.equal(v.status, 'refuse')
+  assert.equal(v.remuxable, false, 'and repackaging is not the answer for these')
   assert.match(v.reason, /AVI/)
+})
+
+test('the two MP4 tables agree with the host s, because they cannot be one module', async () => {
+  // playback.js is bundled into a browser and host/remux.js runs in Node, so they
+  // are two copies by necessity. This is the thing that stops them drifting: a
+  // browser that thinks a file is remuxable while the host disagrees shows somebody
+  // a spinner and then an error.
+  const { MP4_VIDEO, MP4_AUDIO } = await playback()
+  const host = require('../host/remux')
+  assert.deepEqual([...MP4_VIDEO].sort(), [...host.MP4_VIDEO].sort())
+  assert.deepEqual([...MP4_AUDIO].sort(), [...host.MP4_AUDIO].sort())
 })
 
 /* ------------------------------------------------------------- the wizard -- */
