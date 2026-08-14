@@ -105,8 +105,8 @@ const ROUTES = {
   // The fix dialog's search, when a pencil is pressed.
   '/api/metadata/search': {
     candidates: [
-      { tmdbId: 21, title: 'Crash', year: 1996, overview: 'the Cronenberg one' },
-      { tmdbId: 22, title: 'Crash', year: 2004, overview: 'the other one' }
+      { tmdbId: 21, title: 'Crash', year: 1996, poster: '/c1.jpg', overview: 'the Cronenberg one' },
+      { tmdbId: 22, title: 'Crash', year: 2004, poster: '/c2.jpg', overview: 'the other one' }
     ]
   },
   // The artwork panel after a pass: posters fetched, two of them guesses - so the
@@ -296,12 +296,15 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
   pencil.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  // The dialog carries the candidates and the way to say neither is on offer only
-  // when fetched artwork exists to remove - Metropolis has none, so no such button.
+  // The dialog carries the candidates AS TILES - the poster is the choice, so the
+  // candidate itself is the button, with its thumbnail relayed through the host.
   assert.match(text(), /Fix the match - Metropolis/)
-  assert.match(text(), /Crash \(1996\)/)
-  assert.match(text(), /Crash \(2004\)/)
-  assert.match(text(), /Use this/)
+  const cards = [...doc.querySelectorAll('.cand')]
+  assert.equal(cards.length, 2)
+  assert.match(cards[0].textContent, /Crash/)
+  assert.match(cards[0].textContent, /1996/)
+  assert.match(cards[1].textContent, /2004/)
+  assert.match(cards[0].querySelector('img').getAttribute('src'), /^\/api\/metadata\/preview\?p=/, 'the thumbnail comes from the HOST, never from TMDB directly')
   // And pressing the pencil did NOT open the film - the tile click was stopped.
   assert.equal(doc.querySelector('video'), null)
 })

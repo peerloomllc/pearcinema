@@ -773,6 +773,36 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .poster .fixmatch:hover { color: #fff; background: rgba(0,0,0,.75) }
 .fixmatch svg { display: block }
 
+/* The fix dialog's candidates, picked by eye: the poster IS the choice. */
+.candgrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: .6rem; margin-top: .8rem;
+}
+.cand {
+  display: flex; flex-direction: column; gap: .3rem; padding: 0;
+  background: none; border: none; text-align: left; cursor: pointer;
+  color: var(--fg); font: inherit;
+}
+.cand img, .cand .noart {
+  width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--line); display: block;
+}
+.cand .noart { display: flex; align-items: center; justify-content: center; color: var(--muted); background: var(--panel) }
+.cand:hover img, .cand:focus-visible img { outline: 2px solid var(--accent); outline-offset: 1px }
+.cand .t { font-size: .82rem; line-height: 1.25 }
+.cand .s { font-size: .75rem; color: var(--muted) }
+
+/* Artwork-fetch progress: a real bar, in the library banner and the panel both. */
+.artfetch { display: flex; flex-direction: column; gap: .45rem }
+.meter {
+  display: block; height: 4px; border-radius: 999px; overflow: hidden;
+  background: var(--line);
+}
+.meter i {
+  display: block; height: 100%; background: var(--accent);
+  border-radius: 999px; transition: width .6s ease;
+}
+
 .eprow .mark {
   margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px;
   font-size: .75rem; background: transparent; color: var(--muted);

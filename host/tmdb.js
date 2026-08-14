@@ -29,7 +29,7 @@ const fsp = require('fs/promises')
 const path = require('path')
 
 const API = 'https://api.themoviedb.org/3'
-const IMAGES = 'https://image.tmdb.org/t/p/w500'
+const IMAGES = 'https://image.tmdb.org/t/p/'
 
 // Both shapes of TMDB credential work, because the key page offers both and asking
 // somebody to know which one they copied is a support ticket: the short v3 key rides
@@ -108,8 +108,10 @@ class TmdbClient {
     }))
   }
 
-  async poster (posterPath) {
-    const res = await this.fetch(IMAGES + posterPath, { headers: authFor(this.key).headers })
+  // `size` is a TMDB rendition name: w500 for the poster that is kept, w185 for
+  // the thumbnails the fix dialog picks from by eye.
+  async poster (posterPath, size = 'w500') {
+    const res = await this.fetch(IMAGES + size + posterPath, { headers: authFor(this.key).headers })
     if (!res.ok) throw new Error(`TMDB image answered ${res.status}`)
     return Buffer.from(await res.arrayBuffer())
   }

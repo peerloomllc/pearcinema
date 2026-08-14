@@ -17,7 +17,7 @@ import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 import { ArtIcon, Check, List, Grid, Pencil } from './icons'
-import { Modal } from './ui'
+import { Modal, notify } from './ui'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -234,7 +234,7 @@ function FixMatch ({ item, onClose, onFixed }) {
   }
 
   return (
-    <Modal title={'Fix the match - ' + item.title} onClose={onClose}>
+    <Modal title={'Fix the match - ' + item.title} onClose={onClose} wide>
       <p class='hint'>
         Pick the right one and its poster replaces the guess. If the name on the file is
         not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
@@ -253,15 +253,19 @@ function FixMatch ({ item, onClose, onFixed }) {
       {err && <div class='banner bad'>{err}</div>}
       {busy && !cands && <p class='hint'>Asking TMDB…</p>}
       {cands && !cands.length && <p class='hint'>TMDB found nothing by that name.</p>}
-      <div class='tracklist' style='margin-top:.6rem'>
+      {/* PICKED BY EYE (Tim, 2026-08-14). The poster is the thing being chosen, so
+          the poster is what the choice shows - a text list asked somebody to
+          recognise a film by its year. Thumbnails come THROUGH THE HOST, because
+          the promise on the panel is that the host talks to TMDB, not the browser. */}
+      <div class='candgrid'>
         {(cands || []).map(c => (
-          <div class='sub' key={c.tmdbId}>
-            <span>
-              {c.title}{c.year ? ` (${c.year})` : ''}
-              {c.overview && <span class='hint' style='display:block'>{c.overview.slice(0, 140)}{c.overview.length > 140 ? '…' : ''}</span>}
-            </span>
-            <button class='ghost' disabled={busy} onClick={() => use(c)}>Use this</button>
-          </div>
+          <button class='cand' key={c.tmdbId} disabled={busy} title={c.overview} onClick={() => use(c)}>
+            {c.poster
+              ? <img src={'/api/metadata/preview?p=' + encodeURIComponent(c.poster)} alt='' loading='lazy' />
+              : <span class='noart'><ArtIcon type={item.type} size={26} /></span>}
+            <span class='t'>{c.title}</span>
+            {c.year && <span class='s'>{c.year}</span>}
+          </button>
         ))}
       </div>
       {String(item.artId || '').startsWith('tmdb:') && (
@@ -606,7 +610,16 @@ export default function Library ({
   const artRunning = state.metadata?.running || null
   const wasRunning = useRef(false)
   useEffect(() => {
-    if (wasRunning.current && !artRunning) setArtEpoch(e => e + 1)
+    if (wasRunning.current && !artRunning) {
+      setArtEpoch(e => e + 1)
+      // Say what the pass came back with, in the numbers that matter: how many
+      // posters, and how many of those were guesses worth a glance.
+      api('/api/metadata').then(m => {
+        if (m?.error) return
+        notify('Artwork fetched', `${m.matched} title${m.matched === 1 ? ' has' : 's have'} posters now` +
+          (m.uncertain ? `, ${m.uncertain} matched from several possibilities - hover a tile and use the pencil to correct one` : '') + '.')
+      })
+    }
     wasRunning.current = !!artRunning
   }, [artRunning])
 
@@ -825,11 +838,12 @@ export default function Library ({
 
       {/* THE PASS IS VISIBLE WHERE ITS RESULT LANDS (Tim, 2026-08-14). Progress in a
           Settings panel nobody is looking at is progress nobody sees; the posters
-          arrive on THIS page, so this page says they are coming. */}
+          arrive on THIS page, so this page says they are coming - with a bar, not a
+          sentence pretending to be one. */}
       {artRunning && (
-        <div class='banner' style='margin-top:.6rem'>
-          Fetching artwork - {artRunning.done} of {artRunning.total} looked up. Posters
-          appear here as they land.
+        <div class='banner artfetch' style='margin-top:.6rem'>
+          <span>Fetching artwork - <b>{artRunning.done}</b> of {artRunning.total}. Posters appear as they land.</span>
+          <span class='meter'><i style={`width:${artRunning.total ? Math.round((artRunning.done / artRunning.total) * 100) : 0}%`} /></span>
         </div>
       )}
 

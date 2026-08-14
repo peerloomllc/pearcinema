@@ -24,6 +24,13 @@ fetched fresh by TMDB id; nothing from the page is trusted but the id. A fixed m
 is never `uncertain`, because a person chose it. An unmatched item is remembered so
 the next automatic pass does not re-guess it.
 
+**The candidates are picked BY EYE, and their thumbnails come through the host.**
+The poster is the thing being chosen, so the dialog shows posters rather than a text
+list asking somebody to recognise a film by its year. The thumbnails are RELAYED by
+the host (`/api/metadata/preview`, path shape pinned to TMDB's own), because the
+panel's promise is that the HOST talks to TMDB - a page that hotlinked
+image.tmdb.org would make every operator's browser talk to them too.
+
 **Progress is where the result lands.** The pass reports on the LIBRARY page - the
 page whose posters are filling in - riding the /api/state poll that already exists,
 and the lists refetch when the pass completes so posters arrive while somebody

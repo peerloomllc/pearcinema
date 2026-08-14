@@ -812,6 +812,18 @@ async function startDashboard ({
         return json(res, 200, out)
       }
 
+      // A candidate's poster thumbnail, relayed through the host. The path is held
+      // to TMDB's own shape - one path segment, an image extension - so this can
+      // never be pointed anywhere else.
+      if (req.method === 'GET' && url.pathname === '/api/metadata/preview') {
+        const p = String(url.searchParams.get('p') || '')
+        if (!/^\/[A-Za-z0-9_-]+\.(?:jpg|png)$/.test(p)) return json(res, 400, { error: 'not a TMDB image path' })
+        const bytes = await host.previewMetadataPoster(p)
+        if (!bytes) { res.writeHead(404); return res.end() }
+        res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' })
+        return res.end(bytes)
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/metadata/unmatch') {
         const { itemId } = await readBody(req)
         if (!itemId) return json(res, 400, { error: 'itemId required' })

@@ -433,6 +433,15 @@ class PearCinemaHost {
     return this.enricher.unmatch(String(itemId))
   }
 
+  // A candidate's thumbnail for the fix dialog, PROXIED - the promise on the panel
+  // is that the HOST talks to TMDB, so the browser must not be sent to fetch from
+  // TMDB itself. The path shape is checked by the route; this only relays.
+  async previewMetadataPoster (posterPath) {
+    const key = this._metadataKey()
+    if (!key) return null
+    return new tmdb.TmdbClient({ key }).poster(posterPath, 'w185').catch(() => null)
+  }
+
   // After a scan, quietly fill any gaps - but only when the operator has opted in,
   // and never twice at once. Errors are logged rather than thrown: a rate-limited
   // TMDB must not take the library down with it.

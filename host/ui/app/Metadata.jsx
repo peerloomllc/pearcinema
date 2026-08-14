@@ -19,7 +19,7 @@ import { notify } from './ui'
 
 // `embedded` drops the card chrome so the same panel can sit inside the first-run
 // wizard (Tim, 2026-08-14: this step belongs in onboarding, not only in Settings).
-export default function Metadata ({ embedded = false } = {}) {
+export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
   const [meta, setMeta] = useState(null)
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
@@ -59,7 +59,12 @@ export default function Metadata ({ embedded = false } = {}) {
     if (res?.error) return notify('Not saved', res.error)
     setKey(''); setTested(null)
     await reload()
-    if (enabled) notify('Fetching artwork', 'Watch it fill in on the library page. A best guess is applied where a name is ambiguous, and any tile can be corrected from its pencil.')
+    if (enabled) {
+      notify('Fetching artwork', 'Watch it fill in on the library page. A best guess is applied where a name is ambiguous, and any tile can be corrected from its pencil.')
+      // In the wizard, turning it on IS finishing the step - do not make somebody
+      // find a second button (Tim, 2026-08-14).
+      onEnabled?.()
+    }
   }
 
   return (
@@ -113,7 +118,10 @@ export default function Metadata ({ embedded = false } = {}) {
       </div>
 
       {meta.running && (
-        <p class='hint'>Looking up {meta.running.done} of {meta.running.total}…</p>
+        <div class='artfetch' style='margin-top:.6rem'>
+          <span class='hint'>Looking up <b>{meta.running.done}</b> of {meta.running.total}…</span>
+          <span class='meter'><i style={`width:${meta.running.total ? Math.round((meta.running.done / meta.running.total) * 100) : 0}%`} /></span>
+        </div>
       )}
       {!meta.running && meta.lastRun && (
         <p class='hint'>
