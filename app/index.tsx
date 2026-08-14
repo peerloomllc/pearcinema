@@ -16,6 +16,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
 import b4a from 'b4a'
+import { probe as probeDecoders } from '../modules/decoder-probe'
 
 const bundle = require('../assets/bare-universal.bundle')
 
@@ -111,6 +112,20 @@ export default function App () {
         shellPending.current.set(id, resolve)
         ipc.write(b4a.from(JSON.stringify({ id, method, args }) + '\n'))
       })
+      // The REAL decoder list, probed here because MediaCodecList is RN-side.
+      // The worklet's mapper judges it; a null probe leaves the conservative
+      // static declaration standing, which only costs the host engine time.
+      const decoders = probeDecoders()
+      // The raw VIDEO claims, logged verbatim: this is the per-device ledger of
+      // what the chip SAYS, kept because the TCL proved a chip's word and a
+      // playing film are different claims.
+      console.warn('[shell] decoders', JSON.stringify(
+        (decoders ?? []).filter((d) => d.mime.startsWith('video/'))
+      ))
+      shellCall('capabilities.declare', { probe: decoders }).then((r) => {
+        console.warn('[shell] capabilities', JSON.stringify(r?.result ?? null))
+      })
+
       let page = await shellCall('ui.page', { html: uiHtml })
       // The shim listens moments after boot; ask again until the port exists.
       while (!cancelled && !page?.result?.port) {
@@ -159,13 +174,29 @@ export default function App () {
     if (!playing) return
     lastPos.current = (playing.startMs || 0) / 1000
     const sub = player.addListener('timeUpdate', (e: any) => { lastPos.current = e.currentTime })
+    // THE NET FOR LYING CHIPS. A decoder that claimed a codec and then threw on
+    // real frames surfaces here as a player error; the UI answers by asking for
+    // the stream again with the honest self-description, and the host usually
+    // decides transcode. Without this, an over-declaration is a black screen.
+    const errSub = player.addListener('statusChange', (s: any) => {
+      if (s?.status !== 'error') return
+      const p = playingRef.current
+      if (!p) return
+      const payload = JSON.stringify({
+        itemId: p.itemId,
+        title: p.title,
+        positionMs: Math.round(lastPos.current * 1000),
+        error: String(s?.error?.message || '')
+      })
+      feedWebView(`window.__pearEvent && window.__pearEvent('player:error', ${payload})`)
+    })
     const tick = setInterval(() => {
       const p = playingRef.current
       if (!p) return
       const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:tick', ${payload})`)
     }, 15000)
-    return () => { sub.remove(); clearInterval(tick) }
+    return () => { sub.remove(); errSub.remove(); clearInterval(tick) }
   }, [playing])
 
   const stopPlayback = () => {

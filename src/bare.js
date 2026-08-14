@@ -36,17 +36,28 @@ const HOSTS_FILE = path.join(DATA_DIR, 'hosts.json')
 
 const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' })
 
-// WHAT THIS DEVICE DECLARES IT CAN PLAY. Conservative and static for the first
-// cut: H.264 everywhere, HEVC deliberately ABSENT even though many chips decode
-// it - because the one measured device (the TCL, MediaCodec 0x80000000 on a real
-// HEVC film, 2026-08-14) proved that "the chip lists HEVC" and "this file plays"
-// are different claims. A device that under-declares costs the host some engine
-// time; one that over-declares costs the viewer a black screen. Probing the real
-// decoder list per device is the tracked follow-up.
-const CAPABILITIES = {
-  containers: ['mp4', 'matroska', 'webm', 'mpegts'],
-  videoCodecs: ['h264', 'vp9', 'av1'],
-  audioCodecs: ['aac', 'mp3', 'opus', 'flac', 'vorbis']
+const caps = require('./capabilities')
+
+// WHAT THIS DEVICE DECLARES IT CAN PLAY. Starts as the conservative static
+// floor; the shell probes the device's REAL decoder list (MediaCodecList lives
+// RN-side) and hands it over via capabilities.declare moments after boot, and
+// src/capabilities.js turns it into the declaration under its measured-lesson
+// rules. A device that under-declares costs the host some engine time; one
+// that over-declares costs the viewer a black screen - which is why video
+// needs hardware, HEVC needs Main 10, and the player-error retry below exists
+// for whatever lies through both.
+let capabilities = caps.STATIC
+
+// Video codecs this device claimed and its decoder then refused at runtime,
+// per item - the honest correction for a lying chip. Consulted by every path
+// that describes the device to the host, so the retry's HLS playlist and
+// segment calls describe it the same way stream.url did. RAM-only: a fresh
+// process retries direct play once and re-learns in one failed attempt.
+const refusedVideo = new Map()
+
+function capsFor (itemId) {
+  const bad = refusedVideo.get(itemId)
+  return bad ? caps.without(capabilities, bad) : capabilities
 }
 
 // --- IPC --------------------------------------------------------------------
@@ -172,7 +183,7 @@ const shim = createAudioShim({
       const itemId = m[1]
       try {
         const c = await connected()
-        const out = await c.request('media.playlist', { itemId, capabilities: CAPABILITIES })
+        const out = await c.request('media.playlist', { itemId, capabilities: capsFor(itemId) })
         if (!out?.playlist) {
           res.writeHead(409, { 'content-type': 'text/plain' })
           res.end(out?.reason || 'no playlist for this item')
@@ -197,7 +208,7 @@ const shim = createAudioShim({
       try {
         const c = await connected()
         res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
-        await c.request('media.segment', { itemId, seq, capabilities: CAPABILITIES }, {
+        await c.request('media.segment', { itemId, seq, capabilities: capsFor(itemId) }, {
           stream: true,
           buffer: false,
           onchunk: (chunk) => {
@@ -319,17 +330,41 @@ const methods = {
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
 
+  // The shell hands over the raw MediaCodecList probe at boot; the mapper's
+  // policy turns it into this device's declaration. A missing or broken probe
+  // changes nothing - the static floor stands, and under-declaring only costs
+  // the host some engine time.
+  'capabilities.declare': async ({ probe }) => {
+    const mapped = caps.fromProbe(probe)
+    if (mapped) capabilities = mapped
+    log('capabilities:declared', { fromProbe: !!mapped, ...capabilities })
+    return { ok: true, fromProbe: !!mapped, capabilities }
+  },
+
   // Where the player should point - and WHICH KIND of stream that is. The host
   // decides from this device's declared capabilities: direct play gets the
   // byte-range shim URL; a codec this device does not declare gets the HLS
   // playlist whose segments the host transcodes on demand. The player cannot
   // tell it is being helped.
-  'stream.url': async ({ itemId }) => {
+  //
+  // `deviceRefusedVideo` is the UI's retry after the native player errored on
+  // a direct-played file: the decoder just proved the declaration wrong for
+  // this item's video codec, so the device re-describes itself without it and
+  // the host decides again - usually landing on transcode. The client still
+  // never ASKS for a mode; it only tells the truth about itself.
+  'stream.url': async ({ itemId, deviceRefusedVideo = false }) => {
     const c = await connected()
-    const verdict = await c.request('media.decide', { itemId, capabilities: CAPABILITIES }).catch(() => null)
+    if (deviceRefusedVideo) {
+      const item = await c.get({ id: itemId }).catch(() => null)
+      const bad = item?.media?.videoCodec
+      if (bad) {
+        refusedVideo.set(itemId, bad)
+        log('stream:device-refused', { itemId, videoCodec: bad })
+      }
+    }
+    const verdict = await c.request('media.decide', { itemId, capabilities: capsFor(itemId) }).catch(() => null)
     if (verdict?.mode === 'transcode') {
-      const { port } = { port: shimPort }
-      return { url: `http://127.0.0.1:${port}/hls/${itemId}.m3u8`, mode: 'transcode' }
+      return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: 'transcode' }
     }
     // `remux` collapses to direct on a phone: ExoPlayer opens the containers a
     // browser refuses, which is why the phone declared them.
