@@ -2,7 +2,32 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-14 (latest) - ARTWORK APPLIES ITS BEST GUESS, and the correction lives on the tile
+## 2026-08-14 (latest) - THE MOBILE APP STARTS WITH AN EXTRACTION, not a copy: @peerloom/client is APPROVED
+Tier: T3 (client-side pairing and connection code moves into a shared package)
+Context: Tim said "let's work on the mobile app". The 2026-08-14 survey of PearTune's
+phone stack found ~2,300 lines of app-agnostic client plumbing - the pairing client,
+the localhost streaming shim, the host list, reconnect, the offline write queue -
+duplicated per app and packaged nowhere. PearCinema would have been the third copy of
+security-critical client code.
+
+Choice: extract `@peerloom/client` first, PearCinema as first consumer, exactly the
+shared-host playbook. Proposal at `../proposals/2026-08-14-shared-client.md`, approved
+by Tim the same day, verbally per the suite-root convention. The parts that matter:
+
+- **The wire protocol is not copied even into the package** - `@peerloom/client`
+  depends on `@peerloom/host`'s existing `./protocol` export, so the suite keeps ONE
+  implementation of the wire format.
+- **PearTune is untouched** and migrates on a branch later, after the iOS 1.0.0 review
+  outcome - the same posture the host extraction took, with brand-compat pins so the
+  eventual migration cannot silently orphan a paired phone.
+- **Bare AND Node, deliberately**, because the package running in Node IS the plan for
+  the desktop-as-client roadmap item: the desktop app consumes this same package
+  rather than growing a second DHT client.
+- Rejected: copy-and-adapt (fastest to first pixel, and the fourth copy-fork of the
+  suite on the code where divergence is a security problem) and copy-now-extract-later
+  (later never came for @peerloom/core's donors).
+
+## 2026-08-14 - ARTWORK APPLIES ITS BEST GUESS, and the correction lives on the tile
 Tier: T1 (matching policy and dashboard flow; no wire change)
 Context: Tim ran the caution-first cut against his real library and rejected the
 process: 79 titles held back as a homework list of prompts in Settings, before any of

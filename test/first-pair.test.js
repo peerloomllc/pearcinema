@@ -248,6 +248,33 @@ test('REVOKE CUTS A PAIRED DEVICE OFF MID-CONNECTION', async (t) => {
   again.destroy()
 })
 
+test('DEVICE.LEAVE ends this device\'s own access, with revoke\'s teeth', async (t) => {
+  // "Remove this library" on the phone must end access HERE - not leave a live
+  // grant behind a stale UI. Found missing by the first real client smoke test
+  // (2026-08-14), which got "unknown method" where a PearTune phone gets a goodbye.
+  const { h, dev } = await paired(t)
+
+  const conn = dev.connect(h.publicKey)
+  const m = media(conn, h.libraryId)
+  const closed = new Promise(r => conn.on('close', () => r('closed')))
+
+  const out = await m.call('device.leave')
+  assert.equal(out.body?.ok ?? out.ok ?? (out.kind === 'res' ? out.body.ok : false), true)
+
+  // The connection dies with the grant - leaving IS a revoke, self-inflicted.
+  assert.equal(await Promise.race([closed, settle(3000).then(() => 'alive')]), 'closed')
+
+  // And it stays ended: readmission is refused exactly as after an operator revoke.
+  const again = dev.connect(h.publicKey)
+  const back = await Promise.race([
+    new Promise(r => again.on('open', () => r('readmitted'))),
+    new Promise(r => again.on('close', () => r('refused'))),
+    settle(4000).then(() => 'refused')
+  ])
+  assert.equal(back, 'refused')
+  again.destroy()
+})
+
 test('the method table refuses what it does not understand, and survives', async (t) => {
   const { h, dev } = await paired(t)
   const conn = dev.connect(h.publicKey)
