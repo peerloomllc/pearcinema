@@ -403,6 +403,63 @@ function buildTree (episodes) {
   }
 }
 
+// --- searching ---------------------------------------------------------------
+
+// WHAT SOMEBODY MEANT WHEN THEY TYPED IT.
+//
+// A plain substring match answers "does this contain the word", which is not the
+// question. Typing "christmas" against a real library returns twenty-seven things and
+// the film actually CALLED "Christmas" is somewhere in the middle of them, below
+// "Abed's Uncontrollable Christmas" because A sorts before C (Tim, 2026-08-13, with a
+// screenshot of exactly that).
+//
+// So matches are ranked before they are sorted, best first:
+//
+//   0  the title IS the query                          "Christmas"
+//   1  the title starts with it                         "Christmas Party"
+//   2  it starts with it once "A"/"The" is set aside    "A Christmas Gift"
+//   3  a WORD in the title starts with it               "Mary Christmas"
+//   4  it appears somewhere at all                      "Xmas-ish", a partial word
+//   5  it is in the SHOW's name rather than this episode's
+//
+// RANK 2 IS THE ONE THAT EARNS ITS KEEP on a film library. Leading articles are
+// everywhere and mean nothing - the same reason the title SORT already strips them -
+// so without it "A Christmas Gift" ranks no better than "Abed's Uncontrollable
+// Christmas", and the thing somebody obviously meant sits below the thing they did
+// not. Ties break on the ordinary title sort, so the order is stable rather than
+// whatever the source happened to return first.
+const NON_WORD = /[^\p{L}\p{N}]+/u
+
+function searchRank (item, needle) {
+  const title = String(item?.title || '').toLowerCase()
+  const series = String(item?.seriesTitle || '').toLowerCase()
+  const bare = title.replace(ARTICLES, '')
+
+  if (title === needle) return 0
+  if (title.startsWith(needle)) return 1
+  if (bare.startsWith(needle)) return 2
+  if (title.split(NON_WORD).some(w => w.startsWith(needle))) return 3
+  if (title.includes(needle)) return 4
+  if (series.includes(needle)) return 5
+  return 6
+}
+
+// The rows that match, best first. `q` is what was typed; matching is
+// case-insensitive and covers a show's name as well as its own.
+function searchItems (rows, q, limit = 50) {
+  const needle = String(q || '').trim().toLowerCase()
+  if (!needle) return []
+
+  const scored = []
+  for (const item of rows) {
+    const rank = searchRank(item, needle)
+    if (rank < 6) scored.push({ item, rank })
+  }
+
+  scored.sort((a, b) => a.rank - b.rank || byTitle(a.item, b.item))
+  return scored.slice(0, Math.max(1, Number(limit) || 50)).map(s => s.item)
+}
+
 // --- paging -----------------------------------------------------------------
 
 // A film library is small in rows and huge in bytes, the opposite of a music
@@ -456,6 +513,8 @@ module.exports = {
   collator,
 
   buildTree,
+  searchRank,
+  searchItems,
   page,
   PAGE_MAX,
   PAGE_DEFAULT

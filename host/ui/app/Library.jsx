@@ -13,9 +13,10 @@
 // from a real engine - this browser, asked about these files - and on a normal
 // collection it says something uncomfortable and true.
 
-import { useState, useEffect, useMemo } from 'preact/hooks'
+import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
+import { ArtIcon, Check, List, Grid } from './icons'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -74,7 +75,7 @@ function Art ({ item, started = false, progress = null }) {
     return (
       <div class='art'>
         {inner}
-        {item.type === 'movie' ? '🎬' : item.type === 'series' ? '📺' : '🎞'}
+        <ArtIcon type={item.type} />
       </div>
     )
   }
@@ -169,9 +170,9 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
             title={seen ? 'Mark as unwatched' : 'Mark as watched'}
             aria-label={(seen ? 'Mark as unwatched: ' : 'Mark as watched: ') + item.title}
             onClick={e => { e.stopPropagation(); onWatched(item, !seen) }}
-          >✓</button>
+          ><Check size={13} /></button>
           )
-        : (seen && <span class='seen' title='You have watched this'>✓</span>)}
+        : (seen && <span class='seen' title='You have watched this'><Check size={13} /></span>)}
 
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
 
@@ -297,16 +298,43 @@ function CompatLine ({ list, caps }) {
   )
 }
 
-// One paged list from the host, with Load more. `deps` restarts it.
+// One paged list from the host. `deps` restarts it.
+//
+// IT LOADS ITSELF. A "Load more" button is a question the page already knows the
+// answer to: somebody who has scrolled to the bottom of their films wants the next
+// hundred, and making them say so is a click for nothing (Tim, 2026-08-13).
+//
+// THE GUARD IS ONLY ON THE NEXT PAGE, and getting that wrong cost an empty screen.
+//
+// A single "one request at a time" ref looked right and was not: opening a season from
+// the player mounts this with no season yet, that first request is in flight, and the
+// real query - the one with the season on it - arrives a tick later and is DROPPED as
+// a duplicate. The page then shows the crumbs, the title and no episodes, which is
+// exactly what Tim screenshotted.
+//
+// So a NEW query always goes, and only a request for the next page of the same query
+// can be turned away. Late answers are discarded by sequence number rather than by
+// refusing to ask, because the one that matters is usually the newest one.
 function useList (query, deps) {
   const [items, setItems] = useState([])
   const [cursor, setCursor] = useState(null)
   const [busy, setBusy] = useState(true)
   const [err, setErr] = useState('')
+  const paging = useRef(false)
+  const seq = useRef(0)
 
   const fetchPage = async (c) => {
+    if (c && paging.current) return
+    if (c) paging.current = true
+    const mine = ++seq.current
     setBusy(true)
+
     const res = await api(query + (c ? '&cursor=' + encodeURIComponent(c) : ''))
+
+    // A newer query has been asked since. Its answer is the one that belongs on screen,
+    // so this one is dropped rather than overwriting it.
+    if (mine !== seq.current) return
+    paging.current = false
     setBusy(false)
     if (res.error) return setErr(res.error)
     setErr('')
@@ -317,6 +345,37 @@ function useList (query, deps) {
   useEffect(() => { setItems([]); setCursor(null); fetchPage(null) }, deps)
 
   return { items, cursor, busy, err, more: () => fetchPage(cursor) }
+}
+
+// The bottom of the list, watched. When it comes into view, the next page is asked
+// for - with a margin, so the request is already in flight by the time somebody gets
+// there and the grid grows without a gap.
+//
+// A SENTINEL RATHER THAN A SCROLL HANDLER: an IntersectionObserver fires when the
+// browser is ready to tell us, where a scroll listener fires on every pixel and has to
+// be throttled by hand. It also keeps working inside any scroller, which a listener
+// bound to the window does not.
+function LoadMore ({ cursor, onMore, busy }) {
+  const mark = useRef(null)
+
+  useEffect(() => {
+    if (!cursor || !mark.current) return
+    const io = new IntersectionObserver(
+      es => { if (es.some(e => e.isIntersecting)) onMore() },
+      { rootMargin: '600px 0px' }
+    )
+    io.observe(mark.current)
+    return () => io.disconnect()
+  }, [cursor, onMore])
+
+  if (!cursor) return null
+  return (
+    <div class='loadmore' ref={mark}>
+      {/* Something has to be here, or there is nothing to come into view - and it may
+          as well say what is happening rather than being an empty pixel. */}
+      <span class={busy ? 'on' : ''}>Loading more…</span>
+    </div>
+  )
 }
 
 const VIEW_KEY = 'pearcinema.episodeview'
@@ -332,17 +391,53 @@ const loadView = () => {
 function ViewToggle ({ view, onChange }) {
   return (
     <div class='viewtoggle' role='group' aria-label='How to show episodes'>
-      <button class={view === 'list' ? 'on' : ''} onClick={() => onChange('list')} aria-label='List'>☰ List</button>
-      <button class={view === 'grid' ? 'on' : ''} onClick={() => onChange('grid')} aria-label='Grid'>▦ Grid</button>
+      <button class={view === 'list' ? 'on' : ''} onClick={() => onChange('list')} aria-label='List'><List size={15} /> List</button>
+      <button class={view === 'grid' ? 'on' : ''} onClick={() => onChange('grid')} aria-label='Grid'><Grid size={15} /> Grid</button>
     </div>
   )
 }
 
-export default function Library ({ state, caps, search, onPlay, watch = null, onWatchChange = () => {} }) {
+export default function Library ({
+  state, caps, search, onPlay,
+  watch = null, onWatchChange = () => {},
+  // Where to open, when somebody has climbed out of the player rather than gone all
+  // the way back to the library. Consumed once and cleared, so it does not fight with
+  // wherever they navigate next.
+  startAt = null, onStarted = () => {}
+}) {
   // 'films' | 'shows', and where we are inside the show tree.
   const [root, setRoot] = useState('films')
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
+
+  // WHICH WAY WE WENT, which is the whole point of the movement (Tim, 2026-08-13,
+  // choosing it over a plain cross-fade): deeper comes in from the right, back comes in
+  // from the left. A fade says only that something changed; this says where you are.
+  //
+  // Kept in state and stamped onto the screen's key, so the animation restarts on every
+  // move rather than only the first.
+  const [dir, setDir] = useState('deeper')
+  const go = (fn, way = 'deeper') => { setDir(way); fn() }
+
+  useEffect(() => {
+    if (!startAt?.item) return
+    const e = startAt.item
+    setDir('back')
+    setRoot('shows')
+    // Minimal stand-ins: what the crumbs render and what the queries need is an id and
+    // a title, and an episode already carries both for its show and its season.
+    setSeries({ id: e.seriesId, title: e.seriesTitle || 'Show', type: 'series' })
+    setSeason(startAt.level === 'season'
+      ? {
+          id: e.seasonId,
+          type: 'season',
+          title: e.seasonNumber === 0
+            ? 'Specials'
+            : (e.seasonNumber === null || e.seasonNumber === undefined ? 'Season' : 'Season ' + e.seasonNumber)
+        }
+      : null)
+    onStarted()
+  }, [startAt])
   const [hits, setHits] = useState(null)
   const [view, setView] = useState(loadView)
 
@@ -352,6 +447,7 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
   }
 
   const stats = state.stats || {}
+  const depth = hits ? 'search' : season ? 'season' : series ? 'series' : root
 
   // An array on the wire, a Set here. A grid asks "has this been watched" once per
   // poster and a linear scan per poster is the kind of thing that only bites on
@@ -463,30 +559,31 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
   // --- search wins over everything, because that is what the box is for ---
   if (hits) {
     return (
-      <>
+      <div class={'screen ' + dir} key={depth}>
         <h2>{hits.length} result{hits.length === 1 ? '' : 's'} for “{search}”</h2>
         <CompatLine list={hits.filter(h => h.media)} caps={caps} />
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
             <Poster key={h.id} item={h} caps={caps} onOpen={i => {
-              if (i.type === 'series') { setHits(null); setRoot('shows'); setSeries(i) } else onPlay(i, hits.filter(x => x.type === i.type))
+              if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
+              else onPlay(i, hits.filter(x => x.type === i.type))
             }} />
           ))}
         </div>
         {!hits.length && <div class='empty'>Nothing matched.</div>}
-      </>
+      </div>
     )
   }
 
   // --- inside a show ---
   if (root === 'shows' && series) {
     return (
-      <>
+      <div class={'screen ' + dir} key={depth}>
         <div class='crumbs'>
-          <button onClick={() => { setSeries(null); setSeason(null) }}>Shows</button>
+          <button onClick={() => go(() => { setSeries(null); setSeason(null) }, 'back')}>Shows</button>
           <span>/</span>
           {season
-            ? <><button onClick={() => setSeason(null)}>{series.title}</button><span>/</span><span>{season.title}</span></>
+            ? <><button onClick={() => go(() => setSeason(null), 'back')}>{series.title}</button><span>/</span><span>{season.title}</span></>
             : <span>{series.title}</span>}
         </div>
 
@@ -502,7 +599,7 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
                   caps={caps}
                   watch={seasonRollups[s.id]}
                   onWatched={mark}
-                  onOpen={setSeason}
+                  onOpen={x => go(() => setSeason(x))}
                 />
               ))}
             </div>
@@ -550,6 +647,18 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
                       >
                         <span class='code'>{episodeCode(e) || '-'}</span>
                         <span class='t'>{e.title}</span>
+                        {/* HOW FAR THROUGH, IN THE LIST TOO. The grid has said this
+                            since the shelf existed and the list said nothing, so the
+                            same episode looked untouched in one view and half-watched
+                            in the other (Tim, 2026-08-13). A bar along the bottom edge
+                            of the row rather than beside the text: it is the same
+                            language as the poster's, and it does not push the title
+                            around when it appears. */}
+                        {progressOf({ positionMs: resumeOf.get(e.id)?.positionMs, runtime: e.runtime }) !== null && (
+                          <span class='rowbar'>
+                            <i style={`width:${progressOf({ positionMs: resumeOf.get(e.id)?.positionMs, runtime: e.runtime })}%`} />
+                          </span>
+                        )}
                         {e.runtime ? <span class='hint'>{fmtRuntime(e.runtime)}</span> : null}
                         {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
                         <button
@@ -557,22 +666,27 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
                           title={seen.has(e.id) ? 'Mark as unwatched' : 'Mark as watched'}
                           aria-label={(seen.has(e.id) ? 'Mark as unwatched: ' : 'Mark as watched: ') + e.title}
                           onClick={ev => { ev.stopPropagation(); mark(e, !seen.has(e.id)) }}
-                        >✓</button>
+                        ><Check size={13} /></button>
                       </div>
                     )
                   })}
                 </div>
                 )}
-            {episodes.busy && <div class='empty'>Loading…</div>}
-            {episodes.cursor && <button class='ghost' onClick={episodes.more} style='margin-top:1rem'>Load more</button>}
+            {episodes.busy && !episodes.items.length && <div class='empty'>Loading…</div>}
+            <LoadMore cursor={episodes.cursor} onMore={episodes.more} busy={episodes.busy} />
           </>
         )}
-      </>
+      </div>
     )
   }
 
   const showing = root === 'films' ? films : shows
 
+  // WHAT STAYS PUT AND WHAT MOVES. The shelf and the Films/Shows switch are not part of
+  // the thing being switched - sliding them out and back when somebody presses Shows
+  // makes the page look like it reloaded, and it takes the switch they just pressed
+  // away from under the pointer (Tim, 2026-08-13). So only what is BELOW them animates,
+  // keyed on which root is showing.
   return (
     <>
       <ContinueRow
@@ -582,15 +696,19 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
-      <div class='row' style='margin-bottom:.6rem'>
+      {/* The shelf's captions run right up to the picker without this - two unrelated
+          things touching, which reads as one. */}
+      <div class='row' style='margin:1.4rem 0 .6rem'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
-        <button class={root === 'films' ? '' : 'ghost'} onClick={() => setRoot('films')}>
+        <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>
           Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
         </button>
-        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => setRoot('shows')}>
+        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>
           Shows {stats.series ? <span class='chip'>{stats.series}</span> : null}
         </button>
       </div>
+
+      <div class={'screen ' + dir} key={root}>
 
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
       <ArtNote list={showing.items} source={state.source?.kind} />
@@ -600,19 +718,20 @@ export default function Library ({ state, caps, search, onPlay, watch = null, on
       <div class='grid' style='margin-top:.8rem'>
         {showing.items.map(i => (
           <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onOpen={item => {
-            if (item.type === 'series') setSeries(item)
+            if (item.type === 'series') go(() => setSeries(item))
             else onPlay(item, films.items)
           }} />
         ))}
       </div>
 
-      {showing.busy && <div class='empty'>Loading…</div>}
+      {showing.busy && !showing.items.length && <div class='empty'>Loading…</div>}
       {!showing.busy && !showing.items.length && (
         <div class='empty'>
           Nothing here yet. {root === 'films' ? 'Films' : 'Shows'} will appear once the source has been scanned.
         </div>
       )}
-      {showing.cursor && <button class='ghost' style='margin-top:1rem' onClick={showing.more}>Load more</button>}
+      <LoadMore cursor={showing.cursor} onMore={showing.more} busy={showing.busy} />
+      </div>
     </>
   )
 }

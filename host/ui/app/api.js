@@ -83,6 +83,18 @@ export function fmtRuntime (seconds) {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
+// THE WHOLE LENGTH, down to the second, for the details sheet. `fmtRuntime` rounds to
+// the nearest minute, which is right on a poster and wrong in a panel somebody opened
+// specifically to see the facts about a file (Tim, 2026-08-13).
+export function fmtExact (seconds) {
+  const total = Math.round(Number(seconds) || 0)
+  if (!total) return ''
+  const h = Math.floor(total / 3600)
+  const m = Math.floor(total / 60) % 60
+  const s = total % 60
+  return [h && `${h} h`, (h || m) && `${m} m`, `${s} s`].filter(Boolean).join(' ')
+}
+
 export function fmtSize (bytes) {
   if (!bytes) return ''
   const gb = bytes / 1e9

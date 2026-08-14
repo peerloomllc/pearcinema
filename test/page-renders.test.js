@@ -101,7 +101,11 @@ const ROUTES = {
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
 // back the document.
-async function open (state = STATE, extraRoutes = {}) {
+// `delay` matters more than it looks. A stub that answers instantly cannot reproduce
+// anything about REQUESTS IN FLIGHT - and the empty-season bug was exactly that: a
+// first request still running when the real one arrived. A test written against an
+// instant stub passed against the broken code.
+async function open (state = STATE, extraRoutes = {}, asked = null, delay = 0) {
   const errors = []
   const vc = new VirtualConsole()
   vc.on('jsdomError', e => errors.push(e))
@@ -115,6 +119,8 @@ async function open (state = STATE, extraRoutes = {}) {
 
   const win = dom.window
   win.fetch = async (url) => {
+    if (asked) asked.push(String(url))
+    if (delay) await new Promise(r => setTimeout(r, delay))
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
     const routes = { ...ROUTES, ...extraRoutes }
     const hit = Object.keys(routes).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
@@ -125,7 +131,11 @@ async function open (state = STATE, extraRoutes = {}) {
   // Two turns: one for /api/state, one for the list it triggers.
   for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 15))
 
-  return { dom, win, doc: win.document, errors, text: () => win.document.body.textContent }
+  // THE RENDERED PAGE, NOT THE WHOLE DOCUMENT. `body.textContent` includes the inlined
+  // script - the entire application bundle - so any assertion that something is ABSENT
+  // matched its own source code and could never fail. Found 2026-08-13 by a test that
+  // passed while the thing it was testing plainly worked.
+  return { dom, win, doc: win.document, errors, text: () => win.document.getElementById('root').textContent }
 }
 
 test('the page mounts and shows the library, rather than a blank control plane', async (t) => {
@@ -141,11 +151,12 @@ test('the page mounts and shows the library, rather than a blank control plane',
   assert.match(text(), /Metropolis/)
   assert.match(text(), /Nosferatu/)
 
-  // The three places, which is the whole navigation.
-  assert.match(text(), /Watch/)
-  assert.match(text(), /Devices/)
-  assert.match(text(), /Settings/)
+  // The whole navigation, which is now the name plus three icons rather than three
+  // words - see the header test below.
   assert.match(text(), /Pair a device/)
+  for (const label of ['User access', 'Switch theme', 'Settings']) {
+    assert.ok([...doc.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === label), label)
+  }
 })
 
 test('the compatibility line is on screen, and it is honest about the MKV', async (t) => {
@@ -192,10 +203,17 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Devices'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
 
+  // PEARTUNE'S SHAPE: people first, their devices nested under them. A device that
+  // belongs to nobody yet has its own section rather than being mixed in.
+  assert.match(text(), /People & devices/)
+  // This phone CLAIMS a name nobody has confirmed, which is the one thing on the page
+  // waiting on the operator - so it gets its own card at the top rather than being
+  // mixed in with devices that are simply unassigned.
+  assert.match(text(), /Needs confirming/)
   assert.match(text(), /A phone/)
   assert.match(text(), /Cut off/)
 })
@@ -234,7 +252,7 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -259,7 +277,7 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   const { dom, doc, win } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -285,7 +303,7 @@ test('two folders holding the same file is said out loud, not absorbed', async (
   const { dom, doc, win, text } = await open({ ...STATE, stats: { ...STATE.stats, duplicates: 3 } })
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -369,11 +387,14 @@ test('opening a half-watched film OFFERS to resume rather than jumping', async (
   if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  const offer = doc.querySelector('.resumeoffer')
-  assert.ok(offer, 'the card is there')
-  assert.match(offer.textContent, /You stopped at/)
-  assert.match(offer.textContent, /Resume/)
-  assert.match(offer.textContent, /Start over/)
+  // OVER THE PICTURE, not in a strip under it: a banner below the player is a notice
+  // about the film, where this is a question about watching it.
+  const offer = doc.querySelector('.stage .resumeover')
+  assert.ok(offer, 'the prompt is over the picture itself')
+  // AN EXACT TIME. Somebody deciding whether to resume is looking for the moment they
+  // stopped, and "1m" does not tell them which of two attempts this was.
+  assert.match(offer.textContent, /Resume at 1:16\?/)
+  assert.match(offer.textContent, /Start Over/)
   assert.ok(!/^0:00/.test(text()), 'and nothing has jumped on its own')
 })
 
@@ -522,4 +543,551 @@ test('THE RING IS MEASURED AGAINST THE ARTWORK, which is what makes it hug the p
   assert.ok(art.querySelector('.ring'), 'the ring is inside the artwork')
   assert.equal(win.getComputedStyle(art).position, 'relative',
     'and the artwork is what it is measured against')
+})
+
+/* ------------------------------------------------- the look and the movement -- */
+
+test('THE EMOJI ARE GONE, and what replaced them is drawn in our own colours', async (t) => {
+  // Every platform draws its own emoji, in its own colours, at its own weight - so a
+  // page that mixes them with real interface reads as half-finished, which is the one
+  // thing a control plane for somebody's film collection should not look like.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const art = doc.querySelector('.poster .art')
+  assert.ok(art.querySelector('svg'), 'a film with no poster gets a drawn placeholder')
+  assert.match(doc.body.innerHTML, /<svg/, 'and the page uses inline SVG rather than an icon font')
+
+  // No stray pictographs anywhere on screen. Ranges rather than a list, so a new one
+  // slipping in is caught too.
+  const text = doc.body.textContent
+  assert.doesNotMatch(text, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u, 'no emoji left on the page')
+})
+
+test('MOVING DEEPER AND COMING BACK SAY SO', async (t) => {
+  // A fade says only that something changed. The class is what carries the direction,
+  // and it is the whole reason this was chosen over a cross-fade: a library four levels
+  // deep - films, shows, seasons, episodes - is where "which way did I just go" starts
+  // to matter.
+  const SHOW = {
+    type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
+    seasonCount: 1, episodeCount: 3, overview: null, genres: [], artId: null
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/library/list?type=seasons&limit=100': { items: [], total: 0, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  assert.ok(doc.querySelector('.screen'), 'the library is an animated screen')
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok(doc.querySelector('.screen').classList.contains('deeper') ||
+            !doc.querySelector('.screen').classList.contains('back'), 'going in is "deeper"')
+
+  const crumb = [...doc.querySelectorAll('.crumbs button')].find(b => b.textContent === 'Shows')
+  crumb.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok(doc.querySelector('.screen').classList.contains('back'), 'and coming out is "back"')
+})
+
+test('THE LIST LOADS ITSELF - no button asking a question it knows the answer to', async (t) => {
+  const many = Array.from({ length: 4 }, (_, i) => ({ ...FILM, id: 'f' + i, title: 'Film ' + i }))
+  const { dom, doc, text } = await open(STATE, {
+    '/api/library/list?type=movies&limit=100': { items: many, total: 200, cursor: 4 }
+  })
+  t.after(() => dom.window.close())
+
+  assert.doesNotMatch(text(), /Load more/, 'the button is gone')
+  assert.ok(doc.querySelector('.loadmore'), 'and there is a marker for the list to watch for')
+})
+
+test('AN EPISODE CAN CLIMB BACK TO ITS SEASON AND ITS SHOW', async (t) => {
+  // A film has one place to go and "back to the library" says it. An episode is four
+  // levels down, and offering only the way to the very top means anybody who wanted the
+  // rest of the season has to walk back in from Shows.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2, seasonTitle: null,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const crumbs = [...doc.querySelectorAll('.crumbs button')].map(b => b.textContent)
+  assert.deepEqual(crumbs, ['Shows', 'The Wire', 'Season 1'], 'every level is reachable, not just the top')
+  assert.match(text(), /S01E02/, 'and where you are is named rather than linked')
+})
+
+test('NOTHING STARTS PLAYING ON ITS OWN', async (t) => {
+  // Opening a page should not fill a room with sound - and on a repackaged film it also
+  // spends a child process on the host before anybody has said they want it.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const v = doc.querySelector('video')
+  assert.ok(v, 'the player is there')
+  assert.equal(v.hasAttribute('autoplay'), false, 'and it waits to be asked')
+})
+
+test('OPENING A SEASON ASKS FOR THAT SEASON, not for nothing', async (t) => {
+  // The bug behind an empty season page: this mounts with no season yet, that first
+  // request is in flight, and the real query - the one carrying the season - arrived a
+  // tick later and was dropped as a duplicate by an over-eager guard. Crumbs, a title
+  // and no episodes.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const asked = []
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null },
+    '/api/library/list?type=episodes&limit=200&seasonId=season-1': { items: [EP], total: 1, cursor: null }
+  }, asked, 12)
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const crumb = [...doc.querySelectorAll('.crumbs button')].find(b => b.textContent === 'Season 1')
+  crumb.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 200))
+
+  assert.ok(
+    asked.some(u => u.includes('type=episodes') && u.includes('seasonId=season-1')),
+    'the season it climbed to is the one it asked the host for'
+  )
+})
+
+test('SWITCHING FILMS AND SHOWS LEAVES THE SHELF AND THE SWITCH ALONE', async (t) => {
+  // Sliding those out and back makes the page look like it reloaded, and it takes the
+  // button somebody just pressed out from under the pointer.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const shelfBefore = [...doc.querySelectorAll('h2')].find(h => h.textContent === 'Continue watching')
+  assert.ok(shelfBefore)
+  assert.equal(shelfBefore.closest('.screen'), null, 'the shelf is outside the moving part')
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  assert.equal(shows.closest('.screen'), null, 'and so is the switch itself')
+
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok([...doc.querySelectorAll('h2')].some(h => h.textContent === 'Continue watching'),
+    'so the shelf survives the switch')
+})
+
+test('THE DETAILS ARE ONE BUTTON AWAY, and cover nothing until asked', async (t) => {
+  // The file's technical facts used to hold a permanent right-hand column, which made
+  // the picture smaller on every screen to keep room for something most people never
+  // read.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const sheet = doc.querySelector('.sheet')
+  assert.ok(sheet, 'the sheet exists')
+  assert.equal(sheet.classList.contains('open'), false, 'and starts shut')
+  assert.equal(sheet.getAttribute('aria-hidden'), 'true')
+
+  const details = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+  details.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  assert.ok(doc.querySelector('.sheet').classList.contains('open'), 'and opens when asked')
+  assert.match(text(), /How it is playing/, 'with the facts in it')
+})
+
+test('PREVIOUS AND NEXT ARE A TELEVISION IDEA', async (t) => {
+  // On a film the queue is whatever list it was opened from, so "next" would mean the
+  // next film alphabetically - not a thing anybody wants offered. Hidden rather than
+  // disabled: a permanently greyed-out control is still a control to read past.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const acts = [...doc.querySelectorAll('.acts button')].map(b => b.textContent.trim())
+  assert.equal(acts.some(t => /Previous|Next/.test(t)), false, 'a film gets neither')
+
+  // And the two that remain are icons carrying a state that has to be readable.
+  // Nosferatu is watched in this state, so the control is set - and the label says
+  // which way pressing it goes rather than what it currently is, because a tick on its
+  // own means both "done" and "mark done".
+  const watched = doc.querySelector('.acts button.icon[aria-pressed]')
+  assert.ok(watched, 'the watched control says whether it is set')
+  assert.equal(watched.getAttribute('aria-pressed'), 'true')
+  assert.equal(watched.getAttribute('aria-label'), 'Mark as unwatched')
+  assert.ok(watched.classList.contains('on'), 'and it is filled rather than outline')
+})
+
+test('an episode gets Previous and Next, and they are the same width as the rest', async (t) => {
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 2,
+    title: 'The Detail', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/api/library/list?type=movies&limit=100': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const tile = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  tile.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const acts = [...doc.querySelectorAll('.acts button')]
+  assert.deepEqual(acts.slice(0, 2).map(b => b.textContent.trim()), ['Previous', 'Next'],
+    'named plainly - "Next episode" said the obvious twice')
+  assert.equal(acts.length, 4, 'four controls: previous, next, watched, details')
+})
+
+test('the list view shows how far through an episode is, like the grid does', async (t) => {
+  // The grid has said this since the shelf existed and the list said nothing, so the
+  // same episode looked untouched in one view and half-watched in the other.
+  const EP = {
+    type: 'episode', id: 'ep-1', seriesId: 'show-1', seasonId: 'season-1',
+    seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 1,
+    title: 'The Target', year: 2002, runtime: 3600, overview: null, artId: null,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: 4096 }
+  }
+  const SHOW = { type: 'series', id: 'show-1', title: 'The Wire', seasonCount: 1, episodeCount: 1, artId: null, genres: [], overview: null, year: 2002 }
+  const SEASON = { type: 'season', id: 'season-1', seriesId: 'show-1', number: 1, title: 'Season 1', episodeCount: 1, artId: null }
+
+  const { dom, doc, win } = await open(STATE, {
+    '/api/watch/state': {
+      watching: { id: 'p1', name: 'Me' }, choose: [], watched: [], upNext: [],
+      continue: [{ ...EP, resume: { positionMs: 900_000, playedAt: Date.now() } }]
+    },
+    '/api/library/list?type=series&limit=100': { items: [SHOW], total: 1, cursor: null },
+    '/api/library/list?type=seasons&limit=100': { items: [SEASON], total: 1, cursor: null },
+    '/api/library/list?type=episodes&limit=200': { items: [EP], total: 1, cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Season 1'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const list = [...doc.querySelectorAll('button')].find(b => b.textContent.trim().endsWith('List'))
+  if (list) list.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const row = doc.querySelector('.eprow')
+  assert.ok(row, 'the episode is in the list')
+  const bar = row.querySelector('.rowbar i')
+  assert.ok(bar, 'and it says how far through it is')
+  assert.equal(bar.style.width, '25%', '15 minutes of an hour')
+})
+
+test('THE DETAILS SHEET IS NOT CLIPPED OUT OF EXISTENCE', async (t) => {
+  // What Tim screenshotted: a page-sized dim overlay with nothing in it. The edge fade
+  // was a MASK on the content, and a mask - like a filter or a transform - makes its
+  // element the containing block for anything `position: fixed` inside it and clips it.
+  // The sheet starts translated off to the right, so it was clipped away entirely and
+  // only its scrim showed.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const content = doc.querySelector('.content')
+  const style = dom.window.getComputedStyle(content)
+  assert.equal(style.maskImage || 'none', 'none', 'the content masks nothing')
+  assert.equal(style.webkitMaskImage || 'none', 'none')
+
+  // AND THE STRIPS THAT REPLACED THE MASK ARE GONE TOO. A strip painting the page
+  // colour to transparent is a visible BAND wherever what is behind it is not exactly
+  // that colour - in light mode, a pale bar across the top of the library. The content
+  // scrolls under a solid header with a border, which is a boundary already.
+  assert.equal(doc.querySelector('.edge'), null, 'no painted strips over the page')
+})
+
+test('A PAUSED FILM SHOWS A PLAY BUTTON', async (t) => {
+  // It used to assume playing, which was true while the element carried `autoplay` and
+  // became a lie the moment it did not.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const big = doc.querySelector('.controls .iconbtn.big')
+  assert.ok(big, 'the transport button is there')
+  assert.equal(big.getAttribute('aria-label'), 'Play', 'and it offers to start, not to stop')
+})
+
+test('nothing in the controls is an emoji', async (t) => {
+  // The skip buttons were still ⏪ and ⏩ after everything else had been drawn.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const controls = doc.querySelector('.controls')
+  assert.doesNotMatch(controls.textContent, /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)
+  assert.ok(controls.querySelectorAll('svg').length >= 5, 'they are drawn instead')
+})
+
+test('THE DETAILS SHEET STATES FACTS RATHER THAN BADGING THEM', async (t) => {
+  // A coloured pill reads as a status somebody is meant to act on. These are
+  // explanations - and "on the player" beside every usable subtitle was a label for the
+  // obvious, since that list IS the list you can turn on.
+  const { dom, doc, win } = await open(STATE, {
+    '/api/subtitles': {
+      items: [
+        { id: 's1', title: 'English', language: 'en', external: true, playable: true, reason: null },
+        { id: 's2', title: 'French', language: 'fr', external: false, playable: false, reason: 'These subtitles are pictures rather than text.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  ;[...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  const sheet = doc.querySelector('.sheet')
+  assert.doesNotMatch(sheet.textContent, /on the player/, 'no badge on the ones that work')
+  assert.equal(sheet.querySelectorAll('.chip').length, 0, 'and no pills anywhere in the sheet')
+
+  // What earns its place is the opposite: the ones you cannot have, and why.
+  assert.match(sheet.textContent, /not available/)
+  assert.match(sheet.textContent, /pictures rather than text/)
+
+  // The length is exact, because this panel was opened to see the facts about a file.
+  // Nosferatu has no runtime in the fixture; Metropolis does - 153 seconds.
+  assert.match(sheet.textContent, /How it is playing/)
+})
+
+test('the length in the sheet is exact, not rounded to the minute', async (t) => {
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  ;[...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  // 153 seconds. "3m" rounds away more than half of what it is.
+  assert.match(doc.querySelector('.sheet').textContent, /2 m 33 s/)
+})
+
+test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
+  // The search box used to be rendered only on Watch, so opening Devices took it out
+  // and the whole bar shrank - the page jumped under the pointer on every tab change.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const slot = doc.querySelector('.topbar .searchslot')
+  assert.ok(slot, 'the middle of the bar always holds the search')
+  assert.ok(slot.querySelector('.searchbox'), 'and on Watch there is a box in it')
+
+  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  devices.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  // AND IT WORKS FROM ANYWHERE. Disabling it off the Watch tab was a rule about where
+  // somebody happens to be standing rather than about what they want: typing a film's
+  // name means "find me this film" wherever they are.
+  const after = doc.querySelector('.topbar .searchslot .searchbox')
+  assert.ok(after, 'the box is still there on another tab')
+  assert.equal(after.querySelector('input').disabled, false, 'and still usable')
+})
+
+test('THE PAIRING MODAL IS PEARTUNE\'S, down to the words', async (t) => {
+  // Pairing is the one flow somebody meets in both apps, usually minutes apart and
+  // usually with a phone in the other hand. Two shapes for the same act is where a
+  // companion app stops feeling like one.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const pair = [...doc.querySelectorAll('button')].find(b => b.textContent === 'Pair a device')
+  pair.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const seg = doc.querySelector('.seg.wide')
+  assert.ok(seg, 'the segmented control, full width so its options are equal')
+  assert.deepEqual([...seg.querySelectorAll('button')].map(b => b.textContent),
+    ['Full access', 'Guest pass', 'Owner'])
+
+  assert.match(text(), /Permanent access\. Scan the code in PearCinema on your phone\./)
+  assert.match(text(), /Show pairing code/)
+
+  // The stack of three cards it used to be is gone.
+  assert.doesNotMatch(text(), /Open a window/)
+  assert.doesNotMatch(text(), /Lend it for a while/)
+})
+
+test('THE PAGE DOES NOT SHIFT SIDEWAYS WHEN A SCROLLBAR ARRIVES', async (t) => {
+  // Devices is short and Watch is long, so changing tab added or removed a scrollbar
+  // and every centred thing on the page jumped by its width. Reserving the gutter
+  // permanently means the space is always there and nothing reflows.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  // THE SCROLLER IS THE CONTENT, NOT THE DOCUMENT - which is what keeps the scrollbar
+  // below the header rather than running past it, and it is where the gutter has to be
+  // reserved so a short tab and a long one do not shift everything sideways.
+  const scroller = dom.window.getComputedStyle(doc.querySelector('.scroller'))
+  assert.equal(scroller.scrollbarGutter, 'stable', 'the gutter is always reserved')
+  assert.equal(scroller.overflowY, 'auto', 'and the content is what scrolls')
+  assert.equal(dom.window.getComputedStyle(doc.body).overflow, 'hidden', 'the page itself does not')
+})
+
+test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) => {
+  // Centring the search was a problem that only existed because there were tabs on one
+  // side and a button on the other. Without them there is nothing to balance, and the
+  // honest answer was to stop trying: it is left aligned beside the name.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  assert.equal(doc.querySelectorAll('.topbar .tab').length, 0, 'no text tabs in the bar')
+
+  const bar = [...doc.querySelector('.topbar').children].map(c => c.className.split(' ')[0])
+  assert.deepEqual(bar, ['brand', 'searchslot', 'barright'], 'name, search, tools')
+
+  // A HOME ICON, not the brand mark. "Click the name to go back" is a thing somebody
+  // has to be told, which is the definition of the wrong affordance - so the far left
+  // is a home button that happens to carry the name.
+  assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /Back to the library/)
+  assert.ok(doc.querySelector('.brand svg'), 'with an icon that says what it does')
+
+  for (const label of ['User access', 'Switch theme', 'Settings']) {
+    assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)
+  }
+})
+
+test('the page keeps one background, however far it scrolls', async (t) => {
+  // A background set only on the body is propagated to the canvas - but the glow was
+  // `background-attachment: fixed` on that same body, and past the first screenful the
+  // propagated painting stopped agreeing with itself.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const html = dom.window.getComputedStyle(doc.documentElement)
+  assert.match(html.background, /var\(--bg\)/, 'the flat colour is on the root itself')
+
+  // THE GLOW BELONGS TO THE TOP OF THE LIBRARY, not to the window. On a scroll
+  // container the default keeps a background pinned to the element while its content
+  // moves - which is what made the warm patch follow the screen and read as the page
+  // changing colour as you scrolled. `local` ties it to the content.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
+  assert.match(css, /\.scroller\{[^}]*background-attachment:local/, 'the glow scrolls away with the page')
+  assert.doesNotMatch(css, /background-attachment:fixed/, 'and nothing is pinned to the window')
+})
+
+test('the name is one word', async (t) => {
+  // The header row has a `gap`, and a gap falls between text nodes as readily as
+  // between boxes - so "Pear" and "Cinema" were being pushed apart.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+  assert.equal(doc.querySelector('.brand .word').textContent, 'PearCinema')
+})
+
+test('TYPING FROM ANOTHER PAGE TAKES YOU TO THE LIBRARY', async (t) => {
+  // Disabling the box off the Watch tab was a rule about where somebody is standing
+  // rather than about what they want. Typing a film's name means "find me this film".
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.match(text(), /A phone/, 'we are on the access page')
+
+  const input = doc.querySelector('.searchbox input')
+  input.value = 'metro'
+  input.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.doesNotMatch(text(), /Cut off/, 'and typing has carried us off it')
+  assert.equal(doc.querySelector('.searchbox input').value, 'metro', 'with what was typed kept')
+})
+
+test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
+  // A household of four should be four lines, not a wall of devices - and the devices
+  // belong UNDER the person, because revoking a person cuts off everything they hold
+  // and the page should make that obvious without a paragraph explaining it.
+  const withPerson = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Tim', label: 'Tim' }],
+    devices: [{
+      deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true,
+      personId: 'p1', claimedUser: 'Tim', lastSeen: Date.now(), scope: 'full'
+    }]
+  }
+  const { dom, doc, win, text } = await open(withPerson)
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const row = doc.querySelector('.prow')
+  assert.ok(row, 'the person is a row')
+  assert.match(row.textContent, /Tim/)
+  assert.match(row.textContent, /1 device/)
+  assert.equal(row.querySelector('.dev'), null, 'and their devices are folded away')
+
+  row.querySelector('.pname').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  assert.ok(doc.querySelector('.prow .dev'), 'opening them shows what they hold')
+  assert.match(text(), /A phone/)
 })

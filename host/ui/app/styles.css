@@ -4,72 +4,189 @@
  * reverse of most dashboards, and right for a page you sit in front of a film in.
  * Tokens on [data-theme] so both are one stylesheet, and every colour has a value
  * on :root so nothing is stranded on one theme's background.
+ *
+ * THE PALETTE IS PEARTUNE'S, ON A DARKER GROUND (Tim, 2026-08-13). They are companion
+ * apps and read as one suite: the same amber and terracotta, the same warm greys, the
+ * same radial glow at the top of the page. What is deliberately NOT copied is the
+ * lightness - PearTune's ground is a warm near-black for a music dashboard you glance
+ * at, and this one sits behind a film, so it goes darker and lets the picture be the
+ * brightest thing on screen.
+ *
+ * Names are kept as PearCinema had them (`--accent`, `--card`, `--line`) rather than
+ * renamed to PearTune's (`--primary`, `--surface`, `--border`): a rename touches every
+ * rule in the file for no visible gain, and the shared-host extraction is where common
+ * ground belongs, not a copied stylesheet.
  */
 
 :root {
-  --bg: #0e0f13;
-  --bg-2: #14161d;
-  --card: #171922;
-  --card-2: #1d202b;
-  --line: #262a35;
-  --fg: #eceef4;
-  --muted: #8b90a0;
-  --accent: #6ea8fe;
-  --accent-fg: #0b1220;
-  --good: #5fbf8e;
-  --warn: #e2b04a;
+  --bg: #0c0a07;
+  --bg-2: #141009;
+  --bg-accent: radial-gradient(1200px 600px at 50% -12%, rgba(230, 178, 78, .09) 0%, transparent 60%);
+  --card: #191410;
+  --card-2: #201a13;
+  --line: #322a20;
+  --line-strong: #43392c;
+  --fg: #f3ede1;
+  --muted: #a2947d;
+  --accent: #e6b24e;
+  --accent-fg: #1c1305;
+  --good: #8bb877;
+  --warn: #f2b544;
   --danger: #e0705f;
-  --shadow: 0 10px 40px rgba(0, 0, 0, .45);
-  --radius: 12px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .35), 0 10px 40px rgba(0, 0, 0, .45);
+  --radius: 14px;
 }
 
 [data-theme='light'] {
-  --bg: #f6f7fa;
-  --bg-2: #eef0f5;
+  --bg: #faf6ee;
+  --bg-2: #f3ecdf;
+  --bg-accent: radial-gradient(1200px 600px at 50% -12%, rgba(156, 106, 18, .12) 0%, transparent 60%);
   --card: #ffffff;
-  --card-2: #f2f4f8;
-  --line: #dde1e9;
-  --fg: #1a1d24;
-  --muted: #667085;
-  --accent: #2f6fdd;
+  --card-2: #f3ecdf;
+  --line: #ddd2bf;
+  --line-strong: #ccbfa6;
+  --fg: #1c1710;
+  --muted: #6b6252;
+  --accent: #9c6a12;
   --accent-fg: #ffffff;
-  --good: #1f8a5c;
-  --warn: #9a6b0d;
-  --danger: #c0392b;
-  --shadow: 0 10px 30px rgba(20, 25, 40, .12);
+  --good: #3f7d3a;
+  --warn: #8a5a10;
+  --danger: #c1362b;
+  --shadow: 0 1px 2px rgba(27, 26, 22, .08), 0 10px 30px rgba(38, 36, 31, .08);
 }
 
 * { box-sizing: border-box }
 
+/* THE PAGE MUST NOT SHIFT SIDEWAYS WHEN A SCROLLBAR APPEARS.
+ *
+ * Devices is short and Watch is long, so changing tab added or removed a scrollbar and
+ * every centred thing on the page - the search box most visibly - jumped by its width
+ * (Tim, 2026-08-13). Reserving the gutter permanently is the fix: the space is always
+ * there, so nothing reflows when the bar arrives.
+ *
+ * The fallback is a scrollbar that is always drawn rather than always reserved. Uglier
+ * on a short page, and still better than a page that moves under the pointer. */
+/* THE PAGE ITSELF DOES NOT SCROLL. The CONTENT does, below the header - which is how
+ * Plex does it, and it is what keeps the scrollbar out of the header rather than
+ * running past it and reading as a seam down the right-hand edge (Tim, 2026-08-13,
+ * with a screenshot of Plex).
+ *
+ * The gutter is reserved on the scroller for the same reason it was reserved on the
+ * document: a short tab and a long one must not shift everything sideways. */
+html, body { overflow: hidden }
+
+/* THE SCROLLBAR IS OURS TOO. The browser's default is a light track in a dark page,
+ * and it runs the full height of the window - so it butts up against the sticky header
+ * and reads as a seam down the right-hand edge (Tim, 2026-08-13, with a screenshot).
+ * Thin, no track, a thumb the colour of a border until the pointer is near it.
+ *
+ * Both spellings: the standard properties (Firefox, and Chromium 121+) and the WebKit
+ * pseudo-elements, which are what Safari and older Chromium understand. */
+.scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong); border-radius: 999px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box }
+::-webkit-scrollbar-corner { background: transparent }
+
+/* And never sideways, on any screen. A single element that overhangs turns into a
+ * horizontal scrollbar that shifts everything vertically as well. */
+html, body { max-width: 100% }
+
 html, body, #root { height: 100% }
+
+/* THE COLOUR GOES ON `html`, NOT ONLY ON `body`.
+ *
+ * A background set only on the body is propagated to the canvas - but the GLOW was
+ * `background-attachment: fixed` on that same body, and past the first screenful the
+ * propagated painting stopped agreeing with itself: scrolling down changed the colour
+ * of the page (Tim, 2026-08-13). Painting the flat colour on the root and hanging the
+ * glow off a fixed pseudo-element is unambiguous - one always covers the canvas, the
+ * other always covers the viewport, and neither depends on how tall the document
+ * happens to be. */
+html { background: var(--bg) }
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: transparent;
   color: var(--fg);
   font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
+/* The glow is PearTune's, and it is what makes the two read as one suite at a glance -
+ * a warm light at the top of the library rather than a flat field. It lives on the
+ * scroller, not here: see `.scroller`. */
+
 a { color: var(--accent) }
 
 /* ---- shell ---------------------------------------------------------------- */
 
-.shell { min-height: 100%; display: flex; flex-direction: column }
+.shell { height: 100%; display: flex; flex-direction: column; min-height: 0 }
 
+/* NAME, SEARCH, TOOLS - and nothing in the middle to centre.
+ *
+ * The tabs are gone from here (Tim, 2026-08-13): the name is the way back to the
+ * library, Devices and Settings are icons on the right, and the search is simply left
+ * aligned beside the name. Centring it was a problem that only existed because there
+ * were tabs on one side and a button on the other; without them there is nothing to
+ * balance and the honest answer is to stop trying.
+ *
+ * It does NOT scroll away, because it is outside the scroller rather than sticky to
+ * it - which is also what keeps the scrollbar out of it. */
 .topbar {
-  position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; gap: .75rem;
+  display: flex; align-items: center; gap: .8rem;
+  min-height: 3.3rem;
   padding: .7rem 1rem;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
 }
 
-.brand { font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap }
-.brand span { color: var(--accent) }
+.brand {
+  font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap;
+  background: none; border: none; color: inherit; padding: 0; cursor: pointer;
+}
+/* The name is ONE word. The row's `gap` sits between the mark and the wordmark and
+ * nowhere else - a gap falls between text nodes as readily as between boxes, which is
+ * what put a space in the middle of "PearCinema". */
+.brand .word { display: inline }
+.brand .word span { color: var(--accent) }
 
-.tabs { display: flex; gap: .25rem; margin-left: .5rem; flex-wrap: wrap }
+.barright { display: flex; align-items: center; gap: .35rem; justify-self: end }
+.barright .iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; position: relative;
+  width: 2.2rem; height: 2.2rem; border-radius: 9px; padding: 0;
+}
+.barright .iconbtn:hover { background: var(--card); color: var(--fg) }
+.barright .iconbtn.on { background: var(--card); color: var(--accent) }
+.barright > button:last-child { margin-left: .4rem }
+/* Somebody is online. A dot rather than a count: the number changes on its own and a
+ * changing number in the corner of the eye is a distraction, where a light is not. */
+.barright .dot {
+  position: absolute; top: .3rem; right: .3rem; width: .45rem; height: .45rem;
+  border-radius: 999px; background: var(--good);
+}
+
+.searchslot { display: flex; align-items: center; min-width: 0; flex: 1 }
+
+.tabs { display: flex; gap: .25rem; flex-wrap: wrap }
+
+/* Narrow: three across stops fitting well before the columns actually collide - the
+ * search is squeezed to a stub long before anything overlaps - so the bar wraps into
+ * rows and the search takes a line of its own. */
+/* Narrow: the search takes a line of its own rather than squeezing the name off. */
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; row-gap: .5rem }
+  .searchslot { order: 3; width: 100% }
+  .barright { margin-left: auto }
+}
 
 .tab {
   border: none; background: transparent; color: var(--muted);
@@ -81,18 +198,40 @@ a { color: var(--accent) }
 
 .spacer { flex: 1 }
 
+/* WIDE, and centred on the bar. It is the one control people use most, and a narrow
+ * pill floating in the middle of a wide header looked like an afterthought. */
 .searchbox {
-  display: flex; align-items: center; gap: .4rem;
+  display: flex; align-items: center; gap: .5rem;
   background: var(--card); border: 1px solid var(--line);
-  border-radius: 999px; padding: .25rem .7rem;
+  border-radius: 999px; padding: .3rem .9rem;
+  width: 100%; max-width: 30rem;
 }
 .searchbox input {
   border: none; background: transparent; color: var(--fg); font: inherit;
-  width: 11rem; padding: .2rem 0;
+  width: 100%; min-width: 0; padding: .2rem 0;
 }
 .searchbox input:focus { outline: none }
 
-.content { flex: 1; padding: 1.25rem 1rem 4rem; max-width: 1180px; width: 100%; margin: 0 auto }
+/* The pill itself is the field, so it takes the focus ring rather than the input. */
+.searchbox:focus-within { border-color: var(--accent) }
+
+/* THE SCROLLER. Everything above it is fixed by being outside it, so the header needs
+ * no `position: sticky` and the scrollbar cannot reach it.
+ *
+ * THE GLOW LIVES HERE, and `background-attachment: local` is the whole point: on a
+ * scroll container the default keeps a background pinned to the element while its
+ * content moves, which is what made the warm patch follow the window and read as the
+ * page changing colour as you scrolled. `local` ties it to the content, so it belongs
+ * to the TOP OF THE LIBRARY and scrolls away once. */
+.scroller {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable;
+  background-image: var(--bg-accent);
+  background-repeat: no-repeat;
+  background-size: 100% 620px;
+  background-attachment: local;
+}
+.content { padding: 1.25rem 1rem 4rem; max-width: 1180px; width: 100%; margin: 0 auto }
 
 /* ---- generic bits --------------------------------------------------------- */
 
@@ -126,6 +265,15 @@ button.iconbtn {
   padding: .25rem .4rem; line-height: 1;
 }
 button.iconbtn:hover { color: var(--fg) }
+
+/* The search is a PILL, not a box inside one. Its input picks up the ordinary field
+ * styling below unless it says otherwise - same specificity, and the general rule comes
+ * later in the file, so it won - and the result was a rounded rectangle floating inside
+ * a rounded pill (Tim, 2026-08-13, with a screenshot). Stated as the same shape of
+ * selector so it wins on order rather than on luck. */
+.searchbox input[type=text] {
+  background: transparent; border: none; border-radius: 0; padding: .2rem 0;
+}
 
 input[type=text], input[type=password], input[type=number], select {
   font: inherit; color: var(--fg); background: var(--bg-2);
@@ -216,10 +364,62 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* ---- the player ----------------------------------------------------------- */
 
-.playerwrap { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr) }
-@media (max-width: 860px) { .playerwrap { grid-template-columns: 1fr } }
+/* THE PICTURE IS THE PAGE (Tim, 2026-08-13, choosing it over the two columns that were
+ * here). The file's technical facts used to hold a permanent right-hand column, which
+ * made the picture smaller on every screen to keep room for something most people never
+ * read - and made the whole thing read as a file inspector that happens to play video.
+ *
+ * They are one button away now, in a sheet that covers nothing until it is asked for.
+ * It is also the layout that still works when the player goes full screen, or ends up
+ * on a television, where a side column has nowhere to be. */
+.playerwrap { max-width: 1000px; margin: 0 auto }
+
+.titlebar { display: flex; align-items: flex-start; gap: 1rem; margin-top: .7rem }
+.titlebar .grow { flex: 1; min-width: 0 }
+.overview { font-size: .92rem; max-width: 68ch; margin: .5rem 0 0 }
+
+/* FOUR CONTROLS OF ONE WIDTH. Previous and Next only exist on television - on a film
+ * the queue is whatever list it was opened from, so "next" would mean the next film
+ * alphabetically. The other two are icons so the row comes out even rather than a
+ * stack of mixed-width buttons. */
+.acts { display: flex; gap: .4rem; flex: 0 0 auto }
+.acts button { min-width: 5.6rem; justify-content: center; display: inline-flex; align-items: center }
+.acts button.icon { min-width: 2.6rem; padding: .45rem 0; border: 1px solid var(--line); background: transparent; color: var(--muted) }
+.acts button.icon:hover { color: var(--fg); border-color: var(--line-strong) }
+/* An icon carrying a STATE has to be unmistakable, or a tick means both "done" and
+ * "mark done". Filled while watched, outline while not. */
+.acts button.icon.on { background: var(--accent); color: var(--accent-fg); border-color: transparent }
+
+@media (max-width: 640px) {
+  .titlebar { flex-direction: column; gap: .6rem }
+  .acts { width: 100%; }
+  .acts button { flex: 1 }
+}
+
+/* The details sheet: over the page, from the right, and gone again. */
+.sheet {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 40;
+  width: min(360px, 88vw); padding: 1rem 1.1rem; overflow: auto;
+  background: var(--card); border-left: 1px solid var(--line);
+  transform: translateX(101%); transition: transform .26s cubic-bezier(.2, .7, .3, 1);
+}
+.sheet.open { transform: none }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .4rem }
+.sheet-head h3 { margin: 0 }
+
+.scrim {
+  position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .55);
+  opacity: 0; pointer-events: none; transition: opacity .2s ease;
+}
+.scrim.on { opacity: 1; pointer-events: auto }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet { transition: none }
+}
 
 .stage {
+  /* Positioned, because the resume prompt sits over the picture and nothing else. */
+  position: relative;
   background: #000; border-radius: var(--radius); overflow: hidden;
   border: 1px solid var(--line); aspect-ratio: 16 / 9;
   display: flex; align-items: center; justify-content: center;
@@ -270,14 +470,72 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .confirm-actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem }
 .confirm-actions.center { justify-content: center }
 
-.qr { background: #fff; padding: .8rem; border-radius: 12px; width: fit-content; margin: 0 auto }
-.qr svg { display: block; width: 220px; height: 220px }
+/* ---- pairing -------------------------------------------------------------
+ *
+ * PEARTUNE'S, ALMOST VERBATIM, and deliberately (Tim, 2026-08-13): pairing is the one
+ * flow somebody meets in both apps, usually minutes apart and usually with a phone in
+ * the other hand. Two different shapes for the same act is where a companion app stops
+ * feeling like one.
+ */
 
-.linkbox {
-  word-break: break-all; background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 8px; padding: .5rem; font-family: ui-monospace, monospace; font-size: .72rem;
-  margin-top: .7rem;
+.stack { display: flex; flex-direction: column; gap: .75rem }
+.stack.center { align-items: center; text-align: center }
+.center { text-align: center }
+
+/* The access-type toggle must FILL the modal, or a centred stack shrink-wraps it and
+ * "Full access" and "Guest pass" come out different widths. */
+.seg {
+  display: flex; background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px; gap: 2px;
 }
+.seg.wide { width: 100% }
+.seg button {
+  flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  border: none; background: transparent; color: var(--muted);
+  border-radius: 999px; padding: .45rem .5rem; font-size: .82rem; font-weight: 550;
+}
+.seg button.on { background: var(--accent); color: var(--accent-fg) }
+
+/* A LIGHT PANEL AROUND THE CODE, IN BOTH THEMES, and it is not decoration: a phone
+ * camera's auto-exposure meters what surrounds the code, so a small white card
+ * floating in a dark modal gets blown out and the modules wash into grey. Widening the
+ * light region is what makes it scan in a dark room - which is where somebody sets up
+ * a film library. */
+.qrpanel {
+  background: #fff; border-radius: 18px; padding: 1.3rem 1.5rem;
+  display: inline-flex; flex-direction: column; align-items: center; gap: .6rem;
+}
+.qr { background: #fff; border-radius: 12px; width: fit-content }
+.qr svg { display: block; width: 232px; height: 232px }
+/* The caption rides INSIDE the panel, so it is legible against white in dark mode. */
+.qrpanel .qrcap { color: #3a3a3a; font-size: .78rem; line-height: 1.45; max-width: 260px }
+
+.keyrow { display: flex; align-items: center; gap: .5rem; width: 100% }
+.key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+  color: var(--muted); word-break: break-all; overflow-wrap: anywhere;
+  background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: .5rem .6rem; width: 100%; text-align: center;
+}
+.keyrow .key { flex: 1 1 auto; min-width: 0 }
+
+.pairdone { margin: 0; font-size: 1rem }
+/* Equal width, and no wrapping: the row is content-width, so a flex-basis of zero lets
+ * "New code" break across two lines and make the pair uneven. */
+.pairacts { display: flex; gap: .5rem; justify-content: center; width: 100% }
+.pairacts button {
+  flex: 1 1 0; justify-content: center; display: inline-flex; align-items: center;
+  gap: .35rem; white-space: nowrap;
+}
+
+.pairicon {
+  display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 999px;
+  background: var(--card-2); color: var(--muted); border: 1px solid var(--line);
+}
+.pairicon.good { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, transparent) }
+
+.dur { display: inline-flex; align-items: center; gap: .4rem; margin: 0 }
+.dur select { font-size: .82rem }
 
 /* ---- folder picker -------------------------------------------------------- */
 
@@ -349,8 +607,23 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .controls .vol { width: 5rem }
 
-.controls .iconbtn { font-size: 1rem; padding: .2rem .35rem }
-.controls .iconbtn.big { font-size: 1.25rem }
+/* BIGGER ON A DESKTOP, where there is room and a pointer has to land on them
+ * (Tim, 2026-08-13). Sized in the button rather than the icon so the target grows with
+ * it - a 20px glyph in a 24px button is still a 24px thing to hit. The touch sizes are
+ * left alone: they were already at the edge of what fits across a phone. */
+.controls .iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.1rem; height: 2.1rem; padding: 0; border-radius: 8px;
+}
+.controls .iconbtn:hover { background: var(--card-2) }
+.controls .iconbtn.big { width: 2.6rem; height: 2.6rem }
+
+@media (min-width: 861px) {
+  .controls { padding: .6rem .8rem .7rem }
+  .controls .row { gap: .5rem }
+  .controls .iconbtn { width: 2.5rem; height: 2.5rem }
+  .controls .iconbtn.big { width: 3.1rem; height: 3.1rem }
+}
 
 .submenu { position: relative }
 .submenu .menu {
@@ -429,13 +702,35 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .watchas { display: flex; align-items: center; gap: .4rem; margin-right: .6rem }
 .watchas select { font-size: .8rem; padding: .25rem .35rem }
 
-/* Offered, never done. */
-.resumeoffer {
-  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
-  margin-top: .6rem; padding: .5rem .7rem;
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
-  font-size: .9rem;
+/* OFFERED, NEVER DONE - and over the picture rather than in a strip under it. A banner
+ * below the player is a notice about the film; this is a question about watching it,
+ * and it belongs where the eye already is.
+ *
+ * The stage is `position: relative` already, so this covers exactly the picture and
+ * nothing else - the controls underneath stay reachable, which matters because
+ * somebody may want the volume set before they resume. */
+.resumeover {
+  position: absolute; inset: 0; z-index: 4;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, .55);
+  backdrop-filter: blur(2px);
+  animation: fade-in .18s ease both;
 }
+.resumeover .card {
+  margin: 0; text-align: center; min-width: min(22rem, 86%);
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow);
+}
+.resumeover h3 { margin: 0 0 .8rem; font-size: 1.05rem }
+.resumeover .row { justify-content: center }
+/* TWO OF ONE WIDTH. "Resume" is four letters and "Start Over" is ten, so left to
+ * themselves they come out as a big button and a small one - which reads as a
+ * recommendation rather than a pair. */
+.row.two { display: flex; gap: .5rem }
+.row.two button { flex: 1 1 0; min-width: 8rem; justify-content: center }
+
+@keyframes fade-in { from { opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .resumeover { animation: none } }
 
 /* An episode nobody has started yet, on the same shelf as things half-watched. It
  * says so rather than looking like something abandoned in the middle. */
@@ -525,3 +820,123 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   .ring .base { stroke: var(--accent) }
   .ring .dash { display: none }
 }
+
+/* ---- moving between screens ------------------------------------------------ */
+
+/* DEEPER COMES FROM THE RIGHT, BACK COMES FROM THE LEFT (Tim, 2026-08-13, choosing it
+ * over a plain cross-fade). A fade says only that something changed; this says WHERE
+ * YOU WENT, which is the actual difficulty with a library four levels deep - films,
+ * shows, seasons, episodes - and it is the idiom a phone already uses, so it will
+ * still be right when there is a phone app.
+ *
+ * Short, and on transform and opacity only: those two are the properties a browser can
+ * animate without laying the page out again, which is what keeps it smooth on the
+ * small boxes this host runs on. */
+.screen { animation: screen-deeper .26s cubic-bezier(.2, .7, .3, 1) both }
+.screen.back { animation-name: screen-back }
+
+@keyframes screen-deeper { from { opacity: 0; transform: translate3d(26px, 0, 0) } }
+@keyframes screen-back { from { opacity: 0; transform: translate3d(-26px, 0, 0) } }
+
+/* Movement is an attention-getter, and a viewer who has asked for less of it should
+ * get the content immediately rather than a slower version of the same thing. */
+@media (prefers-reduced-motion: reduce) {
+  .screen { animation: none }
+}
+
+/* ---- the list loads itself -------------------------------------------------- */
+
+/* A "Load more" button asks a question the page already knows the answer to: somebody
+ * at the bottom of their films wants the next hundred. This is the marker the list
+ * watches for - it says what is happening rather than being an invisible pixel, and it
+ * fades in only while a page is actually in flight. */
+.loadmore {
+  display: grid; place-items: center;
+  padding: 1.4rem 0 .6rem; min-height: 3rem;
+  color: var(--muted); font-size: .84rem;
+}
+.loadmore span { opacity: 0; transition: opacity .2s ease }
+.loadmore span.on { opacity: 1 }
+
+/* THE EDGE FADES ARE GONE, and it is worth saying why rather than leaving a hole in
+ * the reasoning. They were two fixed strips drawn over the page - and a strip that
+ * paints `var(--bg)` to transparent is a visible BAND wherever the thing behind it is
+ * not exactly that colour, which in light mode meant a pale bar across the top of the
+ * library (Tim, 2026-08-13, with an arrow pointing at it).
+ *
+ * The version that would work is a mask on the scroller, and that is the same mask
+ * that clipped the details sheet out of existence two hours earlier. The content now
+ * scrolls under a solid header with a border, which is a boundary already - so the
+ * honest answer is that the fade was decoration that cost more than it gave.
+ */
+
+/* ---- icons ------------------------------------------------------------------ */
+
+/* Inline SVG at the text's own colour and weight, which is the whole reason for
+ * dropping the emoji: they came in every platform's colours and none of them ours. */
+svg { flex: 0 0 auto }
+button svg, .viewtoggle svg { vertical-align: -.15em }
+.brand svg { color: var(--accent) }
+.brand:hover svg { color: var(--fg) }
+.brand { display: flex; align-items: center; gap: .35rem }
+.dev .ic { display: grid; place-items: center; color: var(--muted); width: 1.6rem }
+.poster .art svg { color: color-mix(in srgb, var(--muted) 70%, transparent) }
+.searchbox svg { color: var(--muted) }
+.mark svg, .seen svg { display: block }
+
+/* How far through, in the LIST view. The grid has shown this since the shelf existed
+ * and the list showed nothing, so one episode looked untouched in one view and
+ * half-watched in the other.
+ *
+ * Along the bottom EDGE of the row rather than beside the text: same language as the
+ * poster's bar, and it cannot push the title around when it appears. */
+.eprow { position: relative; overflow: hidden }
+.eprow .rowbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: rgba(0, 0, 0, .35);
+}
+.eprow .rowbar i { display: block; height: 100%; background: var(--accent) }
+
+/* ---- people and devices ----------------------------------------------------
+ *
+ * PEARTUNE'S SHAPE (Tim, 2026-08-13). Two flat lists - every person, then every
+ * device - made the model invisible. A DEVICE is a key; a PERSON is the thing a human
+ * recognises, and revoking a person cuts off everything they hold. Nesting the devices
+ * under their person is what makes that legible without a paragraph explaining it.
+ */
+
+.access-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .8rem }
+.access-head h3 { margin: 0 }
+.access-head .spacer { flex: 1 }
+
+.access-sub {
+  font-size: .78rem; font-weight: 650; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--muted); margin: 1rem 0 .4rem;
+}
+.access-sub.warn { color: var(--warn) }
+
+/* One row per person until it is opened, so a household is a handful of lines rather
+ * than a wall of devices. */
+.prow { border: 1px solid var(--line); border-radius: 10px; margin-bottom: .5rem; background: var(--card-2) }
+.prow.open { border-color: var(--line-strong) }
+.prow-head { display: flex; align-items: center; gap: .6rem; padding: .55rem .7rem }
+.prow-head input { flex: 1; min-width: 0 }
+
+.pname {
+  flex: 1; min-width: 0; text-align: left; background: none; border: none; color: inherit;
+  padding: 0; cursor: pointer; display: flex; flex-direction: column; gap: .1rem;
+}
+.pname .hint { font-size: .78rem }
+
+.prow-devices {
+  border-top: 1px solid var(--line); padding: .55rem .7rem;
+  display: flex; flex-direction: column; gap: .5rem;
+}
+.prow-devices .dev { background: var(--card); margin: 0 }
+
+.showrev { margin-top: .8rem }
+
+/* Connected now. The same green light the header uses, so one dot means one thing
+ * everywhere on the page. */
+.dot { width: .5rem; height: .5rem; border-radius: 999px; background: var(--line-strong); flex: 0 0 auto }
+.dot.on { background: var(--good) }

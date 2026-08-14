@@ -1049,3 +1049,42 @@ test('STARTING AN EPISODE MARKS ITS SEASON AS THE ONE BEING WATCHED', async (t) 
   const shows = (await c.req('GET', '/api/watch/shows')).json.shows
   assert.equal(shows[SHOW.id].started, true)
 })
+
+test('THE DOOR AND THE ROOM ARE THE SAME COLOURS', async (t) => {
+  // The login page is the first thing anybody sees, and one in a different palette from
+  // the app behind it reads as two programs - or as a phishing page, which is worse.
+  // It is a standalone string by design (it is served to somebody not yet
+  // authenticated, so it cannot pull in the dashboard bundle), which is exactly why the
+  // palette can drift without anything noticing.
+  const ctx = await cinema(t)
+  const c = client(ctx.base)
+  const res = await c.req('GET', '/')
+
+  const page = res.text
+  const app = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
+
+  for (const token of ['#e6b24e', '#0c0a07', '#f3ede1']) {
+    assert.ok(page.includes(token), `the login page uses ${token}`)
+    assert.ok(app.includes(token), `and so does the app: ${token}`)
+  }
+  assert.ok(!/#6ea8fe|#0e0f13/.test(page), 'and none of the palette it used to have')
+})
+
+test('A CODE ALREADY UP COMES BACK WITH ITS QR, not an empty white panel', async (t) => {
+  // A window opened before the page loaded - a reload, a second tab, the phone being
+  // carried to the machine - has to show the SAME code rather than silently opening a
+  // second one. The link always came back; the picture of it did not.
+  const { c } = await loggedIn(t)
+
+  const started = await c.req('POST', '/api/pair/start', { body: {} })
+  assert.equal(started.status, 200)
+  assert.match(started.json.svg, /^<svg/)
+
+  const state = await c.req('GET', '/api/state')
+  assert.equal(state.json.pairing.open, true)
+  assert.equal(state.json.pairing.link, started.json.link)
+  assert.equal(state.json.pairing.svg, started.json.svg, 'the same code, not a fresh one')
+
+  await c.req('POST', '/api/pair/stop', { body: {} })
+  assert.equal((await c.req('GET', '/api/state')).json.pairing.open, false)
+})

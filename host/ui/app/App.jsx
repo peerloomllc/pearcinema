@@ -7,9 +7,11 @@
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { api } from './api'
-import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref } from './ui'
+import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
+// `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -25,7 +27,6 @@ function Settings ({ state, reload }) {
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
-  const [theme, setTheme] = useState(loadThemePref())
 
   const src = state.auth?.passwordSource
 
@@ -86,17 +87,6 @@ function Settings ({ state, reload }) {
       </div>
 
       <div class='card'>
-        <h3>Appearance</h3>
-        <div class='row'>
-          {['system', 'dark', 'light'].map(t => (
-            <button key={t} class={theme === t ? '' : 'ghost'} onClick={() => { setTheme(t); applyThemePref(t) }}>
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div class='card'>
         <h3>This host</h3>
         <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
         <p class='hint'>
@@ -119,6 +109,13 @@ export default function App () {
   const [queue, setQueue] = useState([])
   const [pairing, setPairing] = useState(false)
   const [wizard, setWizard] = useState(false)
+  // The theme lives up here now rather than inside Settings: it is a light switch, and
+  // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
+  const [theme, setTheme] = useState(loadThemePref())
+  // Where the library should open when we leave the player by climbing rather than by
+  // going all the way out. Held here because the library owns which show and season it
+  // is showing, and the player is a sibling of it rather than a child.
+  const [startAt, setStartAt] = useState(null)
 
   // Where this person got to, and what they have finished. SEPARATE from /api/state,
   // which is the operator's view of the box and polls every eight seconds - watch
@@ -153,32 +150,96 @@ export default function App () {
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
 
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
+  // Searching means something on the library and nowhere else - not on Devices, not on
+  // Settings, and not while a film is open.
+  // SEARCHING WORKS FROM ANYWHERE. It used to be disabled off the Watch tab, which is
+  // a rule about where you happen to be standing rather than about what you want -
+  // typing a film's name means "find me this film" wherever you are. So typing carries
+  // you to the library and starts filtering (Tim, 2026-08-13).
+  const searchable = true
+  const onSearch = (v) => {
+    setSearch(v)
+    if (v && (tab !== 'watch' || playing)) { setTab('watch'); setPlaying(null) }
+  }
 
   return (
     <div class='shell'>
       <div class='topbar'>
-        <div class='brand'>Pear<span>Cinema</span></div>
-        <div class='tabs'>
-          <button class={'tab' + (tab === 'watch' ? ' on' : '')} onClick={() => { setTab('watch'); setPlaying(null) }}>Watch</button>
-          <button class={'tab' + (tab === 'who' ? ' on' : '')} onClick={() => setTab('who')}>
-            Devices{online ? ` · ${online} on` : ''}
-          </button>
-          <button class={'tab' + (tab === 'settings' ? ' on' : '')} onClick={() => setTab('settings')}>Settings</button>
-        </div>
-        <div class='spacer' />
-        {tab === 'watch' && !playing && (
-          <div class='searchbox'>
-            <span>🔍</span>
+        {/* THE NAME IS THE WAY HOME, which is what a logo is for - and it is why the
+            tabs could leave the bar at all. */}
+        <button
+          class='brand'
+          onClick={() => { setTab('watch'); setPlaying(null) }}
+          aria-label='Back to the library'
+          title='Back to the library'
+        >
+          <Home size={20} />
+          {/* ONE ELEMENT, because the row has a `gap` and a gap falls between text
+              nodes as readily as between boxes - which is what put a space in the
+              middle of the name. */}
+          <span class='word'>Pear<span>Cinema</span></span>
+        </button>
+        {/* THE SEARCH SITS IN THE MIDDLE OF THE BAR AND THE BAR NEVER CHANGES HEIGHT.
+            It used to be rendered only on the Watch tab, so opening Devices or Settings
+            took the box out and the whole header shrank - the page jumped under the
+            pointer every time somebody changed tab (Tim, 2026-08-13). It is always
+            here now, and merely INERT where searching means nothing, so the bar keeps
+            one height and the middle keeps one thing in it. */}
+        <div class='searchslot'>
+          {/* ALWAYS THERE, DISABLED WHERE IT MEANS NOTHING. Rendering it only on Watch
+              left an empty slot, and an empty slot is not the same height as one with
+              a box in it - so the bar still moved when you changed tab. A greyed-out
+              box is honest about where searching applies AND keeps the header still. */}
+          <div class={'searchbox' + (searchable ? '' : ' off')}>
+            <Search size={15} />
             <input
-              type='text' value={search} placeholder='Search the library'
-              onInput={e => setSearch(e.currentTarget.value)}
+              type='text'
+              value={searchable ? search : ''}
+              placeholder='Search the library'
+              disabled={!searchable}
+              aria-label='Search the library'
+              onInput={e => onSearch(e.currentTarget.value)}
             />
-            {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'>✕</button>}
+            {searchable && search && (
+              <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>
+            )}
           </div>
-        )}
-        <button onClick={() => setPairing(true)}>Pair a device</button>
+        </div>
+        {/* THE RIGHT-HAND SIDE IS TOOLS, in PearTune's order and PearTune's shapes:
+            the light switch, then the gear. Both are icons because both are things you
+            reach for occasionally and neither deserves a word's worth of the bar. */}
+        <div class='barright'>
+          <button
+            class={'iconbtn' + (tab === 'who' ? ' on' : '')}
+            onClick={() => { setTab('who'); setPlaying(null) }}
+            aria-label='User access'
+            title={online ? `User access - ${online} online` : 'User access'}
+          >
+            <PeopleIcon size={18} />
+            {online > 0 && <span class='dot' aria-hidden='true' />}
+          </button>
+
+          <button
+            class='iconbtn'
+            onClick={() => { const next = resolveTheme(theme) === 'dark' ? 'light' : 'dark'; setTheme(next); applyThemePref(next) }}
+            aria-label='Switch theme'
+            title={resolveTheme(theme) === 'dark' ? 'Switch to light' : 'Switch to dark'}
+          >
+            {resolveTheme(theme) === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          <button
+            class={'iconbtn' + (tab === 'settings' ? ' on' : '')}
+            onClick={() => { setTab('settings'); setPlaying(null) }}
+            aria-label='Settings'
+            title='Settings'
+          ><Gear size={18} /></button>
+
+          <button onClick={() => setPairing(true)}>Pair a device</button>
+        </div>
       </div>
 
+      <div class='scroller'>
       <div class='content'>
         {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} />}
 
@@ -192,17 +253,31 @@ export default function App () {
                 watch={watch}
                 onWatchChange={reloadWatch}
                 onPlay={setPlaying}
+                onUp={(level) => { setStartAt({ level, item: playing }); setPlaying(null); reloadWatch() }}
                 // The shelf is rebuilt when the player closes rather than while it
                 // runs: a position written every fifteen seconds would otherwise
                 // reshuffle the row behind the film somebody is watching.
                 onClose={() => { setPlaying(null); reloadWatch() }}
               />
               )
-            : <Library state={state} caps={CAPS} search={search} watch={watch} onPlay={play} onWatchChange={reloadWatch} />
+            : (
+              <Library
+                state={state}
+                caps={CAPS}
+                search={search}
+                watch={watch}
+                startAt={startAt}
+                onStarted={() => setStartAt(null)}
+                onPlay={play}
+                onWatchChange={reloadWatch}
+              />
+              )
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}
         {!wizard && tab === 'settings' && <Settings state={state} reload={reload} />}
+      </div>
+
       </div>
 
       {pairing && (

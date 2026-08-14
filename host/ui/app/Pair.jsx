@@ -1,43 +1,72 @@
 // Letting a phone in.
 //
-// THIS IS THE SCREEN THAT UNBLOCKS AN UMBREL INSTALL. PearTune pairs by scanning a
-// QR on its dashboard; PearCinema had no dashboard, so a packaged install could be
-// started and then never actually reached by a phone. The QR is the product here,
-// not decoration.
+// THIS IS THE SCREEN THAT UNBLOCKS AN UMBREL INSTALL. PearTune pairs by scanning a QR
+// on its dashboard; PearCinema had no dashboard, so a packaged install could be started
+// and then never actually reached by a phone. The QR is the product here, not
+// decoration.
 //
-// Three window kinds, and the difference is access rather than convenience:
+// THE DESIGN AND THE WORDING ARE PEARTUNE'S, deliberately and almost verbatim (Tim,
+// 2026-08-13). Pairing is the one flow a person meets in both apps, usually minutes
+// apart and usually while holding a phone in the other hand; two different shapes for
+// the same act is where a companion app stops feeling like one. Its segmented control,
+// its white QR panel, its captions, its outcome cards.
 //
+// Three window kinds, and the difference is ACCESS rather than convenience:
+//
+//   full   - permanent access, read only.
 //   guest  - access expires. For lending the library to someone for a weekend.
-//   normal - permanent access, read only.
-//   owner  - permanent AND may manage the library. Only this page can open one,
-//            which is what keeps owner scope rooted in dashboard access. The host
-//            enforces owner XOR guest, so an owner is never time-limited.
+//   owner  - permanent AND may manage the library. Only this page can open one, which
+//            is what keeps owner scope rooted in dashboard access. The host enforces
+//            owner XOR guest, so an owner is never time-limited.
 //
-// The window closes itself after a few minutes. That is the host's rule, not this
+// PearTune passes `owner` in as a prop from a separate button; here it is a third
+// segment, because this dashboard has one Pair button and three things it can mean.
+//
+// The window closes itself after a few minutes. That is the HOST's rule, not this
 // page's, and the countdown here reads it rather than deciding it.
 
-import { useState, useEffect } from 'preact/hooks'
+import { useState, useEffect, useRef } from 'preact/hooks'
 import { api, copyText, fmtDur } from './api'
+import { Check, Close } from './icons'
 
-const GUEST_OPTIONS = [
-  { label: '1 hour', ms: 3600e3 },
-  { label: '24 hours', ms: 86400e3 },
-  { label: '7 days', ms: 7 * 86400e3 },
-  { label: '30 days', ms: 30 * 86400e3 }
+const DAY_MS = 86400e3
+const GUEST_DURATIONS = [
+  { ms: 3600e3, label: '1 hour' },
+  { ms: DAY_MS, label: '24 hours' },
+  { ms: 7 * DAY_MS, label: '7 days' },
+  { ms: 30 * DAY_MS, label: '30 days' }
 ]
 
 export default function Pair ({ state, reload, onClose }) {
+  const [kind, setKind] = useState('full') // full | guest | owner
   const [win, setWin] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [left, setLeft] = useState(0)
-  const [guestMs, setGuestMs] = useState(86400e3)
+  const [durMs, setDurMs] = useState(DAY_MS)
+  // { ok: true, label, owner } once a device came through, { ok: false } once the
+  // window closed with nobody through it.
+  const [outcome, setOutcome] = useState(null)
 
-  // A window opened before this page loaded (or in another tab) is still open, and
-  // the QR has to come back for it rather than silently opening a second one.
+  // WHO WAS ALREADY HERE, keyed by device and stamped with grantedAt AND scope.
+  // Success is a device whose signature CHANGED rather than merely a new key: a
+  // re-pair stamps a fresh grantedAt, and an owner promotion of an already-paired
+  // phone flips scope without one. Folding both in catches both. (PearTune learned
+  // this the hard way; it is copied rather than re-derived.)
+  const before = useRef(new Map())
+  const sig = (d) => `${d.grantedAt}|${d.scope || ''}`
+
+  // A window opened before this page loaded (or in another tab) is still open, and the
+  // QR has to come back for it rather than silently opening a second one.
   useEffect(() => {
     if (state.pairing?.open && !win) {
-      setWin({ link: state.pairing.link, guest: state.pairing.guest, owner: state.pairing.owner, expiresMs: state.pairing.expiresMs })
+      setWin({
+        link: state.pairing.link,
+        svg: state.pairing.svg,
+        guest: state.pairing.guest,
+        owner: state.pairing.owner,
+        expiresMs: state.pairing.expiresMs
+      })
     }
   }, [state.pairing?.open])
 
@@ -47,9 +76,42 @@ export default function Pair ({ state, reload, onClose }) {
     return () => clearInterval(t)
   }, [win?.until])
 
-  const open = async (opts) => {
+  // SAY WHAT HAPPENED, rather than leaving somebody holding a code with no idea
+  // whether it worked. The host's window is one-shot, so `pairing` goes false either
+  // way; a device whose signature changed is what separates "paired" from "expired".
+  // Polls faster than the page's own refresh so the confirmation feels immediate, and
+  // only while a code is actually up.
+  useEffect(() => {
+    if (!win || outcome) return
+    let done = false
+    const t = setInterval(async () => {
+      if (done) return
+      const st = await api('/api/state').catch(() => null)
+      if (!st || done) return
+      const fresh = (st.devices || []).find(d => !d.revokedAt && before.current.get(d.deviceKey) !== sig(d))
+      if (fresh) {
+        done = true
+        const label = fresh.label || 'a device'
+        setOutcome({ ok: true, label, owner: win.owner || fresh.scope === 'owner' })
+        reload()
+        setTimeout(onClose, 2200)
+      } else if (st.pairing === false) {
+        // The window ended with nobody through it. Do NOT close on its own: somebody
+        // is standing there and needs a fresh code, not a modal that vanishes.
+        done = true
+        setOutcome({ ok: false })
+      }
+    }, 1000)
+    return () => { done = true; clearInterval(t) }
+  }, [win, outcome])
+
+  const open = async () => {
     setBusy(true)
-    const res = await api('/api/pair/start', opts)
+    const st = await api('/api/state').catch(() => null)
+    before.current = new Map((st?.devices || []).map(d => [d.deviceKey, sig(d)]))
+
+    const res = await api('/api/pair/start',
+      kind === 'owner' ? { owner: true } : kind === 'guest' ? { expiresMs: durMs } : {})
     setBusy(false)
     if (res.error) return
     setWin({ ...res, until: Date.now() + (res.ttlMs || 0) })
@@ -60,72 +122,113 @@ export default function Pair ({ state, reload, onClose }) {
   const stop = async () => {
     await api('/api/pair/stop', {})
     setWin(null)
+    setOutcome(null)
     reload()
   }
 
-  if (!win) {
+  const copyLink = async () => {
+    if (await copyText(win.link)) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
+  }
+
+  // --- the outcome ----------------------------------------------------------
+
+  if (outcome) {
     return (
-      <div>
-        <p class='hint'>
-          Open a window, then scan the code with PearCinema on the phone. Only a device
-          that scans while the window is open gets in.
-        </p>
-
-        <div class='card' style='background:var(--card-2)'>
-          <h3>Give someone permanent access</h3>
-          <p class='hint'>They can watch everything, and cannot change anything.</p>
-          <button disabled={busy} onClick={() => open({})}>Open a window</button>
-        </div>
-
-        <div class='card' style='background:var(--card-2)'>
-          <h3>Lend it for a while</h3>
-          <p class='hint'>Access stops on its own when the time is up. Nothing to remember to undo.</p>
-          <div class='row'>
-            <select value={String(guestMs)} onChange={e => setGuestMs(Number(e.currentTarget.value))}>
-              {GUEST_OPTIONS.map(o => <option key={o.ms} value={String(o.ms)}>{o.label}</option>)}
-            </select>
-            <button class='ghost' disabled={busy} onClick={() => open({ expiresMs: guestMs })}>Open a guest window</button>
-          </div>
-        </div>
-
-        <div class='card' style='background:var(--card-2)'>
-          <h3>Add another of your own devices</h3>
-          <p class='hint'>
-            An owner device can pair other phones and revoke them. Give this only to
-            yourself, or to someone you would hand this page's password to.
-          </p>
-          <button class='ghost' disabled={busy} onClick={() => open({ owner: true })}>Open an owner window</button>
-        </div>
+      <div class='stack center'>
+        {outcome.ok
+          ? (
+            <>
+              <span class='pairicon good'><Check size={30} /></span>
+              <h3 class='pairdone'>
+                {outcome.owner ? `${outcome.label} is now an owner` : `Paired with ${outcome.label}`}
+              </h3>
+              <p class='hint center'>
+                {outcome.owner
+                  ? 'It can manage this library from the app now. Closing…'
+                  : 'It can reach your library now. Closing…'}
+              </p>
+            </>
+            )
+          : (
+            <>
+              <span class='pairicon'><Close size={28} /></span>
+              <h3 class='pairdone'>That code expired</h3>
+              <p class='hint center'>Nobody paired through it. Show a fresh one when the phone is ready.</p>
+              <div class='pairacts'>
+                <button class='ghost' onClick={onClose}>Close</button>
+                <button onClick={() => { setOutcome(null); setWin(null) }}>New code</button>
+              </div>
+            </>
+            )}
       </div>
     )
   }
 
-  const kind = win.owner ? 'Owner' : win.guest ? 'Guest' : 'Full'
+  // --- choosing what kind of access -----------------------------------------
+
+  if (!win) {
+    return (
+      <div class='stack center'>
+        <div class='seg wide'>
+          <button class={kind === 'full' ? 'on' : ''} onClick={() => setKind('full')}>Full access</button>
+          <button class={kind === 'guest' ? 'on' : ''} onClick={() => setKind('guest')}>Guest pass</button>
+          <button class={kind === 'owner' ? 'on' : ''} onClick={() => setKind('owner')}>Owner</button>
+        </div>
+
+        {kind === 'owner' && (
+          <p class='hint center'>
+            Scan this in PearCinema on the phone you want to make an <b>owner</b>. It can
+            then manage this library from the app - see devices, revoke, open a pairing
+            window.
+          </p>
+        )}
+        {kind === 'guest' && (
+          <label class='hint center dur'>Access expires
+            <select value={String(durMs)} onChange={e => setDurMs(Number(e.currentTarget.value))}>
+              {GUEST_DURATIONS.map(o => <option key={o.ms} value={String(o.ms)}>{o.label} after pairing</option>)}
+            </select>
+          </label>
+        )}
+        {kind === 'full' && (
+          <p class='hint center'>Permanent access. Scan the code in PearCinema on your phone.</p>
+        )}
+
+        <button onClick={open} disabled={busy}>{busy ? 'Starting…' : 'Show pairing code'}</button>
+      </div>
+    )
+  }
+
+  // --- the code -------------------------------------------------------------
 
   return (
-    <div>
-      <div class='row' style='justify-content:center;margin-bottom:.6rem'>
-        <span class={'chip ' + (win.owner ? 'accent' : win.guest ? 'warn' : 'good')}>{kind} access</span>
-        {win.guest && win.expiresMs && <span class='chip'>expires {fmtDur(win.expiresMs)} after pairing</span>}
+    <div class='stack center'>
+      {/* A BIGGER, WELL-PADDED WHITE PANEL, in both themes, and it is not decoration:
+          a phone camera's auto-exposure meters what surrounds the code, so a small
+          white card floating in a dark modal gets blown out and the modules wash into
+          grey. Widening the light region is what makes it scan in a dark room.
+          Inherited from PearTune, which paid for it. */}
+      <div class='qrpanel'>
+        {/* The host renders the SVG, so this page and any other client of the API show
+            the same code at the same quiet zone. */}
+        <div class='qr' dangerouslySetInnerHTML={{ __html: win.svg || '' }} />
+        <div class='qrcap'>
+          {win.owner
+            ? 'Owner pairing - this phone gains library management. Valid for 5 minutes.'
+            : win.guest
+              ? `Guest pass - access expires ${fmtDur(win.expiresMs)} after this device pairs.`
+              : 'Valid for 5 minutes. Closes as soon as one device pairs.'}
+        </div>
       </div>
 
-      {/* The host renders the SVG, so the page and any other client of the API
-          always show the same code at the same quiet zone. */}
-      <div class='qr' dangerouslySetInnerHTML={{ __html: win.svg || '' }} />
+      {left > 0 && <p class='hint center'>This window closes in {Math.ceil(left / 1000)}s.</p>}
 
-      <p class='hint' style='text-align:center;margin-top:.7rem'>
-        Scan this in PearCinema on the phone.
-        {left > 0 && <> This window closes in {Math.ceil(left / 1000)}s.</>}
-      </p>
+      <div class='keyrow'>
+        <div class='key addr'>{win.link}</div>
+      </div>
 
-      <div class='linkbox'>{win.link}</div>
-
-      <div class='confirm-actions'>
-        <button class='ghost' onClick={async () => { setCopied(await copyText(win.link)); setTimeout(() => setCopied(false), 1500) }}>
-          {copied ? 'Copied' : 'Copy link'}
-        </button>
-        <button class='ghost' onClick={stop}>Close the window</button>
-        <button onClick={onClose}>Done</button>
+      <div class='pairacts'>
+        <button class='ghost' onClick={stop}>Cancel</button>
+        <button onClick={copyLink}>{copied ? 'Copied' : 'Copy'}</button>
       </div>
     </div>
   )

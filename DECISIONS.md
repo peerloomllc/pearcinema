@@ -2,7 +2,60 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - A SEASON GETS A BADGE TOO, and marking by hand lives on the thing itself
+## 2026-08-13 (latest) - THE LOOK MOVES TOWARD PEARTUNE, and the movement says which way you went
+Tier: T1 (appearance and navigation; no stored data, no wire change)
+Context: Tim, having spent an afternoon looking at this UI - four asks at once. Move the
+look toward PearTune; load lists by scrolling rather than a button; animate between
+screens; and give an episode a way back up its own hierarchy.
+
+**The palette is PearTune's on a darker ground.** Its amber and terracotta, its warm greys,
+its radial glow at the top of the page - so the two read as one suite at a glance, which is
+what a companion app is for. What is deliberately not copied is the LIGHTNESS: PearTune's
+ground is a warm near-black for a dashboard you glance at, and this one sits behind a film,
+so it goes darker and lets the picture be the brightest thing on screen.
+
+Token NAMES stay as PearCinema had them rather than being renamed to PearTune's. A rename
+touches every rule in the file for no visible gain, and shared ground belongs in the
+extracted package rather than in a copied stylesheet.
+
+**The emoji are gone.** Every platform draws its own, in its own colours, at its own weight,
+so a page that mixes them with real interface reads as half-finished. Inline SVG at
+`currentColor` - inline rather than a font because the dashboard is one self-contained file
+by design, and an icon font is a second asset plus a flash of nothing while it loads. The
+set is small on purpose: an icon that has to be explained is worse than the word it replaced.
+
+The MARK is drawn rather than borrowed - a pear with a film frame's perforations. PearTune's
+mark is PearTune's, and a companion app wearing it would be claiming to be the same app.
+
+### The movement says which way you went
+
+Chosen by Tim from four options in a clickable prototype rather than from a description,
+because motion cannot be judged from prose. **Deeper slides in from the right, back slides
+in from the left.** A cross-fade says only that something changed; this says where you are,
+which is the actual difficulty in a library four levels deep - and it is the idiom a phone
+already uses, so it will still be right when there is a phone app.
+
+The runner-up, and worth recording because it will come up again: the clicked poster flying
+out and becoming the screen. More film-like, and it answers "which one did I click" during
+the wait. It costs measurement of a live element and a fixed overlay, and it is the one that
+looks worst when a machine is slow.
+
+### The list loads itself
+
+A "Load more" button asks a question the page already knows the answer to. An
+IntersectionObserver on a marker at the bottom, with a 600px margin so the next page is
+already in flight before anybody reaches the end. Guarded by a REF rather than the busy
+flag: state is asynchronous, and two observer callbacks in one frame would both read
+`false` and fetch the same page twice.
+
+### An episode can climb out one level at a time
+
+A film has one place to go and "back to the library" says it. An episode is four levels
+down, and offering only the way to the very top means anybody who wanted the rest of the
+season walks back in from Shows. The player now draws the same crumbs the library does, and
+they put the library back where they left it.
+
+## 2026-08-13 - A SEASON GETS A BADGE TOO, and marking by hand lives on the thing itself
 Tier: T1 (an existing rollup applied to a second level, and an existing write reached from
 more places)
 Context: Tim, on reading the up-next work - "what about an indicator on the season tile to

@@ -26,11 +26,12 @@
 // directions.
 
 import { useState, useEffect, useRef } from 'preact/hooks'
-import { api, fmtRuntime, fmtSize, episodeCode } from './api'
+import { api, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
+import { Blocked, Check, Close, Info } from './icons'
 
-export default function Player ({ item, caps, queue = [], onPlay, onClose, watch = null, onWatchChange = () => {} }) {
+export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {} }) {
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
   const [failed, setFailed] = useState(null)
@@ -44,7 +45,20 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
   // backwards out of a resume they never asked for.
   const [offer, setOffer] = useState(null)
   const [seen, setSeen] = useState(false)
+  // The details sheet. Shut by default and shut again on every new film - it is a
+  // question somebody asked about THIS one.
+  const [details, setDetails] = useState(false)
   const video = useRef(null)
+  // HAS THE VIEWER ASKED FOR THIS TO PLAY? Nothing starts on its own (Tim,
+  // 2026-08-13): opening a page should not fill a room with sound, and on a
+  // repackaged film it also spends a child process on the host before anybody has
+  // said they want it.
+  //
+  // It cannot simply be "no autoplay", though. On the repackaged path a SEEK is a new
+  // stream and therefore a new element, so without this a scrub would silently stop
+  // playback. The flag says the viewer already pressed play, and the new element picks
+  // up where the old one left off.
+  const wantPlay = useRef(false)
   // The last position WRITTEN, so the fifteen-second heartbeat can skip a write when
   // nothing has moved - a paused film should not keep writing the same number.
   const wrote = useRef(0)
@@ -80,6 +94,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
     setForced(false); setFailed(null); setAt(0); setOffset(0); setSubs([]); setBusy(false)
     setOffer(null)
     wrote.current = 0
+    // A different film is a fresh decision. Playing one and clicking another must not
+    // start the second one on its own.
+    wantPlay.current = false
+    setDetails(false)
     let live = true
     api('/api/subtitles?itemId=' + encodeURIComponent(item.id)).then(res => {
       if (live) setSubs(res.items || [])
@@ -167,15 +185,45 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
   const playableSubs = subs.filter(s => s.playable).sort((a, b) => (b.external ? 1 : 0) - (a.external ? 1 : 0))
   const unplayableSubs = subs.filter(s => !s.playable)
 
+  // PREVIOUS AND NEXT ARE A TELEVISION IDEA. On an episode they are the obvious two
+  // controls; on a FILM the queue is whatever list you happened to open it from, so
+  // "next" means the next film alphabetically - which is not a thing anybody wants
+  // offered (Tim, 2026-08-13). Hidden on films rather than disabled: a control that is
+  // permanently greyed out is still a control to read past.
+  const episodic = item.type === 'episode'
+
   return (
     <div class='playerwrap'>
-      <div>
-        <div class='stagewrap'>
+      {/* CLIMBING BACK OUT, one level at a time. A film has one place to go and a
+          single "back to the library" says it; an EPISODE is four levels down, and
+          offering only the way to the very top means anybody wanting the rest of the
+          season has to walk back in from Shows. */}
+      <div class='crumbs'>
+        <button onClick={onClose}>{episodic ? 'Shows' : 'Library'}</button>
+        {episodic && onUp && (
+          <>
+            <span>/</span>
+            <button onClick={() => onUp('series')}>{item.seriesTitle || 'Show'}</button>
+            <span>/</span>
+            <button onClick={() => onUp('season')}>
+              {item.seasonNumber === 0
+                ? 'Specials'
+                : item.seasonNumber === null || item.seasonNumber === undefined
+                  ? 'Season'
+                  : 'Season ' + item.seasonNumber}
+            </button>
+          </>
+        )}
+        <span>/</span>
+        <span style='color:var(--fg)'>{episodeCode(item) || item.title}</span>
+      </div>
+
+      <div class='stagewrap'>
         <div class='stage'>
           {blocked
             ? (
               <div class='refusal'>
-                <div style='font-size:2rem'>🚫</div>
+                <div style='color:var(--danger)'><Blocked size={34} /></div>
                 <h3>This one cannot be played here</h3>
                 <p>{verdict.reason}</p>
                 <button class='ghost' onClick={() => { setFailed(null); setForced(true) }}>Try anyway</button>
@@ -185,18 +233,19 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
               <video
                 ref={video}
                 key={src}
-                autoplay
                 playsinline
                 onClick={() => { const v = video.current; if (v) v.paused ? v.play().catch(() => {}) : v.pause() }}
                 onLoadedMetadata={e => {
                   const d = e.currentTarget.duration
                   setElDuration(Number.isFinite(d) && d > 0 ? d : 0)
+                  // Only ever resumes something the viewer already started - see
+                  // wantPlay. A first open stays paused.
+                  if (wantPlay.current) e.currentTarget.play().catch(() => {})
                 }}
+                onPlay={() => { wantPlay.current = true }}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
                 onPause={() => savePosition()}
-                // The element reaching the end is believed whatever the clock says -
-                // a file whose header lies about its duration still finished.
                 onEnded={() => savePosition(true)}
                 onPlaying={() => setBusy(false)}
                 onError={() => {
@@ -217,21 +266,40 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
                 ))}
               </video>
               )}
-        </div>
 
-        {/* THE SAME CONTROLS FOR EVERY FILM. Whether the host is handing over the
-            file or repackaging it as it goes is its business, not the viewer's, and
-            two different sets of controls made that difference their problem. */}
-        {/* PICK UP WHERE YOU LEFT OFF, offered rather than done. Somebody who opened a
-            film to watch the start again should not have to scrub backwards out of a
-            jump they never asked for. */}
+        {/* PICK UP WHERE YOU LEFT OFF, over the picture rather than in a strip under
+            it. A banner below the player was a notice about the film; this is a
+            question ABOUT to watching it, and it belongs where the eye already is
+            (Tim, 2026-08-13).
+            The time is exact - "12:34", not "12m". Somebody deciding whether to
+            resume is looking for the moment they stopped, and a rounded number does
+            not tell them which of two attempts this was. */}
         {offer !== null && !blocked && (
-          <div class='resumeoffer'>
-            <span>You stopped at <b>{fmtRuntime(Math.round(offer))}</b>.</span>
-            <button onClick={() => { seekTo(offer); setOffer(null) }}>Resume</button>
-            <button class='ghost' onClick={() => setOffer(null)}>Start over</button>
+          <div class='resumeover'>
+            <div class='card'>
+              <h3>Resume at {fmtClock(offer)}?</h3>
+              <div class='row two'>
+                <button onClick={() => {
+                  wantPlay.current = true
+                  seekTo(offer)
+                  setOffer(null)
+                  if (!remuxing) video.current?.play().catch(() => {})
+                }}>Resume</button>
+                <button class='ghost' onClick={() => {
+                  // START OVER MEANS FROM ZERO, and it used to mean only "stop asking"
+                  // - which left the element wherever it happened to be. On a file that
+                  // is the start, so it looked right; on a repackaged stream it is not.
+                  wantPlay.current = true
+                  seekTo(0)
+                  setOffer(null)
+                  if (!remuxing) video.current?.play().catch(() => {})
+                }}>Start Over</button>
+              </div>
+            </div>
           </div>
         )}
+
+        </div>
 
         {!blocked && (
           <Controls
@@ -244,94 +312,124 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, watch
             subs={playableSubs}
           />
         )}
+      </div>
+
+      {failed && <div class='banner bad' style='margin-top:.7rem'>{failed}</div>}
+      {!blocked && !remuxing && verdict.status === 'nosound' && (
+        <div class='banner warn' style='margin-top:.7rem'>{verdict.reason}</div>
+      )}
+      {!blocked && !remuxing && verdict.status === 'unknown' && (
+        <div class='banner' style='margin-top:.7rem'>{verdict.reason}</div>
+      )}
+
+      {/* WHAT IT IS AND WHAT IT IS ABOUT, and nothing else on the page (Tim,
+          2026-08-13). The file's technical facts used to sit in a permanent right-hand
+          column, which made the picture smaller on every screen to keep room for
+          something most people never read - and read as a file inspector that happens
+          to play video. They are one button away now, and cover nothing until asked. */}
+      <div class='titlebar'>
+        <div class='grow'>
+          <h2>{item.title}</h2>
+          {heading && <p class='hint' style='margin:0'>{heading}</p>}
         </div>
 
-        {failed && <div class='banner bad' style='margin-top:.7rem'>{failed}</div>}
-
-        {/* NO BANNER FOR A FILM THAT IS SIMPLY PLAYING. It used to announce
-            "Sound rebuilt for your browser" over every repackaged film, which is a
-            notice about the host's internals dressed up as news for the viewer -
-            and repackaging is the normal case on this library rather than an
-            exception. The quiet "repackaged" tag beside the clock is enough, and
-            the detail is on the right where the rest of the file's facts are. */}
-        {!blocked && !remuxing && verdict.status === 'nosound' && (
-          <div class='banner warn' style='margin-top:.7rem'>{verdict.reason}</div>
-        )}
-        {!blocked && !remuxing && verdict.status === 'unknown' && (
-          <div class='banner' style='margin-top:.7rem'>{verdict.reason}</div>
-        )}
-
-        <div class='row' style='margin-top:.8rem'>
-          <button class='ghost' disabled={!prev} onClick={() => prev && onPlay(prev)}>Previous</button>
-          <button class='ghost' disabled={!next} onClick={() => next && onPlay(next)}>Next episode</button>
-          <div class='spacer' />
-          <button class='ghost' onClick={onClose}>Back to the library</button>
+        {/* FOUR CONTROLS OF ONE WIDTH. Previous and Next only exist on television; the
+            other two are icons so that all of them come out the same size rather than
+            a row of mixed-width buttons. */}
+        <div class='acts'>
+          {episodic && (
+            <>
+              <button class='ghost' disabled={!prev} onClick={() => prev && onPlay(prev)}>Previous</button>
+              <button class='ghost' disabled={!next} onClick={() => next && onPlay(next)}>Next</button>
+            </>
+          )}
+          {/* AN ICON WITH A STATE HAS TO BE UNMISTAKABLE, or a tick means both "done"
+              and "mark done". Filled while watched, outline while not, and the label
+              says which way pressing it goes. */}
+          <button
+            class={'icon' + (seen ? ' on' : '')}
+            title={seen ? 'Watched - press to unmark' : 'Mark as watched'}
+            aria-label={seen ? 'Mark as unwatched' : 'Mark as watched'}
+            aria-pressed={seen}
+            onClick={() => markWatched(!seen)}
+          ><Check size={17} /></button>
+          <button
+            class={'icon' + (details ? ' on' : '')}
+            title='Details'
+            aria-label='Details'
+            aria-expanded={details}
+            onClick={() => setDetails(!details)}
+          ><Info size={17} /></button>
         </div>
       </div>
 
-      <div>
-        <h2>{item.title}</h2>
-        {heading && <p class='hint' style='margin-top:0'>{heading}</p>}
+      {item.overview && <p class='overview'>{item.overview}</p>}
 
-        {item.overview && <p style='font-size:.9rem'>{item.overview}</p>}
+      {/* The sheet, and the scrim that closes it. Over the page rather than beside it,
+          so nothing is narrower for its sake while it is shut. */}
+      <div class={'scrim' + (details ? ' on' : '')} onClick={() => setDetails(false)} />
+      <aside class={'sheet' + (details ? ' open' : '')} aria-hidden={!details}>
+        <div class='sheet-head'>
+          <h3>Details</h3>
+          <button class='iconbtn' onClick={() => setDetails(false)} aria-label='Close'><Close size={16} /></button>
+        </div>
 
         <dl class='meta'>
-          {item.runtime ? <><dt>Length</dt><dd>{fmtRuntime(item.runtime)}</dd></> : null}
+          {item.runtime ? <><dt>Length</dt><dd>{fmtExact(item.runtime)}</dd></> : null}
           <dt>File</dt>
           <dd>
             {[containerName(m.container), m.videoCodec && m.videoCodec.toUpperCase(), m.audioCodec && m.audioCodec.toUpperCase()]
               .filter(Boolean).join(' · ') || 'not reported'}
             {m.size ? <span class='hint'> · {fmtSize(m.size)}</span> : null}
           </dd>
+          {/* IN WORDS, NOT PILLS. A coloured badge reads as a status somebody is
+              meant to act on; this is an explanation, and the only reason it earns a
+              place at all is that it answers a real question - why jumping takes a
+              moment on some films and not others (Tim, 2026-08-13). */}
           <dt>How it is playing</dt>
           <dd>
-            {blocked && <span class='chip bad'>will not open</span>}
+            {blocked && 'Your browser will not open this one at all.'}
             {!blocked && remuxing && (
               <>
-                <span class='chip accent'>repackaged</span>
-                <div class='hint' style='margin-top:.3rem'>
-                  {verdict.status === 'nosound'
-                    ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
-                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will, untouched, as they stream.`}
-                  {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
-                </div>
+                {verdict.status === 'nosound'
+                  ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
+                  : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will - untouched - as they stream.`}
+                {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
               </>
             )}
-            {!blocked && !remuxing && verdict.status === 'play' && <span class='chip good'>straight from the file</span>}
-            {!blocked && !remuxing && verdict.status === 'unknown' && <span class='chip'>unknown</span>}
+            {!blocked && !remuxing && verdict.status === 'play' && 'Straight from the file, exactly as it is on the disk.'}
+            {!blocked && !remuxing && verdict.status === 'unknown' && 'Your browser has not said whether it can open this one.'}
           </dd>
         </dl>
 
-        {/* THE AUTOMATIC RULE WILL BE WRONG SOMETIMES - a film watched on another
-            device, an episode somebody else put on - so correcting it is one click
-            rather than a trip to a settings screen. */}
-        <div class='row' style='margin:.6rem 0'>
-          <button class={seen ? '' : 'ghost'} onClick={() => markWatched(!seen)}>
-            {seen ? '✓ Watched' : 'Mark as watched'}
-          </button>
-        </div>
-
         {(playableSubs.length > 0 || unplayableSubs.length > 0) && (
           <>
-            <h3>Subtitles</h3>
+            {/* NO BADGE ON THE ONES THAT WORK. This list IS the list of subtitles you
+                can turn on - saying "on the player" beside each is a label for the
+                obvious, in a colour that suggests something happened. What earns its
+                place is the opposite: the ones you cannot have, and why. */}
+            <h3 style='margin-top:1rem'>Subtitles</h3>
             <div class='tracklist'>
               {playableSubs.map(s => (
                 <div class='sub' key={s.id}>
-                  <span>{s.title || s.language || 'Subtitles'}{s.external ? ' (file)' : ''}</span>
-                  <span class='chip good'>on the player</span>
+                  <span>{s.title || s.language || 'Subtitles'}</span>
+                  <span class='hint'>{s.external ? 'file on the disk' : 'in the film'}</span>
                 </div>
               ))}
               {unplayableSubs.map(s => (
                 <div class='sub off' key={s.id} title={s.reason || ''}>
                   <span>{s.title || s.language || 'Subtitles'}</span>
-                  <span class='chip bad'>not available</span>
+                  <span class='hint'>not available</span>
                 </div>
               ))}
             </div>
+            {playableSubs.length > 0 && (
+              <p class='hint'>Turn one on with the subtitles button in the player.</p>
+            )}
             {unplayableSubs.length > 0 && <p class='hint'>{unplayableSubs[0].reason}</p>}
           </>
         )}
-      </div>
+      </aside>
     </div>
   )
 }

@@ -21,9 +21,14 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { fmtClock } from './api'
+import { Captions, Volume, Muted, Play, Pause, Back10, Forward10 } from './icons'
 
 export default function Controls ({ video, at, duration, onSeek, busy, subs, live }) {
-  const [playing, setPlaying] = useState(true)
+  // FALSE, because nothing starts on its own any more. It used to assume playing,
+  // which was true while the element carried `autoplay` and became a lie the moment it
+  // did not: a film sitting paused on open showed a pause button (Tim, 2026-08-13).
+  // The effect below then keeps it honest off the element's own events.
+  const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
@@ -40,6 +45,10 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
     if (!v) return
     const onPlay = () => setPlaying(true)
     const onPause = () => setPlaying(false)
+    // Read where it actually IS as well as listening for changes. A new element (every
+    // seek of a repackaged film is one) fires nothing until something happens to it,
+    // so state carried over from the old one would be stale until the first event.
+    setPlaying(!v.paused)
     v.addEventListener('play', onPlay)
     v.addEventListener('pause', onPause)
     v.volume = volume
@@ -126,10 +135,10 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
       <div class='row'>
         <button class='iconbtn big' onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
-          {playing ? '⏸' : '▶'}
+          {playing ? <Pause size={22} /> : <Play size={22} />}
         </button>
-        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'>⏪</button>
-        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'>⏩</button>
+        <button class='iconbtn' onClick={() => nudge(-10)} aria-label='Back ten seconds'><Back10 size={20} /></button>
+        <button class='iconbtn' onClick={() => nudge(10)} aria-label='Forward ten seconds'><Forward10 size={20} /></button>
 
         <span class='hint mono'>
           {fmtClock(at)}{duration ? ' / ' + fmtClock(duration) : ''}
@@ -144,7 +153,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
 
         {subs.length > 0 && (
           <div class='submenu'>
-            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'>💬</button>
+            <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={19} /></button>
             {subMenu && (
               <div class='menu'>
                 <button class={subOn === -1 ? 'on' : ''} onClick={() => pickSub(-1)}>Off</button>
@@ -159,7 +168,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         )}
 
         <button class='iconbtn' onClick={() => setMute(!muted)} aria-label={muted ? 'Unmute' : 'Mute'}>
-          {muted || volume === 0 ? '🔇' : '🔊'}
+          {muted || volume === 0 ? <Muted size={19} /> : <Volume size={19} />}
         </button>
         <input
           class='vol' type='range' min='0' max='1' step='0.05'
@@ -168,7 +177,14 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
           aria-label='Volume'
         />
 
-        <button class='iconbtn' onClick={fullscreen} aria-label='Fullscreen'>{full ? '⤡' : '⤢'}</button>
+        <button class='iconbtn' onClick={fullscreen} aria-label='Fullscreen'>
+          <svg viewBox='0 0 24 24' width='19' height='19' fill='none' stroke='currentColor'
+            stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'>
+            {full
+              ? <path d='M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5' />
+              : <path d='M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5' />}
+          </svg>
+        </button>
       </div>
     </div>
   )

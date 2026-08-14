@@ -18,19 +18,27 @@ module.exports = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PearCinema</title>
 <style>
+  /* THE SAME PALETTE AS THE PAGE BEHIND IT. This is the first thing anybody sees, and
+     a login in one set of colours opening onto an app in another reads as two
+     different programs - or as a phishing page, which is worse. Copied rather than
+     imported because this file must stay standalone: it is served to somebody who has
+     not authenticated, so it cannot pull in the dashboard's bundle. */
   :root {
-    --bg:#0e0f13; --fg:#eceef4; --muted:#8b90a0; --line:#262a35;
-    --card:#171922; --accent:#6ea8fe; --danger:#e0705f;
+    --bg:#0c0a07; --fg:#f3ede1; --muted:#a2947d; --line:#322a20;
+    --card:#191410; --accent:#e6b24e; --danger:#e0705f;
   }
   * { box-sizing:border-box }
   body {
     margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
-    background:var(--bg); color:var(--fg);
+    background:radial-gradient(1200px 600px at 50% -12%, rgba(230,178,78,.09) 0%, transparent 60%), var(--bg);
+    color:var(--fg);
     font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;
   }
   .box { width:100%; max-width:22rem; padding:2rem; text-align:center }
   h1 { font-size:1.6rem; margin:0 0 .25rem; font-weight:600; letter-spacing:-.01em }
   h1 span { color:var(--accent) }
+  h1.brand { display:flex; align-items:center; justify-content:center; gap:.4rem }
+  h1.brand svg { color:var(--accent) }
   p.sub { color:var(--muted); font-size:.9rem; margin:0 0 1.5rem }
   input {
     width:100%; padding:.75rem; font:inherit; border-radius:10px;
@@ -39,7 +47,7 @@ module.exports = `<!doctype html>
   input:focus { outline:2px solid var(--accent); outline-offset:1px }
   button {
     width:100%; margin-top:.6rem; padding:.75rem; font:inherit; font-weight:600;
-    border:none; border-radius:10px; background:var(--accent); color:#0b1220; cursor:pointer;
+    border:none; border-radius:10px; background:var(--accent); color:#1c1305; cursor:pointer;
   }
   button:disabled { opacity:.5; cursor:default }
   .err {
@@ -51,7 +59,20 @@ module.exports = `<!doctype html>
 </head>
 <body>
   <div class="box">
-    <h1>Pear<span>Cinema</span></h1>
+    <h1 class="brand">
+      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+        <path d="M13.6 6.2c2.4 1 4 3.4 4 6.2 0 3.9-2.9 7.1-6.3 7.1S5 16.3 5 12.4c0-2.6 1.4-4.9 3.5-6"
+          fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        <path d="M11.3 6.4c0-1.9.9-3.4 2.6-4.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        <g fill="currentColor">
+          <rect x="8.1" y="10.2" width="1.6" height="1.6" rx=".4"/>
+          <rect x="8.1" y="13.4" width="1.6" height="1.6" rx=".4"/>
+          <rect x="12.8" y="10.2" width="1.6" height="1.6" rx=".4"/>
+          <rect x="12.8" y="13.4" width="1.6" height="1.6" rx=".4"/>
+        </g>
+      </svg>
+      Pear<span>Cinema</span>
+    </h1>
     <p class="sub">This page can play your library and hand out access to it. It wants a password.</p>
 
     <form id="f">

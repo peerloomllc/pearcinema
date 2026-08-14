@@ -828,17 +828,15 @@ class FolderAdapter {
     return this._byId.get(String(id)) || null
   }
 
+  // RANKED, NOT MERELY MATCHED - see items.searchItems for what the ranks mean.
+  //
+  // Every row is considered rather than the first few hundred. The old version stopped
+  // collecting at four times the limit and then sorted, which meant the BEST match
+  // could be discarded before anything had judged it: on a library this size, whether
+  // the film called "Christmas" appeared at all depended on where it happened to sit
+  // in a Map.
   async search ({ q = '', limit = 50 } = {}) {
-    const needle = String(q).toLowerCase()
-    if (!needle) return { items: [] }
-
-    const hit = (s) => String(s || '').toLowerCase().includes(needle)
-    const out = []
-    for (const item of this._byId.values()) {
-      if (hit(item.title) || hit(item.seriesTitle)) out.push(item)
-      if (out.length >= Math.max(1, Number(limit) || 50) * 4) break
-    }
-    return { items: items.sortItems(out, 'title').slice(0, Math.max(1, Number(limit) || 50)) }
+    return { items: items.searchItems(this._byId.values(), q, limit) }
   }
 
   // --- artwork and subtitles --------------------------------------------------
