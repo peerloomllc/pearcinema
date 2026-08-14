@@ -148,6 +148,9 @@ export default function App () {
   const [pairLink, setPairLink] = useState('')
   const [artBase, setArtBase] = useState('')
   const [err, setErr] = useState('')
+  // Items already retried after a native player error - one honest retry per
+  // item per session, never a loop of failing attempts.
+  const retried = useRef(new Set())
 
   const reload = useCallback(async () => {
     const s = await call('app.state')
@@ -172,6 +175,28 @@ export default function App () {
       }),
       on('player:closed', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+      }),
+      // The native player refused what the declaration said it could play - the
+      // chip lied. Re-describe the device without the codec that just failed
+      // and let the host decide again; a transcode verdict resumes the film
+      // where it died. One retry per item, then the failure is shown plainly.
+      on('player:error', async (d) => {
+        if (!d?.itemId) return
+        if (retried.current.has(d.itemId)) {
+          setErr('This one failed to play on this device, even with the host helping.')
+          return
+        }
+        retried.current.add(d.itemId)
+        try {
+          const { url, mode } = await call('stream.url', { itemId: d.itemId, deviceRefusedVideo: true })
+          if (mode === 'transcode') {
+            await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
+          } else {
+            setErr('This one failed to play on this device, and the host cannot convert it.')
+          }
+        } catch (e) {
+          setErr(e.message)
+        }
       })
     ]
     call('shell.pendingLink').then((url) => { if (url) setPairLink(url) }).catch(() => {})

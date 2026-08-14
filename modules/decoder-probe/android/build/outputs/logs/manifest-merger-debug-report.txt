@@ -1,0 +1,14 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml:1:1-13
+INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml:1:1-13
+	package
+		INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml
+uses-sdk
+INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml
+INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/tim/peerloomllc/pearcinema/modules/decoder-probe/android/src/main/AndroidManifest.xml

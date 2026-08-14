@@ -2,6 +2,76 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - THE DEVICE DECLARES WHAT ITS CHIP PROVED, and a lying chip gets one honest retry
+Tier: T1 (the declaration's CONTENT changes per device; the media.decide contract and
+the wire shape do not)
+Context: the static conservative CAPABILITIES in src/bare.js declared H.264 everywhere
+and HEVC nowhere, so an HEVC-capable phone paid for transcodes it did not need - and it
+silently declared AV1 for every device, including devices with no AV1 decoder at all.
+
+**The shape: the shell probes, the mapper judges, the host still decides.** A local
+Expo module (`modules/decoder-probe`) reads MediaCodecList RN-side and reports raw
+facts - name, mime, hardware flag, profiles, max size. `src/capabilities.js` is the
+policy that turns that into the declaration, PURE so Node tests run it against
+fixtures and cross-check the output through host/remux.js's own `decide()` - the two
+sides share one vocabulary and a drift between them is the fake-season class of bug.
+The client still only describes itself; nothing about THE HOST DECIDES moved.
+
+**The policy, each rule paid for:**
+
+- **Video needs hardware.** Every Android ships c2.android.* software decoders that
+  claim 10-bit HEVC they cannot decode at watchable speed. A software claim is not a
+  capability.
+- **Video needs 1080p headroom** (decoder max size >= 1920x1080), or the codec is not
+  declared at all.
+- **HEVC additionally needs Main 10.** The wire's vocabulary is flat - `hevc`, no
+  profiles - so one bit answers for every HEVC file, and nearly all the real
+  library's HEVC is 10-bit (the 2026-08-13 measurement the transcode design centres
+  on). A Main-only decoder answering yes would black-screen most of them.
+- **Audio needs only a decoder.** Software audio decode is cheap; a phone that
+  declares AC-3/E-AC-3/DTS moves the Dolby files to direct play.
+- **Containers stay static** - they are facts about ExoPlayer's demuxers, which ship
+  in the app and are identical on every device.
+- **No probe means the static floor stands** (iOS today, a broken list). A probe
+  without hardware H.264 and AAC is a broken probe, not a phone that plays nothing,
+  and maps to the floor too. Under-declaring costs engine time, never a screen.
+
+**Measured on the TCL, and the policy earned its keep on the first device:** its
+MediaCodecList really does carry a hardware HEVC decoder (`c2.mtk.hevc.decoder`, max
+2560x1440) - and the mapper still refused to declare HEVC, because the decoder claims
+only 8-bit Main. That is precisely the chip that threw MediaCodec 0x80000000 on Blade
+(10-bit class) the day before. The TCL's actual declaration came out
+`{video: h264, vp9; audio: aac, flac, mp3, opus, vorbis}` - no HEVC, no AV1 (the
+static list had been over-declaring AV1 on this phone all along), no Dolby (no
+license on a budget TCL, honest). Verified live, both directions: Blade still plays
+via the host's per-segment transcode, and an H.264 MKV still direct-plays with zero
+transcoder activity on the host.
+
+**The net for chips that lie through the profile gate:** a native player error while
+playing surfaces as `player:error`; the UI asks stream.url again with
+`deviceRefusedVideo: true`, the worklet re-describes the device WITHOUT that item's
+video codec (aliases normalized), remembers the refusal in RAM for the shim's HLS
+calls, and the host decides again - usually transcode, resumed at the position the
+decoder died. One retry per item, then a plain failure message. The client never asks
+for a mode; a device whose decoder just threw genuinely does not decode that codec.
+NOT yet exercised end to end: it needs a device that over-declares, and the TCL after
+the probe no longer does. The first field report of a phone hitting it settles that.
+
+**Two build traps paid for on the way:**
+
+- **Metro CACHES the worklet bundle as an asset.** A rebuilt
+  assets/bare-universal.bundle went into the APK stale - same filename, same
+  require - and the first on-device run was silently exercising the OLD worklet.
+  The check that caught it: `unzip -p app-debug.apk res/raw/assets_bareuniversal.bundle | grep -c <new symbol>`
+  BEFORE installing. Clear the metro cache when the bare bundle changes.
+- **An unanchored `android/` in .gitignore would have silently dropped the local
+  module's android/ source dir.** Now `/android/`, with the reasoning beside it.
+
+Also: the audio-sink timestamp discontinuity ExoPlayer logs at HLS segment
+boundaries (`UnexpectedDiscontinuityException`, ~200ms) is an artifact of the
+per-segment transcode path that shipped in PR #32, recovered from automatically -
+noted here so it is not rediscovered as a new bug.
+
 ## 2026-08-14 (latest) - THE PHONE PLAYS, and one person's two devices share a position
 Tier: T2 (first device bring-up; two package seams opened by measured failures)
 Context: the mobile app's first cut, verified on the TCL against the real Umbrel per
