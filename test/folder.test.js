@@ -13,6 +13,9 @@
 // real scans; what matters here is the wiring, the cache, the tree and the
 // path-resolution guard.
 
+// NO HARDWARE PROBE IN HERE - see dashboard.test.js for why.
+process.env.PEARCINEMA_TRANSCODE = 'off'
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const os = require('os')

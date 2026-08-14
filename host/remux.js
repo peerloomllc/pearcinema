@@ -19,10 +19,12 @@
 // be driven. The browser's player is ours and can be, so the browser gets the
 // simpler mechanism first and the phone gets HLS when there is a phone.
 //
-// WHAT IT DOES NOT DO. No video re-encoding, ever - that is rung three, the 218 AVI
-// files, and it needs hardware acceleration and its own proposal. If the video codec
-// is not something the client can decode, this refuses rather than quietly becoming
-// a transcoder that melts a Raspberry Pi.
+// WHAT IT DOES NOT DO. No video re-encoding HERE - that is rung three and it lives
+// in host/transcode.js behind its own proposal (2026-08-13-hardware-transcode.md)
+// and its own hardware probe. When the probe has not passed, `decide()` refuses
+// video the client cannot take rather than quietly becoming a software transcoder
+// that melts a Raspberry Pi - and that refusal is a hard rule of the proposal, not
+// a missing feature.
 
 const { spawn } = require('child_process')
 
@@ -108,8 +110,16 @@ const codec = (c) => ALIAS[norm(c)] || norm(c)
 // that: a browser knows its own canPlayType answers and a phone knows its own
 // decoder. Absent, we assume MP4-and-H.264, the universal floor.
 //
-// Returns { mode, reason, audio } where mode is 'direct' | 'remux' | 'refuse'.
-function decide (media, client = {}) {
+// `opts.transcode` says whether THIS HOST may re-encode video - true only when the
+// startup probe proved the hardware (proposals/2026-08-13-hardware-transcode.md,
+// rule 2). It turns the two video refusals below into a third mode rather than
+// changing anything about when the cheaper answers win: the ladder is direct, then
+// remux, then transcode, and a client cannot ask for any of them - only describe
+// itself. Absent means today's behaviour, refusals and all.
+//
+// Returns { mode, reason, audio } where mode is 'direct' | 'remux' | 'transcode'
+// | 'refuse'.
+function decide (media, client = {}, opts = {}) {
   const box = container(media?.container)
   const v = codec(media?.videoCodec)
   const a = codec(media?.audioCodec)
@@ -128,21 +138,44 @@ function decide (media, client = {}) {
     return { mode: 'direct', reason: 'the client can open this file as it is' }
   }
 
+  // The audio question is the same for remux and transcode: copy it when the client
+  // can take it and an MP4 can carry it, rebuild it to AAC when not.
+  const audioOk = !a || (audios.has(a) && MP4_AUDIO.has(a))
+
   // THE VIDEO DECIDES WHETHER REMUX IS EVEN POSSIBLE. A container rewrite cannot
   // change the picture, so if the client cannot decode this video codec, or MP4
-  // cannot carry it, no amount of repackaging helps. Refuse and say so rather than
-  // starting an encoder we do not have.
+  // cannot carry it, no amount of repackaging helps.
+  //
+  // With proven hardware these two refusals become the transcode mode instead: the
+  // picture is re-encoded to H.264 on the engine, which every measured client
+  // decodes. The client still has to SAY it decodes H.264 - a client that cannot
+  // take the output gets the refusal, not a stream it will show as black.
+  const transcodable = !!opts.transcode && videos.has('h264')
+
   if (v && !videos.has(v)) {
+    if (transcodable) {
+      return {
+        mode: 'transcode',
+        reason: `this client cannot decode ${v.toUpperCase()} video, so the picture is converted to H.264 on the host's video hardware`,
+        audio: audioOk ? 'copy' : AUDIO_FALLBACK.codec
+      }
+    }
     return { mode: 'refuse', reason: `this client cannot decode ${v.toUpperCase()} video, and repackaging cannot change the picture` }
   }
   if (v && !MP4_VIDEO.has(v)) {
+    if (transcodable) {
+      return {
+        mode: 'transcode',
+        reason: `${v.toUpperCase()} video cannot be carried in an MP4, so the picture is converted to H.264 on the host's video hardware`,
+        audio: audioOk ? 'copy' : AUDIO_FALLBACK.codec
+      }
+    }
     return { mode: 'refuse', reason: `${v.toUpperCase()} video cannot be carried in an MP4 without re-encoding it` }
   }
 
   // The audio may need rebuilding, which is cheap - and per the 2026-08-13
   // measurement this is 19 files out of 2,986, because Dolby Digital passes straight
   // through.
-  const audioOk = !a || (audios.has(a) && MP4_AUDIO.has(a))
   return {
     mode: 'remux',
     reason: audioOk
@@ -233,27 +266,37 @@ class RemuxProcess {
 
 // The engine. Holds no state beyond the live processes, because there is no cache -
 // see the header.
+//
+// host/transcode.js SUBCLASSES this, overriding only `_args` and `what`: the cap,
+// the BUSY refusal, kill-with-the-response and killAll are process lifecycle, and a
+// second copy of process lifecycle is a second place for an orphaned ffmpeg to come
+// from.
 class Remuxer {
   constructor ({ ffmpeg = 'ffmpeg', maxConcurrent = 3, log = () => {} } = {}) {
     this.ffmpeg = ffmpeg
     this.maxConcurrent = maxConcurrent
     this.log = log
     this.live = new Set()
+    // The verb in the BUSY message, so a viewer is told what the host is busy DOING.
+    this.what = 'repackaging'
   }
 
   get running () { return this.live.size }
 
+  // The argv seam the subclass overrides. Everything else about a session is shared.
+  _args (opts) { return argsFor(opts) }
+
   // Start one. Throws rather than queueing when the box is already busy: a viewer
   // told "the server is busy" can try again, where a viewer watching a spinner for
   // four minutes assumes it is broken.
-  start ({ input, at = 0, audio = 'copy', headers = null }) {
+  start ({ input, at = 0, audio = 'copy', headers = null, media = null }) {
     if (this.live.size >= this.maxConcurrent) {
-      const e = new Error(`this host is already repackaging ${this.live.size} films, which is as many as it will do at once`)
+      const e = new Error(`this host is already ${this.what} ${this.live.size} films, which is as many as it will do at once`)
       e.code = 'BUSY'
       throw e
     }
 
-    const args = argsFor({ input, at, audio, headers })
+    const args = this._args({ input, at, audio, headers, media })
     const proc = spawn(this.ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     const session = new RemuxProcess({ proc, at, audio, log: this.log })
     this.live.add(session)

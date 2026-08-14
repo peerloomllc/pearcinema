@@ -11,6 +11,11 @@
 // PearCinema picked its own topics: a PearTune phone must not reach a PearCinema
 // host, and a PearCinema phone must not reach a PearTune one.
 
+// NO HARDWARE PROBE IN HERE. ready() probes the box's video engine, and this
+// machine may genuinely have one - which would make these tests' behaviour depend
+// on whose laptop they run on. The probe has its own tests with the ffmpeg faked.
+process.env.PEARCINEMA_TRANSCODE = 'off'
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const os = require('os')

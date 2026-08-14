@@ -104,12 +104,20 @@ $SUDO test -s "$DATA/dashboard-password" && HAD_PASSWORD=1
 # network_mode host, and no app_proxy: measured twice on a real Umbrel, holepunching
 # does not survive Docker's bridge NAT, and app_proxy is itself a bridged container
 # so it cannot front a host-networked service.
+# THE VIDEO ENGINE rides along only where the box has one: a --device whose path
+# does not exist makes docker refuse to create the container, which would turn a
+# GPU-less box into a failed deploy rather than a host without transcode. The probe
+# inside decides whether the device actually works.
+DRI=""
+[ -e /dev/dri ] && DRI="--device /dev/dri:/dev/dri"
+
 echo "== starting =="
 $SUDO docker run -d \
   --name pearcinema-host \
   --restart unless-stopped \
   --network host \
   --security-opt no-new-privileges:true \
+  $DRI \
   -e PEARCINEMA_HTTP_HOST=0.0.0.0 \
   -e PEARCINEMA_HTTP_PORT=8751 \
   ${PEARCINEMA_PASSWORD:+-e PEARCINEMA_PASSWORD="$PEARCINEMA_PASSWORD"} \

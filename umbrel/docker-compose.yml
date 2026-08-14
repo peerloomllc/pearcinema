@@ -77,12 +77,17 @@ services:
         bind:
           propagation: rslave
 
-    # NO /dev/dri YET, deliberately. v1 is direct play only - there is no transcode
-    # to accelerate, and a device passthrough that nothing uses is surface for
-    # nothing. When remux and transcode land, this is the line that gets added:
+    # THE VIDEO ENGINE, for hardware transcode (proposals/2026-08-13-hardware-
+    # transcode.md). This is the compose edit PR #9 promised would be enough, and it
+    # is the whole grant: no privileged mode, no extra capabilities. The host probes
+    # the device at startup and only a probe that produced real bytes unlocks the
+    # transcode mode, with the result shown on the dashboard either way.
     #
-    #   devices:
-    #     - /dev/dri:/dev/dri
-    #
-    # The mounts above were chosen so that stays a compose edit rather than a
-    # redesign.
+    # ONE HONEST CAVEAT: unlike the probe, this line is NOT harmless on a box with
+    # no /dev/dri at all - Docker refuses to CREATE a container whose device path
+    # does not exist on the host, which is a failure to start rather than a feature
+    # staying off. Every Umbrel target has one (Intel iGPU or the Pi's vc4), so it
+    # ships on; a headless VM install with no GPU node must delete these two lines,
+    # and everything else keeps working because the probe fails closed.
+    devices:
+      - /dev/dri:/dev/dri
