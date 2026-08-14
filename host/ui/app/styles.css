@@ -71,22 +71,57 @@ html { scrollbar-gutter: stable }
   html { overflow-y: scroll }
 }
 
+/* THE SCROLLBAR IS OURS TOO. The browser's default is a light track in a dark page,
+ * and it runs the full height of the window - so it butts up against the sticky header
+ * and reads as a seam down the right-hand edge (Tim, 2026-08-13, with a screenshot).
+ * Thin, no track, a thumb the colour of a border until the pointer is near it.
+ *
+ * Both spellings: the standard properties (Firefox, and Chromium 121+) and the WebKit
+ * pseudo-elements, which are what Safari and older Chromium understand. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px }
+::-webkit-scrollbar-track { background: transparent }
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong); border-radius: 999px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box }
+::-webkit-scrollbar-corner { background: transparent }
+
 /* And never sideways, on any screen. A single element that overhangs turns into a
  * horizontal scrollbar that shifts everything vertically as well. */
 html, body { overflow-x: hidden; max-width: 100% }
 
 html, body, #root { height: 100% }
 
+/* THE COLOUR GOES ON `html`, NOT ONLY ON `body`.
+ *
+ * A background set only on the body is propagated to the canvas - but the GLOW was
+ * `background-attachment: fixed` on that same body, and past the first screenful the
+ * propagated painting stopped agreeing with itself: scrolling down changed the colour
+ * of the page (Tim, 2026-08-13). Painting the flat colour on the root and hanging the
+ * glow off a fixed pseudo-element is unambiguous - one always covers the canvas, the
+ * other always covers the viewport, and neither depends on how tall the document
+ * happens to be. */
+html { background: var(--bg) }
+
 body {
   margin: 0;
-  /* The glow is PearTune's, and it is the thing that makes the two read as one suite
-   * at a glance - a warm light at the top of the page rather than a flat field. Fixed
-   * so it stays with the top of the page rather than scrolling away. */
-  background: var(--bg-accent), var(--bg);
-  background-attachment: fixed;
+  background: transparent;
   color: var(--fg);
   font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+}
+
+/* The glow is PearTune's, and it is what makes the two read as one suite at a glance -
+ * a warm light at the top of the page rather than a flat field. Behind everything, and
+ * fixed to the window rather than to the document. */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: -1;
+  background: var(--bg-accent); pointer-events: none;
 }
 
 a { color: var(--accent) }
@@ -95,12 +130,19 @@ a { color: var(--accent) }
 
 .shell { min-height: 100%; display: flex; flex-direction: column }
 
-/* THREE COLUMNS AND ONE HEIGHT. The middle column is the search, so it is centred on
- * the BAR rather than on whatever happens to be left over beside the tabs - and it is
- * always present, so the bar cannot change height when a tab has nothing to search. */
+/* THREE COLUMNS, THE OUTER TWO OF EQUAL WIDTH, AND ONE HEIGHT.
+ *
+ * `auto 1fr auto` centred the search in the space LEFT OVER between the tabs and the
+ * Pair button - and those two are nothing like the same width, so the box sat visibly
+ * off-centre against the page's own centred content (Tim, 2026-08-13). `1fr auto 1fr`
+ * makes the outer columns share the leftover space equally, which puts the middle one
+ * on the centre line of the bar. The page's content is `margin: 0 auto` in the same
+ * viewport and the scrollbar gutter is reserved on both sides of that calculation, so
+ * the two centres are the same centre. */
 .topbar {
   position: sticky; top: 0; z-index: 20;
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .75rem;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center; gap: .75rem;
   min-height: 3.3rem;
   padding: .7rem 1rem;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -113,12 +155,14 @@ a { color: var(--accent) }
 
 .barleft { display: flex; align-items: center; gap: .9rem; min-width: 0 }
 .searchslot { display: flex; justify-content: center; align-items: center; min-width: 0 }
+.topbar > button { justify-self: end }
 
 .tabs { display: flex; gap: .25rem; flex-wrap: wrap }
 
-/* Narrow: the middle column has nowhere to be, so the bar wraps into rows and the
- * search takes a line of its own rather than squeezing the tabs off screen. */
-@media (max-width: 780px) {
+/* Narrow: three across stops fitting well before the columns actually collide - the
+ * search is squeezed to a stub long before anything overlaps - so the bar wraps into
+ * rows and the search takes a line of its own. */
+@media (max-width: 1080px) {
   .topbar { grid-template-columns: 1fr auto; row-gap: .5rem }
   .barleft { grid-column: 1 }
   .topbar > button { grid-column: 2 }

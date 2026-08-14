@@ -971,3 +971,35 @@ test('THE PAGE DOES NOT SHIFT SIDEWAYS WHEN A SCROLLBAR ARRIVES', async (t) => {
   assert.equal(html.scrollbarGutter, 'stable', 'the gutter is always reserved')
   assert.equal(html.overflowX, 'hidden', 'and nothing may overhang sideways')
 })
+
+test('THE SEARCH IS ON THE PAGE\'S CENTRE LINE, not in the space left over', async (t) => {
+  // `auto 1fr auto` centred it between the tabs and the Pair button, and those are
+  // nothing like the same width - so it sat visibly off-centre against the page's own
+  // centred content. Equal outer columns put the middle one on the centre line.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const cols = dom.window.getComputedStyle(doc.querySelector('.topbar')).gridTemplateColumns
+  // jsdom reports the declared value rather than the used one, which is enough: what
+  // is being pinned is the RULE, since a browser is the only thing that can lay it out.
+  assert.match(cols.replace(/\s+/g, ''), /^minmax\(0,1fr\)autominmax\(0,1fr\)$/,
+    'the outer columns share the leftover space equally')
+})
+
+test('the page keeps one background, however far it scrolls', async (t) => {
+  // A background set only on the body is propagated to the canvas - but the glow was
+  // `background-attachment: fixed` on that same body, and past the first screenful the
+  // propagated painting stopped agreeing with itself.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const html = dom.window.getComputedStyle(doc.documentElement)
+  assert.match(html.background, /var\(--bg\)/, 'the flat colour is on the root itself')
+
+  // And the glow is a fixed layer of its own rather than a `background-attachment` on
+  // the body, which is what stopped agreeing with itself past the first screenful.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
+  // The bundler normalises `::before` to the single-colon form.
+  assert.match(css, /body::?before\{[^}]*position:fixed/, 'the glow is its own fixed layer')
+  assert.doesNotMatch(css, /background-attachment:fixed/, 'and nothing leans on a fixed attachment')
+})
