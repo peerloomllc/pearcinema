@@ -7,10 +7,11 @@
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { api } from './api'
-import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref } from './ui'
+import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
-import { Mark, Search, Close } from './icons'
+// `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
+import { Mark, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -26,7 +27,6 @@ function Settings ({ state, reload }) {
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
-  const [theme, setTheme] = useState(loadThemePref())
 
   const src = state.auth?.passwordSource
 
@@ -87,17 +87,6 @@ function Settings ({ state, reload }) {
       </div>
 
       <div class='card'>
-        <h3>Appearance</h3>
-        <div class='row'>
-          {['system', 'dark', 'light'].map(t => (
-            <button key={t} class={theme === t ? '' : 'ghost'} onClick={() => { setTheme(t); applyThemePref(t) }}>
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div class='card'>
         <h3>This host</h3>
         <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
         <p class='hint'>
@@ -120,6 +109,9 @@ export default function App () {
   const [queue, setQueue] = useState([])
   const [pairing, setPairing] = useState(false)
   const [wizard, setWizard] = useState(false)
+  // The theme lives up here now rather than inside Settings: it is a light switch, and
+  // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
+  const [theme, setTheme] = useState(loadThemePref())
   // Where the library should open when we leave the player by climbing rather than by
   // going all the way out. Held here because the library owns which show and season it
   // is showing, and the player is a sibling of it rather than a child.
@@ -165,16 +157,13 @@ export default function App () {
   return (
     <div class='shell'>
       <div class='topbar'>
-        <div class='barleft'>
-          <div class='brand'><Mark size={22} />Pear<span>Cinema</span></div>
-          <div class='tabs'>
-            <button class={'tab' + (tab === 'watch' ? ' on' : '')} onClick={() => { setTab('watch'); setPlaying(null) }}>Watch</button>
-            <button class={'tab' + (tab === 'who' ? ' on' : '')} onClick={() => setTab('who')}>
-              Devices{online ? ` · ${online} on` : ''}
-            </button>
-            <button class={'tab' + (tab === 'settings' ? ' on' : '')} onClick={() => setTab('settings')}>Settings</button>
-          </div>
-        </div>
+        {/* THE NAME IS THE WAY HOME, which is what a logo is for - and it is why the
+            tabs could leave the bar at all. */}
+        <button
+          class='brand'
+          onClick={() => { setTab('watch'); setPlaying(null) }}
+          aria-label='PearCinema - back to the library'
+        ><Mark size={22} />Pear<span>Cinema</span></button>
         {/* THE SEARCH SITS IN THE MIDDLE OF THE BAR AND THE BAR NEVER CHANGES HEIGHT.
             It used to be rendered only on the Watch tab, so opening Devices or Settings
             took the box out and the whole header shrank - the page jumped under the
@@ -201,7 +190,38 @@ export default function App () {
             )}
           </div>
         </div>
-        <button onClick={() => setPairing(true)}>Pair a device</button>
+        {/* THE RIGHT-HAND SIDE IS TOOLS, in PearTune's order and PearTune's shapes:
+            the light switch, then the gear. Both are icons because both are things you
+            reach for occasionally and neither deserves a word's worth of the bar. */}
+        <div class='barright'>
+          <button
+            class={'iconbtn' + (tab === 'who' ? ' on' : '')}
+            onClick={() => { setTab('who'); setPlaying(null) }}
+            aria-label='Devices'
+            title={online ? `Devices - ${online} online` : 'Devices'}
+          >
+            <PeopleIcon size={18} />
+            {online > 0 && <span class='dot' aria-hidden='true' />}
+          </button>
+
+          <button
+            class='iconbtn'
+            onClick={() => { const next = resolveTheme(theme) === 'dark' ? 'light' : 'dark'; setTheme(next); applyThemePref(next) }}
+            aria-label='Switch theme'
+            title={resolveTheme(theme) === 'dark' ? 'Switch to light' : 'Switch to dark'}
+          >
+            {resolveTheme(theme) === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+
+          <button
+            class={'iconbtn' + (tab === 'settings' ? ' on' : '')}
+            onClick={() => { setTab('settings'); setPlaying(null) }}
+            aria-label='Settings'
+            title='Settings'
+          ><Gear size={18} /></button>
+
+          <button onClick={() => setPairing(true)}>Pair a device</button>
+        </div>
       </div>
 
       {/* The fade at the top and bottom of the scroll. Fixed strips rather than a mask
@@ -211,6 +231,7 @@ export default function App () {
       <div class='edge top' aria-hidden='true' />
       <div class='edge bottom' aria-hidden='true' />
 
+      <div class='scroller'>
       <div class='content'>
         {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} />}
 
@@ -247,6 +268,8 @@ export default function App () {
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}
         {!wizard && tab === 'settings' && <Settings state={state} reload={reload} />}
+      </div>
+
       </div>
 
       {pairing && (

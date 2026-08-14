@@ -66,10 +66,14 @@
  *
  * The fallback is a scrollbar that is always drawn rather than always reserved. Uglier
  * on a short page, and still better than a page that moves under the pointer. */
-html { scrollbar-gutter: stable }
-@supports not (scrollbar-gutter: stable) {
-  html { overflow-y: scroll }
-}
+/* THE PAGE ITSELF DOES NOT SCROLL. The CONTENT does, below the header - which is how
+ * Plex does it, and it is what keeps the scrollbar out of the header rather than
+ * running past it and reading as a seam down the right-hand edge (Tim, 2026-08-13,
+ * with a screenshot of Plex).
+ *
+ * The gutter is reserved on the scroller for the same reason it was reserved on the
+ * document: a short tab and a long one must not shift everything sideways. */
+html, body { overflow: hidden }
 
 /* THE SCROLLBAR IS OURS TOO. The browser's default is a light track in a dark page,
  * and it runs the full height of the window - so it butts up against the sticky header
@@ -78,7 +82,7 @@ html { scrollbar-gutter: stable }
  *
  * Both spellings: the standard properties (Firefox, and Chromium 121+) and the WebKit
  * pseudo-elements, which are what Safari and older Chromium understand. */
-html {
+.scroller {
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -93,7 +97,7 @@ html {
 
 /* And never sideways, on any screen. A single element that overhangs turns into a
  * horizontal scrollbar that shifts everything vertically as well. */
-html, body { overflow-x: hidden; max-width: 100% }
+html, body { max-width: 100% }
 
 html, body, #root { height: 100% }
 
@@ -117,32 +121,27 @@ body {
 }
 
 /* The glow is PearTune's, and it is what makes the two read as one suite at a glance -
- * a warm light at the top of the page rather than a flat field. Behind everything, and
- * fixed to the window rather than to the document. */
-body::before {
-  content: ''; position: fixed; inset: 0; z-index: -1;
-  background: var(--bg-accent); pointer-events: none;
-}
+ * a warm light at the top of the library rather than a flat field. It lives on the
+ * scroller, not here: see `.scroller`. */
 
 a { color: var(--accent) }
 
 /* ---- shell ---------------------------------------------------------------- */
 
-.shell { min-height: 100%; display: flex; flex-direction: column }
+.shell { height: 100%; display: flex; flex-direction: column; min-height: 0 }
 
-/* THREE COLUMNS, THE OUTER TWO OF EQUAL WIDTH, AND ONE HEIGHT.
+/* NAME, SEARCH, TOOLS - and nothing in the middle to centre.
  *
- * `auto 1fr auto` centred the search in the space LEFT OVER between the tabs and the
- * Pair button - and those two are nothing like the same width, so the box sat visibly
- * off-centre against the page's own centred content (Tim, 2026-08-13). `1fr auto 1fr`
- * makes the outer columns share the leftover space equally, which puts the middle one
- * on the centre line of the bar. The page's content is `margin: 0 auto` in the same
- * viewport and the scrollbar gutter is reserved on both sides of that calculation, so
- * the two centres are the same centre. */
+ * The tabs are gone from here (Tim, 2026-08-13): the name is the way back to the
+ * library, Devices and Settings are icons on the right, and the search is simply left
+ * aligned beside the name. Centring it was a problem that only existed because there
+ * were tabs on one side and a button on the other; without them there is nothing to
+ * balance and the honest answer is to stop trying.
+ *
+ * It does NOT scroll away, because it is outside the scroller rather than sticky to
+ * it - which is also what keeps the scrollbar out of it. */
 .topbar {
-  position: sticky; top: 0; z-index: 20;
-  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  align-items: center; gap: .75rem;
+  display: flex; align-items: center; gap: .8rem;
   min-height: 3.3rem;
   padding: .7rem 1rem;
   background: color-mix(in srgb, var(--bg) 88%, transparent);
@@ -150,25 +149,39 @@ a { color: var(--accent) }
   border-bottom: 1px solid var(--line);
 }
 
-.brand { font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap }
+.brand {
+  font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap;
+  background: none; border: none; color: inherit; padding: 0; cursor: pointer;
+}
 .brand span { color: var(--accent) }
 
-.barleft { display: flex; align-items: center; gap: .9rem; min-width: 0 }
-.searchslot { display: flex; justify-content: center; align-items: center; min-width: 0 }
-.topbar > button { justify-self: end }
+.barright { display: flex; align-items: center; gap: .35rem; justify-self: end }
+.barright .iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; position: relative;
+  width: 2.2rem; height: 2.2rem; border-radius: 9px; padding: 0;
+}
+.barright .iconbtn:hover { background: var(--card); color: var(--fg) }
+.barright .iconbtn.on { background: var(--card); color: var(--accent) }
+.barright > button:last-child { margin-left: .4rem }
+/* Somebody is online. A dot rather than a count: the number changes on its own and a
+ * changing number in the corner of the eye is a distraction, where a light is not. */
+.barright .dot {
+  position: absolute; top: .3rem; right: .3rem; width: .45rem; height: .45rem;
+  border-radius: 999px; background: var(--good);
+}
+
+.searchslot { display: flex; align-items: center; min-width: 0; flex: 1 }
 
 .tabs { display: flex; gap: .25rem; flex-wrap: wrap }
 
 /* Narrow: three across stops fitting well before the columns actually collide - the
  * search is squeezed to a stub long before anything overlaps - so the bar wraps into
  * rows and the search takes a line of its own. */
-@media (max-width: 1080px) {
-  .topbar { grid-template-columns: 1fr auto; row-gap: .5rem }
-  .barleft { grid-column: 1 }
-  .topbar > button { grid-column: 2 }
-  .searchslot { grid-column: 1 / -1; justify-content: stretch }
-  .searchslot .searchbox { width: 100% }
-  .searchbox input { width: 100% }
+/* Narrow: the search takes a line of its own rather than squeezing the name off. */
+@media (max-width: 720px) {
+  .topbar { flex-wrap: wrap; row-gap: .5rem }
+  .searchslot { order: 3; width: 100% }
+  .barright { margin-left: auto }
 }
 
 .tab {
@@ -187,7 +200,7 @@ a { color: var(--accent) }
   display: flex; align-items: center; gap: .5rem;
   background: var(--card); border: 1px solid var(--line);
   border-radius: 999px; padding: .3rem .9rem;
-  width: 100%; max-width: 34rem;
+  width: 100%; max-width: 30rem;
 }
 .searchbox input {
   border: none; background: transparent; color: var(--fg); font: inherit;
@@ -200,7 +213,23 @@ a { color: var(--accent) }
 .searchbox.off { opacity: .45 }
 .searchbox.off input { cursor: not-allowed }
 
-.content { flex: 1; padding: 1.25rem 1rem 4rem; max-width: 1180px; width: 100%; margin: 0 auto }
+/* THE SCROLLER. Everything above it is fixed by being outside it, so the header needs
+ * no `position: sticky` and the scrollbar cannot reach it.
+ *
+ * THE GLOW LIVES HERE, and `background-attachment: local` is the whole point: on a
+ * scroll container the default keeps a background pinned to the element while its
+ * content moves, which is what made the warm patch follow the window and read as the
+ * page changing colour as you scrolled. `local` ties it to the content, so it belongs
+ * to the TOP OF THE LIBRARY and scrolls away once. */
+.scroller {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable;
+  background-image: var(--bg-accent);
+  background-repeat: no-repeat;
+  background-size: 100% 620px;
+  background-attachment: local;
+}
+.content { padding: 1.25rem 1rem 4rem; max-width: 1180px; width: 100%; margin: 0 auto }
 
 /* ---- generic bits --------------------------------------------------------- */
 
@@ -832,6 +861,7 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   pointer-events: none;
 }
 .edge.top { top: 3.3rem; background: linear-gradient(to bottom, var(--bg), transparent) }
+.shell { position: relative }
 .edge.bottom { bottom: 0; height: 40px; background: linear-gradient(to top, var(--bg), transparent) }
 
 /* ---- icons ------------------------------------------------------------------ */

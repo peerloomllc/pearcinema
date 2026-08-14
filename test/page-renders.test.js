@@ -198,7 +198,7 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Devices'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Devices')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
 
@@ -240,7 +240,7 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -265,7 +265,7 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   const { dom, doc, win } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -291,7 +291,7 @@ test('two folders holding the same file is said out loud, not absorbed', async (
   const { dom, doc, win, text } = await open({ ...STATE, stats: { ...STATE.stats, duplicates: 3 } })
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Settings'))
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -924,7 +924,7 @@ test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
   assert.ok(slot, 'the middle of the bar always holds the search')
   assert.ok(slot.querySelector('.searchbox'), 'and on Watch there is a box in it')
 
-  const devices = [...doc.querySelectorAll('.tab')].find(b => b.textContent.startsWith('Devices'))
+  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Devices')
   devices.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -967,23 +967,33 @@ test('THE PAGE DOES NOT SHIFT SIDEWAYS WHEN A SCROLLBAR ARRIVES', async (t) => {
   const { dom, doc } = await open()
   t.after(() => dom.window.close())
 
-  const html = dom.window.getComputedStyle(doc.documentElement)
-  assert.equal(html.scrollbarGutter, 'stable', 'the gutter is always reserved')
-  assert.equal(html.overflowX, 'hidden', 'and nothing may overhang sideways')
+  // THE SCROLLER IS THE CONTENT, NOT THE DOCUMENT - which is what keeps the scrollbar
+  // below the header rather than running past it, and it is where the gutter has to be
+  // reserved so a short tab and a long one do not shift everything sideways.
+  const scroller = dom.window.getComputedStyle(doc.querySelector('.scroller'))
+  assert.equal(scroller.scrollbarGutter, 'stable', 'the gutter is always reserved')
+  assert.equal(scroller.overflowY, 'auto', 'and the content is what scrolls')
+  assert.equal(dom.window.getComputedStyle(doc.body).overflow, 'hidden', 'the page itself does not')
 })
 
-test('THE SEARCH IS ON THE PAGE\'S CENTRE LINE, not in the space left over', async (t) => {
-  // `auto 1fr auto` centred it between the tabs and the Pair button, and those are
-  // nothing like the same width - so it sat visibly off-centre against the page's own
-  // centred content. Equal outer columns put the middle one on the centre line.
+test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) => {
+  // Centring the search was a problem that only existed because there were tabs on one
+  // side and a button on the other. Without them there is nothing to balance, and the
+  // honest answer was to stop trying: it is left aligned beside the name.
   const { dom, doc } = await open()
   t.after(() => dom.window.close())
 
-  const cols = dom.window.getComputedStyle(doc.querySelector('.topbar')).gridTemplateColumns
-  // jsdom reports the declared value rather than the used one, which is enough: what
-  // is being pinned is the RULE, since a browser is the only thing that can lay it out.
-  assert.match(cols.replace(/\s+/g, ''), /^minmax\(0,1fr\)autominmax\(0,1fr\)$/,
-    'the outer columns share the leftover space equally')
+  assert.equal(doc.querySelectorAll('.topbar .tab').length, 0, 'no text tabs in the bar')
+
+  const bar = [...doc.querySelector('.topbar').children].map(c => c.className.split(' ')[0])
+  assert.deepEqual(bar, ['brand', 'searchslot', 'barright'], 'name, search, tools')
+
+  // The name is the way back to the library, which is what let the tabs go.
+  assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /back to the library/)
+
+  for (const label of ['Devices', 'Switch theme', 'Settings']) {
+    assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)
+  }
 })
 
 test('the page keeps one background, however far it scrolls', async (t) => {
@@ -996,10 +1006,11 @@ test('the page keeps one background, however far it scrolls', async (t) => {
   const html = dom.window.getComputedStyle(doc.documentElement)
   assert.match(html.background, /var\(--bg\)/, 'the flat colour is on the root itself')
 
-  // And the glow is a fixed layer of its own rather than a `background-attachment` on
-  // the body, which is what stopped agreeing with itself past the first screenful.
+  // THE GLOW BELONGS TO THE TOP OF THE LIBRARY, not to the window. On a scroll
+  // container the default keeps a background pinned to the element while its content
+  // moves - which is what made the warm patch follow the screen and read as the page
+  // changing colour as you scrolled. `local` ties it to the content.
   const css = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
-  // The bundler normalises `::before` to the single-colon form.
-  assert.match(css, /body::?before\{[^}]*position:fixed/, 'the glow is its own fixed layer')
-  assert.doesNotMatch(css, /background-attachment:fixed/, 'and nothing leans on a fixed attachment')
+  assert.match(css, /\.scroller\{[^}]*background-attachment:local/, 'the glow scrolls away with the page')
+  assert.doesNotMatch(css, /background-attachment:fixed/, 'and nothing is pinned to the window')
 })
