@@ -24,7 +24,21 @@ import Wizard from './Wizard'
 // a 274-film grid would otherwise ask again.
 const CAPS = probeCapabilities()
 
+// SETTINGS IS A SIDE NAVIGATION, one section on screen at a time (Tim, 2026-08-14,
+// picked from three sketches). Five cards stacked in one column read as clutter the
+// moment two of them grew real controls; a slim nav gives each section the whole
+// width and the page one calm shape - the same shape Plex and Jellyfin settle on,
+// so it also reads as familiar.
+const SETTINGS_SECTIONS = [
+  ['source', 'Source'],
+  ['artwork', 'Artwork'],
+  ['library', 'Library'],
+  ['security', 'Security'],
+  ['host', 'This host']
+]
+
 function Settings ({ state, reload }) {
+  const [sec, setSec] = useState('source')
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
@@ -46,61 +60,84 @@ function Settings ({ state, reload }) {
   }
 
   return (
-    <>
-      <SourcePanel state={state} reload={reload} />
+    <div class='settings'>
+      <nav class='setnav' aria-label='Settings sections'>
+        {SETTINGS_SECTIONS.map(([id, label]) => (
+          <button key={id} class={sec === id ? 'on' : ''} onClick={() => setSec(id)}>{label}</button>
+        ))}
+      </nav>
 
-      <Metadata />
+      <div class='setbody'>
+        {sec === 'source' && <SourcePanel state={state} reload={reload} />}
 
-      <div class='card'>
-        <h3>The library's name</h3>
-        <div class='row'>
-          <input type='text' value={name} maxLength={64} onInput={e => setName(e.currentTarget.value)} />
-          <button onClick={saveName} disabled={!name.trim() || name === state.library}>Save</button>
-        </div>
-      </div>
+        {sec === 'artwork' && <Metadata />}
 
-      <div class='card'>
-        <h3>This page's password</h3>
-        {!state.auth?.enabled && (
-          <p class='hint'>
-            There is no password, because this page is only reachable from the machine it
-            runs on. If it is ever opened to the network it will refuse to start without one.
-          </p>
-        )}
-        {src === 'explicit' && (
-          <p class='hint'>
-            This password comes from the platform that installed PearCinema - on Umbrel it is
-            the app password shown next to PearCinema in your app list. Change it there, or a
-            restart would quietly put it back.
-          </p>
-        )}
-        {(src === 'generated' || src === 'file') && (
-          <>
+        {sec === 'library' && (
+          <div class='card'>
+            <h3>The library's name</h3>
+            <p class='hint'>This is the name a phone shows when it is paired with you.</p>
             <div class='field'>
-              <label>The current one</label>
-              <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
+              <input type='text' value={name} maxLength={64} onInput={e => setName(e.currentTarget.value)} />
             </div>
-            <div class='field'>
-              <label>A new one (at least 8 characters)</label>
-              <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
+            <div class='actions'>
+              <button onClick={saveName} disabled={!name.trim() || name === state.library}>Save</button>
             </div>
-            <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
-          </>
+          </div>
+        )}
+
+        {sec === 'security' && (
+          <div class='card'>
+            <h3>This page's password</h3>
+            {!state.auth?.enabled && (
+              <p class='hint'>
+                There is no password, because this page is only reachable from the machine it
+                runs on. If it is ever opened to the network it will refuse to start without one.
+              </p>
+            )}
+            {src === 'explicit' && (
+              <p class='hint'>
+                This password comes from the platform that installed PearCinema - on Umbrel it is
+                the app password shown next to PearCinema in your app list. Change it there, or a
+                restart would quietly put it back.
+              </p>
+            )}
+            {(src === 'generated' || src === 'file') && (
+              <>
+                <div class='field'>
+                  <label>The current one</label>
+                  <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
+                </div>
+                <div class='field'>
+                  <label>A new one (at least 8 characters)</label>
+                  <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
+                </div>
+              </>
+            )}
+            <div class='actions'>
+              {(src === 'generated' || src === 'file') && (
+                <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
+              )}
+              <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Log out</button>
+            </div>
+          </div>
+        )}
+
+        {sec === 'host' && (
+          <div class='card'>
+            <h3>This host</h3>
+            <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
+            <p class='hint'>
+              That is this library's address on the network PearCinema uses. It is not a
+              secret, and it is not enough on its own to get in - a device also needs a
+              grant, which only pairing creates.
+            </p>
+            <div class='actions'>
+              <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
+            </div>
+          </div>
         )}
       </div>
-
-      <div class='card'>
-        <h3>This host</h3>
-        <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
-        <p class='hint'>
-          That is this library's address on the network PearCinema uses. It is not a
-          secret, and it is not enough on its own to get in - a device also needs a
-          grant, which only pairing creates.
-        </p>
-        <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
-        <button class='ghost' style='margin-left:.5rem' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Log out</button>
-      </div>
-    </>
+    </div>
   )
 }
 

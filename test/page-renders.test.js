@@ -273,6 +273,11 @@ test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were
 
   const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  // Settings is a side navigation now; the artwork panel lives behind its entry.
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Artwork')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
   // The sentence IS the consent. A toggle without it is a host quietly telling a
