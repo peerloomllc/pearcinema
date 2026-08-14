@@ -453,6 +453,34 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); flex: none }
 .dot.on { background: var(--good) }
 
+/* ---- settings: a side navigation, one section at a time --------------------- */
+
+.settings { display: flex; gap: 1.4rem; align-items: flex-start }
+.setnav {
+  display: flex; flex-direction: column; gap: .2rem;
+  min-width: 9.5rem; position: sticky; top: .5rem;
+}
+.setnav button {
+  text-align: left; font: inherit; cursor: pointer;
+  background: none; border: none; color: var(--muted);
+  padding: .5rem .75rem; border-radius: 9px;
+}
+.setnav button:hover { color: var(--fg) }
+.setnav button.on { background: var(--card); color: var(--fg); border: 1px solid var(--line) }
+.setbody { flex: 1; min-width: 0 }
+
+/* ONE ACTION ROW PER CARD, right-aligned, and adjacent buttons the same width -
+ * a row of mixed-width buttons is the clutter Tim named. */
+.actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .9rem }
+.actions button { min-width: 7.5rem }
+
+/* On a phone the nav becomes a row of chips above the section. */
+@media (max-width: 720px) {
+  .settings { flex-direction: column }
+  .setnav { flex-direction: row; flex-wrap: wrap; position: static; min-width: 0 }
+  .setnav button { text-align: center }
+}
+
 /* ---- modal ---------------------------------------------------------------- */
 
 .overlay {

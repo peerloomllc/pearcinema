@@ -100,7 +100,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
         </p>
       )}
 
-      <div class='row' style='margin-top:.5rem'>
+      <div class='actions'>
         {!meta.enabled && (
           <button disabled={!meta.hasKey && !(key && tested?.ok)} onClick={() => save(true)}>
             Turn on and fetch artwork
