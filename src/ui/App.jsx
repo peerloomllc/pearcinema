@@ -18,6 +18,16 @@ const fmtRuntime = (s) => {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
+// Exact - "1:12:34", not "1h 12m" - because somebody deciding whether to resume
+// is looking for the moment they stopped, and a rounded number does not tell
+// them which of two attempts this was (the dashboard's rule). Positions are
+// MILLISECONDS, the suite convention.
+const fmtClock = (ms) => {
+  const s = Math.floor((Number(ms) || 0) / 1000)
+  const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60)
+  return (h ? `${h}:${String(m).padStart(2, '0')}` : String(m)) + ':' + String(s % 60).padStart(2, '0')
+}
+
 // The camera pointed at a pairing QR. PearTune's Scanner, ported: getUserMedia
 // frames through jsQR on a hidden canvas. The guard on mediaDevices is load-
 // bearing - outside a secure context the property is UNDEFINED and reading
@@ -276,6 +286,11 @@ export default function App () {
   // pairing screen for adding (or re-adding) a library.
   const [showHosts, setShowHosts] = useState(false)
   const [addingLibrary, setAddingLibrary] = useState(false)
+  // A saved position waiting on the viewer's word - { item, url, positionMs }.
+  // It OFFERS rather than jumping, because somebody who opened a film to watch
+  // the start again should not have to drag backwards out of it (the rule the
+  // dashboard's player already follows).
+  const [resumeOffer, setResumeOffer] = useState(null)
   // Items already retried after a native player error - one honest retry per
   // item per session, never a loop of failing attempts.
   const retried = useRef(new Set())
@@ -345,6 +360,7 @@ export default function App () {
     // close. A RUNNING FILM is the shell's to close - it never reaches here.
     window.__pearBack = () => {
       const u = uiRef.current
+      if (u.resumeOffer) return setResumeOffer(null)
       if (u.addingLibrary) return setAddingLibrary(false)
       if (u.showHosts) return setShowHosts(false)
       if (u.season) return setSeason(null)
@@ -354,7 +370,7 @@ export default function App () {
     return () => offs.forEach((f) => f())
   }, [])
 
-  uiRef.current = { addingLibrary, showHosts, season: !!season, series: !!series }
+  uiRef.current = { resumeOffer: !!resumeOffer, addingLibrary, showHosts, season: !!season, series: !!series }
 
   const fetchList = useCallback(async (params, append = false) => {
     try {
@@ -412,6 +428,14 @@ export default function App () {
   // PLAYBACK IS NATIVE - ExoPlayer in the shell, pointed at the shim, because the
   // WebView's own media stack refuses Matroska and Matroska is 83% of a real
   // library. The UI fetches the URL and any saved position, then hands over.
+  const play = async (item, url, startMs) => {
+    try {
+      await call('shell.play', { itemId: item.id, url, title: item.title, startMs })
+    } catch (e) {
+      setErr(e.message)
+    }
+  }
+
   const open = async (i) => {
     if (i.type === 'series') return setSeries(i)
     if (i.type === 'season') return setSeason(i)
@@ -420,8 +444,13 @@ export default function App () {
         call('stream.url', { itemId: i.id }),
         call('resume.get', { itemId: i.id }).catch(() => null)
       ])
-      const startMs = prior?.positionMs > 0 ? prior.positionMs : 0
-      await call('shell.play', { itemId: i.id, url, title: i.title, startMs })
+      // The position is NESTED: resume.get answers { resume: { positionMs } }.
+      // The first cut read prior.positionMs - always undefined - so the
+      // documented auto-resume never actually resumed and nobody had measured
+      // it. The offer below is the first reader that did.
+      const startMs = prior?.resume?.positionMs > 0 ? prior.resume.positionMs : 0
+      if (startMs > 0) return setResumeOffer({ item: i, url, positionMs: startMs })
+      await play(i, url, 0)
     } catch (e) {
       setErr(e.message)
     }
@@ -449,6 +478,27 @@ export default function App () {
       )}
 
       {err && <div class='bad'>{err}</div>}
+
+      {resumeOffer && (
+        <div class='resumeover' onClick={() => setResumeOffer(null)}>
+          <div class='card' onClick={(e) => e.stopPropagation()}>
+            <h3>Resume at {fmtClock(resumeOffer.positionMs)}?</h3>
+            <div class='row'>
+              <button onClick={() => {
+                const r = resumeOffer
+                setResumeOffer(null)
+                play(r.item, r.url, r.positionMs)
+              }}>Resume</button>
+              <button class='ghost' onClick={() => {
+                // Start over means FROM ZERO, the dashboard's hard-won rule.
+                const r = resumeOffer
+                setResumeOffer(null)
+                play(r.item, r.url, 0)
+              }}>Start Over</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Grid items={items} artBase={artBase} onOpen={open} />
 
