@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -119,6 +119,46 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     // means a full transcode, which v1 does not have - so it is listed with
     // `playable: false` and a reason. Silently hiding it would leave someone
     // hunting for subtitles the file demonstrably contains.
+
+    // --- the phone's transcode path (approved remux proposal, wire section) ---
+    //
+    // THE HOST DECIDES from what the client declares; a client cannot ask to be
+    // transcoded, only describe itself - the same rule every transport follows.
+    'media.decide': async (ctx) => {
+      if (!media) throw ctx.notFound('this host cannot decide modes')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      const out = await media.decide({ itemId: String(ctx.params.itemId), capabilities: ctx.params.capabilities || {} })
+      if (!out) throw ctx.notFound('no such item')
+      return out
+    },
+
+    'media.playlist': async (ctx) => {
+      if (!media) throw ctx.notFound('this host serves no playlists')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      const out = await media.playlist({ itemId: String(ctx.params.itemId), capabilities: ctx.params.capabilities || {} })
+      if (!out) throw ctx.notFound('no such item')
+      return out
+    },
+
+    // One segment's bytes, streamed. Runs on the SAME engine pool as the
+    // browser's transcodes, so its cap answers here as a typed BUSY.
+    'media.segment': async (ctx) => {
+      if (!media) throw ctx.notFound('this host serves no segments')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      let session
+      try {
+        session = await media.segment({
+          itemId: String(ctx.params.itemId),
+          seq: ctx.params.seq,
+          capabilities: ctx.params.capabilities || {}
+        })
+      } catch (e) {
+        if (e.code === 'BUSY') { ctx.fail('BUSY', e.message); return }
+        throw e
+      }
+      if (!session) throw ctx.notFound('no such segment')
+      return ctx.stream(session.stdout)
+    },
 
     'subtitle.list': async (ctx) => {
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')

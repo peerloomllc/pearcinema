@@ -36,6 +36,19 @@ const HOSTS_FILE = path.join(DATA_DIR, 'hosts.json')
 
 const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' })
 
+// WHAT THIS DEVICE DECLARES IT CAN PLAY. Conservative and static for the first
+// cut: H.264 everywhere, HEVC deliberately ABSENT even though many chips decode
+// it - because the one measured device (the TCL, MediaCodec 0x80000000 on a real
+// HEVC film, 2026-08-14) proved that "the chip lists HEVC" and "this file plays"
+// are different claims. A device that under-declares costs the host some engine
+// time; one that over-declares costs the viewer a black screen. Probing the real
+// decoder list per device is the tracked follow-up.
+const CAPABILITIES = {
+  containers: ['mp4', 'matroska', 'webm', 'mpegts'],
+  videoCodecs: ['h264', 'vp9', 'av1'],
+  audioCodecs: ['aac', 'mp3', 'opus', 'flac', 'vorbis']
+}
+
 // --- IPC --------------------------------------------------------------------
 
 function send (msg) {
@@ -147,6 +160,61 @@ const shim = createAudioShim({
   defaultClient: () => connected(),
   streamParams: (id, extra) => ({ itemId: id, ...extra }),
   artParams: (id, size) => ({ artId: id, size }),
+  // THE HLS ROUTES: the playlist is fetched from the host and served with its
+  // segment lines rewritten to this shim's own /hlsseg/ path; each segment pull
+  // becomes one media.segment call whose bytes stream straight through. The
+  // capabilities ride every call because the host is stateless about them.
+  extra: async (req, res) => {
+    const url = req.url || ''
+
+    let m = /^\/hls\/([a-z0-9]+)\.m3u8/i.exec(url)
+    if (m) {
+      const itemId = m[1]
+      try {
+        const c = await connected()
+        const out = await c.request('media.playlist', { itemId, capabilities: CAPABILITIES })
+        if (!out?.playlist) {
+          res.writeHead(409, { 'content-type': 'text/plain' })
+          res.end(out?.reason || 'no playlist for this item')
+          return true
+        }
+        const body = out.playlist.replace(/^(\d+)\.ts$/gm, `/hlsseg/${itemId}/$1.ts`)
+        res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
+        res.end(body)
+      } catch (e) {
+        log('hls:playlist-failed', { err: e.message })
+        try { res.writeHead(502); res.end() } catch {}
+      }
+      return true
+    }
+
+    m = /^\/hlsseg\/([a-z0-9]+)\/(\d+)\.ts/i.exec(url)
+    if (m) {
+      const itemId = m[1]
+      const seq = Number(m[2])
+      let dead = false
+      res.on('close', () => { dead = true })
+      try {
+        const c = await connected()
+        res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
+        await c.request('media.segment', { itemId, seq, capabilities: CAPABILITIES }, {
+          stream: true,
+          buffer: false,
+          onchunk: (chunk) => {
+            if (dead) return
+            try { res.write(chunk) } catch { dead = true }
+          }
+        })
+        if (!dead) { try { res.end() } catch {} }
+      } catch (e) {
+        log('hls:segment-failed', { seq, err: e.message })
+        try { res.destroy() } catch {}
+      }
+      return true
+    }
+
+    return false
+  },
   // PearCinema's items carry their facts under `media`, and the MIME comes from
   // the CONTAINER the probe recorded rather than a filename we do not have.
   itemMeta: (t) => ({
@@ -251,9 +319,22 @@ const methods = {
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
 
-  // Where the player should point. The shim answers Range requests by pulling
-  // the same ranges over P2P - the player never knows.
-  'stream.url': async ({ itemId }) => ({ url: shim.urlFor(itemId) }),
+  // Where the player should point - and WHICH KIND of stream that is. The host
+  // decides from this device's declared capabilities: direct play gets the
+  // byte-range shim URL; a codec this device does not declare gets the HLS
+  // playlist whose segments the host transcodes on demand. The player cannot
+  // tell it is being helped.
+  'stream.url': async ({ itemId }) => {
+    const c = await connected()
+    const verdict = await c.request('media.decide', { itemId, capabilities: CAPABILITIES }).catch(() => null)
+    if (verdict?.mode === 'transcode') {
+      const { port } = { port: shimPort }
+      return { url: `http://127.0.0.1:${port}/hls/${itemId}.m3u8`, mode: 'transcode' }
+    }
+    // `remux` collapses to direct on a phone: ExoPlayer opens the containers a
+    // browser refuses, which is why the phone declared them.
+    return { url: shim.urlFor(itemId), mode: verdict?.mode || 'direct' }
+  },
   'art.base': async () => ({ base: shim.artBase() }),
 
   'ping': async () => (await connected()).ping()
