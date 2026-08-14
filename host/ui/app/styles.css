@@ -57,6 +57,24 @@
 
 * { box-sizing: border-box }
 
+/* THE PAGE MUST NOT SHIFT SIDEWAYS WHEN A SCROLLBAR APPEARS.
+ *
+ * Devices is short and Watch is long, so changing tab added or removed a scrollbar and
+ * every centred thing on the page - the search box most visibly - jumped by its width
+ * (Tim, 2026-08-13). Reserving the gutter permanently is the fix: the space is always
+ * there, so nothing reflows when the bar arrives.
+ *
+ * The fallback is a scrollbar that is always drawn rather than always reserved. Uglier
+ * on a short page, and still better than a page that moves under the pointer. */
+html { scrollbar-gutter: stable }
+@supports not (scrollbar-gutter: stable) {
+  html { overflow-y: scroll }
+}
+
+/* And never sideways, on any screen. A single element that overhangs turns into a
+ * horizontal scrollbar that shifts everything vertically as well. */
+html, body { overflow-x: hidden; max-width: 100% }
+
 html, body, #root { height: 100% }
 
 body {

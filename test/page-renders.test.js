@@ -959,3 +959,15 @@ test('THE PAIRING MODAL IS PEARTUNE\'S, down to the words', async (t) => {
   assert.doesNotMatch(text(), /Open a window/)
   assert.doesNotMatch(text(), /Lend it for a while/)
 })
+
+test('THE PAGE DOES NOT SHIFT SIDEWAYS WHEN A SCROLLBAR ARRIVES', async (t) => {
+  // Devices is short and Watch is long, so changing tab added or removed a scrollbar
+  // and every centred thing on the page jumped by its width. Reserving the gutter
+  // permanently means the space is always there and nothing reflows.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  const html = dom.window.getComputedStyle(doc.documentElement)
+  assert.equal(html.scrollbarGutter, 'stable', 'the gutter is always reserved')
+  assert.equal(html.overflowX, 'hidden', 'and nothing may overhang sideways')
+})
