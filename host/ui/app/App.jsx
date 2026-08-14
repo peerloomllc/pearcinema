@@ -152,7 +152,15 @@ export default function App () {
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
   // Searching means something on the library and nowhere else - not on Devices, not on
   // Settings, and not while a film is open.
-  const searchable = tab === 'watch' && !playing
+  // SEARCHING WORKS FROM ANYWHERE. It used to be disabled off the Watch tab, which is
+  // a rule about where you happen to be standing rather than about what you want -
+  // typing a film's name means "find me this film" wherever you are. So typing carries
+  // you to the library and starts filtering (Tim, 2026-08-13).
+  const searchable = true
+  const onSearch = (v) => {
+    setSearch(v)
+    if (v && (tab !== 'watch' || playing)) { setTab('watch'); setPlaying(null) }
+  }
 
   return (
     <div class='shell'>
@@ -189,7 +197,7 @@ export default function App () {
               placeholder='Search the library'
               disabled={!searchable}
               aria-label='Search the library'
-              onInput={e => setSearch(e.currentTarget.value)}
+              onInput={e => onSearch(e.currentTarget.value)}
             />
             {searchable && search && (
               <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>
@@ -203,8 +211,8 @@ export default function App () {
           <button
             class={'iconbtn' + (tab === 'who' ? ' on' : '')}
             onClick={() => { setTab('who'); setPlaying(null) }}
-            aria-label='Devices'
-            title={online ? `Devices - ${online} online` : 'Devices'}
+            aria-label='User access'
+            title={online ? `User access - ${online} online` : 'User access'}
           >
             <PeopleIcon size={18} />
             {online > 0 && <span class='dot' aria-hidden='true' />}

@@ -131,7 +131,11 @@ async function open (state = STATE, extraRoutes = {}, asked = null, delay = 0) {
   // Two turns: one for /api/state, one for the list it triggers.
   for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 15))
 
-  return { dom, win, doc: win.document, errors, text: () => win.document.body.textContent }
+  // THE RENDERED PAGE, NOT THE WHOLE DOCUMENT. `body.textContent` includes the inlined
+  // script - the entire application bundle - so any assertion that something is ABSENT
+  // matched its own source code and could never fail. Found 2026-08-13 by a test that
+  // passed while the thing it was testing plainly worked.
+  return { dom, win, doc: win.document, errors, text: () => win.document.getElementById('root').textContent }
 }
 
 test('the page mounts and shows the library, rather than a blank control plane', async (t) => {
@@ -147,11 +151,12 @@ test('the page mounts and shows the library, rather than a blank control plane',
   assert.match(text(), /Metropolis/)
   assert.match(text(), /Nosferatu/)
 
-  // The three places, which is the whole navigation.
-  assert.match(text(), /Watch/)
-  assert.match(text(), /Devices/)
-  assert.match(text(), /Settings/)
+  // The whole navigation, which is now the name plus three icons rather than three
+  // words - see the header test below.
   assert.match(text(), /Pair a device/)
+  for (const label of ['User access', 'Switch theme', 'Settings']) {
+    assert.ok([...doc.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === label), label)
+  }
 })
 
 test('the compatibility line is on screen, and it is honest about the MKV', async (t) => {
@@ -198,10 +203,17 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Devices')
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
 
+  // PEARTUNE'S SHAPE: people first, their devices nested under them. A device that
+  // belongs to nobody yet has its own section rather than being mixed in.
+  assert.match(text(), /People & devices/)
+  // This phone CLAIMS a name nobody has confirmed, which is the one thing on the page
+  // waiting on the operator - so it gets its own card at the top rather than being
+  // mixed in with devices that are simply unassigned.
+  assert.match(text(), /Needs confirming/)
   assert.match(text(), /A phone/)
   assert.match(text(), /Cut off/)
 })
@@ -926,16 +938,16 @@ test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
   assert.ok(slot, 'the middle of the bar always holds the search')
   assert.ok(slot.querySelector('.searchbox'), 'and on Watch there is a box in it')
 
-  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Devices')
+  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
   devices.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  // OFF RATHER THAN GONE. An empty slot is not the same height as one with a box in
-  // it, so removing the box still moved the bar - which was the whole complaint.
+  // AND IT WORKS FROM ANYWHERE. Disabling it off the Watch tab was a rule about where
+  // somebody happens to be standing rather than about what they want: typing a film's
+  // name means "find me this film" wherever they are.
   const after = doc.querySelector('.topbar .searchslot .searchbox')
   assert.ok(after, 'the box is still there on another tab')
-  assert.ok(after.classList.contains('off'), 'and says searching does not apply here')
-  assert.equal(after.querySelector('input').disabled, true)
+  assert.equal(after.querySelector('input').disabled, false, 'and still usable')
 })
 
 test('THE PAIRING MODAL IS PEARTUNE\'S, down to the words', async (t) => {
@@ -993,7 +1005,7 @@ test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) =>
   // The name is the way back to the library, which is what let the tabs go.
   assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /back to the library/)
 
-  for (const label of ['Devices', 'Switch theme', 'Settings']) {
+  for (const label of ['User access', 'Switch theme', 'Settings']) {
     assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)
   }
 })
@@ -1023,4 +1035,56 @@ test('the name is one word', async (t) => {
   const { dom, doc } = await open()
   t.after(() => dom.window.close())
   assert.equal(doc.querySelector('.brand .word').textContent, 'PearCinema')
+})
+
+test('TYPING FROM ANOTHER PAGE TAKES YOU TO THE LIBRARY', async (t) => {
+  // Disabling the box off the Watch tab was a rule about where somebody is standing
+  // rather than about what they want. Typing a film's name means "find me this film".
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.match(text(), /A phone/, 'we are on the access page')
+
+  const input = doc.querySelector('.searchbox input')
+  input.value = 'metro'
+  input.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.doesNotMatch(text(), /Cut off/, 'and typing has carried us off it')
+  assert.equal(doc.querySelector('.searchbox input').value, 'metro', 'with what was typed kept')
+})
+
+test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
+  // A household of four should be four lines, not a wall of devices - and the devices
+  // belong UNDER the person, because revoking a person cuts off everything they hold
+  // and the page should make that obvious without a paragraph explaining it.
+  const withPerson = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Tim', label: 'Tim' }],
+    devices: [{
+      deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true,
+      personId: 'p1', claimedUser: 'Tim', lastSeen: Date.now(), scope: 'full'
+    }]
+  }
+  const { dom, doc, win, text } = await open(withPerson)
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const row = doc.querySelector('.prow')
+  assert.ok(row, 'the person is a row')
+  assert.match(row.textContent, /Tim/)
+  assert.match(row.textContent, /1 device/)
+  assert.equal(row.querySelector('.dev'), null, 'and their devices are folded away')
+
+  row.querySelector('.pname').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+
+  assert.ok(doc.querySelector('.prow .dev'), 'opening them shows what they hold')
+  assert.match(text(), /A phone/)
 })

@@ -696,7 +696,9 @@ export default function Library ({
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
-      <div class='row' style='margin-bottom:.6rem'>
+      {/* The shelf's captions run right up to the picker without this - two unrelated
+          things touching, which reads as one. */}
+      <div class='row' style='margin:1.4rem 0 .6rem'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
         <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>
           Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
