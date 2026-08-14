@@ -153,7 +153,11 @@ a { color: var(--accent) }
   font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem; white-space: nowrap;
   background: none; border: none; color: inherit; padding: 0; cursor: pointer;
 }
-.brand span { color: var(--accent) }
+/* The name is ONE word. The row's `gap` sits between the mark and the wordmark and
+ * nowhere else - a gap falls between text nodes as readily as between boxes, which is
+ * what put a space in the middle of "PearCinema". */
+.brand .word { display: inline }
+.brand .word span { color: var(--accent) }
 
 .barright { display: flex; align-items: center; gap: .35rem; justify-self: end }
 .barright .iconbtn {
@@ -847,22 +851,17 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .loadmore span { opacity: 0; transition: opacity .2s ease }
 .loadmore span.on { opacity: 1 }
 
-/* AND THE GRID FADES OUT AT ITS EDGES rather than being chopped off, so a long library
- * reads as continuing past the fold instead of ending there.
+/* THE EDGE FADES ARE GONE, and it is worth saying why rather than leaving a hole in
+ * the reasoning. They were two fixed strips drawn over the page - and a strip that
+ * paints `var(--bg)` to transparent is a visible BAND wherever the thing behind it is
+ * not exactly that colour, which in light mode meant a pale bar across the top of the
+ * library (Tim, 2026-08-13, with an arrow pointing at it).
  *
- * TWO FIXED STRIPS, NOT A MASK ON THE CONTENT. A mask (like a filter or a transform)
- * makes its element the containing block for anything `position: fixed` inside it AND
- * clips it - so the details sheet, which starts translated off to the right, was
- * clipped out of existence and only its scrim showed. Tim screenshotted a page-sized
- * dim overlay with nothing in it. Strips are siblings of the content rather than
- * ancestors, so nothing inside is affected. */
-.edge {
-  position: fixed; left: 0; right: 0; height: 26px; z-index: 15;
-  pointer-events: none;
-}
-.edge.top { top: 3.3rem; background: linear-gradient(to bottom, var(--bg), transparent) }
-.shell { position: relative }
-.edge.bottom { bottom: 0; height: 40px; background: linear-gradient(to top, var(--bg), transparent) }
+ * The version that would work is a mask on the scroller, and that is the same mask
+ * that clipped the details sheet out of existence two hours earlier. The content now
+ * scrolls under a solid header with a border, which is a boundary already - so the
+ * honest answer is that the fade was decoration that cost more than it gave.
+ */
 
 /* ---- icons ------------------------------------------------------------------ */
 

@@ -163,7 +163,13 @@ export default function App () {
           class='brand'
           onClick={() => { setTab('watch'); setPlaying(null) }}
           aria-label='PearCinema - back to the library'
-        ><Mark size={22} />Pear<span>Cinema</span></button>
+        >
+          <Mark size={22} />
+          {/* ONE ELEMENT, because the row has a `gap` and a gap falls between text
+              nodes as readily as between boxes - which is what put a space in the
+              middle of the name. */}
+          <span class='word'>Pear<span>Cinema</span></span>
+        </button>
         {/* THE SEARCH SITS IN THE MIDDLE OF THE BAR AND THE BAR NEVER CHANGES HEIGHT.
             It used to be rendered only on the Watch tab, so opening Devices or Settings
             took the box out and the whole header shrank - the page jumped under the
@@ -223,13 +229,6 @@ export default function App () {
           <button onClick={() => setPairing(true)}>Pair a device</button>
         </div>
       </div>
-
-      {/* The fade at the top and bottom of the scroll. Fixed strips rather than a mask
-          on the content: a mask makes its element the containing block for anything
-          `position: fixed` inside it AND clips it, which erased the details sheet and
-          left only its scrim on screen. */}
-      <div class='edge top' aria-hidden='true' />
-      <div class='edge bottom' aria-hidden='true' />
 
       <div class='scroller'>
       <div class='content'>

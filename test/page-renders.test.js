@@ -822,9 +822,11 @@ test('THE DETAILS SHEET IS NOT CLIPPED OUT OF EXISTENCE', async (t) => {
   assert.equal(style.maskImage || 'none', 'none', 'the content masks nothing')
   assert.equal(style.webkitMaskImage || 'none', 'none')
 
-  // The fade is still there, as strips beside the content rather than over it.
-  assert.ok(doc.querySelector('.edge.top'), 'the top fade')
-  assert.ok(doc.querySelector('.edge.bottom'), 'and the bottom one')
+  // AND THE STRIPS THAT REPLACED THE MASK ARE GONE TOO. A strip painting the page
+  // colour to transparent is a visible BAND wherever what is behind it is not exactly
+  // that colour - in light mode, a pale bar across the top of the library. The content
+  // scrolls under a solid header with a border, which is a boundary already.
+  assert.equal(doc.querySelector('.edge'), null, 'no painted strips over the page')
 })
 
 test('A PAUSED FILM SHOWS A PLAY BUTTON', async (t) => {
@@ -1013,4 +1015,12 @@ test('the page keeps one background, however far it scrolls', async (t) => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
   assert.match(css, /\.scroller\{[^}]*background-attachment:local/, 'the glow scrolls away with the page')
   assert.doesNotMatch(css, /background-attachment:fixed/, 'and nothing is pinned to the window')
+})
+
+test('the name is one word', async (t) => {
+  // The header row has a `gap`, and a gap falls between text nodes as readily as
+  // between boxes - so "Pear" and "Cinema" were being pushed apart.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+  assert.equal(doc.querySelector('.brand .word').textContent, 'PearCinema')
 })
