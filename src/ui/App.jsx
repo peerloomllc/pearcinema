@@ -145,7 +145,6 @@ export default function App () {
   const [cursor, setCursor] = useState(null)
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
-  const [playing, setPlaying] = useState(null)
   const [pairLink, setPairLink] = useState('')
   const [artBase, setArtBase] = useState('')
   const [err, setErr] = useState('')
@@ -165,20 +164,25 @@ export default function App () {
     const offs = [
       on('pair-link', (url) => setPairLink(url)),
       on('hosts:changed', () => reload().catch(() => {})),
-      on('shim:ready', () => reload().catch(() => {}))
+      on('shim:ready', () => reload().catch(() => {})),
+      // THE UI OWNS THE WATCH-STATE WRITES; the native player only reports. The
+      // host derives the runtime itself, so a position is all that crosses.
+      on('player:tick', (d) => {
+        if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+      }),
+      on('player:closed', (d) => {
+        if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+      })
     ]
     call('shell.pendingLink').then((url) => { if (url) setPairLink(url) }).catch(() => {})
-    // Android back unwinds the UI one level; only with nothing left does the app close.
+    // Android back unwinds the UI one level; only with nothing left does the app
+    // close. A RUNNING FILM is the shell's to close - it never reaches here.
     window.__pearBack = () => {
-      setPlaying((p) => {
-        if (p) return null
-        setSeason((se) => {
-          if (se) return null
-          setSeries((sr) => {
-            if (sr) return null
-            call('shell.exit').catch(() => {})
-            return null
-          })
+      setSeason((se) => {
+        if (se) return null
+        setSeries((sr) => {
+          if (sr) return null
+          call('shell.exit').catch(() => {})
           return null
         })
         return null
@@ -212,12 +216,22 @@ export default function App () {
     return <Pairing initialLink={pairLink} onPaired={() => reload()} />
   }
 
-  if (playing) return <Player item={playing} onClose={() => setPlaying(null)} />
-
-  const open = (i) => {
-    if (i.type === 'series') setSeries(i)
-    else if (i.type === 'season') setSeason(i)
-    else setPlaying(i)
+  // PLAYBACK IS NATIVE - ExoPlayer in the shell, pointed at the shim, because the
+  // WebView's own media stack refuses Matroska and Matroska is 83% of a real
+  // library. The UI fetches the URL and any saved position, then hands over.
+  const open = async (i) => {
+    if (i.type === 'series') return setSeries(i)
+    if (i.type === 'season') return setSeason(i)
+    try {
+      const [{ url }, prior] = await Promise.all([
+        call('stream.url', { itemId: i.id }),
+        call('resume.get', { itemId: i.id }).catch(() => null)
+      ])
+      const startMs = prior?.positionMs > 0 ? prior.positionMs : 0
+      await call('shell.play', { itemId: i.id, url, title: i.title, startMs })
+    } catch (e) {
+      setErr(e.message)
+    }
   }
 
   return (
