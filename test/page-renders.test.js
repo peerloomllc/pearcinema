@@ -96,7 +96,27 @@ const ROUTES = {
   },
   // A show half way through, so the tile can say which one is being watched.
   '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, inProgress: 0, started: true, complete: false } } },
-  '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
+  '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] },
+  // The artwork panel, as a fresh host answers it: off, keyless, one ambiguous
+  // match waiting - so the confirm UI renders and can be asserted on.
+  '/api/metadata': {
+    enabled: false,
+    hasKey: false,
+    running: null,
+    lastRun: null,
+    matched: 0,
+    missed: 0,
+    pending: [{
+      id: 'vague-1',
+      title: 'Crash',
+      year: null,
+      type: 'movie',
+      candidates: [
+        { tmdbId: 21, title: 'Crash', year: 1996, overview: 'the Cronenberg one' },
+        { tmdbId: 22, title: 'Crash', year: 2004, overview: 'the other one' }
+      ]
+    }]
+  }
 }
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
@@ -242,6 +262,28 @@ test('EVERY FILM GETS THE SAME CONTROLS, whether it is repackaged or not', async
   const v = doc.querySelector('video')
   assert.ok(v)
   assert.equal(v.hasAttribute('controls'), false, 'the native controls are gone, so there is only ever one bar')
+})
+
+test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and holds the ambiguous match for a click', async (t) => {
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // The sentence IS the consent. A toggle without it is a host quietly telling a
+  // third party what somebody owns.
+  assert.match(text(), /tells TMDB the titles it is identifying/)
+  assert.match(text(), /Off by default/)
+  // No key saved: the way to get one is on screen, not in a doc.
+  assert.match(text(), /themoviedb\.org/)
+  // The two Crashes wait for the operator, with both candidates offered and a way
+  // to say neither.
+  assert.match(text(), /Which one is it\?/)
+  assert.match(text(), /Crash \(1996\)/)
+  assert.match(text(), /Crash \(2004\)/)
+  assert.match(text(), /None of these/)
 })
 
 test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read as', async (t) => {

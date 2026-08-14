@@ -748,6 +748,61 @@ async function startDashboard ({
       }
 
       // --- the source ----------------------------------------------------------
+      // --- online artwork, opt in --------------------------------------------
+      //
+      // The key never leaves the host: the page is told only that one is saved.
+      // The Test button is its own route because a key that silently fails is worse
+      // than none - the library just looks wrong with nothing saying why.
+
+      if (req.method === 'GET' && url.pathname === '/api/metadata') {
+        return json(res, 200, { ...host.metadataSettings(), ...host.enricher.summary() })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/test') {
+        const { key } = await readBody(req)
+        if (!key) return json(res, 400, { error: 'key required' })
+        return json(res, 200, await host.testMetadataKey(String(key)))
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata') {
+        const { key, enabled } = await readBody(req)
+        // A key is TESTED before it is saved, on the same rule the source has: a
+        // saved credential that does not work is a library that quietly looks
+        // wrong, which is the worst version of failure.
+        if (key) {
+          const t = await host.testMetadataKey(String(key))
+          if (!t.ok) return json(res, 400, { error: t.error })
+        }
+        const out = host.saveMetadata({ key, enabled })
+        // Turning it on IS asking for the artwork - do not make the operator find
+        // a second button. Fire and forget; progress shows in /api/metadata.
+        if (out.enabled && out.hasKey && !host.enricher.running) {
+          host.runMetadata().catch(e => host.log('tmdb:failed', { err: e.message }))
+        }
+        return json(res, 200, out)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/run') {
+        const { retryMissed } = await readBody(req)
+        if (host.enricher.running) return json(res, 200, { running: host.enricher.running })
+        host.runMetadata({ retryMissed: !!retryMissed }).catch(e => host.log('tmdb:failed', { err: e.message }))
+        return json(res, 200, { started: true })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/confirm') {
+        const { itemId, tmdbId } = await readBody(req)
+        if (!itemId || !tmdbId) return json(res, 400, { error: 'itemId and tmdbId required' })
+        const out = await host.confirmMetadata({ itemId: String(itemId), tmdbId })
+        if (!out) return json(res, 404, { error: 'no such pending match' })
+        return json(res, 200, out)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/dismiss') {
+        const { itemId } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        return json(res, 200, { ok: host.enricher.dismiss(String(itemId)) })
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/source/test') {
         const cfg = await readBody(req)
         try {
