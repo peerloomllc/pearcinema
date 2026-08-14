@@ -97,6 +97,13 @@ export default function App () {
   const [activeSub, setActiveSub] = useState<string | null>(null)
   const [cueText, setCueText] = useState('')
   const cuesRef = useRef<Cue[]>([])
+  // Where the bottom of the PICTURE is, in wrap coordinates. The video sits
+  // letterboxed inside the wrap (contentFit contain), so anchoring cues to the
+  // wrap floated them mid-black in portrait and mid-picture in landscape
+  // (Tim, 2026-08-14: "in the middle of the screen instead of at the bottom").
+  // Computed from the wrap's layout and the video track's own size.
+  const wrapSizeRef = useRef({ w: 0, h: 0 })
+  const [cueBottom, setCueBottom] = useState(24)
   // The boot effect's shellCall, reachable from render-time handlers.
   const shellCallRef = useRef<((method: string, args: any) => Promise<any>) | null>(null)
   // THE FORWARD BUFFER IS TIME-GOVERNED AND SMALL, and that is a revoke-latency
@@ -323,6 +330,17 @@ export default function App () {
         const next = cue ? cue.text : ''
         return cur === next ? cur : next
       })
+      // Pin the cue just inside the picture's bottom edge: letterbox height is
+      // (wrap - displayed video) / 2, from contain-fit arithmetic.
+      try {
+        const { w, h } = wrapSizeRef.current
+        const vs: any = player.videoTrack?.size
+        if (vs?.width > 0 && vs?.height > 0 && w > 0 && h > 0) {
+          const scale = Math.min(w / vs.width, h / vs.height)
+          const bottom = Math.max(16, (h - vs.height * scale) / 2 + 16)
+          setCueBottom((cur) => (Math.abs(cur - bottom) > 1 ? bottom : cur))
+        }
+      } catch {}
     }, 300)
     return () => clearInterval(t)
   }, [playing])
@@ -455,7 +473,13 @@ export default function App () {
               <Text style={styles.backTxt}>Subtitles</Text>
             </Pressable>
           </View>
-          <View style={styles.videoWrap}>
+          <View
+            style={styles.videoWrap}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout
+              wrapSizeRef.current = { w: width, h: height }
+            }}
+          >
             <VideoView
               style={styles.video}
               player={player}
@@ -467,7 +491,7 @@ export default function App () {
               contentFit='contain'
             />
             {!!cueText && (
-              <View pointerEvents='none' style={styles.cueWrap}>
+              <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
                 <Text style={styles.cue}>{cueText}</Text>
               </View>
             )}
@@ -525,9 +549,10 @@ const styles = StyleSheet.create({
   title: { color: '#efe9df', flex: 1 },
   videoWrap: { flex: 1 },
   video: { flex: 1 },
-  // The external-subtitle overlay: above the native controls' resting place,
-  // never touchable, readable on any picture.
-  cueWrap: { position: 'absolute', left: 16, right: 16, bottom: 84, alignItems: 'center' },
+  // The external-subtitle overlay: pinned to the PICTURE's bottom edge (the
+  // bottom offset is computed from the letterbox), never touchable, readable
+  // on any picture.
+  cueWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
   cue: {
     color: '#fff', fontSize: 16, lineHeight: 22, textAlign: 'center',
     backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 4,
