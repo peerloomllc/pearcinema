@@ -758,6 +758,73 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .poster:hover .mark, .poster:focus-within .mark { opacity: 1 }
 .poster .mark.on { opacity: 1; background: var(--accent); color: #fff }
 
+/* Fix-the-match, opposite corner from the tick so the two controls cannot be
+ * mistaken for each other. Same reveal-on-hover: a control on every tile of a
+ * 240-film grid is noise until the pointer says which tile matters. */
+.poster .fixmatch {
+  position: absolute; top: .4rem; left: .4rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.7);
+  border: 1px solid transparent; opacity: 0; transition: opacity .12s ease;
+}
+.poster:hover .fixmatch, .poster:focus-within .fixmatch { opacity: 1 }
+.poster .fixmatch:hover { color: #fff; background: rgba(0,0,0,.75) }
+.fixmatch svg { display: block }
+
+/* The fix dialog's candidates, picked by eye: the poster IS the choice. */
+.candgrid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  gap: .6rem; margin-top: .8rem;
+}
+.cand {
+  display: flex; flex-direction: column; gap: .3rem; padding: 0;
+  background: none; border: none; text-align: left; cursor: pointer;
+  color: var(--fg); font: inherit;
+}
+.cand img, .cand .noart {
+  width: 100%; aspect-ratio: 2 / 3; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--line); display: block;
+}
+.cand .noart { display: flex; align-items: center; justify-content: center; color: var(--muted); background: var(--panel) }
+.cand:hover img, .cand:focus-visible img { outline: 2px solid var(--accent); outline-offset: 1px }
+.cand .t { font-size: .82rem; line-height: 1.25 }
+.cand .s { font-size: .75rem; color: var(--muted) }
+
+/* The fix dialog: everything centred, and the search row given air above and
+ * below so the hint, the box and the results read as three things, not one. */
+.fixbody { text-align: center }
+.fixsearch { justify-content: center; margin: .9rem 0 1rem }
+.fixsearch input { flex: 1; max-width: 24rem }
+.candgrid { justify-items: center }
+.cand { align-items: center; text-align: center }
+
+/* The Films/Shows picker, frozen to the top of the scroller. Sticky rather than
+ * fixed, so it takes its place in the flow and only pins once scrolled to - and it
+ * sits OUTSIDE the animated .screen, so no transform interferes with the pinning.
+ * The blur matches the topbar's, because pinned rows over scrolling content are
+ * the same idea in both places. */
+.pickrow {
+  position: sticky; top: 0; z-index: 6;
+  margin: 1.4rem 0 .6rem; padding: .55rem 0;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(10px);
+}
+/* The divider between "back to the shelf" and the categories proper. */
+.vdiv { width: 1px; align-self: stretch; background: var(--line); margin: 0 .25rem }
+
+/* Artwork-fetch progress: a real bar, in the library banner and the panel both. */
+.artfetch { display: flex; flex-direction: column; gap: .45rem }
+.meter {
+  display: block; height: 4px; border-radius: 999px; overflow: hidden;
+  background: var(--line);
+}
+.meter i {
+  display: block; height: 100%; background: var(--accent);
+  border-radius: 999px; transition: width .6s ease;
+}
+
 .eprow .mark {
   margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px;
   font-size: .75rem; background: transparent; color: var(--muted);

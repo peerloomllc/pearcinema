@@ -2,7 +2,89 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - MEASURED: the N100's video engine holds ten 1080p HEVC transcodes, and the FREE driver is enough
+## 2026-08-14 (latest) - ARTWORK APPLIES ITS BEST GUESS, and the correction lives on the tile
+Tier: T1 (matching policy and dashboard flow; no wire change)
+Context: Tim ran the caution-first cut against his real library and rejected the
+process: 79 titles held back as a homework list of prompts in Settings, before any of
+their artwork appeared. His words - best effort the matching, notice that some may be
+wrong, and "on the artwork/tiles there should be an edit icon/button in the corner" -
+with Plex's Fix Match named as the reference.
+
+**Supersedes the previous entry's matching section.** Every lookup now applies its
+best candidate - exact-title-with-year first, then exact title, then TMDB's own first
+result - and records `uncertain` where it was a guess. The panel and the notice count
+the guesses honestly; nobody is quizzed. On his library: the 79 held-back titles
+resolved to guesses in one pass, 237 matched in all, 27 with nothing.
+
+**The fix is where the mistake is visible.** A pencil in the tile's corner (opposite
+the watched tick, hover-revealed like it) opens a fix-match dialog: the lookup rerun,
+optionally with the operator's own words - the filename being wrong is usually the
+whole problem - a pick applied, or the fetched artwork dropped. The chosen poster is
+fetched fresh by TMDB id; nothing from the page is trusted but the id. A fixed match
+is never `uncertain`, because a person chose it. An unmatched item is remembered so
+the next automatic pass does not re-guess it.
+
+**The candidates are picked BY EYE, and their thumbnails come through the host.**
+The poster is the thing being chosen, so the dialog shows posters rather than a text
+list asking somebody to recognise a film by its year. The thumbnails are RELAYED by
+the host (`/api/metadata/preview`, path shape pinned to TMDB's own), because the
+panel's promise is that the HOST talks to TMDB - a page that hotlinked
+image.tmdb.org would make every operator's browser talk to them too.
+
+**Progress is where the result lands.** The pass reports on the LIBRARY page - the
+page whose posters are filling in - riding the /api/state poll that already exists,
+and the lists refetch when the pass completes so posters arrive while somebody
+watches. The pencil only shows where artwork came from the lookup or is absent:
+a poster beside the file on disk is not this feature's to change.
+
+**And the step joined the first-run wizard** (Tim, same day), right after the source:
+the moment somebody points at their films is the moment a wall of grey placeholders
+is coming. Skippable, embedded from the same panel Settings uses.
+
+## 2026-08-13 - ONLINE ARTWORK IS BUILT CAUTION-FIRST, and the key question is REOPENED
+Tier: T1 (host-local cache and routes; no wire change, no Hyperbee change)
+Context: the opt-in TMDB item, whose design calls were fixed 2026-08-12: operator's own
+key, TMDB only, sidecar always wins, default off, cache in the data dir, the dashboard
+saying plainly that the host tells a third party what titles it is identifying.
+
+**Matching applies itself only when it cannot be wrong.** An exact normalised title
+with the year agreeing (rips are routinely off by one), or a search returning exactly
+one thing. Everything else - the two films called Crash, the two called Solaris -
+becomes a PENDING match holding the candidates, for the operator to pick from or
+dismiss. A wrong poster on somebody's film is worse than a placeholder, and a
+filename is not always what a film is called.
+
+**Sidecar-wins is enforced structurally, not by policy.** The enrichment is a Proxy
+over the adapter that fills `artId` ONLY where there is none, with a copy rather
+than a mutation (adapters cache their item objects, and a poisoned cache would
+survive the feature being turned off). Both transports see the same decorated
+adapter, so a browser and a phone cannot disagree about which films have posters.
+The pass itself walks the INNER adapter, so "has artwork" means artwork on disk
+rather than artwork the last pass invented.
+
+**Both credential shapes work without asking which.** TMDB's key page offers a short
+v3 key and a long v4 token; the long one is a JWT so it starts with `eyJ`, and that
+is the whole detection. Asking an operator which kind they copied is a support
+ticket.
+
+**The pass is remembered, including its failures.** Matched, pending, dismissed and
+missed all persist, so a restart re-fetches nothing and a dismissed row stays
+dismissed. "Look again" retries the misses explicitly. The whole store is
+disposable - deleting it costs a re-fetch and nothing else.
+
+### The key model is REOPENED (Tim, 2026-08-13)
+
+Tim asked whether a shared key he obtains - shipped with the app, used by every
+install - would be easier than bring-your-own. The honest facts: TMDB is free for
+this use and rate-limits per network address, so installs do not share a bucket;
+embedding an application key is normal practice among open-source media apps. The
+two real costs of a shared key: it is public forever once shipped, and a TMDB
+revocation blacks out artwork for every install at once, with his account on the
+hook. **Undecided: Tim is obtaining a key himself first to feel the signup
+friction before choosing.** The build works for either outcome - a shipped default
+key would be additive and the override field already exists.
+
+## 2026-08-13 - MEASURED: the N100's video engine holds ten 1080p HEVC transcodes, and the FREE driver is enough
 Tier: T2 (a measurement that sizes a proposed T3; no code change)
 Context: the hardware transcode TODO item said to measure concurrent 1080p HEVC to H.264
 on this hardware before promising anything, because the capacity doc's audio-era numbers

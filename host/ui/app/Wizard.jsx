@@ -14,6 +14,7 @@ import { useState } from 'preact/hooks'
 import { api } from './api'
 import { setupSteps, dismissSetup, DEFAULT_LIBRARY_NAME } from './setup'
 import SourcePanel from './SourcePanel'
+import Metadata from './Metadata'
 import Pair from './Pair'
 
 export default function Wizard ({ state, reload, onDone }) {
@@ -87,6 +88,19 @@ export default function Wizard ({ state, reload, onDone }) {
           <div class='confirm-actions'>
             <button class='ghost' onClick={advance}>Do this later</button>
             <button onClick={advance} disabled={state.source?.kind === 'empty'}>Next</button>
+          </div>
+        </>
+      )}
+
+      {step === 'artwork' && (
+        <>
+          <h2>Posters for your films</h2>
+          {/* Turning it on advances on its own - the enable IS the step. The
+              buttons below are for everybody else: no key yet, or no thanks. */}
+          <Metadata embedded onEnabled={advance} />
+          <div class='confirm-actions'>
+            <button class='ghost' onClick={advance}>Skip - artwork beside my files is enough</button>
+            <button onClick={advance}>Next</button>
           </div>
         </>
       )}

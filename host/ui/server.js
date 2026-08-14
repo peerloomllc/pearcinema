@@ -350,6 +350,11 @@ async function startDashboard ({
           // probe and nothing else. The app folds it into its verdicts: an HEVC
           // refusal on a host that can convert is a film that plays.
           transcode: host.transcode || { available: false, reason: 'not supported by this host' },
+          // Enough about the artwork feature for the LIBRARY to act on: whether the
+          // tiles should wear a fix control, and the live progress of a pass. Rides
+          // here because the page already polls this route - the full summary stays
+          // on /api/metadata.
+          metadata: { ...host.metadataSettings(), running: host.enricher.running },
           bind
         })
       }
@@ -748,6 +753,83 @@ async function startDashboard ({
       }
 
       // --- the source ----------------------------------------------------------
+      // --- online artwork, opt in --------------------------------------------
+      //
+      // The key never leaves the host: the page is told only that one is saved.
+      // The Test button is its own route because a key that silently fails is worse
+      // than none - the library just looks wrong with nothing saying why.
+
+      if (req.method === 'GET' && url.pathname === '/api/metadata') {
+        return json(res, 200, { ...host.metadataSettings(), ...host.enricher.summary() })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/test') {
+        const { key } = await readBody(req)
+        if (!key) return json(res, 400, { error: 'key required' })
+        return json(res, 200, await host.testMetadataKey(String(key)))
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata') {
+        const { key, enabled } = await readBody(req)
+        // A key is TESTED before it is saved, on the same rule the source has: a
+        // saved credential that does not work is a library that quietly looks
+        // wrong, which is the worst version of failure.
+        if (key) {
+          const t = await host.testMetadataKey(String(key))
+          if (!t.ok) return json(res, 400, { error: t.error })
+        }
+        const out = host.saveMetadata({ key, enabled })
+        // Turning it on IS asking for the artwork - do not make the operator find
+        // a second button. Fire and forget; progress shows in /api/metadata.
+        if (out.enabled && out.hasKey && !host.enricher.running) {
+          host.runMetadata().catch(e => host.log('tmdb:failed', { err: e.message }))
+        }
+        return json(res, 200, out)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/run') {
+        const { retryMissed } = await readBody(req)
+        if (host.enricher.running) return json(res, 200, { running: host.enricher.running })
+        host.runMetadata({ retryMissed: !!retryMissed }).catch(e => host.log('tmdb:failed', { err: e.message }))
+        return json(res, 200, { started: true })
+      }
+
+      // The fix flow, from the tile's pencil: search again, apply the operator's
+      // pick, or drop the fetched artwork entirely.
+      if (req.method === 'POST' && url.pathname === '/api/metadata/search') {
+        const { itemId, q } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        const out = await host.searchMetadata({ itemId: String(itemId), q: q ? String(q) : null })
+        if (!out) return json(res, 404, { error: 'no such item' })
+        return json(res, 200, { candidates: out })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/fix') {
+        const { itemId, tmdbId, type } = await readBody(req)
+        if (!itemId || !tmdbId) return json(res, 400, { error: 'itemId and tmdbId required' })
+        const out = await host.fixMetadata({ itemId: String(itemId), tmdbId, type: String(type || 'movie') })
+        if (!out) return json(res, 404, { error: 'TMDB does not know that id' })
+        return json(res, 200, out)
+      }
+
+      // A candidate's poster thumbnail, relayed through the host. The path is held
+      // to TMDB's own shape - one path segment, an image extension - so this can
+      // never be pointed anywhere else.
+      if (req.method === 'GET' && url.pathname === '/api/metadata/preview') {
+        const p = String(url.searchParams.get('p') || '')
+        if (!/^\/[A-Za-z0-9_-]+\.(?:jpg|png)$/.test(p)) return json(res, 400, { error: 'not a TMDB image path' })
+        const bytes = await host.previewMetadataPoster(p)
+        if (!bytes) { res.writeHead(404); return res.end() }
+        res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' })
+        return res.end(bytes)
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/unmatch') {
+        const { itemId } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        return json(res, 200, { ok: await host.unmatchMetadata({ itemId: String(itemId) }) })
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/source/test') {
         const cfg = await readBody(req)
         try {

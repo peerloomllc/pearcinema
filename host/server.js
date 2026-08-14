@@ -18,6 +18,7 @@ const { buildAdapter } = require('./adapters')
 const { createMethods, MUTATING } = require('./methods')
 const remux = require('./remux')
 const transcode = require('./transcode')
+const tmdb = require('./tmdb')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
@@ -134,11 +135,53 @@ class PearCinemaHost {
     // opened the seed. Ids are source-scoped AND library-scoped by design, so an
     // adapter built with the wrong one would mint ids nothing else in the system
     // agrees with.
-    this.adapter = buildAdapter(this.source, {
+    // The opt-in TMDB artwork store. Holds nothing until the operator saves a key
+    // and turns it on; its cache lives in the data dir and is disposable.
+    this.enricher = new tmdb.Enricher({ dataDir: this.dataDir, log })
+
+    this._inner = buildAdapter(this.source, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
       dataDir: this.dataDir,
       log
+    })
+    this.adapter = this._decorated(this._inner)
+  }
+
+  // THE ADAPTER BOTH TRANSPORTS SEE, with online artwork laid over the gaps. A
+  // Proxy rather than edits at every call site, so the browser routes and the
+  // phone's method table cannot disagree about which films have posters - the same
+  // one-implementation rule the byte path follows.
+  //
+  // Only four calls change: items out of list/get/search get a tmdb: artId WHERE
+  // THEY HAVE NONE (sidecar always wins, enforced in decorate), and art() answers
+  // tmdb: ids from the cache. Everything else passes through untouched.
+  _decorated (inner) {
+    const en = this.enricher
+    return new Proxy(inner, {
+      get (t, p) {
+        if (p === 'list') {
+          return async (params) => {
+            const page = await t.list(params)
+            return { ...page, items: (page.items || []).map(i => en.decorate(i)) }
+          }
+        }
+        if (p === 'get') return async (params) => en.decorate(await t.get(params))
+        if (p === 'search') {
+          return async (params) => {
+            const out = await t.search(params)
+            return { ...out, items: (out.items || []).map(i => en.decorate(i)) }
+          }
+        }
+        if (p === 'art') {
+          return async ({ artId, ...rest } = {}) => {
+            if (String(artId || '').startsWith('tmdb:')) return en.artStream(artId)
+            return t.art({ artId, ...rest })
+          }
+        }
+        const v = t[p]
+        return typeof v === 'function' ? v.bind(t) : v
+      }
     })
   }
 
@@ -223,7 +266,8 @@ class PearCinemaHost {
     })
     const leaves = await next.scan({ force }) // throws on a bad URL, bad credentials, no folder
 
-    this.adapter = next
+    this._inner = next
+    this.adapter = this._decorated(next)
     this.source = cfg
     this.sourceFrom = 'dashboard'
     this.sourceError = null
@@ -334,6 +378,85 @@ class PearCinemaHost {
     return clean
   }
 
+  // --- online metadata, opt in ----------------------------------------------
+  //
+  // The key lives in the settings file in the data dir, which already holds the
+  // host identity seed - anybody who can read one can read the other, so this adds
+  // no new place a secret lives. It is never sent to a client; the dashboard is
+  // told only THAT a key is saved.
+
+  metadataSettings () {
+    const t = this._readSettings().tmdb || {}
+    return { enabled: !!t.enabled, hasKey: !!t.key }
+  }
+
+  _metadataKey () { return (this._readSettings().tmdb || {}).key || null }
+
+  async testMetadataKey (key) {
+    return new tmdb.TmdbClient({ key }).test()
+  }
+
+  // Saving a key means it was just TESTED by the route - a key that silently fails
+  // is worse than none, because the library simply looks wrong.
+  saveMetadata ({ key, enabled } = {}) {
+    const cur = this._readSettings().tmdb || {}
+    const next = {
+      key: key !== undefined ? String(key || '').trim() || undefined : cur.key,
+      enabled: enabled !== undefined ? !!enabled : !!cur.enabled
+    }
+    this._writeSettings({ tmdb: next })
+    this.log('host:metadata', { enabled: next.enabled, hasKey: !!next.key })
+    return this.metadataSettings()
+  }
+
+  // The pass, over the INNER adapter - "has artwork" must mean artwork on disk,
+  // not artwork the last pass invented.
+  async runMetadata ({ retryMissed = false } = {}) {
+    const key = this._metadataKey()
+    if (!key) throw new Error('no TMDB key is saved')
+    return this.enricher.run(this._inner, { key, retryMissed })
+  }
+
+  // The fix flow, from the tile: candidates for one item (optionally with the
+  // operator's own retyped query), one applied by TMDB id, or the match dropped.
+  async searchMetadata ({ itemId, q = null }) {
+    const item = await this._inner.get({ id: String(itemId) })
+    if (!item) return null
+    return this.enricher.search({ item, q, key: this._metadataKey() })
+  }
+
+  async fixMetadata ({ itemId, tmdbId, type }) {
+    // The inner adapter rides along so re-matching a show can refresh its seasons'
+    // pictures in the same breath.
+    return this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey(), adapter: this._inner })
+  }
+
+  async unmatchMetadata ({ itemId }) {
+    return this.enricher.unmatch(String(itemId))
+  }
+
+  // A candidate's thumbnail for the fix dialog, PROXIED - the promise on the panel
+  // is that the HOST talks to TMDB, so the browser must not be sent to fetch from
+  // TMDB itself. The path shape is checked by the route; this only relays.
+  async previewMetadataPoster (posterPath) {
+    const key = this._metadataKey()
+    if (!key) return null
+    return new tmdb.TmdbClient({ key }).poster(posterPath, 'w185').catch(() => null)
+  }
+
+  // After a scan, quietly fill any gaps - but only when the operator has opted in,
+  // and never twice at once. Errors are logged rather than thrown: a rate-limited
+  // TMDB must not take the library down with it.
+  async _autoMetadata () {
+    const { enabled, hasKey } = this.metadataSettings()
+    if (!enabled || !hasKey || this.enricher.running) return
+    try {
+      await this.runMetadata()
+    } catch (e) {
+      this.log('tmdb:failed', { err: e.message })
+    }
+  }
+
   // --- lifecycle ------------------------------------------------------------
 
   // THE SCAN DOES NOT BLOCK THE HOST FROM COMING UP, and on a real library that is
@@ -357,7 +480,7 @@ class PearCinemaHost {
     // which is correct for a host whose hardware is not yet proven.
     this._probeTranscode()
 
-    const scan = this._scan({ rescan })
+    const scan = this._scan({ rescan }).then(() => this._autoMetadata())
     if (waitForScan) await scan
     return this
   }

@@ -31,7 +31,11 @@ export function needsSetup (state) {
 export function setupSteps (state) {
   const src = state && state.auth && state.auth.passwordSource
   const wantsPassword = src === 'generated' || src === 'file'
-  return ['welcome', 'name', 'source', ...(wantsPassword ? ['password'] : []), 'pair', 'done']
+  // Artwork sits right after the source (Tim, 2026-08-14): the moment somebody has
+  // pointed at their films is the moment a wall of grey placeholders is coming, and
+  // discovering the fix later in Settings is discovering it too late. Skippable
+  // like everything else - it is an opt-in and the wizard must not lean on it.
+  return ['welcome', 'name', 'source', 'artwork', ...(wantsPassword ? ['password'] : []), 'pair', 'done']
 }
 
 const KEY = 'pearcinema.setup.dismissed'

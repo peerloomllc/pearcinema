@@ -17,6 +17,7 @@ import Player from './Player'
 import People from './People'
 import Pair from './Pair'
 import SourcePanel from './SourcePanel'
+import Metadata from './Metadata'
 import Wizard from './Wizard'
 
 // Asked once. canPlayType cannot change while the page is open, and every poster in
@@ -47,6 +48,8 @@ function Settings ({ state, reload }) {
   return (
     <>
       <SourcePanel state={state} reload={reload} />
+
+      <Metadata />
 
       <div class='card'>
         <h3>The library's name</h3>

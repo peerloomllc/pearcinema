@@ -16,7 +16,8 @@
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
-import { ArtIcon, Check, List, Grid } from './icons'
+import { ArtIcon, Check, List, Grid, Pencil } from './icons'
+import { Modal, notify } from './ui'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -82,7 +83,7 @@ function Art ({ item, started = false, progress = null }) {
   return (
     <div class='art'>
       {inner}
-      <img src={'/api/art?id=' + encodeURIComponent(item.artId)} alt='' loading='lazy' onError={() => setBad(true)} />
+      <img src={'/api/art?id=' + encodeURIComponent(item.artId) + (item.artBust ? '&v=' + item.artBust : '')} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
 }
@@ -103,7 +104,7 @@ function flagFor (v) {
 // HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
 // last decade has drawn it. A number would be exact and useless; the bar is read
 // without being looked at.
-function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null }) {
+function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null, onFix = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
 
@@ -176,9 +177,110 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
 
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
 
+      {/* FIX THE MATCH WHERE THE MISTAKE IS VISIBLE (Tim, 2026-08-14, Plex's shape).
+          Fetched artwork is a best guess, and the correction belongs on the tile
+          wearing the wrong poster - not in a queue in Settings. Only offered where
+          the artwork CAME from the lookup or where there is none at all: a poster
+          sitting beside the file on disk is not this feature's to change. */}
+      {onFix && (item.type === 'movie' || item.type === 'series') &&
+        (!item.artId || String(item.artId).startsWith('tmdb:')) && (
+          <button
+            class='fixmatch'
+            title={'Fix the artwork for ' + item.title}
+            aria-label={'Fix the artwork for ' + item.title}
+            onClick={e => { e.stopPropagation(); onFix(item) }}
+          ><Pencil size={13} /></button>
+      )}
+
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </div>
+  )
+}
+
+// FIX THE MATCH, from the tile that is wearing the wrong poster.
+//
+// The dialog reruns the lookup - with the operator's own words if they retype the
+// title, which is usually the whole problem, since a filename is not always what a
+// film is called - and applies the pick, or drops the fetched artwork entirely.
+// The host fetches the chosen poster fresh by TMDB id; nothing from this page is
+// trusted beyond the id itself.
+function FixMatch ({ item, onClose, onFixed }) {
+  const [q, setQ] = useState(item.title || '')
+  const [cands, setCands] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const search = async (query = null) => {
+    setBusy(true); setErr('')
+    const r = await api('/api/metadata/search', { itemId: item.id, ...(query ? { q: query } : {}) })
+    setBusy(false)
+    if (r?.error) return setErr(r.error)
+    setCands(r.candidates || [])
+  }
+  useEffect(() => { setCands(null); setQ(item.title || ''); search() }, [item.id])
+
+  // What changed, handed back for an IN-PLACE patch of the tile: the new artId
+  // (deterministic - the poster route is keyed by item), and a cache-buster,
+  // because the URL does not change when the poster behind it does.
+  const use = async (c) => {
+    setBusy(true)
+    const r = await api('/api/metadata/fix', { itemId: item.id, tmdbId: c.tmdbId, type: item.type })
+    setBusy(false)
+    if (r?.error) return setErr(r.error)
+    onFixed({ artId: 'tmdb:' + item.id, artBust: Date.now() })
+    onClose()
+  }
+
+  const drop = async () => {
+    await api('/api/metadata/unmatch', { itemId: item.id })
+    onFixed({ artId: null })
+    onClose()
+  }
+
+  return (
+    <Modal title={'Fix the match - ' + item.title} onClose={onClose} wide>
+      <div class='fixbody'>
+      <p class='hint'>
+        Pick the right one and its poster replaces the guess. If the name on the file is
+        not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
+        by the real name.
+      </p>
+      <div class='row fixsearch'>
+        <input
+          type='text'
+          value={q}
+          aria-label='Search TMDB'
+          onInput={e => setQ(e.currentTarget.value)}
+          onKeyDown={e => { if (e.key === 'Enter') search(q) }}
+        />
+        <button class='ghost' disabled={busy || !q.trim()} onClick={() => search(q)}>Search</button>
+      </div>
+      {err && <div class='banner bad'>{err}</div>}
+      {busy && !cands && <p class='hint'>Asking TMDB…</p>}
+      {cands && !cands.length && <p class='hint'>TMDB found nothing by that name.</p>}
+      {/* PICKED BY EYE (Tim, 2026-08-14). The poster is the thing being chosen, so
+          the poster is what the choice shows - a text list asked somebody to
+          recognise a film by its year. Thumbnails come THROUGH THE HOST, because
+          the promise on the panel is that the host talks to TMDB, not the browser. */}
+      <div class='candgrid'>
+        {(cands || []).map(c => (
+          <button class='cand' key={c.tmdbId} disabled={busy} title={c.overview} onClick={() => use(c)}>
+            {c.poster
+              ? <img src={'/api/metadata/preview?p=' + encodeURIComponent(c.poster)} alt='' loading='lazy' />
+              : <span class='noart'><ArtIcon type={item.type} size={26} /></span>}
+            <span class='t'>{c.title}</span>
+            {c.year && <span class='s'>{c.year}</span>}
+          </button>
+        ))}
+      </div>
+      {String(item.artId || '').startsWith('tmdb:') && (
+        <button class='ghost' style='margin-top:.8rem' disabled={busy} onClick={drop}>
+          None of these - remove the fetched artwork
+        </button>
+      )}
+      </div>
+    </Modal>
   )
 }
 
@@ -216,7 +318,7 @@ function ContinueRow ({ watch, caps, onOpen, onWatched }) {
   if (!list.length) return null
   return (
     <>
-      <h2 class='shelf'>Continue watching</h2>
+      <h2 class='shelf' id='continue-shelf'>Continue watching</h2>
       <div class='grid'>
         {list.map(i => (
           <Poster
@@ -348,7 +450,23 @@ function useList (query, deps) {
 
   useEffect(() => { setItems([]); setCursor(null); fetchPage(null) }, deps)
 
-  return { items, cursor, busy, err, more: () => fetchPage(cursor) }
+  // Change ONE item where it stands, without a refetch. Fixing a poster must not
+  // throw somebody back to the top of a list they had scrolled (Tim, 2026-08-14) -
+  // and a refetch empties the array first, which collapses the grid and takes the
+  // scroll position with it.
+  const patch = (id, changes) => setItems(prev => prev.map(i => (i.id === id ? { ...i, ...changes } : i)))
+
+  // Re-read what is ALREADY on screen, in place: as many items as are loaded, in
+  // one call, replacing the array only when the answer arrives - so the grid never
+  // collapses and the scroll never moves. This is how a finished artwork pass gets
+  // its posters onto the page somebody is looking at.
+  const refresh = async () => {
+    const n = Math.max(items.length, 100)
+    const res = await api(query.replace(/limit=\d+/, 'limit=' + n))
+    if (!res.error) { setItems(res.items || []); setCursor(res.cursor || null) }
+  }
+
+  return { items, cursor, busy, err, more: () => fetchPage(cursor), patch, refresh }
 }
 
 // The bottom of the list, watched. When it comes into view, the next page is asked
@@ -505,8 +623,38 @@ export default function Library ({
     return () => { live = false }
   }, [series?.id, watch])
 
+  // THE TILE IS THE PLACE A MATCH GETS FIXED. `fixItem` is the tile whose pencil
+  // was pressed.
+  const [fixItem, setFixItem] = useState(null)
+  const canFix = !!(state.metadata?.enabled && state.metadata?.hasKey)
+  const artRunning = state.metadata?.running || null
+
   const films = useList('/api/library/list?type=movies&limit=100', [root])
   const shows = useList('/api/library/list?type=series&limit=100', [root])
+
+  // A finished artwork pass refreshes the lists IN PLACE - stale-while-refetch, so
+  // the grid never collapses and the scroll never moves - and says what it found.
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    if (wasRunning.current && !artRunning) {
+      films.refresh(); shows.refresh()
+      api('/api/metadata').then(m => {
+        if (m?.error) return
+        notify('Artwork fetched', `${m.matched} title${m.matched === 1 ? ' has' : 's have'} posters now` +
+          (m.uncertain ? `, ${m.uncertain} matched from several possibilities - hover a tile and use the pencil to correct one` : '') + '.')
+      })
+    }
+    wasRunning.current = !!artRunning
+  }, [artRunning])
+
+  // One fix, applied to every copy of the item on screen: the grid it lives in and
+  // the search results when there are any. No refetch anywhere - see useList.patch.
+  const patchItem = (id, changes) => {
+    films.patch(id, changes)
+    shows.patch(id, changes)
+    if (hits) setHits(prev => (prev || []).map(i => (i.id === id ? { ...i, ...changes } : i)))
+  }
+
   const seasons = useList(
     '/api/library/list?type=seasons&limit=100&seriesId=' + encodeURIComponent(series?.id || ''),
     [series?.id]
@@ -560,15 +708,26 @@ export default function Library ({
     )
   }
 
+  // THE FIX DIALOG RENDERS OUTSIDE THE ANIMATED SCREEN, and that placement is a
+  // bug fix rather than taste (Tim, 2026-08-14: "the modal pops up at a fixed
+  // space at the top of the list"). The depth-slide animation runs with
+  // `fill-mode: both` on a transform, and an ancestor whose transform an animation
+  // still APPLIES TO is a containing block for position: fixed - so the overlay
+  // was centring on the tall scrolled list rather than on the viewport. Outside
+  // the .screen there is no transformed ancestor and fixed means the viewport
+  // again.
+  const fixModal = fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={(changes) => patchItem(fixItem.id, changes)} />
+
   // --- search wins over everything, because that is what the box is for ---
   if (hits) {
     return (
+      <>
       <div class={'screen ' + dir} key={depth}>
         <h2>{hits.length} result{hits.length === 1 ? '' : 's'} for “{search}”</h2>
         <CompatLine list={hits.filter(h => h.media)} caps={caps} />
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
-            <Poster key={h.id} item={h} caps={caps} onOpen={i => {
+            <Poster key={h.id} item={h} caps={caps} onFix={canFix ? setFixItem : null} onOpen={i => {
               if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
               else onPlay(i, hits.filter(x => x.type === i.type))
             }} />
@@ -576,6 +735,8 @@ export default function Library ({
         </div>
         {!hits.length && <div class='empty'>Nothing matched.</div>}
       </div>
+      {fixModal}
+      </>
     )
   }
 
@@ -700,16 +861,27 @@ export default function Library ({
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
-      {/* The shelf's captions run right up to the picker without this - two unrelated
-          things touching, which reads as one. */}
-      <div class='row' style='margin:1.4rem 0 .6rem'>
+      {/* FROZEN AT THE TOP while the library scrolls (Tim, 2026-08-14): three
+          hundred tiles down is exactly where somebody decides they wanted Shows
+          instead, and the way back up to the shelf rides along as its own button -
+          freezing the shelf ITSELF would spend a third of the viewport on it. */}
+      {/* Continue watching sits LEFT of the categories with a divider between
+          (Tim, 2026-08-14): it is a place to go back to, not a third category, and
+          the divider keeps that reading as categories are added. No counts on the
+          buttons - the number of films you own is not a decision anybody is making
+          here. */}
+      <div class='row pickrow'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
-        <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>
-          Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
-        </button>
-        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>
-          Shows {stats.series ? <span class='chip'>{stats.series}</span> : null}
-        </button>
+        {((watch?.continue || []).length > 0 || (watch?.upNext || []).length > 0) && (
+          <>
+            <button class='ghost' onClick={() => document.getElementById('continue-shelf')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+              Continue watching
+            </button>
+            <span class='vdiv' aria-hidden='true' />
+          </>
+        )}
+        <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>Films</button>
+        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>Shows</button>
       </div>
 
       <div class={'screen ' + dir} key={root}>
@@ -717,11 +889,22 @@ export default function Library ({
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
       <ArtNote list={showing.items} source={state.source?.kind} />
 
+      {/* THE PASS IS VISIBLE WHERE ITS RESULT LANDS (Tim, 2026-08-14). Progress in a
+          Settings panel nobody is looking at is progress nobody sees; the posters
+          arrive on THIS page, so this page says they are coming - with a bar, not a
+          sentence pretending to be one. */}
+      {artRunning && (
+        <div class='banner artfetch' style='margin-top:.6rem'>
+          <span>Fetching artwork - <b>{artRunning.done}</b> of {artRunning.total}. Posters appear as they land.</span>
+          <span class='meter'><i style={`width:${artRunning.total ? Math.round((artRunning.done / artRunning.total) * 100) : 0}%`} /></span>
+        </div>
+      )}
+
       {showing.err && <div class='banner bad'>{showing.err}</div>}
 
       <div class='grid' style='margin-top:.8rem'>
         {showing.items.map(i => (
-          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onOpen={item => {
+          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={canFix ? setFixItem : null} onOpen={item => {
             if (item.type === 'series') go(() => setSeries(item))
             else onPlay(item, films.items)
           }} />
@@ -736,6 +919,8 @@ export default function Library ({
       )}
       <LoadMore cursor={showing.cursor} onMore={showing.more} busy={showing.busy} />
       </div>
+
+      {fixModal}
     </>
   )
 }

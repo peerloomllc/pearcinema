@@ -64,6 +64,9 @@ const STATE = {
     url: null,
     username: null
   },
+  // Artwork is on, so the tiles wear their fix control and the library can show a
+  // pass's progress.
+  metadata: { enabled: true, hasKey: true, running: null },
   devices: [{ deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true, personId: null, claimedUser: 'Tim', lastSeen: Date.now(), scope: 'full' }],
   persons: [],
   pairing: { open: false },
@@ -96,7 +99,27 @@ const ROUTES = {
   },
   // A show half way through, so the tile can say which one is being watched.
   '/api/watch/shows': { shows: { 'show-1': { total: 10, watched: 4, unwatched: 6, inProgress: 0, started: true, complete: false } } },
-  '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] }
+  '/api/source/folders': { path: '/library', parent: '/', mounts: [], dirs: [{ name: 'Cartoons', path: '/library/Cartoons', video: true }] },
+  // BEFORE '/api/metadata', because the stub matches on prefix and the first key
+  // wins - the search route would otherwise be shadowed by the summary.
+  // The fix dialog's search, when a pencil is pressed.
+  '/api/metadata/search': {
+    candidates: [
+      { tmdbId: 21, title: 'Crash', year: 1996, poster: '/c1.jpg', overview: 'the Cronenberg one' },
+      { tmdbId: 22, title: 'Crash', year: 2004, poster: '/c2.jpg', overview: 'the other one' }
+    ]
+  },
+  // The artwork panel after a pass: posters fetched, two of them guesses - so the
+  // honesty notice renders and can be asserted on.
+  '/api/metadata': {
+    enabled: true,
+    hasKey: true,
+    running: null,
+    lastRun: { at: 1, looked: 6, matched: 5, uncertain: 2, missed: 1 },
+    matched: 5,
+    uncertain: 2,
+    missed: 1
+  }
 }
 
 // Open the page with a stubbed API, wait for the first fetches to land, and hand
@@ -242,6 +265,48 @@ test('EVERY FILM GETS THE SAME CONTROLS, whether it is repackaged or not', async
   const v = doc.querySelector('video')
   assert.ok(v)
   assert.equal(v.hasAttribute('controls'), false, 'the native controls are gone, so there is only ever one bar')
+})
+
+test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were guesses', async (t) => {
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // The sentence IS the consent. A toggle without it is a host quietly telling a
+  // third party what somebody owns.
+  assert.match(text(), /tells TMDB the titles it is identifying/)
+  assert.match(text(), /Off by default/)
+  // Nobody is quizzed: the guesses are counted and the correction is pointed at,
+  // on the tile, where the mistake is visible (Tim, 2026-08-14).
+  assert.match(text(), /matched from several possibilities/)
+  assert.match(text(), /pencil on its tile/)
+  assert.doesNotMatch(text(), /Which one is it/)
+})
+
+test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candidates', async (t) => {
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  // Metropolis has no artwork of its own, so its tile offers the fix control.
+  const pencil = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the artwork for Metropolis')
+  assert.ok(pencil, 'the fix control is on the tile')
+  pencil.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  // The dialog carries the candidates AS TILES - the poster is the choice, so the
+  // candidate itself is the button, with its thumbnail relayed through the host.
+  assert.match(text(), /Fix the match - Metropolis/)
+  const cards = [...doc.querySelectorAll('.cand')]
+  assert.equal(cards.length, 2)
+  assert.match(cards[0].textContent, /Crash/)
+  assert.match(cards[0].textContent, /1996/)
+  assert.match(cards[1].textContent, /2004/)
+  assert.match(cards[0].querySelector('img').getAttribute('src'), /^\/api\/metadata\/preview\?p=/, 'the thumbnail comes from the HOST, never from TMDB directly')
+  // And pressing the pencil did NOT open the film - the tile click was stopped.
+  assert.equal(doc.querySelector('video'), null)
 })
 
 test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read as', async (t) => {
