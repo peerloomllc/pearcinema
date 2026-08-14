@@ -20,6 +20,7 @@ import { Worklet } from 'react-native-bare-kit'
 import * as FileSystem from 'expo-file-system/legacy'
 import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
+import * as ScreenOrientation from 'expo-screen-orientation'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 
@@ -246,6 +247,26 @@ export default function App () {
     return () => sub.remove()
   }, [])
 
+  // THE PLAYER MAY ROTATE; THE REST OF THE APP MAY NOT. The app is locked to
+  // portrait in app.json, which locked the PLAYER too - a film could only ever
+  // be a letterboxed band across a portrait screen, and the phone ignored being
+  // turned (Tim, 2026-08-14: "it doesn't look right"). While a film runs the
+  // orientation unlocks and the sensor decides; closing the player locks
+  // portrait back. This deliberately does NOT use the native fullscreen
+  // activity, which would rotate but is a separate screen the external-subtitle
+  // overlay and the Subtitles button cannot follow into.
+  useEffect(() => {
+    if (playing) {
+      ScreenOrientation.unlockAsync()
+        .then(() => console.log('[shell] orientation unlocked'))
+        .catch((e) => console.log('[shell] orientation unlock failed: ' + (e?.message || e)))
+    } else {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+        .then(() => console.log('[shell] orientation locked portrait'))
+        .catch((e) => console.log('[shell] orientation lock failed: ' + (e?.message || e)))
+    }
+  }, [!!playing])
+
   // Position ticks flow INTO the UI, which owns every watch-state rule.
   useEffect(() => {
     playingRef.current = playing
@@ -439,7 +460,10 @@ export default function App () {
               style={styles.video}
               player={player}
               nativeControls
-              allowsFullscreen
+              // No native fullscreen: it presents a SEPARATE activity that the
+              // subtitle overlay and the Subtitles button cannot follow into.
+              // Rotation is the fullscreen story here - turn the phone.
+              allowsFullscreen={false}
               contentFit='contain'
             />
             {!!cueText && (
