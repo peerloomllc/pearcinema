@@ -792,6 +792,10 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .cand .t { font-size: .82rem; line-height: 1.25 }
 .cand .s { font-size: .75rem; color: var(--muted) }
 
+/* The fix dialog's search, centred in the modal with the input carrying the width. */
+.fixsearch { justify-content: center }
+.fixsearch input { flex: 1; max-width: 24rem }
+
 /* Artwork-fetch progress: a real bar, in the library banner and the panel both. */
 .artfetch { display: flex; flex-direction: column; gap: .45rem }
 .meter {

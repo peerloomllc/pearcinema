@@ -83,7 +83,7 @@ function Art ({ item, started = false, progress = null }) {
   return (
     <div class='art'>
       {inner}
-      <img src={'/api/art?id=' + encodeURIComponent(item.artId)} alt='' loading='lazy' onError={() => setBad(true)} />
+      <img src={'/api/art?id=' + encodeURIComponent(item.artId) + (item.artBust ? '&v=' + item.artBust : '')} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
 }
@@ -220,17 +220,22 @@ function FixMatch ({ item, onClose, onFixed }) {
   }
   useEffect(() => { setCands(null); setQ(item.title || ''); search() }, [item.id])
 
+  // What changed, handed back for an IN-PLACE patch of the tile: the new artId
+  // (deterministic - the poster route is keyed by item), and a cache-buster,
+  // because the URL does not change when the poster behind it does.
   const use = async (c) => {
     setBusy(true)
     const r = await api('/api/metadata/fix', { itemId: item.id, tmdbId: c.tmdbId, type: item.type })
     setBusy(false)
     if (r?.error) return setErr(r.error)
-    onFixed(); onClose()
+    onFixed({ artId: 'tmdb:' + item.id, artBust: Date.now() })
+    onClose()
   }
 
   const drop = async () => {
     await api('/api/metadata/unmatch', { itemId: item.id })
-    onFixed(); onClose()
+    onFixed({ artId: null })
+    onClose()
   }
 
   return (
@@ -240,7 +245,7 @@ function FixMatch ({ item, onClose, onFixed }) {
         not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
         by the real name.
       </p>
-      <div class='row'>
+      <div class='row fixsearch'>
         <input
           type='text'
           value={q}
@@ -443,7 +448,23 @@ function useList (query, deps) {
 
   useEffect(() => { setItems([]); setCursor(null); fetchPage(null) }, deps)
 
-  return { items, cursor, busy, err, more: () => fetchPage(cursor) }
+  // Change ONE item where it stands, without a refetch. Fixing a poster must not
+  // throw somebody back to the top of a list they had scrolled (Tim, 2026-08-14) -
+  // and a refetch empties the array first, which collapses the grid and takes the
+  // scroll position with it.
+  const patch = (id, changes) => setItems(prev => prev.map(i => (i.id === id ? { ...i, ...changes } : i)))
+
+  // Re-read what is ALREADY on screen, in place: as many items as are loaded, in
+  // one call, replacing the array only when the answer arrives - so the grid never
+  // collapses and the scroll never moves. This is how a finished artwork pass gets
+  // its posters onto the page somebody is looking at.
+  const refresh = async () => {
+    const n = Math.max(items.length, 100)
+    const res = await api(query.replace(/limit=\d+/, 'limit=' + n))
+    if (!res.error) { setItems(res.items || []); setCursor(res.cursor || null) }
+  }
+
+  return { items, cursor, busy, err, more: () => fetchPage(cursor), patch, refresh }
 }
 
 // The bottom of the list, watched. When it comes into view, the next page is asked
@@ -601,19 +622,20 @@ export default function Library ({
   }, [series?.id, watch])
 
   // THE TILE IS THE PLACE A MATCH GETS FIXED. `fixItem` is the tile whose pencil
-  // was pressed; `artEpoch` bumps to refetch the lists, both after a fix and when a
-  // background artwork pass finishes - posters should appear where somebody is
-  // looking, not on their next visit.
+  // was pressed.
   const [fixItem, setFixItem] = useState(null)
-  const [artEpoch, setArtEpoch] = useState(0)
   const canFix = !!(state.metadata?.enabled && state.metadata?.hasKey)
   const artRunning = state.metadata?.running || null
+
+  const films = useList('/api/library/list?type=movies&limit=100', [root])
+  const shows = useList('/api/library/list?type=series&limit=100', [root])
+
+  // A finished artwork pass refreshes the lists IN PLACE - stale-while-refetch, so
+  // the grid never collapses and the scroll never moves - and says what it found.
   const wasRunning = useRef(false)
   useEffect(() => {
     if (wasRunning.current && !artRunning) {
-      setArtEpoch(e => e + 1)
-      // Say what the pass came back with, in the numbers that matter: how many
-      // posters, and how many of those were guesses worth a glance.
+      films.refresh(); shows.refresh()
       api('/api/metadata').then(m => {
         if (m?.error) return
         notify('Artwork fetched', `${m.matched} title${m.matched === 1 ? ' has' : 's have'} posters now` +
@@ -623,8 +645,14 @@ export default function Library ({
     wasRunning.current = !!artRunning
   }, [artRunning])
 
-  const films = useList('/api/library/list?type=movies&limit=100', [root, artEpoch])
-  const shows = useList('/api/library/list?type=series&limit=100', [root, artEpoch])
+  // One fix, applied to every copy of the item on screen: the grid it lives in and
+  // the search results when there are any. No refetch anywhere - see useList.patch.
+  const patchItem = (id, changes) => {
+    films.patch(id, changes)
+    shows.patch(id, changes)
+    if (hits) setHits(prev => (prev || []).map(i => (i.id === id ? { ...i, ...changes } : i)))
+  }
+
   const seasons = useList(
     '/api/library/list?type=seasons&limit=100&seriesId=' + encodeURIComponent(series?.id || ''),
     [series?.id]
@@ -678,9 +706,20 @@ export default function Library ({
     )
   }
 
+  // THE FIX DIALOG RENDERS OUTSIDE THE ANIMATED SCREEN, and that placement is a
+  // bug fix rather than taste (Tim, 2026-08-14: "the modal pops up at a fixed
+  // space at the top of the list"). The depth-slide animation runs with
+  // `fill-mode: both` on a transform, and an ancestor whose transform an animation
+  // still APPLIES TO is a containing block for position: fixed - so the overlay
+  // was centring on the tall scrolled list rather than on the viewport. Outside
+  // the .screen there is no transformed ancestor and fixed means the viewport
+  // again.
+  const fixModal = fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={(changes) => patchItem(fixItem.id, changes)} />
+
   // --- search wins over everything, because that is what the box is for ---
   if (hits) {
     return (
+      <>
       <div class={'screen ' + dir} key={depth}>
         <h2>{hits.length} result{hits.length === 1 ? '' : 's'} for “{search}”</h2>
         <CompatLine list={hits.filter(h => h.media)} caps={caps} />
@@ -693,8 +732,9 @@ export default function Library ({
           ))}
         </div>
         {!hits.length && <div class='empty'>Nothing matched.</div>}
-        {fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={() => setArtEpoch(e => e + 1)} />}
       </div>
+      {fixModal}
+      </>
     )
   }
 
@@ -858,8 +898,6 @@ export default function Library ({
         ))}
       </div>
 
-      {fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={() => setArtEpoch(e => e + 1)} />}
-
       {showing.busy && !showing.items.length && <div class='empty'>Loading…</div>}
       {!showing.busy && !showing.items.length && (
         <div class='empty'>
@@ -868,6 +906,8 @@ export default function Library ({
       )}
       <LoadMore cursor={showing.cursor} onMore={showing.more} busy={showing.busy} />
       </div>
+
+      {fixModal}
     </>
   )
 }
