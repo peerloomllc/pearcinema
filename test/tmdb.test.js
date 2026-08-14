@@ -165,7 +165,8 @@ test('titles are compared as words, not as bytes', async () => {
 
 /* --------------------------------------------------------------- the pass -- */
 
-// A library of one film with sidecar art, one without, and one ambiguous name.
+// A library of one film with sidecar art, one without, one ambiguous name, and a
+// show with a season of two episodes - one of which TMDB has no still for.
 function fakeAdapter () {
   const movies = [
     { id: 'has-art', type: 'movie', title: 'Covered', year: 2000, artId: 'real-art' },
@@ -173,9 +174,28 @@ function fakeAdapter () {
     { id: 'vague', type: 'movie', title: 'Crash', year: null, artId: null }
   ]
   const series = [{ id: 'show', type: 'series', title: 'A Show', year: null, artId: null }]
+  // `number`, NOT `seasonNumber` - the real season model's field name
+  // (host/items.js). The first version of this fake used the wrong name and
+  // passed, while the real library skipped every season it had.
+  const seasons = [{ id: 'show-s1', type: 'season', seriesId: 'show', number: 1, artId: null }]
+  const episodes = [
+    { id: 'show-e1', type: 'episode', seasonId: 'show-s1', episodeNumber: 1, artId: null },
+    { id: 'show-e2', type: 'episode', seasonId: 'show-s1', episodeNumber: 2, artId: null }
+  ]
   return {
-    list: async ({ type }) => ({ items: type === 'movies' ? movies : type === 'series' ? series : [], cursor: null }),
-    items: { movies, series }
+    list: async ({ type, seriesId = null, seasonId = null }) => ({
+      items: type === 'movies'
+        ? movies
+        : type === 'series'
+          ? series
+          : type === 'seasons'
+            ? (seriesId === 'show' ? seasons : [])
+            : type === 'episodes'
+              ? (seasonId === 'show-s1' ? episodes : [])
+              : [],
+      cursor: null
+    }),
+    items: { movies, series, seasons, episodes }
   }
 }
 
@@ -189,6 +209,12 @@ const ROUTES = [
   })],
   [/search\/tv/, respond({ results: [{ id: 31, name: 'A Show', first_air_date: '2010-01-01', poster_path: '/s.jpg' }] })],
   [/\/movie\/22\b/, respond({ id: 22, title: 'Crash', release_date: '2004-01-01', poster_path: '/c2.jpg', overview: 'the other one' })],
+  // The show's one season: a poster of its own, a still for episode 1 and nothing
+  // for episode 2 - the shape TMDB really answers for specials and oddities.
+  [/\/tv\/31\/season\/1\b/, respond({
+    poster_path: '/sp.jpg',
+    episodes: [{ episode_number: 1, still_path: '/st1.jpg' }, { episode_number: 2, still_path: null }]
+  })],
   [/image\.tmdb\.org/, respond({})]
 ]
 
@@ -204,11 +230,13 @@ test('THE PASS: sidecar art untouched, everything else gets its best guess, doub
   assert.equal(out.missed, 0)
 
   // The poster is real bytes in the DATA dir, nowhere near the library - the
-  // ambiguous Crash included, wearing its best guess.
+  // ambiguous Crash included, wearing its best guess, and the show's season
+  // poster and episode still beside them.
   const posters = await fsp.readdir(path.join(dir, 'tmdb', 'posters'))
-  assert.deepEqual(posters.sort(), ['bare.jpg', 'show.jpg', 'vague.jpg'])
+  assert.deepEqual(posters.sort(), ['bare.jpg', 'show-e1.jpg', 'show-s1.jpg', 'show.jpg', 'vague.jpg'])
   assert.equal(en.matched.vague.uncertain, true)
   assert.equal(en.matched.bare.uncertain, undefined)
+  assert.equal(out.pictures, 2, 'the season and the one episode TMDB has a still for')
 
   // Decoration fills only the gap, with a copy rather than a mutation.
   const bare = adapter.items.movies[1]
@@ -218,7 +246,7 @@ test('THE PASS: sidecar art untouched, everything else gets its best guess, doub
   assert.equal(en.decorate(adapter.items.movies[0]).artId, 'real-art', 'sidecar always wins')
 
   // And the art route can serve it.
-  const stream = en.art('tmdb:bare')
+  const stream = en.artStream('tmdb:bare')
   const chunks = []
   for await (const c of stream) chunks.push(c)
   assert.deepEqual(Buffer.concat(chunks), POSTER_BYTES)
@@ -235,7 +263,36 @@ test('the state survives a restart, and a second pass does no work', async () =>
   assert.equal(again.decorate({ id: 'bare', artId: null }).artId, 'tmdb:bare')
   const out = await again.run(fakeAdapter(), { key: 'k' })
   assert.equal(out.looked, 0, 'matched and missed are both remembered')
-  assert.equal(f.asked.length, askedOnce, 'and nothing was asked again')
+  // ONE ask is allowed on the second pass: episode 2 has no still, so its season
+  // is asked again in case TMDB has grown one - a single cheap call, not a
+  // re-fetch of anything already held.
+  assert.equal(f.asked.length, askedOnce + 1, 'only the still-less season is asked again')
+})
+
+test('SEASON POSTERS AND EPISODE STILLS ride on the show match, and leave with it', async () => {
+  const dir = await tmpdir()
+  const en = new tmdb.Enricher({ dataDir: dir, fetch: fakeFetch(ROUTES) })
+  await en.run(fakeAdapter(), { key: 'k' })
+
+  // The season and the episode with a still are decorated; the still-less episode
+  // stays a placeholder rather than wearing something invented.
+  assert.equal(en.decorate({ id: 'show-s1', artId: null }).artId, 'tmdb:show-s1')
+  assert.equal(en.decorate({ id: 'show-e1', artId: null }).artId, 'tmdb:show-e1')
+  assert.equal(en.decorate({ id: 'show-e2', artId: null }).artId, null)
+
+  // And the bytes serve through the same art contract.
+  const stream = en.artStream('tmdb:show-s1')
+  const chunks = []
+  for await (const c of stream) chunks.push(c)
+  assert.deepEqual(Buffer.concat(chunks), POSTER_BYTES)
+
+  // Unmatching the SHOW takes its seasons' pictures with it - the old programme's
+  // stills under a new match would be the worst version of wrong.
+  await en.unmatch('show')
+  assert.equal(en.decorate({ id: 'show-s1', artId: null }).artId, null)
+  assert.equal(en.artStream('tmdb:show-e1'), null)
+  const posters = await fsp.readdir(path.join(dir, 'tmdb', 'posters'))
+  assert.equal(posters.includes('show-s1.jpg'), false, 'the files are gone too')
 })
 
 test('THE FIX FLOW: the operator corrects a guess from the tile, or drops the artwork', async () => {
@@ -260,7 +317,7 @@ test('THE FIX FLOW: the operator corrects a guess from the tile, or drops the ar
   // Unmatching drops the poster and is remembered, so the next automatic pass
   // leaves the item alone rather than re-guessing.
   assert.equal(await en.unmatch('vague'), true)
-  assert.equal(en.art('tmdb:vague'), null)
+  assert.equal(en.artStream('tmdb:vague'), null)
   assert.equal(en.decorate({ id: 'vague', artId: null }).artId, null)
   const out = await en.run(fakeAdapter(), { key: 'k' })
   assert.equal(out.looked, 0, 'the unmatched item is not re-guessed')

@@ -175,7 +175,7 @@ class PearCinemaHost {
         }
         if (p === 'art') {
           return async ({ artId, ...rest } = {}) => {
-            if (String(artId || '').startsWith('tmdb:')) return en.art(artId)
+            if (String(artId || '').startsWith('tmdb:')) return en.artStream(artId)
             return t.art({ artId, ...rest })
           }
         }
@@ -426,7 +426,9 @@ class PearCinemaHost {
   }
 
   async fixMetadata ({ itemId, tmdbId, type }) {
-    return this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey() })
+    // The inner adapter rides along so re-matching a show can refresh its seasons'
+    // pictures in the same breath.
+    return this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey(), adapter: this._inner })
   }
 
   async unmatchMetadata ({ itemId }) {

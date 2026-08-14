@@ -116,6 +116,17 @@ class TmdbClient {
     return Buffer.from(await res.arrayBuffer())
   }
 
+  // One SEASON of a matched show: its own poster, and a still from every episode -
+  // one call returns the lot, which is why season art costs a call per season
+  // rather than one per episode.
+  async season ({ tmdbId, seasonNumber }) {
+    const r = await this._get(`/tv/${Number(tmdbId)}/season/${Number(seasonNumber)}`)
+    return {
+      poster: r.poster_path || null,
+      episodes: (r.episodes || []).map(e => ({ episode: e.episode_number, still: e.still_path || null }))
+    }
+  }
+
   // One title by its TMDB id, for the fix flow: the operator picked a candidate and
   // the poster path is fetched fresh by id rather than trusted from the page.
   async details ({ type, tmdbId }) {
@@ -149,6 +160,18 @@ function bestMatch (item, candidates) {
   return { candidate: exactYear[0] || exact[0] || candidates[0], sure: false }
 }
 
+// Every page of one list. The adapter paginates; the pass wants the lot.
+async function listAll (adapter, params) {
+  const out = []
+  let cursor = null
+  do {
+    const page = await adapter.list({ ...params, limit: 500, cursor })
+    out.push(...(page.items || []))
+    cursor = page.cursor
+  } while (cursor)
+  return out
+}
+
 // The store and the pass. Persisted as one JSON file plus a folder of posters in
 // the DATA dir - disposable by design, so deleting it costs a re-fetch and nothing
 // else, and nothing of the library's is ever written.
@@ -179,22 +202,32 @@ class Enricher {
 
   get matched () { return this.state.matched || (this.state.matched = {}) }
   get missed () { return this.state.missed || (this.state.missed = {}) }
+  // Season posters and episode stills, keyed by ITEM id and remembering which show
+  // they rode in on (`from`), so unmatching or re-fixing a show can take its
+  // seasons' pictures with it rather than leaving the wrong programme's stills up.
+  get art () { return this.state.art || (this.state.art = {}) }
 
   _posterFile (itemId) { return path.join(this.postersDir, itemId + '.jpg') }
+
+  async _saveImage (itemId, bytes) {
+    await fsp.mkdir(this.postersDir, { recursive: true })
+    await fsp.writeFile(this._posterFile(itemId), bytes)
+  }
 
   // SIDECAR ALWAYS WINS, expressed as: an item that has artwork is returned as it
   // came. Only a gap is filled, and with a copy rather than a mutation, because
   // adapters cache their item objects and a decorated cache would survive the
   // feature being turned off.
   decorate (item) {
-    if (!item || item.artId || !this.matched[item.id]?.poster) return item
+    if (!item || item.artId) return item
+    if (!this.matched[item.id]?.poster && !this.art[item.id]) return item
     return { ...item, artId: 'tmdb:' + item.id }
   }
 
   // Bytes for a tmdb: art id, same contract as adapter.art.
-  art (artId) {
+  artStream (artId) {
     const itemId = String(artId || '').replace(/^tmdb:/, '')
-    if (!this.matched[itemId]?.poster) return null
+    if (!this.matched[itemId]?.poster && !this.art[itemId]) return null
     const file = this._posterFile(itemId)
     if (!fs.existsSync(file)) return null
     const stream = fs.createReadStream(file)
@@ -204,10 +237,7 @@ class Enricher {
 
   async _apply (client, item, candidate, how, { uncertain = false } = {}) {
     const bytes = candidate.poster ? await client.poster(candidate.poster) : null
-    if (bytes) {
-      await fsp.mkdir(this.postersDir, { recursive: true })
-      await fsp.writeFile(this._posterFile(item.id), bytes)
-    }
+    if (bytes) await this._saveImage(item.id, bytes)
     this.matched[item.id] = {
       tmdbId: candidate.tmdbId,
       title: candidate.title,
@@ -236,17 +266,12 @@ class Enricher {
     const client = new TmdbClient({ key, fetch: this.fetch })
     const work = []
     for (const type of ['movies', 'series']) {
-      let cursor = null
-      do {
-        const page = await adapter.list({ type, limit: 500, cursor })
-        for (const it of page.items || []) {
-          if (it.artId) continue
-          if (this.matched[it.id]) continue
-          if (this.missed[it.id] && !retryMissed) continue
-          work.push(it)
-        }
-        cursor = page.cursor
-      } while (cursor)
+      for (const it of await listAll(adapter, { type })) {
+        if (it.artId) continue
+        if (this.matched[it.id]) continue
+        if (this.missed[it.id] && !retryMissed) continue
+        work.push(it)
+      }
     }
 
     this.running = { done: 0, total: work.length, startedAt: Date.now() }
@@ -270,12 +295,27 @@ class Enricher {
         }
         this.running.done++
       }
+
+      // SEASONS AND EPISODES ride on the show matches (Tim, 2026-08-14). One TMDB
+      // call per season brings that season's poster AND a still from every episode,
+      // so a 165-season library is 165 calls, not 2,700. Only gaps are fetched, so
+      // a second pass over a fully-pictured library does nothing. The progress
+      // total grows as this work is discovered, which the bar handles honestly.
+      const tick = {
+        add: (n) => { this.running.total += n },
+        done: (n) => { this.running.done += n }
+      }
+      for (const s of await listAll(adapter, { type: 'series' })) {
+        const m = this.matched[s.id]
+        if (m?.tmdbId) await this._fetchSeasonArt(adapter, client, s.id, m.tmdbId, tick)
+      }
     } finally {
       this.state.lastRun = {
         at: Date.now(),
         looked: work.length,
         matched: Object.keys(this.matched).length,
         uncertain: Object.values(this.matched).filter(m => m.uncertain).length,
+        pictures: Object.keys(this.art).length,
         missed: Object.keys(this.missed).length
       }
       this._write()
@@ -284,6 +324,62 @@ class Enricher {
 
     this.log('tmdb:done', this.state.lastRun)
     return this.state.lastRun
+  }
+
+  // Season posters and episode stills for ONE show, filling only what is missing.
+  // A season with no number cannot be addressed at TMDB and is skipped; an episode
+  // TMDB has no still for is skipped silently rather than swelling `missed` by
+  // hundreds of specials - the next pass asks its season again, one cheap call.
+  async _fetchSeasonArt (adapter, client, seriesId, seriesTmdbId, tick = null) {
+    for (const season of await listAll(adapter, { type: 'seasons', seriesId })) {
+      // A SEASON item carries `number`, not `seasonNumber` - that name lives on
+      // EPISODES (host/items.js). Found the expensive way: a fake adapter written
+      // with the wrong field passed every test while the real library skipped
+      // every season it had.
+      const n = season.number ?? season.seasonNumber ?? null
+      if (n === null || n === undefined) continue
+      const eps = await listAll(adapter, { type: 'episodes', seasonId: season.id })
+      const needSeason = !season.artId && !this.art[season.id]
+      const needEps = eps.filter(e => !e.artId && !this.art[e.id] && e.episodeNumber !== null && e.episodeNumber !== undefined)
+      if (!needSeason && !needEps.length) continue
+
+      tick?.add(1 + needEps.length)
+      try {
+        const data = await client.season({ tmdbId: seriesTmdbId, seasonNumber: n })
+        if (needSeason && data.poster) {
+          await this._saveImage(season.id, await client.poster(data.poster))
+          this.art[season.id] = { from: seriesId, at: Date.now() }
+        }
+        tick?.done(1)
+
+        const stills = new Map(data.episodes.map(x => [x.episode, x.still]))
+        for (const e of needEps) {
+          const still = stills.get(e.episodeNumber)
+          if (still) {
+            try {
+              // w300: a still is a thumbnail in a grid, not a poster on a shelf.
+              await this._saveImage(e.id, await client.poster(still, 'w300'))
+              this.art[e.id] = { from: seriesId, at: Date.now() }
+            } catch {}
+          }
+          tick?.done(1)
+        }
+      } catch (e) {
+        if (e.code === 'BAD_KEY') throw e
+        tick?.done(1 + needEps.length)
+      }
+    }
+  }
+
+  // Drop every season poster and episode still that rode in on one show's match -
+  // called when the show is unmatched or re-matched, because the old programme's
+  // pictures under the new programme's name is the worst version of wrong.
+  async _dropSeasonArt (seriesId) {
+    for (const [id, a] of Object.entries(this.art)) {
+      if (a.from !== seriesId) continue
+      delete this.art[id]
+      await fsp.rm(this._posterFile(id), { force: true })
+    }
   }
 
   // Candidates for ONE item, for the fix flow on the tile. `q` lets the operator
@@ -296,25 +392,31 @@ class Enricher {
 
   // The operator picked the right one from the tile. The poster is fetched fresh by
   // id rather than trusted from the page, and a fixed match is never uncertain -
-  // a person chose it.
-  async fix ({ itemId, tmdbId, type, key }) {
+  // a person chose it. Re-matching a SHOW swaps its seasons' pictures too: the old
+  // ones are dropped as stale and the new show's fetched, best effort.
+  async fix ({ itemId, tmdbId, type, key, adapter = null }) {
     const client = new TmdbClient({ key, fetch: this.fetch })
     const candidate = await client.details({ type, tmdbId })
     if (!candidate?.tmdbId) return null
+    if (type === 'series') await this._dropSeasonArt(itemId)
     await this._apply(client, { id: itemId }, candidate, 'fixed')
+    if (type === 'series' && adapter) {
+      await this._fetchSeasonArt(adapter, client, itemId, candidate.tmdbId).catch(() => {})
+    }
     this._write()
     return this.matched[itemId]
   }
 
   // "This is not any of them" - drop the fetched artwork and stop guessing at this
   // item. Recorded in missed so the next automatic pass leaves it alone; "Look
-  // again" retries it deliberately.
+  // again" retries it deliberately. A show takes its seasons' pictures with it.
   async unmatch (itemId) {
     const had = this.matched[itemId]
     if (!had) return false
     delete this.matched[itemId]
     this.missed[itemId] = { title: had.title, unmatched: true, at: Date.now() }
     await fsp.rm(this._posterFile(itemId), { force: true })
+    await this._dropSeasonArt(itemId)
     this._write()
     return true
   }
@@ -325,6 +427,7 @@ class Enricher {
       lastRun: this.state.lastRun || null,
       matched: Object.keys(this.matched).length,
       uncertain: Object.values(this.matched).filter(m => m.uncertain).length,
+      pictures: Object.keys(this.art).length,
       missed: Object.keys(this.missed).length
     }
   }

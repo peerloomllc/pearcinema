@@ -126,7 +126,8 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
       {!meta.running && meta.lastRun && (
         <p class='hint'>
           {meta.matched} title{meta.matched === 1 ? ' has' : 's have'} fetched artwork
-          {meta.missed > 0 ? `, ${meta.missed} came back with nothing` : ''}.
+          {meta.pictures > 0 ? `, plus ${meta.pictures} season and episode pictures` : ''}
+          {meta.missed > 0 ? `, and ${meta.missed} came back with nothing` : ''}.
         </p>
       )}
       {!meta.running && meta.uncertain > 0 && (

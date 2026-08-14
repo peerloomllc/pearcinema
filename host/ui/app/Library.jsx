@@ -865,19 +865,23 @@ export default function Library ({
           hundred tiles down is exactly where somebody decides they wanted Shows
           instead, and the way back up to the shelf rides along as its own button -
           freezing the shelf ITSELF would spend a third of the viewport on it. */}
+      {/* Continue watching sits LEFT of the categories with a divider between
+          (Tim, 2026-08-14): it is a place to go back to, not a third category, and
+          the divider keeps that reading as categories are added. No counts on the
+          buttons - the number of films you own is not a decision anybody is making
+          here. */}
       <div class='row pickrow'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
-        <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>
-          Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
-        </button>
-        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>
-          Shows {stats.series ? <span class='chip'>{stats.series}</span> : null}
-        </button>
         {((watch?.continue || []).length > 0 || (watch?.upNext || []).length > 0) && (
-          <button class='ghost' onClick={() => document.getElementById('continue-shelf')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-            Continue watching
-          </button>
+          <>
+            <button class='ghost' onClick={() => document.getElementById('continue-shelf')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+              Continue watching
+            </button>
+            <span class='vdiv' aria-hidden='true' />
+          </>
         )}
+        <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>Films</button>
+        <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>Shows</button>
       </div>
 
       <div class={'screen ' + dir} key={root}>

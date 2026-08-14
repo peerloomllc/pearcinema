@@ -811,6 +811,8 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: blur(10px);
 }
+/* The divider between "back to the shelf" and the categories proper. */
+.vdiv { width: 1px; align-self: stretch; background: var(--line); margin: 0 .25rem }
 
 /* Artwork-fetch progress: a real bar, in the library banner and the panel both. */
 .artfetch { display: flex; flex-direction: column; gap: .45rem }
