@@ -19,6 +19,7 @@ const { createMethods, MUTATING } = require('./methods')
 const remux = require('./remux')
 const transcode = require('./transcode')
 const tmdb = require('./tmdb')
+const hls = require('./hls')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
@@ -116,7 +117,13 @@ class PearCinemaHost {
           state: this.host.userState,
           // device.leave: the phone removed this library, so drop its own grant and
           // cut its connections - same teeth as revoke, logged as self-initiated.
-          leave: (deviceKey) => this.host.leaveDevice(deviceKey)
+          leave: (deviceKey) => this.host.leaveDevice(deviceKey),
+          // The phone's transcode path: decide, playlist, one segment at a time.
+          media: {
+            decide: (p) => this.decideFor(p),
+            playlist: (p) => this.hlsPlaylist(p),
+            segment: (p) => this.hlsSegment(p)
+          }
         }),
         mutating: MUTATING,
         // media.stream stays in the package - gating a byte stream on a live grant
@@ -436,6 +443,68 @@ class PearCinemaHost {
 
   async unmatchMetadata ({ itemId }) {
     return this.enricher.unmatch(String(itemId))
+  }
+
+  // --- the phone's transcode path: decide, playlist, segment ------------------
+  //
+  // Stateless by design: every call recomputes the verdict from the same decide()
+  // the browser uses, so there is no session row to leak and revoke needs no new
+  // teeth - a revoked phone simply cannot call again, and the segment its player
+  // already asked for dies with the connection like any stream.
+
+  async decideFor ({ itemId, capabilities = {} }) {
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return null
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    return { mode: verdict.mode, reason: verdict.reason }
+  }
+
+  async hlsPlaylist ({ itemId, capabilities = {} }) {
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return null
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    if (verdict.mode !== 'transcode') return { mode: verdict.mode, reason: verdict.reason, playlist: null }
+    const playlist = hls.playlistFor(item)
+    if (!playlist) return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
+    return {
+      mode: 'transcode',
+      playlist,
+      segments: hls.segmentCount(item.runtime),
+      segmentSeconds: hls.SEGMENT_SECONDS
+    }
+  }
+
+  async hlsSegment ({ itemId, seq, capabilities = {} }) {
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return null
+
+    const n = hls.segmentCount(item.runtime)
+    const k = Number(seq)
+    if (!Number.isInteger(k) || k < 0 || k >= n) return null
+
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    if (verdict.mode !== 'transcode') return null
+
+    if (!this.adapter.ffmpegInput) return null
+    const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })
+    if (!source) return null
+
+    const tc = require('./transcode')
+    const argv = hls.segmentArgs({
+      input: source.input,
+      headers: source.headers || null,
+      seq: k,
+      media: item.media || {},
+      device: this.transcoder.device,
+      hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
+      bitrate: tc.bitrateFor(item.media?.width)
+    })
+
+    // Through the SAME pool as the browser's transcodes: one engine, one cap,
+    // one BUSY message, one kill path.
+    const session = this.transcoder.start({ argv, at: k * hls.SEGMENT_SECONDS, audio: 'aac', media: item.media })
+    this.log('host:hls-segment', { seq: k, running: this.transcoder.running })
+    return session
   }
 
   // A candidate's thumbnail for the fix dialog, PROXIED - the promise on the panel
