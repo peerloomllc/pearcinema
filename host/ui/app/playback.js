@@ -127,12 +127,21 @@ function defaultCanPlayType () {
 // THE VERDICT for one item, in this browser.
 //
 //   play    - it should just work
+//   convert - the browser cannot decode the picture, and the HOST can re-encode it
+//             on its video hardware, so it plays. Only ever returned when the host
+//             has said its startup probe passed (`caps.hostTranscode`) - the same
+//             refusal on a host without the hardware stays a refusal, because a
+//             promise the host cannot keep is worse than the truth.
 //   nosound - the picture will play and there will be silence (a DTS or TrueHD
 //             track in a container the browser accepts). Worth playing, worth
 //             warning about, and NOT the same as a refusal.
 //   refuse  - the browser will show nothing. Always carries a reason.
 //   unknown - the source told us nothing about the file. Let the user try; a
 //             guess dressed as a verdict is worse than no verdict.
+//
+// `caps` is this browser's own answers plus one fact about the host - hostTranscode -
+// because a verdict is a promise about what WILL HAPPEN, and what happens depends on
+// both ends.
 export function verdictFor (item, caps) {
   const m = item?.media
   if (!m || (!m.container && !m.videoCodec)) {
@@ -149,18 +158,38 @@ export function verdictFor (item, caps) {
     // Chrome answer is every browser's answer.
     const mkv = container === 'matroska' || container === 'mkv' || container === 'matroska,webm'
     if (!(mkv && caps.matroska)) {
-      // IS THIS FIXABLE BY REPACKAGING? Only if the streams inside are ones this
-      // browser can already decode AND an MP4 can carry them. That is the whole of
-      // rung one, and on the measured library it is true of nearly everything - which
-      // is why this flag turns most of a collection from a refusal into a film.
-      const remuxable = (!video || (caps[video] && MP4_VIDEO.has(video))) &&
-                        (!audio || MP4_AUDIO.has(audio))
+      // IS THIS FIXABLE BY REPACKAGING? The PICTURE decides: it has to be a codec
+      // this browser already decodes AND one an MP4 can carry, because repackaging
+      // never touches it. The SOUND never blocks a remux - the host copies it when
+      // the browser can take it and rebuilds it to AAC when it cannot, which is the
+      // same answer host/remux.js decide() gives, and the client saying "refuse"
+      // where the host would say "remux" was a disagreement between the two.
+      const videoOk = !video || (caps[video] && MP4_VIDEO.has(video))
+      if (videoOk) {
+        const audioOk = !audio || MP4_AUDIO.has(audio)
+        return {
+          status: 'refuse',
+          remuxable: true,
+          reason: audioOk
+            ? `Your browser will not open ${name} files - the same refusal an iPhone gives. The picture and sound inside are fine, so PearCinema repackages them into a container it will open, without re-encoding anything.`
+            : `Your browser will not open ${name} files, and an MP4 cannot carry the ${String(m.audioCodec || '').toUpperCase()} soundtrack either - so the picture is repackaged untouched and the soundtrack is rebuilt, which is quick.`
+        }
+      }
+      // The picture is the problem, and on a host whose hardware proved itself that
+      // is a film that plays: converted to H.264 on the engine. The host makes the
+      // real decision and would answer 409 if it disagreed; this only decides which
+      // promise the tile makes.
+      if (caps.hostTranscode && caps.h264) {
+        return {
+          status: 'convert',
+          remuxable: false,
+          reason: `Your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video, so the host converts the picture to H.264 on its own video hardware as it streams.`
+        }
+      }
       return {
         status: 'refuse',
-        remuxable,
-        reason: remuxable
-          ? `Your browser will not open ${name} files - the same refusal an iPhone gives. The picture and sound inside are fine, so PearCinema repackages them into a container it will open, without re-encoding anything.`
-          : `Your browser will not open ${name} files, and what is inside cannot simply be repackaged either: ${!video || caps[video] ? `an MP4 cannot carry ${String(m.audioCodec || '').toUpperCase()} audio` : `your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video`}. Playing this one needs re-encoding, which this version does not do.`
+        remuxable: false,
+        reason: `Your browser will not open ${name} files, and what is inside cannot simply be repackaged either: your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video. Playing this one needs re-encoding, which this host cannot do.`
       }
     }
   }
@@ -170,8 +199,16 @@ export function verdictFor (item, caps) {
   // direction: the player always offers Play anyway, so a false refusal costs one
   // click, where a false promise costs a black screen with no explanation.
   if (video && !caps[video]) {
-    // Repackaging cannot change the picture, so this one is not fixable by it.
-    //
+    // Repackaging cannot change the picture, so this one is not fixable by it. With
+    // proven hardware on the host it is fixable by CONVERTING it, which is the whole
+    // point of the transcode path - same promise as the container case above.
+    if (caps.hostTranscode && caps.h264) {
+      return {
+        status: 'convert',
+        remuxable: false,
+        reason: `Your browser cannot decode ${String(m.videoCodec).toUpperCase()} video, so the host converts the picture to H.264 on its own video hardware as it streams.`
+      }
+    }
     // THE `.mp4` CASE NEEDS SAYING OUT LOUD. A file can be named .mp4 and still hold
     // HEVC, and then it looks like it ought to play and does not - Tim hit this on
     // Blade. The extension names the BOX; the codec is what is inside it, and only
@@ -184,7 +221,7 @@ export function verdictFor (item, caps) {
         (familiarBox
           ? ` The file is an ${name}, which browsers do open - but the name describes the box, not what is inside it, and this one holds ${String(m.videoCodec).toUpperCase()}.`
           : '') +
-        ' Repackaging changes the wrapper and never the picture, so this one needs re-encoding, which this version does not do.'
+        ' Repackaging changes the wrapper and never the picture, so this one needs re-encoding, which this host cannot do.'
     }
   }
 
@@ -207,7 +244,7 @@ export function verdictFor (item, caps) {
 // Counted rather than estimated, and unknowns counted separately so the number is
 // never quietly inflated by files we simply know nothing about.
 export function tally (list, caps) {
-  const out = { total: 0, play: 0, nosound: 0, refuse: 0, unknown: 0, repackaged: 0 }
+  const out = { total: 0, play: 0, convert: 0, nosound: 0, refuse: 0, unknown: 0, repackaged: 0 }
   for (const item of list || []) {
     if (!item?.media) continue
     out.total++
@@ -215,7 +252,8 @@ export function tally (list, caps) {
     out[v.status]++
     // Counted separately as well as by status, because a `refuse` the host can
     // repackage is a film that plays - and a count that called it a failure would
-    // tell somebody their library is broken while they are watching it.
+    // tell somebody their library is broken while they are watching it. `convert`
+    // needs no such flag: the status itself already means "plays".
     if (v.remuxable) out.repackaged++
   }
   return out

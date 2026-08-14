@@ -1,6 +1,6 @@
 # Hardware transcode - re-encoding the picture on the Intel video engine, and when that is allowed to start
 
-**Status**: PROPOSED
+**Status**: APPROVED 2026-08-13 (merged as PR #23)
 
 **Goal**: Play the files repackaging cannot fix - the HEVC television no browser decodes
 and the AVI shelf no MP4 can carry - by converting the picture on the host's own video

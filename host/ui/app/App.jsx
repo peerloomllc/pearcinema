@@ -147,6 +147,12 @@ export default function App () {
 
   if (!state) return <div class='empty'>Loading…</div>
 
+  // What this browser can decode PLUS one fact about the host: whether its hardware
+  // probe passed, because a verdict is a promise about what will happen and what
+  // happens depends on both ends. Folded into caps rather than passed beside it so
+  // every consumer of a verdict gets both halves or neither.
+  const caps = { ...CAPS, hostTranscode: !!state.transcode?.available }
+
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
 
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
@@ -248,7 +254,7 @@ export default function App () {
             ? (
               <Player
                 item={playing}
-                caps={CAPS}
+                caps={caps}
                 queue={queue}
                 watch={watch}
                 onWatchChange={reloadWatch}
@@ -263,7 +269,7 @@ export default function App () {
             : (
               <Library
                 state={state}
-                caps={CAPS}
+                caps={caps}
                 search={search}
                 watch={watch}
                 startAt={startAt}

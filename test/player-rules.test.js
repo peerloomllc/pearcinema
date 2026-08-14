@@ -143,7 +143,7 @@ test('the tally counts what it knows and never inflates the playable number', as
   // can rewrap and the DTS soundtrack it can rebuild. It is deliberately not folded
   // into `play`, because the two are different claims: one plays untouched and the
   // other plays because the host worked.
-  assert.deepEqual(tally(list, caps), { total: 5, play: 1, nosound: 1, refuse: 2, unknown: 1, repackaged: 2 })
+  assert.deepEqual(tally(list, caps), { total: 5, play: 1, convert: 0, nosound: 1, refuse: 2, unknown: 1, repackaged: 2 })
 })
 
 test('AVI is refused too - 218 files of the real library are exactly this', async () => {
@@ -291,6 +291,67 @@ test('a badge is a promise about what will HAPPEN, so a repackaged file wears no
   // Only a file nothing can fix keeps a flag.
   const hevc = verdictFor(film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }), caps)
   assert.equal(hevc.remuxable, false)
+})
+
+/* ------------------------------------------- when the host's hardware proved -- */
+
+// `hostTranscode` is the one fact about the HOST that rides in caps: whether its
+// startup probe produced real bytes. It is what turns the two picture refusals into
+// films that play - and only those two, because everything cheaper still wins.
+
+test('HEVC BECOMES A FILM THAT PLAYS once the host hardware proved itself', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = { ...probeCapabilities(chromium), hostTranscode: true }
+
+  // The 76%-of-the-television case, in both boxes it arrives in.
+  for (const container of ['matroska', 'mp4']) {
+    const v = verdictFor(film({ container, videoCodec: 'hevc', audioCodec: 'aac' }), caps)
+    assert.equal(v.status, 'convert', 'HEVC in ' + container)
+    assert.match(v.reason, /converts the picture to H\.264/)
+    assert.match(v.reason, /video hardware/)
+  }
+})
+
+test('the SAME file stays refused on a host whose probe did not pass', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+
+  // hostTranscode absent and hostTranscode false are the same claim: this host
+  // cannot convert, so promising a conversion would be a spinner and then an error.
+  for (const caps of [probeCapabilities(chromium), { ...probeCapabilities(chromium), hostTranscode: false }]) {
+    const v = verdictFor(film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }), caps)
+    assert.equal(v.status, 'refuse')
+    assert.equal(v.remuxable, false)
+  }
+})
+
+test('a convert host changes NOTHING about files the cheaper answers already cover', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = { ...probeCapabilities(chromium), hostTranscode: true }
+
+  // Direct play still wins - Tim's 2001 plays untouched.
+  assert.equal(verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }), caps).status, 'play')
+  // Remux still wins where only the box or the sound is the problem.
+  assert.equal(verdictFor(film({ container: 'matroska', videoCodec: 'h264', audioCodec: 'ac3' }), caps).status, 'nosound')
+})
+
+test('the AVI shelf converts too - the 218 files that were rung three from the start', async () => {
+  const { probeCapabilities, verdictFor } = await playback()
+  const caps = { ...probeCapabilities(chromium), hostTranscode: true }
+  const v = verdictFor(film({ container: 'avi', videoCodec: 'mpeg4', audioCodec: 'mp3' }), caps)
+  assert.equal(v.status, 'convert')
+})
+
+test('the tally counts converts as films that play', async () => {
+  const { probeCapabilities, tally } = await playback()
+  const caps = { ...probeCapabilities(chromium), hostTranscode: true }
+
+  const list = [
+    film({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac' }),
+    film({ container: 'mp4', videoCodec: 'h264', audioCodec: 'aac' })
+  ]
+  const t = tally(list, caps)
+  assert.equal(t.convert, 1)
+  assert.equal(t.refuse, 0, 'a file the host converts is not a failure')
 })
 
 test('an .mp4 holding HEVC says WHY the familiar extension did not help', async () => {

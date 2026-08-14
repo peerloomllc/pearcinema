@@ -12,6 +12,12 @@
 // `media.stream` makes, with the same offset and length, or there are two pieces of
 // byte-range arithmetic to keep honest and they will diverge.
 
+// NO HARDWARE PROBE IN HERE. ready() probes the box's video engine, and this
+// machine may genuinely have one - which would turn the refuse-409 assertions below
+// into live transcodes on whose laptop they happen to run. The probe has its own
+// tests with the ffmpeg faked.
+process.env.PEARCINEMA_TRANSCODE = 'off'
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const os = require('os')
@@ -274,6 +280,12 @@ test('the wrong password does not let you in; the right one does', async (t) => 
   const state = await c.req('GET', '/api/state')
   assert.equal(state.status, 200)
   assert.equal(state.json.library, 'The Cinema')
+
+  // The transcode gate reaches the page, and in here it is OFF BY CONFIG (the env
+  // at the top of this file), which is also what proves the flag works: a passing
+  // probe on the laptop running these tests must not leak through it.
+  assert.equal(state.json.transcode.available, false)
+  assert.match(state.json.transcode.reason, /turned off by configuration/)
 
   const page = await c.req('GET', '/')
   assert.match(page.text, /id="root"/, 'a logged-in browser gets the built app')

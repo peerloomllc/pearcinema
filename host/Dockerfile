@@ -45,8 +45,17 @@ FROM node:20-bookworm-slim
 # accepted rather than worked around: remux is already on the roadmap (83% of a
 # measured real library is in a container an iPhone will not open), and it needs
 # exactly this binary.
+#
+#   intel-media-va-driver - the VA driver hardware transcode needs, and the FREE one
+#                           from main, measured sufficient on the real N100
+#                           (DECISIONS 2026-08-13): full decode and encode
+#                           entrypoints including HEVC Main 10 and H.264 encode. The
+#                           `-non-free` variant the TODO guessed at is not needed,
+#                           so neither is a non-free apt component. Harmless on a
+#                           box with no GPU - the startup probe fails and the
+#                           transcode mode stays off.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates libatomic1 ffmpeg \
+ && apt-get install -y --no-install-recommends ca-certificates libatomic1 ffmpeg intel-media-va-driver \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -4,10 +4,12 @@
 //
 //   /api/stream  - the actual file, byte-ranged. Free, exact, and seekable by the
 //                  native scrubber. Used whenever the browser will open the file.
-//   /api/remux   - repackaged into MP4 on the fly, and the soundtrack rebuilt if the
-//                  browser cannot decode it. Used when the browser refuses the
-//                  container or the audio - never for the picture, which is never
-//                  re-encoded.
+//   /api/remux   - generated MP4 on the fly. Repackaged when the browser refuses the
+//                  container, the soundtrack rebuilt when it cannot decode it, and -
+//                  on a host whose hardware probe passed - the picture converted to
+//                  H.264 on the video engine when the browser cannot decode THAT.
+//                  The host decides which of those it is; to this player they are
+//                  all the same stream.
 //
 // The HOST decides which. A client can describe itself and cannot demand to be
 // repackaged, because direct play is free and exact and remux is neither.
@@ -70,7 +72,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // Repackage when it is the only way to play it AND when it is the only way to HEAR
   // it. A silent film is broken, and rebuilding a soundtrack is cheap - so a
   // 'nosound' verdict is fixed rather than merely reported.
-  const remuxing = ((verdict.status === 'refuse' || verdict.status === 'nosound') && verdict.remuxable) || forced
+  // A `convert` verdict streams through the same route: to the player, remux and
+  // transcode are the same thing - generated MP4 down a socket, seek by restart.
+  const remuxing = ((verdict.status === 'refuse' || verdict.status === 'nosound') && verdict.remuxable) ||
+    verdict.status === 'convert' || forced
   const blocked = verdict.status === 'refuse' && !verdict.remuxable && !forced
 
   // SECONDS ALREADY. This used to multiply by 60, on the same misreading that showed
@@ -251,7 +256,9 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 onError={() => {
                   setBusy(false)
                   setFailed(remuxing
-                    ? 'Repackaging stopped. The film itself is fine - this is the host or the connection rather than the file.'
+                    ? (verdict.status === 'convert'
+                        ? 'Converting stopped. The film itself is fine - this is the host or the connection rather than the file.'
+                        : 'Repackaging stopped. The film itself is fine - this is the host or the connection rather than the file.')
                     : 'The browser stopped without saying why. That is almost always the container or the codec, and the file will play on a phone.')
                 }}
               >
@@ -391,9 +398,11 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
             {blocked && 'Your browser will not open this one at all.'}
             {!blocked && remuxing && (
               <>
-                {verdict.status === 'nosound'
-                  ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
-                  : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will - untouched - as they stream.`}
+                {verdict.status === 'convert'
+                  ? `Your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video, so the host converts the picture to H.264 on its own video hardware as it streams.`
+                  : verdict.status === 'nosound'
+                    ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
+                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will - untouched - as they stream.`}
                 {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
               </>
             )}

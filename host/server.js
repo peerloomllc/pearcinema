@@ -17,6 +17,7 @@ const { createProtocol, LibraryHost } = require('@peerloom/host')
 const { buildAdapter } = require('./adapters')
 const { createMethods, MUTATING } = require('./methods')
 const remux = require('./remux')
+const transcode = require('./transcode')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
@@ -64,6 +65,23 @@ class PearCinemaHost {
       maxConcurrent: Number(process.env.PEARCINEMA_MAX_REMUX) || 3,
       log
     })
+
+    // The re-encoding engine, and ITS OWN CAP: remux exhausts disk I/O where this
+    // exhausts the video engine, and one pool for both would let three cheap remuxes
+    // block the transcode a viewer actually needs, or the reverse. Default 4 against
+    // a measured ceiling of ~10 concurrent 1080p streams on the N100 (DECISIONS
+    // 2026-08-13), leaving headroom for whatever else shares /dev/dri.
+    //
+    // WHETHER IT MAY RUN AT ALL is `this.transcode`, and it starts closed: only the
+    // startup probe in ready() opens it, and only when the hardware produced real
+    // bytes. There is no software fallback anywhere - see the proposal's rule 3.
+    this.transcoder = new transcode.Transcoder({
+      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      maxConcurrent: Number(process.env.PEARCINEMA_MAX_TRANSCODE) || 4,
+      device: process.env.PEARCINEMA_VAAPI_DEVICE || transcode.DEVICE_DEFAULT,
+      log
+    })
+    this.transcode = { available: false, reason: 'the hardware has not been probed yet' }
 
     this.host = new LibraryHost({
       protocol: PROTOCOL,
@@ -157,8 +175,13 @@ class PearCinemaHost {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
 
-    const verdict = remux.decide(item.media, capabilities)
-    if (verdict.mode !== 'remux') return { ...verdict, session: null, item }
+    // The transcode flag is rule 2's gate reaching the decision: false until the
+    // startup probe produced real bytes, and decide() refuses video exactly as it
+    // always did while it is.
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    if (verdict.mode !== 'remux' && verdict.mode !== 'transcode') {
+      return { ...verdict, session: null, item }
+    }
 
     if (!this.adapter.ffmpegInput) {
       return { mode: 'refuse', reason: 'this source cannot be repackaged', session: null, item }
@@ -166,14 +189,18 @@ class PearCinemaHost {
     const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })
     if (!source) return null
 
-    const session = this.remuxer.start({
+    // Same session shape, different engine and different cap: remux is the disk's
+    // pool, transcode is the video engine's.
+    const engine = verdict.mode === 'transcode' ? this.transcoder : this.remuxer
+    const session = engine.start({
       input: source.input,
       headers: source.headers || null,
       at: Math.max(0, Number(at) || 0),
-      audio: verdict.audio || 'copy'
+      audio: verdict.audio || 'copy',
+      media: item.media || null
     })
 
-    this.log('host:remux', { at, audio: verdict.audio, running: this.remuxer.running })
+    this.log('host:' + verdict.mode, { at, audio: verdict.audio, running: engine.running })
     return { ...verdict, session, item }
   }
 
@@ -324,9 +351,35 @@ class PearCinemaHost {
   async ready ({ rescan = false, waitForScan = false } = {}) {
     await this.host.ready()
 
+    // THE HARDWARE PROBE, beside the scan rather than in front of the listen: the
+    // host must come up whether or not the box can transcode. Fire and record - a
+    // playback that arrives before the probe settles simply gets today's refusal,
+    // which is correct for a host whose hardware is not yet proven.
+    this._probeTranscode()
+
     const scan = this._scan({ rescan })
     if (waitForScan) await scan
     return this
+  }
+
+  // Rule 2 of the transcode proposal: only hardware that proved itself at startup
+  // may re-encode, and the proof is real bytes out of the real pipeline on synthetic
+  // input - the presence of /dev/dri is not the test, because a device node with no
+  // driver behind it initialises and then fails.
+  //
+  // PEARCINEMA_TRANSCODE=off is the feature's rollback and skips the probe entirely.
+  async _probeTranscode () {
+    if (String(process.env.PEARCINEMA_TRANSCODE || '').toLowerCase() === 'off') {
+      this.transcode = { available: false, reason: 'turned off by configuration' }
+      this.log('host:transcode', this.transcode)
+      return this.transcode
+    }
+    this.transcode = await transcode.probeTranscode({
+      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      device: this.transcoder.device
+    })
+    this.log('host:transcode', { available: this.transcode.available, reason: this.transcode.reason || undefined })
+    return this.transcode
   }
 
   // A BAD SOURCE MUST NOT STOP THE HOST. If the credentials are wrong or the drive is
@@ -369,6 +422,7 @@ class PearCinemaHost {
     // exits is an orphan holding a file handle on somebody's library drive, and on a
     // small box it is the whole box.
     this.remuxer.killAll()
+    this.transcoder.killAll()
     return this.host.close()
   }
 }

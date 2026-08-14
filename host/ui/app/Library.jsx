@@ -272,7 +272,7 @@ function CompatLine ({ list, caps }) {
   const t = tally(list, caps)
   if (!t.total) return null
 
-  const plays = t.play + t.repackaged
+  const plays = t.play + t.repackaged + t.convert
   // Nothing to report when everything works. Silence is the right amount of interface
   // for good news.
   if (plays === t.total && !t.unknown) return null
@@ -287,10 +287,14 @@ function CompatLine ({ list, caps }) {
           <p>{t.repackaged} of them are repackaged as they stream, because your browser will
             not open the file as it is on disk. The picture is never re-encoded.</p>
         )}
+        {t.convert > 0 && (
+          <p>{t.convert} hold video your browser cannot decode, so the host converts the
+            picture to H.264 on its own video hardware as they stream.</p>
+        )}
         {t.refuse > 0 && (
           <p>{t.refuse} will not play here: your browser cannot decode what is inside them.
             Repackaging changes the wrapper and never the picture, so those need re-encoding,
-            which this version does not do. They play on a phone.</p>
+            which this host cannot do. They play on a phone.</p>
         )}
         {t.unknown > 0 && <p>{t.unknown} did not say what is inside them, so they may play.</p>}
       </div>
