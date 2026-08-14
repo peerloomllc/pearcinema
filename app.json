@@ -1,0 +1,93 @@
+{
+  "expo": {
+    "name": "PearCinema",
+    "slug": "pearcinema",
+    "version": "0.1.0",
+    "newArchEnabled": true,
+    "orientation": "portrait",
+    "scheme": "pear",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.pearcinema",
+      "versionCode": 1,
+      "permissions": [
+        "CAMERA",
+        "INTERNET",
+        "WAKE_LOCK"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "pear",
+              "host": "pearcinema",
+              "pathPrefix": "/pair"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f0d0a"
+      },
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.pearcinema",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "PearCinema scans a pairing QR code to connect to your library host.",
+        "NSAppTransportSecurity": {
+          "NSExceptionDomains": {
+            "127.0.0.1": {
+              "NSExceptionAllowsInsecureHTTPLoads": true
+            }
+          }
+        }
+      },
+      "buildNumber": "1"
+    },
+    "plugins": [
+      [
+        "expo-router"
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 29
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/adaptive-icon.png",
+          "imageWidth": 288,
+          "backgroundColor": "#0f0d0a",
+          "resizeMode": "contain"
+        }
+      ],
+      "./plugins/with-android-abis",
+      "./plugins/with-android-debug-app-id",
+      "./plugins/with-localhost-cleartext",
+      "./plugins/with-standalone-debug",
+      "./plugins/with-webview-recovery"
+    ],
+    "assets": [
+      "./assets/bare-universal.bundle"
+    ],
+    "icon": "./assets/icon.png"
+  }
+}

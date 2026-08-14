@@ -2,7 +2,44 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-14 (latest) - THE MOBILE APP STARTS WITH AN EXTRACTION, not a copy: @peerloom/client is APPROVED
+## 2026-08-14 (latest) - THE PHONE PLAYS, and one person's two devices share a position
+Tier: T2 (first device bring-up; two package seams opened by measured failures)
+Context: the mobile app's first cut, verified on the TCL against the real Umbrel per
+rule 15's escalation - the EMULATOR could not holepunch (HOLEPUNCH_ABORTED, the exact
+case the rule lists as one a virtual device answers badly).
+
+**The milestone, and the claim above it.** Paired by deep link over the real DHT,
+browsed 240 films with posters riding P2P through the loopback shim, played a real
+film minutes deep - and the phone's resume heartbeat appeared on the dashboard's
+continue-watching shelf under the same person, at 73130 ms. One person, two devices,
+one place in a film: the claim the watch-state work shipped unable to prove.
+
+**Three findings, each measured on the device and fixed in @peerloom/client:**
+
+1. **A WebView page injected as a string cannot be trusted with media.** It loads
+   `<img>` from the shim and then refuses `<video>` and `fetch()` against the very
+   same URLs. The shim now serves the app's own page at its root, so the page, the
+   posters and the film are one real origin.
+2. **One abandoned probe was killing the whole connection.** A video player abandons
+   range probes in milliseconds, and a write into the destroyed response threw
+   synchronously inside the channel's message handler - protomux tore the channel
+   down and every request the connection held failed as "channel closed". Every
+   response write is guarded now.
+3. **Where an item's size lives is app vocabulary, and reading the wrong shelf was
+   invisible.** The donor's `t.size` read against PearCinema's `t.media.size` gave
+   `content-length: NaN` on every OPEN-ENDED range - the only kind a player sends -
+   so every film refused with an instant code 4 and zero requests visibly failing.
+   The metadata mapping is injectable and a non-finite size now refuses with a log
+   line instead of a NaN header.
+
+**Known and accepted for the first cut, tracked in TODO:** the wire has no stream
+cancel, so a player's abandoned probes stream to completion (bandwidth on the LAN,
+real money off it - the follow-up is a T2/T3 wire addition); a live connection keeps
+the grant it connected with, so assigning a device to a person applies on reconnect;
+and the WebView player is a stopgap - the proposal's Android-plays-everything claim
+was always an ExoPlayer claim, so the native player is the eventual answer.
+
+## 2026-08-14 - THE MOBILE APP STARTS WITH AN EXTRACTION, not a copy: @peerloom/client is APPROVED
 Tier: T3 (client-side pairing and connection code moves into a shared package)
 Context: Tim said "let's work on the mobile app". The 2026-08-14 survey of PearTune's
 phone stack found ~2,300 lines of app-agnostic client plumbing - the pairing client,
