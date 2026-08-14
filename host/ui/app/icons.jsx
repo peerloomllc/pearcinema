@@ -185,3 +185,11 @@ export const People = (p) => (
     <path d='M16 5.6a3.2 3.2 0 0 1 0 5.8M17.5 14.8a5.5 5.5 0 0 1 3 4.7' />
   </S>
 )
+
+// HOME, on the far left, where a logo would be. The pear is the brand and the brand is
+// not a control - "click the name to go back" is a thing you have to be told, which is
+// the definition of the wrong affordance (Tim, 2026-08-13). The pear keeps the login
+// page and the app icon, where it is a mark rather than a button.
+export const Home = (p) => (
+  <S {...p}><path d='M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5H9V20H5a1 1 0 0 1-1-1z' /></S>
+)

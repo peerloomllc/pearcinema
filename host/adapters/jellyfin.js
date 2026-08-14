@@ -429,8 +429,12 @@ class JellyfinAdapter {
       Limit: Math.min(items.PAGE_MAX, Number(limit) * 3 || 150)
     })
 
+    // RANKED HERE TOO, on what the server sent back. Jellyfin's own order is its
+    // business and it is not ours - the same query should put the same thing first
+    // whichever source is behind it, or "search" means two different things depending
+    // on how somebody happens to store their films. See items.searchItems.
     const mapped = (body.Items || []).map(i => this._map(i)).filter(Boolean)
-    return { items: mapped.slice(0, Math.max(1, Number(limit) || 50)) }
+    return { items: items.searchItems(mapped, q, limit) }
   }
 
   async art ({ artId, size } = {}) {

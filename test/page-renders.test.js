@@ -1002,8 +1002,11 @@ test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) =>
   const bar = [...doc.querySelector('.topbar').children].map(c => c.className.split(' ')[0])
   assert.deepEqual(bar, ['brand', 'searchslot', 'barright'], 'name, search, tools')
 
-  // The name is the way back to the library, which is what let the tabs go.
-  assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /back to the library/)
+  // A HOME ICON, not the brand mark. "Click the name to go back" is a thing somebody
+  // has to be told, which is the definition of the wrong affordance - so the far left
+  // is a home button that happens to carry the name.
+  assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /Back to the library/)
+  assert.ok(doc.querySelector('.brand svg'), 'with an icon that says what it does')
 
   for (const label of ['User access', 'Switch theme', 'Settings']) {
     assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)

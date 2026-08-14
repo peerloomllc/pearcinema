@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Mark, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -170,9 +170,10 @@ export default function App () {
         <button
           class='brand'
           onClick={() => { setTab('watch'); setPlaying(null) }}
-          aria-label='PearCinema - back to the library'
+          aria-label='Back to the library'
+          title='Back to the library'
         >
-          <Mark size={22} />
+          <Home size={20} />
           {/* ONE ELEMENT, because the row has a `gap` and a gap falls between text
               nodes as readily as between boxes - which is what put a space in the
               middle of the name. */}

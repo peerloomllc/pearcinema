@@ -212,10 +212,8 @@ a { color: var(--accent) }
 }
 .searchbox input:focus { outline: none }
 
-/* Off rather than gone. The box keeps its place so the bar keeps its height, and it
- * says plainly that searching does not apply here rather than leaving a hole. */
-.searchbox.off { opacity: .45 }
-.searchbox.off input { cursor: not-allowed }
+/* The pill itself is the field, so it takes the focus ring rather than the input. */
+.searchbox:focus-within { border-color: var(--accent) }
 
 /* THE SCROLLER. Everything above it is fixed by being outside it, so the header needs
  * no `position: sticky` and the scrollbar cannot reach it.
@@ -267,6 +265,15 @@ button.iconbtn {
   padding: .25rem .4rem; line-height: 1;
 }
 button.iconbtn:hover { color: var(--fg) }
+
+/* The search is a PILL, not a box inside one. Its input picks up the ordinary field
+ * styling below unless it says otherwise - same specificity, and the general rule comes
+ * later in the file, so it won - and the result was a rounded rectangle floating inside
+ * a rounded pill (Tim, 2026-08-13, with a screenshot). Stated as the same shape of
+ * selector so it wins on order rather than on luck. */
+.searchbox input[type=text] {
+  background: transparent; border: none; border-radius: 0; padding: .2rem 0;
+}
 
 input[type=text], input[type=password], input[type=number], select {
   font: inherit; color: var(--fg); background: var(--bg-2);
@@ -869,7 +876,8 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
  * dropping the emoji: they came in every platform's colours and none of them ours. */
 svg { flex: 0 0 auto }
 button svg, .viewtoggle svg { vertical-align: -.15em }
-.brand svg { color: var(--accent); margin-right: .1rem }
+.brand svg { color: var(--accent) }
+.brand:hover svg { color: var(--fg) }
 .brand { display: flex; align-items: center; gap: .35rem }
 .dev .ic { display: grid; place-items: center; color: var(--muted); width: 1.6rem }
 .poster .art svg { color: color-mix(in srgb, var(--muted) 70%, transparent) }
