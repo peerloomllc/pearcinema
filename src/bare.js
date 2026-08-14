@@ -204,11 +204,15 @@ const shim = createAudioShim({
       const itemId = m[1]
       const seq = Number(m[2])
       let dead = false
-      res.on('close', () => { dead = true })
+      let cancelSeg = null
+      // A scrub away from a transcoding segment cancels it on the wire, which
+      // EPIPEs the host's per-segment ffmpeg and frees the engine slot at the
+      // scrub instead of four seconds later (stream-cancel proposal).
+      res.on('close', () => { dead = true; try { cancelSeg?.() } catch {} })
       try {
         const c = await connected()
         res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
-        await c.request('media.segment', { itemId, seq, capabilities: capsFor(itemId) }, {
+        const p = c.request('media.segment', { itemId, seq, capabilities: capsFor(itemId) }, {
           stream: true,
           buffer: false,
           onchunk: (chunk) => {
@@ -216,6 +220,9 @@ const shim = createAudioShim({
             try { res.write(chunk) } catch { dead = true }
           }
         })
+        cancelSeg = p.cancel || null
+        await p
+        cancelSeg = null
         if (!dead) { try { res.end() } catch {} }
       } catch (e) {
         log('hls:segment-failed', { seq, err: e.message })

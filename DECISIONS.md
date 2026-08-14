@@ -2,6 +2,67 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - STREAM CANCEL IS ON THE WIRE, and revoke now freezes the screen in seconds
+Tier: T3 (a message appended to the shared media channel; approved in
+`../proposals/2026-08-14-stream-cancel.md`, verbally per the suite-root convention)
+Context: two measured holes from the first phone bring-up - abandoned player probes
+streamed whole files to a floor that dropped them, and the hardware revoke test's
+honest caveat that buffered minutes keep playing from RAM.
+
+**The shape, in three layers** (peerloom-host PR #7, peerloom-client PR #4, this
+repo's PR):
+
+- **The wire**: `cancel(6)` appended to the media channel, after `push(5)`, exactly
+  the append-only evolution channels.js documents. No reply, no end frame for a
+  cancelled id, both race orders legal. An old peer drops the unknown frame and
+  streams to completion - today's behaviour, by construction. Brand-compat pins
+  untouched.
+- **The host**: serveMedia tracks live streamed responses and a cancel destroys the
+  source - closing a file read, EPIPEing a transcoding segment's ffmpeg so the
+  engine slot frees at the scrub. A cancel racing openStream kills the stream at
+  birth via a bounded pre-cancel set, because a real probe cancels within
+  milliseconds of asking.
+- **The client**: every streamed request's promise carries `.cancel()`, which
+  RESOLVES with a marker rather than rejecting - failover keys on stream failure,
+  and a player hanging up is the opposite of a host dying. The shim cancels on
+  response close in both stream paths, and its ranged reads are WINDOWED (8 MB,
+  plain offset/length - no wire change): the next window is asked for only while
+  the player drains, gated on live `writableNeedDrain` rather than a latched flag
+  (a buffer that filled and drained mid-window would otherwise wait forever on a
+  drain that already fired - caught by test). A hung-up read aborts its cache
+  sink; a later complete read may still commit.
+
+**And the third piece lives in the SHELL, which the proposal did not predict:**
+ExoPlayer's buffering is size-governed by default and drank our bounded windows
+into its own buffer at line speed - the windows alone took post-revoke playback
+from minutes to a measured 89 seconds, still not the claim. One player config
+(`bufferOptions: preferredForwardBufferDuration 20, prioritizeTimeOverSizeThresholds
+true`) makes time govern, and the claim became true on the screen.
+
+**Verified on the TCL against the real Umbrel, the acceptance standard being the
+screen and the byte counts, not log lines:**
+
+- **The probe test**: opening a film and backing out served 640 KB of a 2.78 GB
+  film (`shim:hungup served:655360 of:2777633735`, `media:cancelled` on the host in
+  the same second). The old build shipped the remainder - gigabytes - to a floor
+  that dropped it.
+- **The revoke test, rerun end to end**: revoke mid-film, `killed: 1`, and the
+  picture froze TWELVE SECONDS later (surface fps telemetry, revoke 14:22:25, last
+  frame 14:22:37). The sequence of measurements is the story: minutes before this
+  work, 89 seconds with windows alone, 12 with the player's buffer time-governed.
+  "No new bytes within a second" still holds unchanged.
+- **The transcode pool goes quiet at the back press** - no further segments are
+  requested or started after the player closes.
+
+**Tests**: 210 in peerloom-host (3 new: cancel mid-pipe, cancel racing the open,
+unknown ids in both orders), 169 in peerloom-client (2 new over a real DHT testnet:
+a hangup destroys the HOST's source while the connection lives; an open-ended read
+arrives as gap-free bounded windows, byte-identical), 423 here.
+
+**Still open from the proposal**: the off-LAN window-size measurement (open
+question 1) rides with the scrub-latency item; the dashboard's browser player keeps
+unwindowed loopback streaming (question 3, recommended no and taken).
+
 ## 2026-08-14 - THE DEVICE DECLARES WHAT ITS CHIP PROVED, and a lying chip gets one honest retry
 Tier: T1 (the declaration's CONTENT changes per device; the media.decide contract and
 the wire shape do not)

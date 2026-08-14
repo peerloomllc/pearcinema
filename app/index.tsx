@@ -42,7 +42,20 @@ export default function App () {
   const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
   const playingRef = useRef<typeof playing>(null)
   const lastPos = useRef(0)
-  const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = 5 })
+  // THE FORWARD BUFFER IS TIME-GOVERNED AND SMALL, and that is a revoke-latency
+  // decision, not a tuning nicety. With ExoPlayer's defaults the SIZE thresholds
+  // govern and it buffered minutes of film through the shim's windows - measured
+  // 2026-08-14: a revoked screen kept playing 89 seconds from RAM. Time-governed
+  // at 20 seconds, a revoke freezes the picture in at most about that, which is
+  // what makes the wire's stream-cancel visible on the screen. The cost is a
+  // shallower cushion against link hiccups, which 20 seconds still covers.
+  const player = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 5
+    p.bufferOptions = {
+      preferredForwardBufferDuration: 20,
+      prioritizeTimeOverSizeThresholds: true
+    }
+  })
 
   // Worklet replies routed back to the WebView by id; worklet events forwarded
   // as __pearEvent. One buffer, newline-framed, exactly the suite convention.
