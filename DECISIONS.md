@@ -2,6 +2,45 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - SUBTITLES ON THE PHONE: one picker, two mechanisms, and the picker hides the difference
+Tier: T1 (player UI and one worklet proxy; no wire change - subtitle.list and
+subtitle.get were already the host's vocabulary)
+Context: the two halves of a real library need two different renderers, and the
+open question was whether the embedded half was already free. Measured: it is.
+
+**Embedded tracks ride the native player.** On direct play ExoPlayer reads the
+file's own text tracks and expo-video surfaces them (`availableSubtitleTracks`,
+`subtitleTrack` to select). Verified on the TCL against a real episode: the
+X-Files "2shy" MKV's embedded ASS track appeared in the picker as "English (in
+the file)" and selecting it rendered dialogue on screen - screenshot, not log
+line. This covers the 2,715 embedded TV tracks with no bytes moved and no code
+beyond the picker.
+
+**External files render as an RN overlay, clocked off the player.** A native
+player has no side-load API, so the host's WebVTT (the .srt beside the file,
+converted server-side, streamed over the P2P connection through subtitle.get)
+is parsed in the shell - a deliberately minimal VTT parser, timestamps and text,
+tags stripped - and the active cue is looked up from `player.currentTime` a few
+times a second into a Text overlay above the controls. MODE-INDEPENDENT by
+construction: direct play and the HLS transcode both carry the film's own
+timeline, so one cue lookup serves both. Verified on the TCL on the harder
+case - Samurai Jack XCII, HEVC, so the picture arrived as a host transcode
+while the sidecar .eng.srt rendered in sync over it ("[ Tire screeches ]" at
+the tire screech).
+
+**One picker covers both and hides the mechanism**, the same posture as the
+host deciding stream modes: rows are just names, embedded ones marked "(in the
+file)", Off first, one active at a time - choosing external switches the native
+track off so two renderers cannot fight over the picture.
+
+**What this deliberately does not do**: PGS. The films' image subtitles still
+need burn-in on the transcode path - a real cost decision (it turns a remux
+into a full re-encode), still open in TODO, unchanged by any of this.
+
+One trap for the record: the host STREAMS subtitle bytes through the same
+chokepoint as film bytes, so the worklet proxy buffers the stream into one
+string for IPC - tens of kilobytes, not a byte feed the shell must reassemble.
+
 ## 2026-08-14 - THE TMDB KEY STAYS BRING-YOUR-OWN. Settled, this time by Tim with the friction in hand
 Tier: T0 (no code changes; the feature already ships this way)
 Context: the 2026-08-12 decision said bring-your-own; Tim reopened it 2026-08-13
