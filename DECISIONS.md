@@ -2,6 +2,46 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - A WARM PAIRING LINK REMOUNTS THE APP, so the link lives in a module stash
+Tier: T1 (shell and UI flow; no wire change)
+Context: the measured gap - a pairing link while a host is active never reached the
+pairing screen - turned out to have TWO roots, and the instrumented trace on the TCL
+was what separated them (console.log, because LogBox eats console.warn in a bundled
+debug build with no Metro attached - itself worth remembering).
+
+**Root one, the UI**: the pairing screen only existed when the app had no host. It is
+now an overlay a running app can open - a link opens it prefilled, the Libraries
+screen's Add a library opens it empty, Back unwinds it.
+
+**Root two, the shell, and the one the donor already knew**: expo-router navigates on
+EVERY warm pear:// link (no /pair route; +not-found redirects home) and that
+navigation REMOUNTS the shell component - worklet terminated and rebooted, WebView
+reloaded on a fresh shim port, every ref reset. The trace showed the link arriving,
+the event injected into the dying WebView, and the whole boot sequence running again
+half a second later. So the link is stashed in a MODULE-level variable that survives
+the remount, and the freshly mounted UI collects it via shell.pendingLink with
+collect-and-clear semantics. PearTune's shell carries the same scar in the same
+shape; the port simply had not carried the stash across.
+
+Also learned the expensive way: `npm install expo-linking` pulled the next SDK's
+version (57.x against Expo 54) and its expo-modules-core ABI mismatch crash-looped
+the app at boot - `npx expo install` is what resolves the SDK-matched version. And
+the swap was a red herring anyway: expo-linking's addEventListener IS react-native's
+Linking on Android, so the event machinery was never the problem.
+
+With it: the Libraries screen (hosts list, active marker, switch, two-tap armed
+leave, Add a library) behind the library-name chip; the QR scanner (PearTune's
+getUserMedia + jsQR, whole) in the pairing screen, camera permission asked by the
+shell on demand - on this page's own origin, because http://127.0.0.1 is a
+trustworthy origin and the donor's https://localhost baseUrl trick is not needed
+when the page is genuinely served. And hosts.remove no longer eats the host list
+(removeHost returns { file, removed }; the worklet assigned the wrapper - latent
+until a UI first called it).
+
+Scanner verification is honest about its edge: permission flow, camera open (HAL
+frame requests ticking) and overlay verified on the TCL; the DECODE is the donor's
+shipped jsQR and waits for a hand holding the phone at a real QR.
+
 ## 2026-08-14 - STREAM CANCEL IS ON THE WIRE, and revoke now freezes the screen in seconds
 Tier: T3 (a message appended to the shared media channel; approved in
 `../proposals/2026-08-14-stream-cancel.md`, verbally per the suite-root convention)

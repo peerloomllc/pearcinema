@@ -313,7 +313,10 @@ const methods = {
         }
       } catch {}
     }
-    hostsState = H.removeHost(hostsState, hostKey)
+    // removeHost returns { file, removed } - the file is the new state, and
+    // assigning the wrapper instead would silently eat the whole host list on
+    // the next write. Caught the first time a UI actually called this.
+    hostsState = H.removeHost(hostsState, hostKey).file
     writeHosts(hostsState)
     if (client) { try { await client.close() } catch {} ; client = null }
     emit('hosts:changed', {})
