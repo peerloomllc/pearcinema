@@ -104,3 +104,13 @@ button:disabled { opacity: .5 }
 .hostrow .name { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 .hostrow .on { font-size: .75rem; color: var(--accent) }
 .hostrow .danger { background: #5c2320; color: #f2d9d7; border: 1px solid #7a2f2b }
+
+/* Pick up where you left off - a question over the library, answered in a tap. */
+.resumeover { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); z-index: 30 }
+.resumeover .card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .9rem;
+  width: min(85vw, 340px);
+}
+.resumeover .row { display: flex; gap: .6rem }
+.resumeover .row button { flex: 1 }
