@@ -8,6 +8,7 @@
 // the suite convention.
 
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks'
+import jsQR from 'jsqr'
 import { call, on } from './bridge'
 
 const fmtRuntime = (s) => {
@@ -17,9 +18,86 @@ const fmtRuntime = (s) => {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
-function Pairing ({ onPaired, initialLink = '' }) {
+// The camera pointed at a pairing QR. PearTune's Scanner, ported: getUserMedia
+// frames through jsQR on a hidden canvas. The guard on mediaDevices is load-
+// bearing - outside a secure context the property is UNDEFINED and reading
+// getUserMedia off it throws synchronously inside the effect, which unmounts
+// the tree into a black screen with nothing in the log (the donor paid for
+// that). This page's origin is http://127.0.0.1, which IS trustworthy, but the
+// guard stays so a WebView that disagrees fails with a sentence instead.
+function Scanner ({ onScan, onCancel }) {
+  const video = useRef(null)
+  const canvas = useRef(null)
+  const [msg, setMsg] = useState('Point at the pairing code')
+
+  useEffect(() => {
+    let stream = null
+    let raf = null
+    let done = false
+
+    ;(async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error('This device will not give the app a camera.')
+        }
+        const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        if (done) return s.getTracks().forEach((t) => t.stop())
+        stream = s
+        video.current.srcObject = s
+        video.current.play()
+        tick()
+      } catch (e) {
+        setMsg(`Camera unavailable (${e.message}). Paste the link instead.`)
+      }
+    })()
+
+    function tick () {
+      if (done) return
+      const v = video.current
+      const c = canvas.current
+      if (v && c && v.readyState === v.HAVE_ENOUGH_DATA) {
+        c.width = v.videoWidth
+        c.height = v.videoHeight
+        const ctx = c.getContext('2d')
+        ctx.drawImage(v, 0, 0, c.width, c.height)
+        const img = ctx.getImageData(0, 0, c.width, c.height)
+        const code = jsQR(img.data, img.width, img.height)
+        if (code?.data) {
+          done = true
+          onScan(code.data)
+          return
+        }
+      }
+      raf = requestAnimationFrame(tick)
+    }
+
+    return () => {
+      done = true
+      if (raf) cancelAnimationFrame(raf)
+      stream?.getTracks().forEach((t) => t.stop())
+    }
+  }, [])
+
+  return (
+    <div class='scanner'>
+      <video ref={video} playsinline muted />
+      <canvas ref={canvas} style={{ display: 'none' }} />
+      <div class='overlay'>
+        <p>{msg}</p>
+        <button class='ghost' onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+// `onCancel` makes this screen reachable from a RUNNING app - adding a second
+// library, or a pairing link arriving while a host is active, which used to go
+// nowhere because this screen only existed when the app had no host at all
+// (the gap the 2026-08-14 revoke-restore hit twice).
+function Pairing ({ onPaired, initialLink = '', onCancel = null }) {
   const [link, setLink] = useState(initialLink)
   const [busy, setBusy] = useState(false)
+  const [scanning, setScanning] = useState(false)
   const [err, setErr] = useState('')
 
   // The deep link lands AFTER first render on a cold start - the shell forwards
@@ -30,10 +108,10 @@ function Pairing ({ onPaired, initialLink = '' }) {
     if (initialLink) setLink((cur) => cur || initialLink)
   }, [initialLink])
 
-  const pair = async () => {
+  const pairWith = async (raw) => {
     setBusy(true); setErr('')
     try {
-      const out = await call('pair', { link: link.trim(), label: 'phone' })
+      const out = await call('pair', { link: String(raw || '').trim(), label: 'phone' })
       onPaired(out)
     } catch (e) {
       setErr(e.message)
@@ -41,23 +119,69 @@ function Pairing ({ onPaired, initialLink = '' }) {
     setBusy(false)
   }
 
+  const scan = async () => {
+    // The shell holds the runtime camera permission; asking is a no-op when it
+    // is already granted. The scanner shows its own failure if this is denied.
+    await call('shell.cameraPermission').catch(() => {})
+    setScanning(true)
+  }
+
+  if (scanning) {
+    return (
+      <Scanner
+        onScan={(text) => { setScanning(false); setLink(text); pairWith(text) }}
+        onCancel={() => setScanning(false)}
+      />
+    )
+  }
+
   return (
     <div class='pairing'>
       <h1>Pear<span>Cinema</span></h1>
       <p>Your films, from your own machine, anywhere - no port forwarding, no VPN, no account.</p>
       <p class='hint'>
-        On your library's dashboard press <b>Pair a device</b>, then paste the link
-        its QR carries here.
+        On your library's dashboard press <b>Pair a device</b>, then scan the QR
+        it shows - or paste the link it carries here.
       </p>
+      <button onClick={scan}>Scan the code</button>
       <textarea
         placeholder='pear://pearcinema/pair?...'
         value={link}
         onInput={(e) => setLink(e.currentTarget.value)}
       />
       {err && <div class='bad'>{err}</div>}
-      <button disabled={busy || !link.trim()} onClick={pair}>
+      <button disabled={busy || !link.trim()} onClick={() => pairWith(link)}>
         {busy ? 'Pairing…' : 'Pair with this library'}
       </button>
+      {onCancel && <button class='ghost' onClick={onCancel}>‹ Back</button>}
+    </div>
+  )
+}
+
+// Every paired library, the active one marked, each leavable - and the way in
+// for a second library. Leave is armed by a first tap rather than a confirm()
+// dialog, because a WebView's confirm is at the shell's mercy.
+function Hosts ({ hosts, onSwitch, onLeave, onAdd, onBack }) {
+  const [arming, setArming] = useState(null)
+  return (
+    <div class='hosts'>
+      <div class='crumbs'>
+        <button class='ghost' onClick={onBack}>‹ Back</button>
+        <span>Libraries</span>
+      </div>
+      {hosts.map((h) => (
+        <div class='hostrow' key={h.hostKey}>
+          <div class='meta'>
+            <span class='name'>{h.libraryName || 'Library'}</span>
+            {h.active && <span class='on'>Playing from this library</span>}
+          </div>
+          {!h.active && <button class='ghost' onClick={() => onSwitch(h.hostKey)}>Switch</button>}
+          {arming === h.hostKey
+            ? <button class='danger' onClick={() => { setArming(null); onLeave(h.hostKey) }}>Really leave?</button>
+            : <button class='ghost' onClick={() => setArming(h.hostKey)}>Leave</button>}
+        </div>
+      ))}
+      <button class='more' onClick={onAdd}>Add a library</button>
     </div>
   )
 }
@@ -148,9 +272,15 @@ export default function App () {
   const [pairLink, setPairLink] = useState('')
   const [artBase, setArtBase] = useState('')
   const [err, setErr] = useState('')
+  // The two overlay screens a RUNNING app can open: the library list, and the
+  // pairing screen for adding (or re-adding) a library.
+  const [showHosts, setShowHosts] = useState(false)
+  const [addingLibrary, setAddingLibrary] = useState(false)
   // Items already retried after a native player error - one honest retry per
   // item per session, never a loop of failing attempts.
   const retried = useRef(new Set())
+  // What the hardware back button should unwind, read at press time.
+  const uiRef = useRef({})
 
   const reload = useCallback(async () => {
     const s = await call('app.state')
@@ -165,7 +295,11 @@ export default function App () {
   useEffect(() => {
     reload().catch((e) => setErr(e.message))
     const offs = [
-      on('pair-link', (url) => setPairLink(url)),
+      // A pairing link while a host is ACTIVE used to go nowhere - the pairing
+      // screen only existed when the app had no host (measured 2026-08-14: the
+      // revoke restore needed a full app wipe to re-pair). It now opens the
+      // pairing screen as an overlay, link filled in.
+      on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
       on('shim:ready', () => reload().catch(() => {})),
       // THE UI OWNS THE WATCH-STATE WRITES; the native player only reports. The
@@ -199,22 +333,28 @@ export default function App () {
         }
       })
     ]
-    call('shell.pendingLink').then((url) => { if (url) setPairLink(url) }).catch(() => {})
+    // The stashed link from the shell - a warm pear:// link remounts the whole
+    // shell (expo-router navigates on it), so the live pair-link event above is
+    // only the fast path; THIS collect is what survives the remount. Opening
+    // the overlay here is harmless when no host is active yet: the full-screen
+    // pairing render wins in that case.
+    call('shell.pendingLink').then((url) => {
+      if (url) { setPairLink(url); setAddingLibrary(true) }
+    }).catch(() => {})
     // Android back unwinds the UI one level; only with nothing left does the app
     // close. A RUNNING FILM is the shell's to close - it never reaches here.
     window.__pearBack = () => {
-      setSeason((se) => {
-        if (se) return null
-        setSeries((sr) => {
-          if (sr) return null
-          call('shell.exit').catch(() => {})
-          return null
-        })
-        return null
-      })
+      const u = uiRef.current
+      if (u.addingLibrary) return setAddingLibrary(false)
+      if (u.showHosts) return setShowHosts(false)
+      if (u.season) return setSeason(null)
+      if (u.series) return setSeries(null)
+      call('shell.exit').catch(() => {})
     }
     return () => offs.forEach((f) => f())
   }, [])
+
+  uiRef.current = { addingLibrary, showHosts, season: !!season, series: !!series }
 
   const fetchList = useCallback(async (params, append = false) => {
     try {
@@ -241,6 +381,34 @@ export default function App () {
     return <Pairing initialLink={pairLink} onPaired={() => reload()} />
   }
 
+  // The overlay screens of a running app. Pairing first: a link that arrived
+  // wants acting on even when the library list is also open.
+  if (addingLibrary) {
+    return (
+      <Pairing
+        initialLink={pairLink}
+        onPaired={() => { setAddingLibrary(false); setShowHosts(false); setPairLink(''); setSeries(null); setSeason(null); reload() }}
+        onCancel={() => { setAddingLibrary(false); setPairLink('') }}
+      />
+    )
+  }
+
+  if (showHosts) {
+    return (
+      <Hosts
+        hosts={state.hosts || []}
+        onSwitch={async (hostKey) => {
+          try { await call('hosts.setActive', { hostKey }); setSeries(null); setSeason(null); setShowHosts(false); await reload() } catch (e) { setErr(e.message) }
+        }}
+        onLeave={async (hostKey) => {
+          try { await call('hosts.remove', { hostKey }); await reload() } catch (e) { setErr(e.message) }
+        }}
+        onAdd={() => setAddingLibrary(true)}
+        onBack={() => setShowHosts(false)}
+      />
+    )
+  }
+
   // PLAYBACK IS NATIVE - ExoPlayer in the shell, pointed at the shim, because the
   // WebView's own media stack refuses Matroska and Matroska is 83% of a real
   // library. The UI fetches the URL and any saved position, then hands over.
@@ -263,7 +431,7 @@ export default function App () {
     <div class='shell'>
       <div class='top'>
         <span class='brand' onClick={() => { setSeries(null); setSeason(null) }}>Pear<b>Cinema</b></span>
-        <span class='lib'>{state.active.libraryName}</span>
+        <span class='lib' onClick={() => setShowHosts(true)}>{state.active.libraryName}</span>
       </div>
 
       {!series && (

@@ -8,7 +8,12 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+// expo-linking, NOT react-native's Linking: on the new architecture the RN
+// module's warm 'url' event never fires, so a pairing link tapped while the
+// app was running arrived nowhere (measured on the TCL, 2026-08-14 - the
+// second half of the pairing-link gap; the donor shell uses expo-linking too).
+import * as Linking from 'expo-linking'
 import { WebView } from 'react-native-webview'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import { Worklet } from 'react-native-bare-kit'
@@ -20,6 +25,15 @@ import { probe as probeDecoders } from '../modules/decoder-probe'
 
 const bundle = require('../assets/bare-universal.bundle')
 
+// The parked pairing link, MODULE scope on purpose. A warm pear:// link makes
+// expo-router navigate (there is no /pair route, so +not-found redirects home)
+// and that navigation REMOUNTS this component - worklet, WebView, refs and all.
+// Anything stashed in a ref dies with the remount and the link vanishes, which
+// was the measured half of the pairing-link gap the trace pinned on 2026-08-14.
+// A module variable survives; the freshly mounted UI collects it via
+// shell.pendingLink. The donor shell carries the same scar in the same shape.
+let pendingPairLink: string | null = null
+
 SplashScreen.preventAutoHideAsync().catch(() => {})
 
 export default function App () {
@@ -27,7 +41,6 @@ export default function App () {
   const ipcRef = useRef<any>(null)
   const workletRef = useRef<Worklet | null>(null)
   const [uri, setUri] = useState<string | null>(null)
-  const pendingLink = useRef<string | null>(null)
   // The shell's own calls into the worklet ride NEGATIVE ids, so they can never
   // collide with the UI's positive ones on the same pipe.
   const shellPending = useRef(new Map<number, (v: any) => void>())
@@ -160,9 +173,17 @@ export default function App () {
   // A pairing deep link (pear://pearcinema/pair?...) arrives here - cold start or
   // warm - and is handed to the UI, which owns the pairing screen.
   useEffect(() => {
+    // Only PearCinema's own pairing links - the suite shares the pear:// scheme.
+    // One console.log per link taken (LogBox eats console.warn in a bundled
+    // debug build, so log is the level that reaches logcat): "did the intent
+    // even arrive" is the first question every report about pairing raises.
     const forward = (url: string | null) => {
-      if (!url || !url.includes('/pair')) return
-      pendingLink.current = url
+      if (!url || !url.startsWith('pear://pearcinema/pair')) return
+      console.log('[shell] pair link stashed, rv=' + url.slice(30, 42))
+      pendingPairLink = url
+      // The fast path, for a delivery that did NOT remount us. If the router
+      // remounts everything a beat later, the stash above is what survives and
+      // the new mount's shell.pendingLink collect is what lands it.
       feedWebView(`window.__pearEvent && window.__pearEvent('pair-link', ${JSON.stringify(url)})`)
     }
     Linking.getInitialURL().then(forward).catch(() => {})
@@ -248,7 +269,31 @@ export default function App () {
       return
     }
     if (msg.method === 'shell.pendingLink') {
-      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: pendingLink.current, error: null })})`)
+      // Collect semantics: hand the link over ONCE and clear it, or a taken
+      // link would reopen the pairing screen on every later remount.
+      const link = pendingPairLink
+      pendingPairLink = null
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: link, error: null })})`)
+      return
+    }
+    // The QR scanner runs IN the WebView (getUserMedia + jsQR, PearTune's
+    // shape), but the WebView can only use a camera the APP holds the runtime
+    // permission for. The UI asks here before opening the scanner; denial is
+    // not an error - the scanner shows its own sentence and the paste path
+    // still works.
+    if (msg.method === 'shell.cameraPermission') {
+      ;(async () => {
+        let granted = true
+        try {
+          if (Platform.OS === 'android') {
+            const r = await PermissionsAndroid.request('android.permission.CAMERA' as any)
+            granted = r === PermissionsAndroid.RESULTS.GRANTED
+          }
+        } catch {
+          granted = false
+        }
+        feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { granted }, error: null })})`)
+      })()
       return
     }
 
@@ -273,6 +318,12 @@ export default function App () {
           allowsInlineMediaPlayback
           mediaPlaybackRequiresUserAction={false}
           allowsFullscreenVideo
+          // The pairing QR scanner runs in the WebView via getUserMedia - the
+          // page's origin (http://127.0.0.1) is a trustworthy origin, so the
+          // camera API exists; these two hand the WebView the camera once the
+          // app itself holds the runtime permission (shell.cameraPermission).
+          mediaCapturePermissionGrantType='grant'
+          onPermissionRequest={(ev: any) => { try { ev?.grant?.(ev.resources) } catch {} }}
           style={styles.web}
         />
       )}
