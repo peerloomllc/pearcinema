@@ -8,8 +8,9 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Linking, Platform, StyleSheet, View } from 'react-native'
+import { BackHandler, Linking, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
+import { VideoView, useVideoPlayer } from 'expo-video'
 import { Worklet } from 'react-native-bare-kit'
 import * as FileSystem from 'expo-file-system/legacy'
 import { Asset } from 'expo-asset'
@@ -30,6 +31,17 @@ export default function App () {
   // collide with the UI's positive ones on the same pipe.
   const shellPending = useRef(new Map<number, (v: any) => void>())
   const shellId = useRef(-1)
+
+  // THE PLAYER IS NATIVE - ExoPlayer via expo-video - because the WebView's media
+  // stack refuses Matroska, which is 83% of a real library, while ExoPlayer eats
+  // it. The WebView stays the whole interface; this overlay exists only while a
+  // film runs, pointed at the same loopback shim URL, and the UI keeps OWNING the
+  // watch-state writes - the shell only reports positions, so there is exactly one
+  // copy of the resume rules.
+  const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
+  const playingRef = useRef<typeof playing>(null)
+  const lastPos = useRef(0)
+  const player = useVideoPlayer(null, (p) => { p.timeUpdateEventInterval = 5 })
 
   // Worklet replies routed back to the WebView by id; worklet events forwarded
   // as __pearEvent. One buffer, newline-framed, exactly the suite convention.
@@ -130,15 +142,41 @@ export default function App () {
     return () => sub.remove()
   }, [])
 
-  // Android back: let the UI unwind its own navigation first; only a UI with
-  // nowhere left to go lets the system have it.
+  // Android back: a running film closes first; then the UI unwinds its own
+  // navigation; only a UI with nowhere left to go lets the system have it.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (playingRef.current) { stopPlayback(); return true }
       feedWebView('window.__pearBack && window.__pearBack()')
       return true
     })
     return () => sub.remove()
   }, [])
+
+  // Position ticks flow INTO the UI, which owns every watch-state rule.
+  useEffect(() => {
+    playingRef.current = playing
+    if (!playing) return
+    lastPos.current = (playing.startMs || 0) / 1000
+    const sub = player.addListener('timeUpdate', (e: any) => { lastPos.current = e.currentTime })
+    const tick = setInterval(() => {
+      const p = playingRef.current
+      if (!p) return
+      const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
+      feedWebView(`window.__pearEvent && window.__pearEvent('player:tick', ${payload})`)
+    }, 15000)
+    return () => { sub.remove(); clearInterval(tick) }
+  }, [playing])
+
+  const stopPlayback = () => {
+    const p = playingRef.current
+    if (p) {
+      const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
+      feedWebView(`window.__pearEvent && window.__pearEvent('player:closed', ${payload})`)
+    }
+    try { player.pause() } catch {}
+    setPlaying(null)
+  }
 
   // WebView -> worklet: the other half of the bridge.
   const onMessage = (event: any) => {
@@ -147,6 +185,24 @@ export default function App () {
 
     // A handful of methods are the SHELL's, not the worklet's.
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
+    if (msg.method === 'shell.play') {
+      const { itemId, url, title, startMs } = msg.args || {}
+      setPlaying({ itemId, url, title: title || '', startMs })
+      try {
+        player.replace({ uri: url })
+        if (startMs > 0) player.currentTime = startMs / 1000
+        player.play()
+      } catch (e: any) {
+        console.warn('[shell] play failed', e?.message)
+      }
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.stop') {
+      stopPlayback()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
     if (msg.method === 'shell.pendingLink') {
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: pendingLink.current, error: null })})`)
       return
@@ -176,11 +232,35 @@ export default function App () {
           style={styles.web}
         />
       )}
+
+      {playing && (
+        <View style={styles.playerOverlay}>
+          <View style={styles.playerBar}>
+            <Pressable onPress={stopPlayback} style={styles.backBtn}>
+              <Text style={styles.backTxt}>‹ Back</Text>
+            </Pressable>
+            <Text style={styles.title} numberOfLines={1}>{playing.title}</Text>
+          </View>
+          <VideoView
+            style={styles.video}
+            player={player}
+            nativeControls
+            allowsFullscreen
+            contentFit='contain'
+          />
+        </View>
+      )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0f0d0a' },
-  web: { flex: 1, backgroundColor: '#0f0d0a' }
+  web: { flex: 1, backgroundColor: '#0f0d0a' },
+  playerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
+  playerBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 40, paddingHorizontal: 12, paddingBottom: 6 },
+  backBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e2820' },
+  backTxt: { color: '#efe9df', fontWeight: '600' },
+  title: { color: '#efe9df', flex: 1 },
+  video: { flex: 1 }
 })

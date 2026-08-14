@@ -83,7 +83,8 @@
       "./plugins/with-android-debug-app-id",
       "./plugins/with-localhost-cleartext",
       "./plugins/with-standalone-debug",
-      "./plugins/with-webview-recovery"
+      "./plugins/with-webview-recovery",
+      "expo-video"
     ],
     "assets": [
       "./assets/bare-universal.bundle"
