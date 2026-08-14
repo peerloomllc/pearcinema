@@ -113,7 +113,10 @@ class PearCinemaHost {
           // The per-person store, built by the package on its own Hyperbee. Safe to
           // read here for the same reason `grants` is: `media` is a FUNCTION the
           // package calls once the host exists, not an object built alongside it.
-          state: this.host.userState
+          state: this.host.userState,
+          // device.leave: the phone removed this library, so drop its own grant and
+          // cut its connections - same teeth as revoke, logged as self-initiated.
+          leave: (deviceKey) => this.host.leaveDevice(deviceKey)
         }),
         mutating: MUTATING,
         // media.stream stays in the package - gating a byte stream on a live grant

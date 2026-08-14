@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -238,6 +238,23 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     // THE CALLER IS THE CONNECTION. What a device may read here is fixed by the
     // grant the firewall looked up from its Noise-authenticated key, so a device
     // can only ever learn about ITSELF.
+
+    // A device dropping its OWN access: "remove this library" on the phone must end
+    // access HERE, with the same teeth as an operator revoke - not leave a live
+    // grant behind a stale UI. The deviceKey is the connection's own Noise-proven
+    // key, so a device can only ever leave on its own behalf; there is no parameter
+    // to forge. Found missing 2026-08-14 by the first real client smoke test, which
+    // got "unknown method" where a PearTune phone gets a goodbye - the donor's copy
+    // lives in its unmigrated host, which is exactly the drift the extractions
+    // exist to end.
+    'device.leave': async (ctx) => {
+      if (!leave) throw ctx.notFound('this host cannot process a leave')
+      // The goodbye goes out BEFORE the grant dies - the donor's exact sequencing.
+      // The leave revokes THIS connection, so a reply queued after the kill never
+      // arrives and the phone times out on a leave that worked.
+      ctx.reply({ ok: true })
+      try { await leave(ctx.deviceKey) } catch {}
+    },
 
     'identity.get': async (ctx) => {
       // RE-READ the row rather than answering off `ctx.grant`. That grant was
