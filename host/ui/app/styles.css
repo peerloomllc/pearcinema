@@ -94,7 +94,7 @@ a { color: var(--accent) }
 .brand span { color: var(--accent) }
 
 .barleft { display: flex; align-items: center; gap: .9rem; min-width: 0 }
-.searchslot { display: flex; justify-content: center; min-height: 2.1rem; align-items: center }
+.searchslot { display: flex; justify-content: center; align-items: center; min-width: 0 }
 
 .tabs { display: flex; gap: .25rem; flex-wrap: wrap }
 
@@ -119,16 +119,24 @@ a { color: var(--accent) }
 
 .spacer { flex: 1 }
 
+/* WIDE, and centred on the bar. It is the one control people use most, and a narrow
+ * pill floating in the middle of a wide header looked like an afterthought. */
 .searchbox {
-  display: flex; align-items: center; gap: .4rem;
+  display: flex; align-items: center; gap: .5rem;
   background: var(--card); border: 1px solid var(--line);
-  border-radius: 999px; padding: .25rem .7rem;
+  border-radius: 999px; padding: .3rem .9rem;
+  width: 100%; max-width: 34rem;
 }
 .searchbox input {
   border: none; background: transparent; color: var(--fg); font: inherit;
-  width: 11rem; padding: .2rem 0;
+  width: 100%; min-width: 0; padding: .2rem 0;
 }
 .searchbox input:focus { outline: none }
+
+/* Off rather than gone. The box keeps its place so the bar keeps its height, and it
+ * says plainly that searching does not apply here rather than leaving a hole. */
+.searchbox.off { opacity: .45 }
+.searchbox.off input { cursor: not-allowed }
 
 .content { flex: 1; padding: 1.25rem 1rem 4rem; max-width: 1180px; width: 100%; margin: 0 auto }
 

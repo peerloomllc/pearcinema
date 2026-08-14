@@ -158,6 +158,9 @@ export default function App () {
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
 
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
+  // Searching means something on the library and nowhere else - not on Devices, not on
+  // Settings, and not while a film is open.
+  const searchable = tab === 'watch' && !playing
 
   return (
     <div class='shell'>
@@ -179,16 +182,24 @@ export default function App () {
             here now, and merely INERT where searching means nothing, so the bar keeps
             one height and the middle keeps one thing in it. */}
         <div class='searchslot'>
-          {tab === 'watch' && !playing && (
-            <div class='searchbox'>
-              <Search size={15} />
-              <input
-                type='text' value={search} placeholder='Search the library'
-                onInput={e => setSearch(e.currentTarget.value)}
-              />
-              {search && <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>}
-            </div>
-          )}
+          {/* ALWAYS THERE, DISABLED WHERE IT MEANS NOTHING. Rendering it only on Watch
+              left an empty slot, and an empty slot is not the same height as one with
+              a box in it - so the bar still moved when you changed tab. A greyed-out
+              box is honest about where searching applies AND keeps the header still. */}
+          <div class={'searchbox' + (searchable ? '' : ' off')}>
+            <Search size={15} />
+            <input
+              type='text'
+              value={searchable ? search : ''}
+              placeholder='Search the library'
+              disabled={!searchable}
+              aria-label='Search the library'
+              onInput={e => setSearch(e.currentTarget.value)}
+            />
+            {searchable && search && (
+              <button class='iconbtn' onClick={() => setSearch('')} aria-label='Clear'><Close size={15} /></button>
+            )}
+          </div>
         </div>
         <button onClick={() => setPairing(true)}>Pair a device</button>
       </div>

@@ -928,9 +928,12 @@ test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
   devices.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  assert.ok(doc.querySelector('.topbar .searchslot'), 'the slot survives the tab change')
-  assert.equal(doc.querySelector('.topbar .searchslot .searchbox'), null,
-    'empty where searching means nothing, rather than gone')
+  // OFF RATHER THAN GONE. An empty slot is not the same height as one with a box in
+  // it, so removing the box still moved the bar - which was the whole complaint.
+  const after = doc.querySelector('.topbar .searchslot .searchbox')
+  assert.ok(after, 'the box is still there on another tab')
+  assert.ok(after.classList.contains('off'), 'and says searching does not apply here')
+  assert.equal(after.querySelector('input').disabled, true)
 })
 
 test('THE PAIRING MODAL IS PEARTUNE\'S, down to the words', async (t) => {
