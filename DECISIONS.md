@@ -2,7 +2,49 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - THE LOOK MOVES TOWARD PEARTUNE, and the movement says which way you went
+## 2026-08-13 (latest) - MEASURED: the N100's video engine holds ten 1080p HEVC transcodes, and the FREE driver is enough
+Tier: T2 (a measurement that sizes a proposed T3; no code change)
+Context: the hardware transcode TODO item said to measure concurrent 1080p HEVC to H.264
+on this hardware before promising anything, because the capacity doc's audio-era numbers
+do not transfer and say so. Taken 2026-08-13 in a throwaway container built from the
+shipped PearCinema image with `/dev/dri` passed in, against real episodes off the
+Elements drive, on the loaded box with its usual containers running.
+
+**The driver gap is smaller than the TODO believed.** The item said the image was missing
+`iHD_drv_video.so` and named the non-free package as the likely fix. Measured: the FREE
+`intel-media-va-driver` from Debian main is sufficient on the N100 - full decode and
+encode entrypoints including HEVC Main 10 decode and H.264 encode, 7.7x realtime. The
+image needs one package from a component it already uses, no non-free apt source.
+
+**The library's HEVC is 10-bit.** Every x265 episode sampled is Main 10 `yuv420p10le`.
+Any transcode path that only handled 8-bit would miss the common case, not the edge. The
+VAAPI pipeline converts 10-bit to 8-bit on the engine as part of the scale stage
+(`scale_vaapi=format=nv12`), measured working.
+
+The numbers, 1080p 10-bit HEVC in, H.264 at 6 Mbps out, full-hardware pipeline:
+
+```
+1 stream    7.3x realtime
+2 streams   all realtime, aggregate 10.4x
+4 streams   all realtime, aggregate 10.7x
+8 streams   all realtime (300s of content in 227.6s), aggregate 10.5x
+software    1.02x realtime for ONE stream, the whole 4-core CPU
+```
+
+The engine saturates at roughly **10.5x realtime aggregate and holds it flat from 2
+streams to 8**, so the practical ceiling is about ten concurrent 1080p transcodes. CPU
+during the 8-stream run was about a third of one core - the video engine does the work
+and the host's Node loop is undisturbed.
+
+**The software row is the design rule.** A CPU encode of the same file barely keeps one
+viewer at realtime with nothing left for the host itself, on the strongest box this is
+likely to run on. That is why the proposal this sizes makes "software encoding never
+starts" a hard rule rather than a default.
+
+Recorded alongside `proposals/2026-08-13-hardware-transcode.md`, which carries the five
+start rules these numbers shaped.
+
+## 2026-08-13 - THE LOOK MOVES TOWARD PEARTUNE, and the movement says which way you went
 Tier: T1 (appearance and navigation; no stored data, no wire change)
 Context: Tim, having spent an afternoon looking at this UI - four asks at once. Move the
 look toward PearTune; load lists by scrolling rather than a button; animate between
