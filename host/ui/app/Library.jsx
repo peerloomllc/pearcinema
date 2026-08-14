@@ -240,6 +240,7 @@ function FixMatch ({ item, onClose, onFixed }) {
 
   return (
     <Modal title={'Fix the match - ' + item.title} onClose={onClose} wide>
+      <div class='fixbody'>
       <p class='hint'>
         Pick the right one and its poster replaces the guess. If the name on the file is
         not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
@@ -278,6 +279,7 @@ function FixMatch ({ item, onClose, onFixed }) {
           None of these - remove the fetched artwork
         </button>
       )}
+      </div>
     </Modal>
   )
 }
@@ -316,7 +318,7 @@ function ContinueRow ({ watch, caps, onOpen, onWatched }) {
   if (!list.length) return null
   return (
     <>
-      <h2 class='shelf'>Continue watching</h2>
+      <h2 class='shelf' id='continue-shelf'>Continue watching</h2>
       <div class='grid'>
         {list.map(i => (
           <Poster
@@ -859,9 +861,11 @@ export default function Library ({
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
-      {/* The shelf's captions run right up to the picker without this - two unrelated
-          things touching, which reads as one. */}
-      <div class='row' style='margin:1.4rem 0 .6rem'>
+      {/* FROZEN AT THE TOP while the library scrolls (Tim, 2026-08-14): three
+          hundred tiles down is exactly where somebody decides they wanted Shows
+          instead, and the way back up to the shelf rides along as its own button -
+          freezing the shelf ITSELF would spend a third of the viewport on it. */}
+      <div class='row pickrow'>
         <WatchingAs watch={watch} onChange={onWatchChange} />
         <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>
           Films {stats.movies ? <span class='chip'>{stats.movies}</span> : null}
@@ -869,6 +873,11 @@ export default function Library ({
         <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>
           Shows {stats.series ? <span class='chip'>{stats.series}</span> : null}
         </button>
+        {((watch?.continue || []).length > 0 || (watch?.upNext || []).length > 0) && (
+          <button class='ghost' onClick={() => document.getElementById('continue-shelf')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
+            Continue watching
+          </button>
+        )}
       </div>
 
       <div class={'screen ' + dir} key={root}>
