@@ -2,6 +2,26 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - THE TMDB KEY STAYS BRING-YOUR-OWN. Settled, this time by Tim with the friction in hand
+Tier: T0 (no code changes; the feature already ships this way)
+Context: the 2026-08-12 decision said bring-your-own; Tim reopened it 2026-08-13
+after seeing the signup step, then did the signup himself to feel the cost before
+choosing. Today he chose: **no shipped key**.
+
+What the choice weighs, recorded so it is not re-argued: a shipped key would have
+removed the signup entirely (and per-address rate limiting means installs never
+share a quota bucket, so it would have scaled fine - that fact stays true). Against
+it: any key inside a shipped app is extractable forever, and a revocation would
+black out every install's lookups at once. Bring-your-own keeps every operator on
+their own key, their own quota and their own relationship with TMDB - the same
+self-reliance posture as the rest of the product - at the cost of one signup before
+posters, which the sidecar-first design already softens: artwork on disk needs no
+key at all.
+
+The override field, the host-side relaying and the privacy sentence on the panel
+are all unchanged. If a future storefront release makes the signup a measured
+drop-off point, the door back is one default value - the facts above still apply.
+
 ## 2026-08-14 - A WARM PAIRING LINK REMOUNTS THE APP, so the link lives in a module stash
 Tier: T1 (shell and UI flow; no wire change)
 Context: the measured gap - a pairing link while a host is active never reached the
