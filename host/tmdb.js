@@ -16,11 +16,13 @@
 //     `:ro` by design; sidecar-writing would be a separate, explicit action and is
 //     deliberately not built here.
 //
-// MATCHING IS CAUTIOUS BY CONSTRUCTION. An exact title (normalised) with a matching
-// year, or a search that returns exactly one thing, is applied on its own. Anything
-// else becomes a PENDING match holding the candidates, for the operator to confirm -
-// because a wrong poster on somebody's film is worse than a placeholder, and a
-// filename is not always what a film is called.
+// MATCHING IS BEST-EFFORT, WITH HONESTY ABOUT DOUBT (Tim, 2026-08-14, revising the
+// first cut). The first build held every ambiguous name back for the operator to
+// settle, which on a real library meant a homework list of prompts before any
+// artwork appeared. Plex's shape is better and Tim named it: apply the best guess,
+// SAY that some guesses were made, and put a fix control on the tile itself - so
+// the cost of a wrong poster is one click on the thing that is wrong, not a queue
+// standing between the operator and all the right ones.
 
 const fs = require('fs')
 const fsp = require('fs/promises')
@@ -111,23 +113,38 @@ class TmdbClient {
     if (!res.ok) throw new Error(`TMDB image answered ${res.status}`)
     return Buffer.from(await res.arrayBuffer())
   }
+
+  // One title by its TMDB id, for the fix flow: the operator picked a candidate and
+  // the poster path is fetched fresh by id rather than trusted from the page.
+  async details ({ type, tmdbId }) {
+    const tv = type === 'series'
+    const r = await this._get(`${tv ? '/tv' : '/movie'}/${Number(tmdbId)}`)
+    return {
+      tmdbId: r.id,
+      title: tv ? r.name : r.title,
+      year: Number(String(tv ? r.first_air_date : r.release_date || '').slice(0, 4)) || null,
+      poster: r.poster_path || null,
+      overview: r.overview || ''
+    }
+  }
 }
 
-// Is this candidate safe to apply with nobody looking? Exact normalised title with
+// The best candidate, and whether it was a GUESS. An exact normalised title with
 // the year agreeing (rips are routinely off by one), or the only thing the search
-// returned. Everything else waits for the operator.
-function autoMatch (item, candidates) {
+// returned, is sure. Anything else still picks - exact-with-year first, then exact,
+// then TMDB's own first result - but says `sure: false`, which is what the
+// dashboard's "some of these were guesses" notice and the tile's fix control key
+// off. The two films called Solaris both ship a poster; one of them may need the
+// pencil.
+function bestMatch (item, candidates) {
   if (!candidates.length) return null
   const want = normTitle(item.title)
-  const exact = candidates.filter(c =>
-    normTitle(c.title) === want &&
-    (!item.year || !c.year || Math.abs(c.year - item.year) <= 1)
-  )
-  if (exact.length === 1) return exact[0]
-  if (candidates.length === 1) return candidates[0]
-  // Several exact matches (remakes wearing the same name) are exactly the wrong
-  // place to guess: the 1972 and the 2006 film both normalise identically.
-  return null
+  const yearOk = (c) => !item.year || !c.year || Math.abs(c.year - item.year) <= 1
+  const exact = candidates.filter(c => normTitle(c.title) === want)
+  const exactYear = exact.filter(yearOk)
+  if (exactYear.length === 1) return { candidate: exactYear[0], sure: true }
+  if (candidates.length === 1) return { candidate: candidates[0], sure: true }
+  return { candidate: exactYear[0] || exact[0] || candidates[0], sure: false }
 }
 
 // The store and the pass. Persisted as one JSON file plus a folder of posters in
@@ -159,7 +176,6 @@ class Enricher {
   }
 
   get matched () { return this.state.matched || (this.state.matched = {}) }
-  get pending () { return this.state.pending || (this.state.pending = {}) }
   get missed () { return this.state.missed || (this.state.missed = {}) }
 
   _posterFile (itemId) { return path.join(this.postersDir, itemId + '.jpg') }
@@ -184,7 +200,7 @@ class Enricher {
     return stream
   }
 
-  async _apply (client, item, candidate, how) {
+  async _apply (client, item, candidate, how, { uncertain = false } = {}) {
     const bytes = candidate.poster ? await client.poster(candidate.poster) : null
     if (bytes) {
       await fsp.mkdir(this.postersDir, { recursive: true })
@@ -196,9 +212,9 @@ class Enricher {
       year: candidate.year,
       poster: !!bytes,
       how,
+      ...(uncertain ? { uncertain: true } : {}),
       at: Date.now()
     }
-    delete this.pending[item.id]
     delete this.missed[item.id]
   }
 
@@ -211,6 +227,10 @@ class Enricher {
     if (this.running) return this.running
     if (!key) throw new Error('no TMDB key is saved')
 
+    // The first cut held ambiguous names in a `pending` queue; anything a previous
+    // build left there is simply looked up again under the new rules.
+    delete this.state.pending
+
     const client = new TmdbClient({ key, fetch: this.fetch })
     const work = []
     for (const type of ['movies', 'series']) {
@@ -220,7 +240,6 @@ class Enricher {
         for (const it of page.items || []) {
           if (it.artId) continue
           if (this.matched[it.id]) continue
-          if (this.pending[it.id] && !retryMissed) continue
           if (this.missed[it.id] && !retryMissed) continue
           work.push(it)
         }
@@ -235,16 +254,9 @@ class Enricher {
       for (const item of work) {
         try {
           const candidates = await client.search({ type: item.type, title: item.title, year: item.year })
-          const sure = autoMatch(item, candidates)
-          if (sure) {
-            await this._apply(client, item, sure, 'auto')
-          } else if (candidates.length) {
-            this.pending[item.id] = {
-              title: item.title,
-              year: item.year,
-              type: item.type,
-              candidates
-            }
+          const best = bestMatch(item, candidates)
+          if (best) {
+            await this._apply(client, item, best.candidate, 'auto', { uncertain: !best.sure })
           } else {
             this.missed[item.id] = { title: item.title, at: Date.now() }
           }
@@ -261,7 +273,7 @@ class Enricher {
         at: Date.now(),
         looked: work.length,
         matched: Object.keys(this.matched).length,
-        pending: Object.keys(this.pending).length,
+        uncertain: Object.values(this.matched).filter(m => m.uncertain).length,
         missed: Object.keys(this.missed).length
       }
       this._write()
@@ -272,23 +284,35 @@ class Enricher {
     return this.state.lastRun
   }
 
-  // The operator picked one of the candidates. Trusting their click is the point of
-  // holding the ambiguous ones back.
-  async confirm ({ itemId, tmdbId, key }) {
-    const p = this.pending[itemId]
-    const candidate = p?.candidates?.find(c => c.tmdbId === Number(tmdbId))
-    if (!candidate) return null
-    await this._apply(new TmdbClient({ key, fetch: this.fetch }), { id: itemId }, candidate, 'confirmed')
+  // Candidates for ONE item, for the fix flow on the tile. `q` lets the operator
+  // retype the title - the whole reason a match went wrong is usually that the
+  // filename is not what the film is called.
+  async search ({ item, q = null, key }) {
+    const client = new TmdbClient({ key, fetch: this.fetch })
+    return client.search({ type: item.type, title: q || item.title, year: q ? null : item.year })
+  }
+
+  // The operator picked the right one from the tile. The poster is fetched fresh by
+  // id rather than trusted from the page, and a fixed match is never uncertain -
+  // a person chose it.
+  async fix ({ itemId, tmdbId, type, key }) {
+    const client = new TmdbClient({ key, fetch: this.fetch })
+    const candidate = await client.details({ type, tmdbId })
+    if (!candidate?.tmdbId) return null
+    await this._apply(client, { id: itemId }, candidate, 'fixed')
     this._write()
     return this.matched[itemId]
   }
 
-  // "None of these" - stop offering. A pending row the operator has rejected is
-  // noise on every visit to the panel.
-  dismiss (itemId) {
-    if (!this.pending[itemId]) return false
-    this.missed[itemId] = { title: this.pending[itemId].title, dismissed: true, at: Date.now() }
-    delete this.pending[itemId]
+  // "This is not any of them" - drop the fetched artwork and stop guessing at this
+  // item. Recorded in missed so the next automatic pass leaves it alone; "Look
+  // again" retries it deliberately.
+  async unmatch (itemId) {
+    const had = this.matched[itemId]
+    if (!had) return false
+    delete this.matched[itemId]
+    this.missed[itemId] = { title: had.title, unmatched: true, at: Date.now() }
+    await fsp.rm(this._posterFile(itemId), { force: true })
     this._write()
     return true
   }
@@ -298,10 +322,10 @@ class Enricher {
       running: this.running,
       lastRun: this.state.lastRun || null,
       matched: Object.keys(this.matched).length,
-      pending: Object.entries(this.pending).map(([id, p]) => ({ id, ...p })),
+      uncertain: Object.values(this.matched).filter(m => m.uncertain).length,
       missed: Object.keys(this.missed).length
     }
   }
 }
 
-module.exports = { TmdbClient, Enricher, autoMatch, normTitle, authFor }
+module.exports = { TmdbClient, Enricher, bestMatch, normTitle, authFor }

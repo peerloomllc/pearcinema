@@ -109,38 +109,53 @@ test('a wrong year empties the search, so it retries once without one', async ()
 
 /* ----------------------------------------------------------- the matching -- */
 
-test('MATCHING IS CAUTIOUS: only an exact title or a lone result applies itself', async () => {
+test('MATCHING IS BEST-EFFORT AND HONEST ABOUT DOUBT: everything picks, only certainty says so', async () => {
   const item = { title: 'Solaris', year: 1972 }
 
   // Exact title, year agreeing: sure.
-  assert.equal(tmdb.autoMatch(item, [
+  const exact = tmdb.bestMatch(item, [
     { tmdbId: 1, title: 'Solaris', year: 1972 },
     { tmdbId: 2, title: 'Solaris: The Documentary', year: 2005 }
-  ])?.tmdbId, 1)
+  ])
+  assert.equal(exact.candidate.tmdbId, 1)
+  assert.equal(exact.sure, true)
 
   // TWO exact matches - the remake problem. 1972 and 2002 both call themselves
-  // Solaris, and with no year on the file nobody should guess.
-  assert.equal(tmdb.autoMatch({ title: 'Solaris', year: null }, [
+  // Solaris, and with no year on the file a GUESS is still made (Tim, 2026-08-14,
+  // revising the hold-it-back first cut) - but marked unsure, which is what the
+  // notice and the tile's pencil key off.
+  const remake = tmdb.bestMatch({ title: 'Solaris', year: null }, [
     { tmdbId: 1, title: 'Solaris', year: 1972 },
     { tmdbId: 3, title: 'Solaris', year: 2002 }
-  ]), null)
+  ])
+  assert.equal(remake.candidate.tmdbId, 1, 'the best guess still ships a poster')
+  assert.equal(remake.sure, false, 'and admits it was a guess')
 
   // A lone result is safe whatever it is called.
-  assert.equal(tmdb.autoMatch({ title: 'An Obscure Thing', year: null }, [
+  const lone = tmdb.bestMatch({ title: 'An Obscure Thing', year: null }, [
     { tmdbId: 7, title: 'An Obscure Thing Entirely', year: 1999 }
-  ])?.tmdbId, 7)
+  ])
+  assert.equal(lone.candidate.tmdbId, 7)
+  assert.equal(lone.sure, true)
 
-  // Several inexact results: wait for the operator.
-  assert.equal(tmdb.autoMatch({ title: 'Crash', year: null }, [
+  // Several inexact results: TMDB's own first result, unsure.
+  const inexact = tmdb.bestMatch({ title: 'Crash', year: null }, [
     { tmdbId: 1, title: 'Crash Landing', year: 2005 },
     { tmdbId: 2, title: 'The Crash', year: 2017 }
-  ]), null)
+  ])
+  assert.equal(inexact.candidate.tmdbId, 1)
+  assert.equal(inexact.sure, false)
 
   // Off-by-one years still count as agreeing.
-  assert.equal(tmdb.autoMatch({ title: 'Dune', year: 2022 }, [
+  const dune = tmdb.bestMatch({ title: 'Dune', year: 2022 }, [
     { tmdbId: 1, title: 'Dune', year: 2021 },
     { tmdbId: 2, title: 'Dune', year: 1984 }
-  ])?.tmdbId, 1)
+  ])
+  assert.equal(dune.candidate.tmdbId, 1)
+  assert.equal(dune.sure, true)
+
+  // Nothing found is still nothing.
+  assert.equal(tmdb.bestMatch(item, []), null)
 })
 
 test('titles are compared as words, not as bytes', async () => {
@@ -173,22 +188,27 @@ const ROUTES = [
     ]
   })],
   [/search\/tv/, respond({ results: [{ id: 31, name: 'A Show', first_air_date: '2010-01-01', poster_path: '/s.jpg' }] })],
+  [/\/movie\/22\b/, respond({ id: 22, title: 'Crash', release_date: '2004-01-01', poster_path: '/c2.jpg', overview: 'the other one' })],
   [/image\.tmdb\.org/, respond({})]
 ]
 
-test('THE PASS: sidecar art untouched, sure matches applied, ambiguity held for the operator', async () => {
+test('THE PASS: sidecar art untouched, everything else gets its best guess, doubt is counted', async () => {
   const dir = await tmpdir()
   const en = new tmdb.Enricher({ dataDir: dir, fetch: fakeFetch(ROUTES) })
   const adapter = fakeAdapter()
 
   const out = await en.run(adapter, { key: 'k' })
   assert.equal(out.looked, 3, 'the covered film was never looked up at all')
-  assert.equal(out.matched, 2, 'the bare film and the show')
-  assert.equal(out.pending, 1, 'the two Crashes wait for a click')
+  assert.equal(out.matched, 3, 'every bare item got a poster, ambiguous or not')
+  assert.equal(out.uncertain, 1, 'and the guessed one is counted as a guess')
+  assert.equal(out.missed, 0)
 
-  // The poster is real bytes in the DATA dir, nowhere near the library.
+  // The poster is real bytes in the DATA dir, nowhere near the library - the
+  // ambiguous Crash included, wearing its best guess.
   const posters = await fsp.readdir(path.join(dir, 'tmdb', 'posters'))
-  assert.deepEqual(posters.sort(), ['bare.jpg', 'show.jpg'])
+  assert.deepEqual(posters.sort(), ['bare.jpg', 'show.jpg', 'vague.jpg'])
+  assert.equal(en.matched.vague.uncertain, true)
+  assert.equal(en.matched.bare.uncertain, undefined)
 
   // Decoration fills only the gap, with a copy rather than a mutation.
   const bare = adapter.items.movies[1]
@@ -214,28 +234,36 @@ test('the state survives a restart, and a second pass does no work', async () =>
   const again = new tmdb.Enricher({ dataDir: dir, fetch: f })
   assert.equal(again.decorate({ id: 'bare', artId: null }).artId, 'tmdb:bare')
   const out = await again.run(fakeAdapter(), { key: 'k' })
-  assert.equal(out.looked, 0, 'matched, pending and missed are all remembered')
+  assert.equal(out.looked, 0, 'matched and missed are both remembered')
   assert.equal(f.asked.length, askedOnce, 'and nothing was asked again')
 })
 
-test('the operator settles an ambiguous match, or dismisses it', async () => {
+test('THE FIX FLOW: the operator corrects a guess from the tile, or drops the artwork', async () => {
   const dir = await tmpdir()
   const en = new tmdb.Enricher({ dataDir: dir, fetch: fakeFetch(ROUTES) })
   await en.run(fakeAdapter(), { key: 'k' })
 
-  assert.equal(en.summary().pending.length, 1)
-  const done = await en.confirm({ itemId: 'vague', tmdbId: 22, key: 'k' })
-  assert.equal(done.how, 'confirmed')
-  assert.equal(en.summary().pending.length, 0)
+  // The guessed Crash was the 1996 one; the operator says it is the 2004 one. The
+  // poster is fetched fresh BY ID - nothing from the page is trusted but the id.
+  const fixed = await en.fix({ itemId: 'vague', tmdbId: 22, type: 'movie', key: 'k' })
+  assert.equal(fixed.how, 'fixed')
+  assert.equal(fixed.tmdbId, 22)
+  assert.equal(fixed.uncertain, undefined, 'a person chose it, so it is not a guess')
+  assert.equal(en.summary().uncertain, 0)
   assert.equal(en.decorate({ id: 'vague', artId: null }).artId, 'tmdb:vague')
 
-  // Dismissing is remembered too - a rejected row must not come back every pass.
-  const en2 = new tmdb.Enricher({ dataDir: await tmpdir(), fetch: fakeFetch(ROUTES) })
-  await en2.run(fakeAdapter(), { key: 'k' })
-  assert.equal(en2.dismiss('vague'), true)
-  assert.equal(en2.summary().pending.length, 0)
-  const out = await en2.run(fakeAdapter(), { key: 'k' })
-  assert.equal(out.looked, 0)
+  // And the fix search takes the operator's own words, because the filename being
+  // wrong is usually the whole problem.
+  const cands = await en.search({ item: { id: 'vague', type: 'movie', title: 'Crash' }, q: 'Uncovered', key: 'k' })
+  assert.equal(cands[0].tmdbId, 11)
+
+  // Unmatching drops the poster and is remembered, so the next automatic pass
+  // leaves the item alone rather than re-guessing.
+  assert.equal(await en.unmatch('vague'), true)
+  assert.equal(en.art('tmdb:vague'), null)
+  assert.equal(en.decorate({ id: 'vague', artId: null }).artId, null)
+  const out = await en.run(fakeAdapter(), { key: 'k' })
+  assert.equal(out.looked, 0, 'the unmatched item is not re-guessed')
 })
 
 test('no key refuses loudly, and a key TMDB rejects fails the pass rather than one item', async () => {
@@ -262,5 +290,5 @@ test('one flaky lookup costs that item only, and lands in missed', async () => {
   })
   const out = await en.run(fakeAdapter(), { key: 'k' })
   assert.equal(out.missed, 1)
-  assert.equal(out.matched, 1, 'the show still got its poster')
+  assert.equal(out.matched, 2, 'the show and the guessable film still got their posters')
 })

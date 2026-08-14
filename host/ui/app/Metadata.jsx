@@ -8,15 +8,18 @@
 //   - The key is the operator's own. The panel links to where one is made, takes
 //     the paste, and TESTS it before anything is saved - a key that silently fails
 //     is a library that quietly looks wrong.
-//   - Only the uncertain matches ask for a click. The sure ones applied themselves;
-//     what is listed here is the handful where a filename could honestly be more
-//     than one thing, with the candidates to pick from.
+//   - NOBODY IS QUIZZED (Tim, 2026-08-14, revising the first cut, with Plex as the
+//     named reference). Every lookup applies its best guess; this panel says how
+//     many of those were guesses, and the correction lives where the mistake is
+//     visible - a pencil on the tile itself, opening a fix-match dialog.
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { api } from './api'
 import { notify } from './ui'
 
-export default function Metadata () {
+// `embedded` drops the card chrome so the same panel can sit inside the first-run
+// wizard (Tim, 2026-08-14: this step belongs in onboarding, not only in Settings).
+export default function Metadata ({ embedded = false } = {}) {
   const [meta, setMeta] = useState(null)
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
@@ -44,11 +47,6 @@ export default function Metadata () {
 
   if (!meta) return null
 
-  // The wire is not trusted to be complete: a host one version behind answers this
-  // route with less than the panel expects, and a missing list must degrade to an
-  // empty one rather than taking the whole Settings screen down with it.
-  const pending = meta.pending || []
-
   const test = async () => {
     setTesting(true)
     const t = await api('/api/metadata/test', { key })
@@ -61,21 +59,12 @@ export default function Metadata () {
     if (res?.error) return notify('Not saved', res.error)
     setKey(''); setTested(null)
     await reload()
-    if (enabled) notify('Fetching artwork', 'The sure matches apply themselves; anything uncertain will wait for you below.')
-  }
-
-  const confirm = async (itemId, tmdbId) => {
-    await api('/api/metadata/confirm', { itemId, tmdbId })
-    reload()
-  }
-  const dismiss = async (itemId) => {
-    await api('/api/metadata/dismiss', { itemId })
-    reload()
+    if (enabled) notify('Fetching artwork', 'Watch it fill in on the library page. A best guess is applied where a name is ambiguous, and any tile can be corrected from its pencil.')
   }
 
   return (
-    <div class='card'>
-      <h3>Artwork from the internet</h3>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Artwork from the internet</h3>}
       <p class='hint'>
         Most files carry no artwork of their own. With this on, the host asks TMDB - a
         third-party film database - for posters, which means <b>this host tells TMDB the
@@ -128,33 +117,16 @@ export default function Metadata () {
       )}
       {!meta.running && meta.lastRun && (
         <p class='hint'>
-          Last pass: {meta.lastRun.looked} looked up, {meta.matched} with artwork,{' '}
-          {pending.length} waiting for you, {meta.missed} not found.
+          {meta.matched} title{meta.matched === 1 ? ' has' : 's have'} fetched artwork
+          {meta.missed > 0 ? `, ${meta.missed} came back with nothing` : ''}.
         </p>
       )}
-
-      {pending.length > 0 && (
-        <>
-          <h3 style='margin-top:1rem'>Which one is it?</h3>
-          <p class='hint'>
-            These names could honestly be more than one thing, and a wrong poster is
-            worse than none - so nobody guessed. Pick, or dismiss.
-          </p>
-          {pending.slice(0, 20).map(p => (
-            <div class='field' key={p.id}>
-              <label>{p.title}{p.year ? ` (${p.year})` : ''}</label>
-              <div class='row' style='flex-wrap:wrap;gap:.35rem'>
-                {p.candidates.map(c => (
-                  <button class='ghost' key={c.tmdbId} title={c.overview} onClick={() => confirm(p.id, c.tmdbId)}>
-                    {c.title}{c.year ? ` (${c.year})` : ''}
-                  </button>
-                ))}
-                <button class='ghost' onClick={() => dismiss(p.id)}>None of these</button>
-              </div>
-            </div>
-          ))}
-          {pending.length > 20 && <p class='hint'>…and {pending.length - 20} more after these.</p>}
-        </>
+      {!meta.running && meta.uncertain > 0 && (
+        <p class='hint'>
+          <b>{meta.uncertain}</b> of them {meta.uncertain === 1 ? 'was' : 'were'} matched from
+          several possibilities, so a poster may be wrong here and there. Correcting one is
+          the pencil on its tile, in the library.
+        </p>
       )}
     </div>
   )

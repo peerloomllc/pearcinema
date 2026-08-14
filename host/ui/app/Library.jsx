@@ -16,7 +16,8 @@
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
-import { ArtIcon, Check, List, Grid } from './icons'
+import { ArtIcon, Check, List, Grid, Pencil } from './icons'
+import { Modal } from './ui'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -103,7 +104,7 @@ function flagFor (v) {
 // HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
 // last decade has drawn it. A number would be exact and useless; the bar is read
 // without being looked at.
-function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null }) {
+function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null, onFix = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
 
@@ -176,9 +177,99 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
 
       {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
 
+      {/* FIX THE MATCH WHERE THE MISTAKE IS VISIBLE (Tim, 2026-08-14, Plex's shape).
+          Fetched artwork is a best guess, and the correction belongs on the tile
+          wearing the wrong poster - not in a queue in Settings. Only offered where
+          the artwork CAME from the lookup or where there is none at all: a poster
+          sitting beside the file on disk is not this feature's to change. */}
+      {onFix && (item.type === 'movie' || item.type === 'series') &&
+        (!item.artId || String(item.artId).startsWith('tmdb:')) && (
+          <button
+            class='fixmatch'
+            title={'Fix the artwork for ' + item.title}
+            aria-label={'Fix the artwork for ' + item.title}
+            onClick={e => { e.stopPropagation(); onFix(item) }}
+          ><Pencil size={13} /></button>
+      )}
+
       <div class='t'>{item.title}</div>
       {sub && <div class='s'>{sub}</div>}
     </div>
+  )
+}
+
+// FIX THE MATCH, from the tile that is wearing the wrong poster.
+//
+// The dialog reruns the lookup - with the operator's own words if they retype the
+// title, which is usually the whole problem, since a filename is not always what a
+// film is called - and applies the pick, or drops the fetched artwork entirely.
+// The host fetches the chosen poster fresh by TMDB id; nothing from this page is
+// trusted beyond the id itself.
+function FixMatch ({ item, onClose, onFixed }) {
+  const [q, setQ] = useState(item.title || '')
+  const [cands, setCands] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const search = async (query = null) => {
+    setBusy(true); setErr('')
+    const r = await api('/api/metadata/search', { itemId: item.id, ...(query ? { q: query } : {}) })
+    setBusy(false)
+    if (r?.error) return setErr(r.error)
+    setCands(r.candidates || [])
+  }
+  useEffect(() => { setCands(null); setQ(item.title || ''); search() }, [item.id])
+
+  const use = async (c) => {
+    setBusy(true)
+    const r = await api('/api/metadata/fix', { itemId: item.id, tmdbId: c.tmdbId, type: item.type })
+    setBusy(false)
+    if (r?.error) return setErr(r.error)
+    onFixed(); onClose()
+  }
+
+  const drop = async () => {
+    await api('/api/metadata/unmatch', { itemId: item.id })
+    onFixed(); onClose()
+  }
+
+  return (
+    <Modal title={'Fix the match - ' + item.title} onClose={onClose}>
+      <p class='hint'>
+        Pick the right one and its poster replaces the guess. If the name on the file is
+        not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
+        by the real name.
+      </p>
+      <div class='row'>
+        <input
+          type='text'
+          value={q}
+          aria-label='Search TMDB'
+          onInput={e => setQ(e.currentTarget.value)}
+          onKeyDown={e => { if (e.key === 'Enter') search(q) }}
+        />
+        <button class='ghost' disabled={busy || !q.trim()} onClick={() => search(q)}>Search</button>
+      </div>
+      {err && <div class='banner bad'>{err}</div>}
+      {busy && !cands && <p class='hint'>Asking TMDB…</p>}
+      {cands && !cands.length && <p class='hint'>TMDB found nothing by that name.</p>}
+      <div class='tracklist' style='margin-top:.6rem'>
+        {(cands || []).map(c => (
+          <div class='sub' key={c.tmdbId}>
+            <span>
+              {c.title}{c.year ? ` (${c.year})` : ''}
+              {c.overview && <span class='hint' style='display:block'>{c.overview.slice(0, 140)}{c.overview.length > 140 ? '…' : ''}</span>}
+            </span>
+            <button class='ghost' disabled={busy} onClick={() => use(c)}>Use this</button>
+          </div>
+        ))}
+      </div>
+      {String(item.artId || '').startsWith('tmdb:') && (
+        <button class='ghost' style='margin-top:.8rem' disabled={busy} onClick={drop}>
+          None of these - remove the fetched artwork
+        </button>
+      )}
+    </Modal>
   )
 }
 
@@ -505,8 +596,22 @@ export default function Library ({
     return () => { live = false }
   }, [series?.id, watch])
 
-  const films = useList('/api/library/list?type=movies&limit=100', [root])
-  const shows = useList('/api/library/list?type=series&limit=100', [root])
+  // THE TILE IS THE PLACE A MATCH GETS FIXED. `fixItem` is the tile whose pencil
+  // was pressed; `artEpoch` bumps to refetch the lists, both after a fix and when a
+  // background artwork pass finishes - posters should appear where somebody is
+  // looking, not on their next visit.
+  const [fixItem, setFixItem] = useState(null)
+  const [artEpoch, setArtEpoch] = useState(0)
+  const canFix = !!(state.metadata?.enabled && state.metadata?.hasKey)
+  const artRunning = state.metadata?.running || null
+  const wasRunning = useRef(false)
+  useEffect(() => {
+    if (wasRunning.current && !artRunning) setArtEpoch(e => e + 1)
+    wasRunning.current = !!artRunning
+  }, [artRunning])
+
+  const films = useList('/api/library/list?type=movies&limit=100', [root, artEpoch])
+  const shows = useList('/api/library/list?type=series&limit=100', [root, artEpoch])
   const seasons = useList(
     '/api/library/list?type=seasons&limit=100&seriesId=' + encodeURIComponent(series?.id || ''),
     [series?.id]
@@ -568,13 +673,14 @@ export default function Library ({
         <CompatLine list={hits.filter(h => h.media)} caps={caps} />
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
-            <Poster key={h.id} item={h} caps={caps} onOpen={i => {
+            <Poster key={h.id} item={h} caps={caps} onFix={canFix ? setFixItem : null} onOpen={i => {
               if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
               else onPlay(i, hits.filter(x => x.type === i.type))
             }} />
           ))}
         </div>
         {!hits.length && <div class='empty'>Nothing matched.</div>}
+        {fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={() => setArtEpoch(e => e + 1)} />}
       </div>
     )
   }
@@ -717,16 +823,28 @@ export default function Library ({
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
       <ArtNote list={showing.items} source={state.source?.kind} />
 
+      {/* THE PASS IS VISIBLE WHERE ITS RESULT LANDS (Tim, 2026-08-14). Progress in a
+          Settings panel nobody is looking at is progress nobody sees; the posters
+          arrive on THIS page, so this page says they are coming. */}
+      {artRunning && (
+        <div class='banner' style='margin-top:.6rem'>
+          Fetching artwork - {artRunning.done} of {artRunning.total} looked up. Posters
+          appear here as they land.
+        </div>
+      )}
+
       {showing.err && <div class='banner bad'>{showing.err}</div>}
 
       <div class='grid' style='margin-top:.8rem'>
         {showing.items.map(i => (
-          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onOpen={item => {
+          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={canFix ? setFixItem : null} onOpen={item => {
             if (item.type === 'series') go(() => setSeries(item))
             else onPlay(item, films.items)
           }} />
         ))}
       </div>
+
+      {fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={() => setArtEpoch(e => e + 1)} />}
 
       {showing.busy && !showing.items.length && <div class='empty'>Loading…</div>}
       {!showing.busy && !showing.items.length && (

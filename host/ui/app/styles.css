@@ -758,6 +758,21 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .poster:hover .mark, .poster:focus-within .mark { opacity: 1 }
 .poster .mark.on { opacity: 1; background: var(--accent); color: #fff }
 
+/* Fix-the-match, opposite corner from the tick so the two controls cannot be
+ * mistaken for each other. Same reveal-on-hover: a control on every tile of a
+ * 240-film grid is noise until the pointer says which tile matters. */
+.poster .fixmatch {
+  position: absolute; top: .4rem; left: .4rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.7);
+  border: 1px solid transparent; opacity: 0; transition: opacity .12s ease;
+}
+.poster:hover .fixmatch, .poster:focus-within .fixmatch { opacity: 1 }
+.poster .fixmatch:hover { color: #fff; background: rgba(0,0,0,.75) }
+.fixmatch svg { display: block }
+
 .eprow .mark {
   margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px;
   font-size: .75rem; background: transparent; color: var(--muted);

@@ -350,6 +350,11 @@ async function startDashboard ({
           // probe and nothing else. The app folds it into its verdicts: an HEVC
           // refusal on a host that can convert is a film that plays.
           transcode: host.transcode || { available: false, reason: 'not supported by this host' },
+          // Enough about the artwork feature for the LIBRARY to act on: whether the
+          // tiles should wear a fix control, and the live progress of a pass. Rides
+          // here because the page already polls this route - the full summary stays
+          // on /api/metadata.
+          metadata: { ...host.metadataSettings(), running: host.enricher.running },
           bind
         })
       }
@@ -789,18 +794,28 @@ async function startDashboard ({
         return json(res, 200, { started: true })
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/metadata/confirm') {
-        const { itemId, tmdbId } = await readBody(req)
+      // The fix flow, from the tile's pencil: search again, apply the operator's
+      // pick, or drop the fetched artwork entirely.
+      if (req.method === 'POST' && url.pathname === '/api/metadata/search') {
+        const { itemId, q } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        const out = await host.searchMetadata({ itemId: String(itemId), q: q ? String(q) : null })
+        if (!out) return json(res, 404, { error: 'no such item' })
+        return json(res, 200, { candidates: out })
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/metadata/fix') {
+        const { itemId, tmdbId, type } = await readBody(req)
         if (!itemId || !tmdbId) return json(res, 400, { error: 'itemId and tmdbId required' })
-        const out = await host.confirmMetadata({ itemId: String(itemId), tmdbId })
-        if (!out) return json(res, 404, { error: 'no such pending match' })
+        const out = await host.fixMetadata({ itemId: String(itemId), tmdbId, type: String(type || 'movie') })
+        if (!out) return json(res, 404, { error: 'TMDB does not know that id' })
         return json(res, 200, out)
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/metadata/dismiss') {
+      if (req.method === 'POST' && url.pathname === '/api/metadata/unmatch') {
         const { itemId } = await readBody(req)
         if (!itemId) return json(res, 400, { error: 'itemId required' })
-        return json(res, 200, { ok: host.enricher.dismiss(String(itemId)) })
+        return json(res, 200, { ok: await host.unmatchMetadata({ itemId: String(itemId) }) })
       }
 
       if (req.method === 'POST' && url.pathname === '/api/source/test') {

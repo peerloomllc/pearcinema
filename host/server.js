@@ -417,8 +417,20 @@ class PearCinemaHost {
     return this.enricher.run(this._inner, { key, retryMissed })
   }
 
-  async confirmMetadata ({ itemId, tmdbId }) {
-    return this.enricher.confirm({ itemId, tmdbId, key: this._metadataKey() })
+  // The fix flow, from the tile: candidates for one item (optionally with the
+  // operator's own retyped query), one applied by TMDB id, or the match dropped.
+  async searchMetadata ({ itemId, q = null }) {
+    const item = await this._inner.get({ id: String(itemId) })
+    if (!item) return null
+    return this.enricher.search({ item, q, key: this._metadataKey() })
+  }
+
+  async fixMetadata ({ itemId, tmdbId, type }) {
+    return this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey() })
+  }
+
+  async unmatchMetadata ({ itemId }) {
+    return this.enricher.unmatch(String(itemId))
   }
 
   // After a scan, quietly fill any gaps - but only when the operator has opted in,

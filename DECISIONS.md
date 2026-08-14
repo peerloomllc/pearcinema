@@ -2,7 +2,39 @@
 
 Append-only, newest on top. Per Constitution §4.
 
-## 2026-08-13 (latest) - ONLINE ARTWORK IS BUILT CAUTION-FIRST, and the key question is REOPENED
+## 2026-08-14 (latest) - ARTWORK APPLIES ITS BEST GUESS, and the correction lives on the tile
+Tier: T1 (matching policy and dashboard flow; no wire change)
+Context: Tim ran the caution-first cut against his real library and rejected the
+process: 79 titles held back as a homework list of prompts in Settings, before any of
+their artwork appeared. His words - best effort the matching, notice that some may be
+wrong, and "on the artwork/tiles there should be an edit icon/button in the corner" -
+with Plex's Fix Match named as the reference.
+
+**Supersedes the previous entry's matching section.** Every lookup now applies its
+best candidate - exact-title-with-year first, then exact title, then TMDB's own first
+result - and records `uncertain` where it was a guess. The panel and the notice count
+the guesses honestly; nobody is quizzed. On his library: the 79 held-back titles
+resolved to guesses in one pass, 237 matched in all, 27 with nothing.
+
+**The fix is where the mistake is visible.** A pencil in the tile's corner (opposite
+the watched tick, hover-revealed like it) opens a fix-match dialog: the lookup rerun,
+optionally with the operator's own words - the filename being wrong is usually the
+whole problem - a pick applied, or the fetched artwork dropped. The chosen poster is
+fetched fresh by TMDB id; nothing from the page is trusted but the id. A fixed match
+is never `uncertain`, because a person chose it. An unmatched item is remembered so
+the next automatic pass does not re-guess it.
+
+**Progress is where the result lands.** The pass reports on the LIBRARY page - the
+page whose posters are filling in - riding the /api/state poll that already exists,
+and the lists refetch when the pass completes so posters arrive while somebody
+watches. The pencil only shows where artwork came from the lookup or is absent:
+a poster beside the file on disk is not this feature's to change.
+
+**And the step joined the first-run wizard** (Tim, same day), right after the source:
+the moment somebody points at their films is the moment a wall of grey placeholders
+is coming. Skippable, embedded from the same panel Settings uses.
+
+## 2026-08-13 - ONLINE ARTWORK IS BUILT CAUTION-FIRST, and the key question is REOPENED
 Tier: T1 (host-local cache and routes; no wire change, no Hyperbee change)
 Context: the opt-in TMDB item, whose design calls were fixed 2026-08-12: operator's own
 key, TMDB only, sidecar always wins, default off, cache in the data dir, the dashboard
