@@ -340,6 +340,14 @@ const methods = {
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
 
+  // The track's text, as WebVTT. The host STREAMS it (subtitle bytes ride the
+  // same chokepoint as film bytes); buffered here because a subtitle file is
+  // tens of kilobytes and the shell wants one string, not a byte feed.
+  'subtitle.get': async (args) => {
+    const buf = await (await connected()).request('subtitle.get', args, { stream: true })
+    return { vtt: b4a.toString(buf) }
+  },
+
   // The shell hands over the raw MediaCodecList probe at boot; the mapper's
   // policy turns it into this device's declaration. A missing or broken probe
   // changes nothing - the static floor stands, and under-declaring only costs

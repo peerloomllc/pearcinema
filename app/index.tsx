@@ -20,6 +20,7 @@ import { Worklet } from 'react-native-bare-kit'
 import * as FileSystem from 'expo-file-system/legacy'
 import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
+import * as ScreenOrientation from 'expo-screen-orientation'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 
@@ -35,6 +36,34 @@ const bundle = require('../assets/bare-universal.bundle')
 let pendingPairLink: string | null = null
 
 SplashScreen.preventAutoHideAsync().catch(() => {})
+
+// A WebVTT text into cues. Minimal on purpose: timestamps and text are the
+// whole contract (the host converts SRT to VTT before it ever gets here), and
+// styling tags are stripped rather than rendered. Hour field optional, comma
+// tolerated - the host's converter writes dots, but a subtitle that survived
+// three tools deserves the benefit of the doubt.
+type Cue = { start: number, end: number, text: string }
+function parseVtt (raw: string): Cue[] {
+  const ts = (s: string) => {
+    const m = /(?:(\d+):)?(\d+):(\d+)[.,](\d+)/.exec(s.trim())
+    if (!m) return null
+    return Number(m[1] || 0) * 3600 + Number(m[2]) * 60 + Number(m[3]) +
+      Number(m[4].padEnd(3, '0').slice(0, 3)) / 1000
+  }
+  const cues: Cue[] = []
+  for (const block of String(raw).replace(/\r/g, '').split(/\n\n+/)) {
+    const lines = block.split('\n').filter((l) => l.trim())
+    const ti = lines.findIndex((l) => l.includes('-->'))
+    if (ti === -1) continue
+    const [a, b] = lines[ti].split('-->')
+    const start = ts(a)
+    const end = ts(b)
+    if (start == null || end == null) continue
+    const text = lines.slice(ti + 1).join('\n').replace(/<[^>]+>/g, '').trim()
+    if (text) cues.push({ start, end, text })
+  }
+  return cues
+}
 
 export default function App () {
   const webref = useRef<WebView>(null)
@@ -55,6 +84,28 @@ export default function App () {
   const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
   const playingRef = useRef<typeof playing>(null)
   const lastPos = useRef(0)
+
+  // SUBTITLES, both kinds behind one picker. Embedded text tracks ride the
+  // native player (ExoPlayer reads them out of the file on direct play;
+  // player.subtitleTrack selects one). External files - the host serves them
+  // as WebVTT over the P2P connection - have NO path into a native player, so
+  // they render as an RN overlay driven by the player's clock. The overlay is
+  // mode-independent: direct play and the HLS transcode both carry the film's
+  // own timeline, so one cue lookup serves both.
+  const [subTracks, setSubTracks] = useState<any[]>([])
+  const [subPicker, setSubPicker] = useState(false)
+  const [activeSub, setActiveSub] = useState<string | null>(null)
+  const [cueText, setCueText] = useState('')
+  const cuesRef = useRef<Cue[]>([])
+  // Where the bottom of the PICTURE is, in wrap coordinates. The video sits
+  // letterboxed inside the wrap (contentFit contain), so anchoring cues to the
+  // wrap floated them mid-black in portrait and mid-picture in landscape
+  // (Tim, 2026-08-14: "in the middle of the screen instead of at the bottom").
+  // Computed from the wrap's layout and the video track's own size.
+  const wrapSizeRef = useRef({ w: 0, h: 0 })
+  const [cueBottom, setCueBottom] = useState(24)
+  // The boot effect's shellCall, reachable from render-time handlers.
+  const shellCallRef = useRef<((method: string, args: any) => Promise<any>) | null>(null)
   // THE FORWARD BUFFER IS TIME-GOVERNED AND SMALL, and that is a revoke-latency
   // decision, not a tuning nicety. With ExoPlayer's defaults the SIZE thresholds
   // govern and it buffered minutes of film through the shim's windows - measured
@@ -138,6 +189,7 @@ export default function App () {
         shellPending.current.set(id, resolve)
         ipc.write(b4a.from(JSON.stringify({ id, method, args }) + '\n'))
       })
+      shellCallRef.current = shellCall
       // The REAL decoder list, probed here because MediaCodecList is RN-side.
       // The worklet's mapper judges it; a null probe leaves the conservative
       // static declaration standing, which only costs the host engine time.
@@ -202,6 +254,26 @@ export default function App () {
     return () => sub.remove()
   }, [])
 
+  // THE PLAYER MAY ROTATE; THE REST OF THE APP MAY NOT. The app is locked to
+  // portrait in app.json, which locked the PLAYER too - a film could only ever
+  // be a letterboxed band across a portrait screen, and the phone ignored being
+  // turned (Tim, 2026-08-14: "it doesn't look right"). While a film runs the
+  // orientation unlocks and the sensor decides; closing the player locks
+  // portrait back. This deliberately does NOT use the native fullscreen
+  // activity, which would rotate but is a separate screen the external-subtitle
+  // overlay and the Subtitles button cannot follow into.
+  useEffect(() => {
+    if (playing) {
+      ScreenOrientation.unlockAsync()
+        .then(() => console.log('[shell] orientation unlocked'))
+        .catch((e) => console.log('[shell] orientation unlock failed: ' + (e?.message || e)))
+    } else {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
+        .then(() => console.log('[shell] orientation locked portrait'))
+        .catch((e) => console.log('[shell] orientation lock failed: ' + (e?.message || e)))
+    }
+  }, [!!playing])
+
   // Position ticks flow INTO the UI, which owns every watch-state rule.
   useEffect(() => {
     playingRef.current = playing
@@ -241,6 +313,62 @@ export default function App () {
     }
     try { player.pause() } catch {}
     setPlaying(null)
+    setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
+    cuesRef.current = []
+  }
+
+  // The overlay's clock: the active cue, looked up from the player's own time a
+  // few times a second. Only ticks while an external track is showing.
+  useEffect(() => {
+    if (!playing) return
+    const t = setInterval(() => {
+      if (!cuesRef.current.length) return
+      let at = 0
+      try { at = player.currentTime } catch { return }
+      const cue = cuesRef.current.find((c) => at >= c.start && at <= c.end)
+      setCueText((cur) => {
+        const next = cue ? cue.text : ''
+        return cur === next ? cur : next
+      })
+      // Pin the cue just inside the picture's bottom edge: letterbox height is
+      // (wrap - displayed video) / 2, from contain-fit arithmetic.
+      try {
+        const { w, h } = wrapSizeRef.current
+        const vs: any = player.videoTrack?.size
+        if (vs?.width > 0 && vs?.height > 0 && w > 0 && h > 0) {
+          const scale = Math.min(w / vs.width, h / vs.height)
+          const bottom = Math.max(16, (h - vs.height * scale) / 2 + 16)
+          setCueBottom((cur) => (Math.abs(cur - bottom) > 1 ? bottom : cur))
+        }
+      } catch {}
+    }, 300)
+    return () => clearInterval(t)
+  }, [playing])
+
+  const chooseSubtitle = async (kind: 'off' | 'embedded' | 'external', track?: any) => {
+    setSubPicker(false)
+    cuesRef.current = []
+    setCueText('')
+    if (kind === 'off') {
+      setActiveSub(null)
+      try { player.subtitleTrack = null } catch {}
+      return
+    }
+    if (kind === 'embedded') {
+      setActiveSub('emb:' + (track?.id ?? track?.label ?? ''))
+      try { player.subtitleTrack = track } catch {}
+      return
+    }
+    // External: the host's WebVTT, rendered by the overlay. The native track is
+    // switched off so two sets of subtitles cannot fight over the picture.
+    try { player.subtitleTrack = null } catch {}
+    const p = playingRef.current
+    if (!p) return
+    setActiveSub('ext:' + track.id)
+    const out = await shellCallRef.current?.('subtitle.get', { itemId: p.itemId, subtitleId: track.id })
+    if (playingRef.current?.itemId !== p.itemId) return
+    cuesRef.current = parseVtt(out?.result?.vtt || '')
+    if (!cuesRef.current.length) setActiveSub(null)
   }
 
   // WebView -> worklet: the other half of the bridge.
@@ -253,6 +381,12 @@ export default function App () {
     if (msg.method === 'shell.play') {
       const { itemId, url, title, startMs } = msg.args || {}
       setPlaying({ itemId, url, title: title || '', startMs })
+      // A new film starts with no subtitles chosen and a fresh track list.
+      setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
+      cuesRef.current = []
+      shellCallRef.current?.('subtitle.list', { itemId })
+        .then((r) => setSubTracks((r?.result?.items || []).filter((t: any) => t.playable)))
+        .catch(() => {})
       try {
         player.replace({ uri: url })
         if (startMs > 0) player.currentTime = startMs / 1000
@@ -335,14 +469,70 @@ export default function App () {
               <Text style={styles.backTxt}>‹ Back</Text>
             </Pressable>
             <Text style={styles.title} numberOfLines={1}>{playing.title}</Text>
+            <Pressable onPress={() => setSubPicker(true)} style={styles.backBtn}>
+              <Text style={styles.backTxt}>Subtitles</Text>
+            </Pressable>
           </View>
-          <VideoView
-            style={styles.video}
-            player={player}
-            nativeControls
-            allowsFullscreen
-            contentFit='contain'
-          />
+          <View
+            style={styles.videoWrap}
+            onLayout={(e) => {
+              const { width, height } = e.nativeEvent.layout
+              wrapSizeRef.current = { w: width, h: height }
+            }}
+          >
+            <VideoView
+              style={styles.video}
+              player={player}
+              nativeControls
+              // No native fullscreen: it presents a SEPARATE activity that the
+              // subtitle overlay and the Subtitles button cannot follow into.
+              // Rotation is the fullscreen story here - turn the phone.
+              allowsFullscreen={false}
+              contentFit='contain'
+            />
+            {!!cueText && (
+              <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
+                <Text style={styles.cue}>{cueText}</Text>
+              </View>
+            )}
+          </View>
+
+          {subPicker && (
+            <View style={styles.subPicker}>
+              <View style={styles.subCard}>
+                <Text style={styles.subHead}>Subtitles</Text>
+                <Pressable style={styles.subRow} onPress={() => chooseSubtitle('off')}>
+                  <Text style={[styles.subTxt, !activeSub && styles.subOn]}>Off</Text>
+                </Pressable>
+                {subTracks.map((t: any) => (
+                  <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
+                    <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
+                      {(t.title || t.language || 'Subtitles') + (t.external ? '' : ' (in the file)')}
+                    </Text>
+                  </Pressable>
+                ))}
+                {(() => {
+                  // The tracks ExoPlayer read out of the file itself - present on
+                  // direct play, absent on a transcode (the segments carry none).
+                  let embedded: any[] = []
+                  try { embedded = player.availableSubtitleTracks || [] } catch {}
+                  return embedded.map((t: any, i: number) => (
+                    <Pressable key={'emb' + i} style={styles.subRow} onPress={() => chooseSubtitle('embedded', t)}>
+                      <Text style={[styles.subTxt, activeSub === 'emb:' + (t?.id ?? t?.label ?? '') && styles.subOn]}>
+                        {(t.label || t.language || `Track ${i + 1}`) + ' (in the file)'}
+                      </Text>
+                    </Pressable>
+                  ))
+                })()}
+                {subTracks.length === 0 && (
+                  <Text style={styles.subNone}>No subtitle files for this one - anything listed above came from inside the file.</Text>
+                )}
+                <Pressable style={styles.subRow} onPress={() => setSubPicker(false)}>
+                  <Text style={styles.subTxt}>Close</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -357,5 +547,28 @@ const styles = StyleSheet.create({
   backBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e2820' },
   backTxt: { color: '#efe9df', fontWeight: '600' },
   title: { color: '#efe9df', flex: 1 },
-  video: { flex: 1 }
+  videoWrap: { flex: 1 },
+  video: { flex: 1 },
+  // The external-subtitle overlay: pinned to the PICTURE's bottom edge (the
+  // bottom offset is computed from the letterbox), never touchable, readable
+  // on any picture.
+  cueWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
+  cue: {
+    color: '#fff', fontSize: 16, lineHeight: 22, textAlign: 'center',
+    backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 6, overflow: 'hidden'
+  },
+  subPicker: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center', justifyContent: 'center', padding: 24
+  },
+  subCard: {
+    backgroundColor: '#1a1712', borderColor: '#2e2820', borderWidth: 1,
+    borderRadius: 12, padding: 8, alignSelf: 'stretch', maxWidth: 420
+  },
+  subHead: { color: '#efe9df', fontWeight: '700', fontSize: 16, padding: 10 },
+  subRow: { paddingVertical: 12, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#241f18' },
+  subTxt: { color: '#efe9df' },
+  subOn: { color: '#e2a13d', fontWeight: '700' },
+  subNone: { color: '#8f8778', fontSize: 12, padding: 10 }
 })
