@@ -39,6 +39,26 @@ the grant it connected with, so assigning a device to a person applies on reconn
 and the WebView player is a stopgap - the proposal's Android-plays-everything claim
 was always an ExoPlayer claim, so the native player is the eventual answer.
 
+### The hardware revoke test, PAID the same day - and what video changes about it
+
+Run the way the item demanded: a film playing on the TCL, revoke from the dashboard,
+eyes on the screen. The connection died within a second (`killed: 1`, the stream dead
+at the shim in the same instant), a seek to 1:30:47 - far past anything fetched -
+froze on a stale frame forever with ZERO requests served after the cut, and every
+reconnect attempt died at the firewall as `PEER_CONNECTION_FAILED`.
+
+**What video adds to the claim, honestly:** the picture kept playing for minutes
+after the cut, from RAM. The missing stream-cancel had let the player fetch the film
+at LAN speed - about a third of it in forty seconds - so "revoke kills the music"
+does not translate to "revoke blanks the screen". Access dies instantly; the buffer
+drains on its own schedule. The stream-cancel follow-up is therefore a
+revoke-latency fix as well as a bandwidth one, and the acceptance wording for video
+should be "no NEW bytes within a second", which is exactly what was observed.
+
+Also found by the restore afterwards: a pairing link arriving while a host is
+active never reaches the pairing screen - the UI only offers pairing when it has no
+host. Filed with the mobile follow-ups.
+
 ## 2026-08-14 - THE MOBILE APP STARTS WITH AN EXTRACTION, not a copy: @peerloom/client is APPROVED
 Tier: T3 (client-side pairing and connection code moves into a shared package)
 Context: Tim said "let's work on the mobile app". The 2026-08-14 survey of PearTune's
