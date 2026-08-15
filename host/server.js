@@ -119,6 +119,24 @@ class PearCinemaHost {
           // device.leave: the phone removed this library, so drop its own grant and
           // cut its connections - same teeth as revoke, logged as self-initiated.
           leave: (deviceKey) => this.host.leaveDevice(deviceKey),
+          // Device photos, one small jpeg per device key, beside the grant data.
+          // A file store rather than bee rows so a photo never rides a grants
+          // scan it was not asked for.
+          avatars: {
+            dir: path.join(this.dataDir, 'avatars'),
+            set: (deviceKey, b64) => {
+              const dir = path.join(this.dataDir, 'avatars')
+              fs.mkdirSync(dir, { recursive: true })
+              const file = path.join(dir, String(deviceKey).replace(/[^a-z0-9]/gi, '') + '.b64')
+              if (b64) fs.writeFileSync(file, String(b64))
+              else fs.rmSync(file, { force: true })
+            },
+            get: (deviceKey) => {
+              try {
+                return fs.readFileSync(path.join(this.dataDir, 'avatars', String(deviceKey).replace(/[^a-z0-9]/gi, '') + '.b64'), 'utf8')
+              } catch { return null }
+            }
+          },
           // The phone's transcode path: decide, playlist, one segment at a time.
           media: {
             decide: (p) => this.decideFor(p),

@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -387,6 +387,32 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       try { await leave(ctx.deviceKey) } catch {}
     },
 
+    // A device claiming who it belongs to and what it calls itself. The claim
+    // GRANTS NOTHING - the package's setClaim leaves personId untouched, and
+    // only the dashboard's confirm flow can move a device to a person. The
+    // deviceKey is the connection's own Noise-proven key; nothing to forge.
+    'identity.set': async (ctx) => {
+      if (!grants?.setClaim) throw ctx.notFound('this host cannot record claims yet')
+      const { userName, deviceName } = ctx.params
+      const row = await grants.setClaim(ctx.deviceKey, {
+        claimedUser: userName !== undefined ? String(userName || '') : undefined,
+        label: deviceName !== undefined ? String(deviceName || '') : undefined
+      })
+      if (!row) throw ctx.notFound('no live grant for this device')
+      return { ok: true, claimedUser: row.claimedUser, deviceName: row.label }
+    },
+
+    // This device's own photo, stored host-side so the dashboard can show it
+    // and a re-install gets it back. ~25 KB compressed by the phone; capped
+    // hard here because a "photo" is client input like any other.
+    'avatar.set': async (ctx) => {
+      if (!avatars) throw ctx.notFound('this host does not keep photos')
+      const b64 = ctx.params.avatar ? String(ctx.params.avatar) : null
+      if (b64 && b64.length > 120_000) throw ctx.badParams('photo too large')
+      avatars.set(ctx.deviceKey, b64)
+      return { ok: true }
+    },
+
     'identity.get': async (ctx) => {
       // RE-READ the row rather than answering off `ctx.grant`. That grant was
       // captured once, when the firewall admitted this connection, so answering
@@ -399,6 +425,18 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       const labels = person && grants ? await grants.personLabels() : null
 
       return {
+        // What this device CLAIMED, and whether the operator has confirmed it
+        // (a claim with a person assigned reads as confirmed; the phone words
+        // the in-between honestly). The photo comes back so a re-install shows
+        // your face again.
+        userName: row.claimedUser || null,
+        // Confirmed means the operator confirmed THE CLAIM - the assigned
+        // person carries the claimed name - not merely that the device is
+        // assigned to somebody. A device already filed under Me that claims
+        // to be Timothy is PENDING, and saying "confirmed" there told the
+        // person the exact opposite of the truth (caught live on the TCL).
+        confirmed: !!(row.claimedUser && person && person.name === row.claimedUser),
+        avatar: avatars ? avatars.get(ctx.deviceKey) : null,
         deviceName: row.label || null,
         // Disambiguated where two people share a name, so "belongs to Sam" on the
         // phone names the SAME Sam the dashboard's revoke button does.

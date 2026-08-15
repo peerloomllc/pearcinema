@@ -65,6 +65,32 @@ function usePress (onPress, onLongPress) {
   }
 }
 
+// The donor's avatar pipeline: any picked image becomes a small square jpeg
+// before it ever leaves the phone, so a 12 MP photo costs ~25 KB on the wire.
+function readFileDataUrl (file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result)
+    r.onerror = () => reject(new Error('could not read that file'))
+    r.readAsDataURL(file)
+  })
+}
+
+async function compressToAvatarB64 (dataUrl, size = 256) {
+  const img = new Image()
+  await new Promise((resolve, reject) => {
+    img.onload = resolve
+    img.onerror = () => reject(new Error('not an image'))
+    img.src = dataUrl
+  })
+  const c = document.createElement('canvas')
+  c.width = size; c.height = size
+  const ctx = c.getContext('2d')
+  const s = Math.min(img.width, img.height)
+  ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size)
+  return c.toDataURL('image/jpeg', 0.82).split(',')[1]
+}
+
 // The donor's collapsible settings section, one open at a time.
 function Section ({ id, title, Icon, open, onToggle, children }) {
   return (
@@ -317,6 +343,20 @@ export default function App () {
   const [themePref, setThemePref] = useState(loadThemePref())
   const [settingsOpen, setSettingsOpen] = useState(null)
   const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
+
+  // The profile header's editable claim. Seeded from identity.get; dirty when
+  // either field departs from what the server answered.
+  const [profName, setProfName] = useState('')
+  const [profDev, setProfDev] = useState('')
+  const [avatar, setAvatar] = useState(null)
+  const [profSaving, setProfSaving] = useState(false)
+  const fileRef = useRef(null)
+  useEffect(() => {
+    setProfName(ident?.userName || ident?.belongsTo || '')
+    setProfDev(ident?.deviceName || 'phone')
+    setAvatar(ident?.avatar || null)
+  }, [ident])
+  const profDirty = ident && (profName !== (ident.userName || ident.belongsTo || '') || profDev !== (ident.deviceName || 'phone'))
 
   // Overlays.
   const [sheet, setSheet] = useState(null)
@@ -744,23 +784,62 @@ export default function App () {
       <header><h1>Settings</h1></header>
 
       {/* Profile header, the donor's - always visible above the sections: your
-          photo, your name, this device. Editing the name arrives with the host's
-          claim support; until then these show what the server has. */}
+          photo, your name, this device. A claim grants nothing until the
+          operator confirms it, and the note below says so honestly. */}
       <div className='profile'>
-        <button className='profile-av' aria-label='Your photo'>
-          <span className='profile-mono'>{(ident?.belongsTo || 'Y')[0].toUpperCase()}</span>
+        <button className='profile-av' onClick={() => fileRef.current?.click()} aria-label='Change your photo'>
+          {avatar
+            ? <img src={'data:image/jpeg;base64,' + avatar} alt='' />
+            : <span className='profile-mono'>{((profName || ident?.belongsTo || 'Y')[0] || 'Y').toUpperCase()}</span>}
         </button>
+        <input
+          ref={fileRef} type='file' accept='image/*' style={{ display: 'none' }}
+          onChange={async (e) => {
+            const f = e.currentTarget.files?.[0]
+            e.currentTarget.value = ''
+            if (!f) return
+            try {
+              const b64 = await compressToAvatarB64(await readFileDataUrl(f))
+              setAvatar(b64)
+              await call('avatar.set', { avatar: b64 })
+              say('Photo saved')
+            } catch (er) { setErr(er.message) }
+          }}
+        />
         <div className='profile-fields'>
-          <input className='profile-name' value={ident?.belongsTo || ''} placeholder='Your name' disabled aria-label='Your name' />
-          <input className='profile-dev' value={ident?.deviceName || 'phone'} placeholder='This device' disabled aria-label='Device name' />
+          <input
+            className='profile-name' value={profName} placeholder='Your name' maxLength={64}
+            aria-label='Your name' onInput={(e) => setProfName(e.currentTarget.value)}
+          />
+          <input
+            className='profile-dev' value={profDev} placeholder='This device' maxLength={64}
+            aria-label='Device name' onInput={(e) => setProfDev(e.currentTarget.value)}
+          />
         </div>
+        {profDirty && (
+          <button
+            className='profile-save' disabled={profSaving}
+            onClick={async () => {
+              setProfSaving(true)
+              try {
+                await call('identity.set', { userName: profName, deviceName: profDev })
+                await call('identity.get').then(setIdent).catch(() => {})
+                say('Saved')
+              } catch (er) { setErr(er.message) }
+              setProfSaving(false)
+            }}
+          >{profSaving ? '…' : 'Save'}</button>
+        )}
       </div>
-      <div className='profile-note desc'>
-        {ident?.belongsTo
-          ? `The server has this device down as ${ident.belongsTo}'s.`
-          : 'The server has not assigned this device to anyone yet.'}
-        {' '}Editing your name and photo from the phone arrives with a host update.
-      </div>
+      {ident?.userName && (
+        <div className='profile-note desc'>
+          {ident.confirmed
+            ? `The server has confirmed this device belongs to ${ident.belongsTo || ident.userName}.`
+            : ident.belongsTo
+              ? `The server still has this device down as ${ident.belongsTo}. It is waiting to confirm you are ${ident.userName} - only the person running it can move a device to someone else.`
+              : `Waiting for the server to confirm you are ${ident.userName}. Until then this is only a label.`}
+        </div>
+      )}
 
       <div className='settings-acc'>
         <Section id='library' title={hosts.length > 1 ? 'Libraries' : 'Library'} Icon={FilmStrip} open={settingsOpen === 'library'} onToggle={toggleSection}>
