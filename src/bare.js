@@ -489,6 +489,12 @@ const methods = {
   // the host decides again - usually landing on transcode. The client still
   // never ASKS for a mode; it only tells the truth about itself.
   'stream.url': async ({ itemId, deviceRefusedVideo = false }) => {
+    // A downloaded film needs no host at all - the shim serves it off disk
+    // with full Range support. Checked BEFORE connecting, or offline playback
+    // would die asking a host it does not need.
+    if (!deviceRefusedVideo && cache.has(String(itemId))) {
+      return { url: shim.urlFor(itemId), mode: 'download' }
+    }
     const c = await connected()
     if (deviceRefusedVideo) {
       const item = await c.get({ id: itemId }).catch(() => null)
