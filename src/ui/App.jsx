@@ -600,7 +600,7 @@ export default function App () {
               <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
               <button className={root === 'series' ? 'on' : ''} onClick={() => setRoot('series')}>Shows</button>
             </div>
-            <button className='ghost' aria-label='Sort and layout' onClick={() => setShowDisplay(true)}>
+            <button className='dispbtn' aria-label='Sort and layout' onClick={() => setShowDisplay(true)}>
               <SlidersHorizontal size={18} />
             </button>
           </div>

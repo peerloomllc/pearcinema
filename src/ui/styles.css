@@ -1459,3 +1459,11 @@ label.flabel { display: block; margin-top: .6rem; }
    span the sticky's full width so their edges line up (Tim, 2026-08-15). */
 .sticky .searchbar { margin-bottom: .55rem }
 .sticky .pickrow, .sticky .searchbar { width: 100% }
+
+/* The sort-and-layout button wears the same pill as the browse seg beside it
+   (Tim, 2026-08-15). */
+.dispbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  border-radius: 9999px; padding: .5rem .8rem; color: var(--color-text-muted);
+}
