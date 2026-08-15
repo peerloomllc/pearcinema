@@ -37,6 +37,7 @@
 const { EmptyAdapter } = require('./empty')
 const { JellyfinAdapter } = require('./jellyfin')
 const { FolderAdapter } = require('./folder')
+const ffmpegBin = require('../ffmpeg-bin')
 
 const KINDS = new Set(['empty', 'jellyfin', 'folder'])
 
@@ -54,10 +55,10 @@ function buildAdapter (cfg, { libraryId, ids, dataDir = null, log = () => {} } =
         libraryId,
         ids,
         log,
-        // The same binaries the rest of the host uses. Overridable for the same
-        // reason the remuxer's is: an image may carry them somewhere unusual.
-        ffprobe: process.env.PEARCINEMA_FFPROBE || 'ffprobe',
-        ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg'
+        // The same binaries the rest of the host uses, through the one
+        // resolution point (setting, bundled, PATH - see host/ffmpeg-bin.js).
+        ffprobe: ffmpegBin.ffprobe(),
+        ffmpeg: ffmpegBin.ffmpeg()
       })
 
     case 'jellyfin':

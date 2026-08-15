@@ -18,6 +18,7 @@ const { buildAdapter } = require('./adapters')
 const { createMethods, MUTATING } = require('./methods')
 const remux = require('./remux')
 const transcode = require('./transcode')
+const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const hls = require('./hls')
 
@@ -63,7 +64,7 @@ class PearCinemaHost {
     // at once, and an unbounded count of child processes is how a host stops being a
     // host. Nothing is written to disk - see host/remux.js.
     this.remuxer = new remux.Remuxer({
-      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      ffmpeg: ffmpegBin.ffmpeg(),
       maxConcurrent: Number(process.env.PEARCINEMA_MAX_REMUX) || 3,
       log
     })
@@ -78,7 +79,7 @@ class PearCinemaHost {
     // startup probe in ready() opens it, and only when the hardware produced real
     // bytes. There is no software fallback anywhere - see the proposal's rule 3.
     this.transcoder = new transcode.Transcoder({
-      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      ffmpeg: ffmpegBin.ffmpeg(),
       maxConcurrent: Number(process.env.PEARCINEMA_MAX_TRANSCODE) || 4,
       device: process.env.PEARCINEMA_VAAPI_DEVICE || transcode.DEVICE_DEFAULT,
       log
@@ -570,7 +571,7 @@ class PearCinemaHost {
       return this.transcode
     }
     this.transcode = await transcode.probeTranscode({
-      ffmpeg: process.env.PEARCINEMA_FFMPEG || 'ffmpeg',
+      ffmpeg: ffmpegBin.ffmpeg(),
       device: this.transcoder.device
     })
     this.log('host:transcode', { available: this.transcode.available, reason: this.transcode.reason || undefined })

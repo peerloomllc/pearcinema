@@ -69,3 +69,8 @@ scripts/.env
 src/ui/.phone.bundle
 src/ui/.phone.css
 .expo/
+
+# Bundled ffmpeg binaries - dropped in by desktop packaging, never committed.
+# The README documenting the convention IS committed.
+vendor/ffmpeg/*
+!vendor/ffmpeg/README.md
