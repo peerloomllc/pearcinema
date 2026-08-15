@@ -68,9 +68,15 @@ let capabilities = caps.STATIC
 // process retries direct play once and re-learns in one failed attempt.
 const refusedVideo = new Map()
 
+const DATA_SAVER_KBPS = 2500
+
 function capsFor (itemId) {
   const bad = refusedVideo.get(itemId)
-  return bad ? caps.without(capabilities, bad) : capabilities
+  const base = bad ? caps.without(capabilities, bad) : capabilities
+  // Data saver rides the capability declaration as a stated link budget -
+  // still a description of THIS client's situation, and the host still
+  // decides. One seam covers decide, playlist and every segment.
+  return readSettings().dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
 }
 
 // --- IPC --------------------------------------------------------------------

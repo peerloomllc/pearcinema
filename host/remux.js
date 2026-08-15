@@ -134,6 +134,23 @@ function decide (media, client = {}, opts = {}) {
 
   const containerOk = containers.has(box)
 
+  // DATA SAVER. The client states a link budget (maxKbps) - a fact about its
+  // situation, not a mode request, and the host still decides: a file over the
+  // budget is converted DOWN on the video hardware, capped at the budget by
+  // the segment path. Only with proven hardware and an H.264-capable client;
+  // a host that cannot cap serves the file as it is, honestly - a slow stream
+  // beats no stream, and software transcode stays forbidden. The 1.15 slack
+  // keeps a file a hair over budget from paying a whole conversion.
+  const maxKbps = Number(client.maxKbps) || 0
+  if (maxKbps && opts.fileKbps && opts.fileKbps > maxKbps * 1.15 && opts.transcode && videos.has('h264')) {
+    const audioOkSaver = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    return {
+      mode: 'transcode',
+      reason: `the client asked to stay near ${maxKbps} kbps and this file runs about ${Math.round(opts.fileKbps)} kbps, so the picture is converted down on the host's video hardware`,
+      audio: audioOkSaver ? 'copy' : AUDIO_FALLBACK.codec
+    }
+  }
+
   if (containerOk && (!v || videos.has(v)) && (!a || audios.has(a))) {
     return { mode: 'direct', reason: 'the client can open this file as it is' }
   }

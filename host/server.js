@@ -476,17 +476,25 @@ class PearCinemaHost {
   // teeth - a revoked phone simply cannot call again, and the segment its player
   // already asked for dies with the connection like any stream.
 
+  // The file's real average rate, for the data-saver comparison. Size over
+  // runtime - approximate on VBR, exactly wrong nowhere it matters.
+  _fileKbps (item) {
+    const size = item?.media?.size
+    const secs = item?.runtime
+    return size > 0 && secs > 0 ? (size * 8) / (secs * 1000) : 0
+  }
+
   async decideFor ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
     return { mode: verdict.mode, reason: verdict.reason }
   }
 
   async hlsPlaylist ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
     if (verdict.mode !== 'transcode') return { mode: verdict.mode, reason: verdict.reason, playlist: null }
     const playlist = hls.playlistFor(item)
     if (!playlist) return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
@@ -506,7 +514,7 @@ class PearCinemaHost {
     const k = Number(seq)
     if (!Number.isInteger(k) || k < 0 || k >= n) return null
 
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
     if (verdict.mode !== 'transcode') return null
 
     if (!this.adapter.ffmpegInput) return null
@@ -521,7 +529,8 @@ class PearCinemaHost {
       media: item.media || {},
       device: this.transcoder.device,
       hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
-      bitrate: tc.bitrateFor(item.media?.width)
+      // The width ladder, capped at the client's stated budget when it gave one.
+      bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0)
     })
 
     // Through the SAME pool as the browser's transcodes: one engine, one cap,
