@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -271,6 +271,97 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'watched.list': async (ctx) => {
       if (!state) return { items: [] }
       return { items: [...await state.watchedSet(ctx.owner)] }
+    },
+
+    // --- the watchlist ----------------------------------------------------
+    //
+    // Rides the inherited favourites store with the video kind vocabulary.
+    // Per PERSON via ctx.owner, same as watch state - a watchlist is the same
+    // claim: your phone and the dashboard agree on what you saved.
+
+    'fav.set': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { kind, id, on } = ctx.params
+      if (!['movie', 'episode', 'series', 'season'].includes(kind)) throw ctx.badParams('bad kind')
+      if (!id) throw ctx.badParams('id required')
+      await state.setFav(ctx.owner, String(kind), String(id), !!on)
+      return { ok: true, on: !!on }
+    },
+
+    // Resolved to ITEMS, not ids - the same rule resume.list follows: a client
+    // rendering a shelf needs titles and artwork, and a saved id whose item has
+    // left the library is dropped rather than sent as a card that cannot open.
+    'fav.list': async (ctx) => {
+      if (!state) return { items: [] }
+      const byKind = await state.listFavs(ctx.owner)
+      const adapter = getAdapter()
+      const out = []
+      for (const [kind, ids] of Object.entries(byKind)) {
+        for (const id of ids) {
+          const item = await adapter.get({ id })
+          if (item) out.push({ ...item, kind })
+        }
+      }
+      return { items: out }
+    },
+
+    // --- asking for what is not there --------------------------------------
+
+    'request.add': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { kind, name } = ctx.params
+      if (!['movie', 'series'].includes(kind)) throw ctx.badParams('bad kind')
+      return { request: await state.addRequest(ctx.owner, { kind, name }) }
+    },
+
+    'request.list': async (ctx) => {
+      if (!state) return { items: [] }
+      return { items: await state.listRequests({ requester: ctx.owner }) }
+    },
+
+    'request.remove': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const row = await state.getRequest(String(ctx.params.id || ''))
+      // Only your own ask - the id is not a capability.
+      if (!row || row.requester !== ctx.owner) throw ctx.notFound('no such request')
+      await state.deleteRequest(row.id)
+      return { ok: true }
+    },
+
+    // --- the owner's view (scope-gated, never parameter-gated) --------------
+
+    'request.all': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!state) return { items: [] }
+      return { items: await state.listRequests() }
+    },
+
+    'request.resolve': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { id, status } = ctx.params
+      if (!['added', 'declined'].includes(status)) throw ctx.badParams('bad status')
+      const row = await state.resolveRequest(String(id || ''), status)
+      if (!row) throw ctx.notFound('no such request')
+      return { request: row }
+    },
+
+    'device.list': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!grants) return { items: [] }
+      const rows = await grants.list()
+      const labels = await grants.personLabels().catch(() => null)
+      return {
+        items: rows.map((r) => ({
+          deviceKey: r.deviceKey,
+          label: r.label || null,
+          platform: r.platform || null,
+          belongsTo: r.personId ? (labels?.get(r.personId) || null) : null,
+          grantedAt: r.grantedAt || null,
+          expiresAt: r.expiresAt ?? null,
+          self: r.deviceKey === ctx.deviceKey
+        }))
+      }
     },
 
     // --- identity ---------------------------------------------------------

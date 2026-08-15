@@ -33,6 +33,18 @@ const PLATFORM = Bare.argv[1] || 'android'
 
 const IDENTITY_FILE = path.join(DATA_DIR, 'identity.json')
 const HOSTS_FILE = path.join(DATA_DIR, 'hosts.json')
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json')
+
+// Small device-local preferences (theme and friends), beside the identity the
+// same way the donor keeps them - so the shell could one day read the theme
+// before the WebView paints.
+function readSettings () {
+  try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) || {} } catch { return {} }
+}
+function writeSettings (s) {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s))
+}
 
 const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' })
 
@@ -262,6 +274,13 @@ const methods = {
     return { ok: true, port: shimPort }
   },
 
+  'getSettings': async () => readSettings(),
+  'setSettings': async (patch) => {
+    const next = { ...readSettings(), ...patch }
+    writeSettings(next)
+    return next
+  },
+
   // Everything the UI needs to draw its first screen, in one call.
   'app.state': async () => {
     const active = H.activeHost(hostsState)
@@ -337,6 +356,18 @@ const methods = {
   'resume.list': async (args) => (await connected()).request('resume.list', args),
   'watched.set': async (args) => (await connected()).request('watched.set', args),
   'watched.list': async (args) => (await connected()).request('watched.list', args),
+
+  // The watchlist, requests, the owner's view and this device's identity -
+  // straight proxies; the host derives WHO from the connection, never a param.
+  'fav.set': async (args) => (await connected()).request('fav.set', args),
+  'fav.list': async (args) => (await connected()).request('fav.list', args),
+  'request.add': async (args) => (await connected()).request('request.add', args),
+  'request.list': async (args) => (await connected()).request('request.list', args),
+  'request.remove': async (args) => (await connected()).request('request.remove', args),
+  'request.all': async (args) => (await connected()).request('request.all', args),
+  'request.resolve': async (args) => (await connected()).request('request.resolve', args),
+  'device.list': async (args) => (await connected()).request('device.list', args),
+  'identity.get': async (args) => (await connected()).request('identity.get', args),
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
 

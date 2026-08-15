@@ -1,15 +1,32 @@
-// The PearCinema phone UI, first cut: pair, browse, play.
+// The PearCinema phone UI, in PearTune's form. Five tabs on a bottom nav -
+// Library, You, Watchlist, Settings, About - PearTune's shell copied as close
+// as the vocabulary allows (Tim, 2026-08-14: near one-for-one, minor changes
+// only where a film app genuinely differs from a music app). The donor's
+// stylesheet rides along verbatim, so the classes here ARE its classes.
 //
-// Deliberately small. The dashboard's Preact app is the design reference (same
-// suite, same palette family) and this will grow toward it; what this cut proves
-// is the whole vertical - a pairing link into the worklet, a library over P2P,
-// posters off the loopback shim, and a film playing in an HTML5 <video> whose
-// bytes ride the live connection. Runtimes are SECONDS, positions MILLISECONDS,
-// the suite convention.
+// What is PearCinema's own and must not regress: the native player handoff
+// (shell.play), the resume offer, the lying-chip retry, the pairing overlay
+// with the scanner, and the watch-state heartbeats. Runtimes are SECONDS,
+// positions MILLISECONDS, the suite convention.
 
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks'
 import jsQR from 'jsqr'
+import {
+  FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play,
+  CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
+  QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
+  Lightning, Coffee, EnvelopeOpen
+} from '@phosphor-icons/react'
 import { call, on } from './bridge'
+import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
+
+const APP_VERSION = '0.1.0'
+const LIGHTNING_ADDRESS = 'peerloomllc@strike.me'
+const STRIKE_TIP_URL = 'https://strike.me/peerloomllc/'
+const BUYMEACOFFEE_URL = 'https://buymeacoffee.com/peerloomllc'
+const GITHUB_URL = 'https://github.com/peerloomllc/pearcinema'
+const CONTACT_EMAIL = 'peerloomllc@proton.me'
+const SHARE_TEXT = 'PearCinema - your films and TV, from your own machine or a friend\'s, playable anywhere. No port forwarding, no VPN, no account.\n\nhttps://peerloomllc.com/'
 
 const fmtRuntime = (s) => {
   const n = Number(s) || 0
@@ -18,23 +35,144 @@ const fmtRuntime = (s) => {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
-// Exact - "1:12:34", not "1h 12m" - because somebody deciding whether to resume
-// is looking for the moment they stopped, and a rounded number does not tell
-// them which of two attempts this was (the dashboard's rule). Positions are
-// MILLISECONDS, the suite convention.
+// Exact, not rounded - somebody deciding whether to resume is looking for the
+// moment they stopped (the dashboard's rule).
 const fmtClock = (ms) => {
   const s = Math.floor((Number(ms) || 0) / 1000)
   const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60)
   return (h ? `${h}:${String(m).padStart(2, '0')}` : String(m)) + ':' + String(s % 60).padStart(2, '0')
 }
 
-// The camera pointed at a pairing QR. PearTune's Scanner, ported: getUserMedia
-// frames through jsQR on a hidden canvas. The guard on mediaDevices is load-
-// bearing - outside a secure context the property is UNDEFINED and reading
-// getUserMedia off it throws synchronously inside the effect, which unmounts
-// the tree into a black screen with nothing in the log (the donor paid for
-// that). This page's origin is http://127.0.0.1, which IS trustworthy, but the
-// guard stays so a WebView that disagrees fails with a sentence instead.
+// Tap vs hold, the donor's shape: a hold opens the action sheet, a tap opens
+// the thing.
+function usePress (onPress, onLongPress) {
+  const timer = useRef(null)
+  const fired = useRef(false)
+  const start = () => {
+    fired.current = false
+    if (onLongPress) timer.current = setTimeout(() => { fired.current = true; onLongPress() }, 450)
+  }
+  const stop = (go) => {
+    clearTimeout(timer.current)
+    if (go && !fired.current) onPress?.()
+  }
+  return {
+    onPointerDown: start,
+    onPointerUp: () => stop(true),
+    onPointerLeave: () => stop(false),
+    onPointerCancel: () => stop(false),
+    onContextMenu: (e) => e.preventDefault()
+  }
+}
+
+const TABS = [
+  { key: 'library', label: 'Library', Icon: FilmStrip },
+  { key: 'you', label: 'You', Icon: Heart },
+  { key: 'watchlist', label: 'Watchlist', Icon: BookmarkSimple },
+  { key: 'settings', label: 'Settings', Icon: Gear },
+  { key: 'about', label: 'About', Icon: Info }
+]
+
+function NavBar ({ active, onTab, saved = 0 }) {
+  return (
+    <nav className='navbar'>
+      {TABS.map(({ key, label, Icon }) => {
+        const onNow = active === key
+        const badge = key === 'watchlist' && saved > 0 ? saved : null
+        return (
+          <button
+            key={key} className={onNow ? 'on' : ''} onClick={() => onTab(key)}
+            aria-current={onNow ? 'page' : undefined} aria-label={label}
+          >
+            <span className='ic'>
+              <Icon size={22} weight={onNow ? 'fill' : 'regular'} />
+              {badge && <span className='badge'>{badge > 99 ? '99+' : badge}</span>}
+            </span>
+            <span>{label}</span>
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
+function Cover ({ src, title }) {
+  return (
+    <div className='cover'>
+      {src ? <img src={src} loading='lazy' alt='' /> : <span className='blank'>{(title || '?').slice(0, 2)}</span>}
+    </div>
+  )
+}
+
+function Tile ({ item, artBase, saved, onOpen, onLong, onSave }) {
+  const press = usePress(() => onOpen(item), () => onLong(item))
+  return (
+    <div className='album'>
+      {onSave && (
+        <button
+          className={'tileheart' + (saved ? ' on' : '')}
+          aria-label={saved ? 'Remove from watchlist' : 'Add to watchlist'}
+          onClick={(e) => { e.stopPropagation(); onSave(item) }}
+        >
+          <BookmarkSimple size={16} weight={saved ? 'fill' : 'bold'} />
+        </button>
+      )}
+      <div {...press}>
+        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=350` : null} title={item.title} />
+        <div className='t'>{item.title}</div>
+        <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
+      </div>
+    </div>
+  )
+}
+
+function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave }) {
+  return (
+    <div className='grid' style={{ '--cols': 2 }}>
+      {items.map((i) => (
+        <Tile
+          key={i.id} item={i} artBase={artBase}
+          saved={savedSet?.has(i.id)} onOpen={onOpen} onLong={onLong} onSave={onSave}
+        />
+      ))}
+    </div>
+  )
+}
+
+function ItemRow ({ item, sub, onOpen, onLong, right = null }) {
+  const press = usePress(() => onOpen(item), onLong ? () => onLong(item) : null)
+  return (
+    <li className='track' {...press}>
+      <div className='meta'>
+        <div className='t'>{item.title}</div>
+        {sub && <div className='sub muted sm'>{sub}</div>}
+      </div>
+      {right}
+    </li>
+  )
+}
+
+function ActionSheet ({ item, saved, watched, onClose, onPlay, onSave, onWatched }) {
+  const playable = item.type === 'movie' || item.type === 'episode'
+  return (
+    <div className='sheetwrap' onClick={onClose}>
+      <div className='sheet' onClick={(e) => e.stopPropagation()}>
+        <h3>{item.title}</h3>
+        <div className='acts'>
+          {playable && <button onClick={() => { onClose(); onPlay(item) }}><Play size={18} /> Play</button>}
+          <button onClick={() => { onClose(); onSave(item) }}>
+            <BookmarkSimple size={18} /> {saved ? 'Remove from watchlist' : 'Add to watchlist'}
+          </button>
+          <button onClick={() => { onClose(); onWatched(item, !watched) }}>
+            <CheckCircle size={18} /> {watched ? 'Mark unwatched' : 'Mark watched'}
+          </button>
+          <button className='ghost' onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Scanner ({ onScan, onCancel }) {
   const video = useRef(null)
   const canvas = useRef(null)
@@ -44,12 +182,9 @@ function Scanner ({ onScan, onCancel }) {
     let stream = null
     let raf = null
     let done = false
-
     ;(async () => {
       try {
-        if (!navigator.mediaDevices?.getUserMedia) {
-          throw new Error('This device will not give the app a camera.')
-        }
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('This device will not give the app a camera.')
         const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
         if (done) return s.getTracks().forEach((t) => t.stop())
         stream = s
@@ -60,27 +195,19 @@ function Scanner ({ onScan, onCancel }) {
         setMsg(`Camera unavailable (${e.message}). Paste the link instead.`)
       }
     })()
-
     function tick () {
       if (done) return
-      const v = video.current
-      const c = canvas.current
+      const v = video.current; const c = canvas.current
       if (v && c && v.readyState === v.HAVE_ENOUGH_DATA) {
-        c.width = v.videoWidth
-        c.height = v.videoHeight
+        c.width = v.videoWidth; c.height = v.videoHeight
         const ctx = c.getContext('2d')
         ctx.drawImage(v, 0, 0, c.width, c.height)
         const img = ctx.getImageData(0, 0, c.width, c.height)
         const code = jsQR(img.data, img.width, img.height)
-        if (code?.data) {
-          done = true
-          onScan(code.data)
-          return
-        }
+        if (code?.data) { done = true; onScan(code.data); return }
       }
       raf = requestAnimationFrame(tick)
     }
-
     return () => {
       done = true
       if (raf) cancelAnimationFrame(raf)
@@ -89,31 +216,23 @@ function Scanner ({ onScan, onCancel }) {
   }, [])
 
   return (
-    <div class='scanner'>
+    <div className='scanner'>
       <video ref={video} playsinline muted />
       <canvas ref={canvas} style={{ display: 'none' }} />
-      <div class='overlay'>
+      <div className='overlay'>
         <p>{msg}</p>
-        <button class='ghost' onClick={onCancel}>Cancel</button>
+        <button className='ghost' onClick={onCancel}>Cancel</button>
       </div>
     </div>
   )
 }
 
-// `onCancel` makes this screen reachable from a RUNNING app - adding a second
-// library, or a pairing link arriving while a host is active, which used to go
-// nowhere because this screen only existed when the app had no host at all
-// (the gap the 2026-08-14 revoke-restore hit twice).
 function Pairing ({ onPaired, initialLink = '', onCancel = null }) {
   const [link, setLink] = useState(initialLink)
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
   const [err, setErr] = useState('')
 
-  // The deep link lands AFTER first render on a cold start - the shell forwards
-  // it once the WebView is up - and useState captures only the mount-time value.
-  // Without this, the field stays empty, the button stays dead, and the tap on a
-  // perfectly good link does nothing (found on the first emulator run).
   useEffect(() => {
     if (initialLink) setLink((cur) => cur || initialLink)
   }, [initialLink])
@@ -123,179 +242,80 @@ function Pairing ({ onPaired, initialLink = '', onCancel = null }) {
     try {
       const out = await call('pair', { link: String(raw || '').trim(), label: 'phone' })
       onPaired(out)
-    } catch (e) {
-      setErr(e.message)
-    }
+    } catch (e) { setErr(e.message) }
     setBusy(false)
   }
 
   const scan = async () => {
-    // The shell holds the runtime camera permission; asking is a no-op when it
-    // is already granted. The scanner shows its own failure if this is denied.
     await call('shell.cameraPermission').catch(() => {})
     setScanning(true)
   }
 
   if (scanning) {
-    return (
-      <Scanner
-        onScan={(text) => { setScanning(false); setLink(text); pairWith(text) }}
-        onCancel={() => setScanning(false)}
-      />
-    )
+    return <Scanner onScan={(t) => { setScanning(false); setLink(t); pairWith(t) }} onCancel={() => setScanning(false)} />
   }
 
   return (
-    <div class='pairing'>
+    <div className='pairing'>
       <h1>Pear<span>Cinema</span></h1>
       <p>Your films, from your own machine, anywhere - no port forwarding, no VPN, no account.</p>
-      <p class='hint'>
-        On your library's dashboard press <b>Pair a device</b>, then scan the QR
-        it shows - or paste the link it carries here.
-      </p>
-      <button onClick={scan}>Scan the code</button>
-      <textarea
-        placeholder='pear://pearcinema/pair?...'
-        value={link}
-        onInput={(e) => setLink(e.currentTarget.value)}
-      />
-      {err && <div class='bad'>{err}</div>}
-      <button disabled={busy || !link.trim()} onClick={() => pairWith(link)}>
-        {busy ? 'Pairing…' : 'Pair with this library'}
-      </button>
-      {onCancel && <button class='ghost' onClick={onCancel}>‹ Back</button>}
+      <p className='hint'>On your library's dashboard press <b>Pair a device</b>, then scan the QR it shows - or paste the link it carries here.</p>
+      <button onClick={scan}><QrCode size={18} /> Scan the code</button>
+      <textarea placeholder='pear://pearcinema/pair?...' value={link} onInput={(e) => setLink(e.currentTarget.value)} />
+      {err && <div className='bad'>{err}</div>}
+      <button disabled={busy || !link.trim()} onClick={() => pairWith(link)}>{busy ? 'Pairing…' : 'Pair with this library'}</button>
+      {onCancel && <button className='ghost' onClick={onCancel}>‹ Back</button>}
     </div>
   )
 }
 
-// Every paired library, the active one marked, each leavable - and the way in
-// for a second library. Leave is armed by a first tap rather than a confirm()
-// dialog, because a WebView's confirm is at the shell's mercy.
-function Hosts ({ hosts, onSwitch, onLeave, onAdd, onBack }) {
-  const [arming, setArming] = useState(null)
-  return (
-    <div class='hosts'>
-      <div class='crumbs'>
-        <button class='ghost' onClick={onBack}>‹ Back</button>
-        <span>Libraries</span>
-      </div>
-      {hosts.map((h) => (
-        <div class='hostrow' key={h.hostKey}>
-          <div class='meta'>
-            <span class='name'>{h.libraryName || 'Library'}</span>
-            {h.active && <span class='on'>Playing from this library</span>}
-          </div>
-          {!h.active && <button class='ghost' onClick={() => onSwitch(h.hostKey)}>Switch</button>}
-          {arming === h.hostKey
-            ? <button class='danger' onClick={() => { setArming(null); onLeave(h.hostKey) }}>Really leave?</button>
-            : <button class='ghost' onClick={() => setArming(h.hostKey)}>Leave</button>}
-        </div>
-      ))}
-      <button class='more' onClick={onAdd}>Add a library</button>
-    </div>
-  )
-}
-
-function Player ({ item, onClose }) {
-  const [src, setSrc] = useState(null)
-  const [err, setErr] = useState('')
-  const at = useRef(0)
-  const video = useRef(null)
-
-  useEffect(() => {
-    call('stream.url', { itemId: item.id }).then((r) => setSrc(r.url)).catch((e) => setErr(e.message))
-  }, [item.id])
-
-  // The same heartbeat the dashboard writes, into the same per-person store - the
-  // claim this app exists to prove.
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (video.current && !video.current.paused) {
-        at.current = video.current.currentTime
-        call('resume.set', { itemId: item.id, positionMs: Math.round(at.current * 1000), runtimeSeconds: item.runtime }).catch(() => {})
-      }
-    }, 15000)
-    return () => {
-      clearInterval(t)
-      const ms = Math.round(at.current * 1000)
-      if (ms > 0) call('resume.set', { itemId: item.id, positionMs: ms, runtimeSeconds: item.runtime }).catch(() => {})
-    }
-  }, [item.id])
-
-  return (
-    <div class='player'>
-      <div class='bar'>
-        <button class='ghost' onClick={onClose}>‹ Back</button>
-        <span class='t'>{item.title}</span>
-      </div>
-      {err && <div class='bad'>{err}</div>}
-      {src && (
-        <video
-          ref={video}
-          src={src}
-          controls
-          playsinline
-          autoplay
-          onTimeUpdate={(e) => { at.current = e.currentTarget.currentTime }}
-          onEnded={() => call('resume.set', { itemId: item.id, positionMs: Math.round((item.runtime || 0) * 1000), runtimeSeconds: item.runtime, ended: true }).catch(() => {})}
-          onError={(e) => {
-            // MediaError codes: 1 aborted, 2 network, 3 decode, 4 src-not-supported.
-            // Said ON SCREEN because a WebView's console is invisible in the field
-            // and this distinction (container rejected vs bytes unreachable) is the
-            // first question every playback report needs answered.
-            // MediaError codes: 1 aborted, 2 network, 3 decode, 4 src-not-supported.
-            // Shown plainly because a WebView's console is invisible in the field,
-            // and code 3 vs 4 is the first question every playback report needs
-            // answered (a codec this chip cannot decode vs a container refused).
-            const me = e.currentTarget.error
-            setErr(`The player refused this one (code ${me?.code ?? '?'}).`)
-          }}
-        />
-      )}
-    </div>
-  )
-}
-
-function Grid ({ items, artBase, onOpen }) {
-  return (
-    <div class='grid'>
-      {items.map((i) => (
-        <div class='poster' key={i.id} onClick={() => onOpen(i)}>
-          {i.artId
-            ? <img src={`${artBase}${encodeURIComponent(i.artId)}?s=350`} loading='lazy' />
-            : <div class='noart'>{i.title.slice(0, 2)}</div>}
-          <div class='t'>{i.title}</div>
-          <div class='s'>{[i.year, fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}</div>
-        </div>
-      ))}
-    </div>
-  )
-}
+// --- the app -----------------------------------------------------------------
 
 export default function App () {
   const [state, setState] = useState(null)
+  const [tab, setTab] = useState('library')
+
+  // Library tab.
   const [root, setRoot] = useState('movies')
   const [items, setItems] = useState([])
   const [cursor, setCursor] = useState(null)
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
-  const [pairLink, setPairLink] = useState('')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState(null)
+
+  // Cross-tab data.
   const [artBase, setArtBase] = useState('')
-  const [err, setErr] = useState('')
-  // The two overlay screens a RUNNING app can open: the library list, and the
-  // pairing screen for adding (or re-adding) a library.
-  const [showHosts, setShowHosts] = useState(false)
+  const [ident, setIdent] = useState(null)
+  const [saved, setSaved] = useState(new Set())
+  const [savedItems, setSavedItems] = useState(null)
+  const [watchedIds, setWatchedIds] = useState(new Set())
+  const [youView, setYouView] = useState('continue')
+  const [continueRows, setContinueRows] = useState(null)
+  const [watchedRows, setWatchedRows] = useState(null)
+  const [requests, setRequests] = useState(null)
+  const [allRequests, setAllRequests] = useState(null)
+  const [devices, setDevices] = useState(null)
+  const [themePref, setThemePref] = useState(loadThemePref())
+
+  // Overlays.
+  const [sheet, setSheet] = useState(null)
+  const [askTitle, setAskTitle] = useState(false)
   const [addingLibrary, setAddingLibrary] = useState(false)
-  // A saved position waiting on the viewer's word - { item, url, positionMs }.
-  // It OFFERS rather than jumping, because somebody who opened a film to watch
-  // the start again should not have to drag backwards out of it (the rule the
-  // dashboard's player already follows).
   const [resumeOffer, setResumeOffer] = useState(null)
-  // Items already retried after a native player error - one honest retry per
-  // item per session, never a loop of failing attempts.
+  const [pairLink, setPairLink] = useState('')
+  const [err, setErr] = useState('')
+  const [toast, setToast] = useState('')
+
   const retried = useRef(new Set())
-  // What the hardware back button should unwind, read at press time.
   const uiRef = useRef({})
+  const toastTimer = useRef(null)
+
+  const say = (msg) => {
+    setToast(msg)
+    clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(''), 2600)
+  }
 
   const reload = useCallback(async () => {
     const s = await call('app.state')
@@ -303,6 +323,12 @@ export default function App () {
     if (s.active) {
       const b = await call('art.base').catch(() => null)
       if (b) setArtBase(b.base)
+      call('identity.get').then(setIdent).catch(() => {})
+      call('fav.list').then((r) => {
+        setSaved(new Set((r.items || []).map((i) => i.id)))
+        setSavedItems(r.items || [])
+      }).catch(() => {})
+      call('watched.list').then((r) => setWatchedIds(new Set(r.items || []))).catch(() => {})
     }
     return s
   }, [])
@@ -310,25 +336,16 @@ export default function App () {
   useEffect(() => {
     reload().catch((e) => setErr(e.message))
     const offs = [
-      // A pairing link while a host is ACTIVE used to go nowhere - the pairing
-      // screen only existed when the app had no host (measured 2026-08-14: the
-      // revoke restore needed a full app wipe to re-pair). It now opens the
-      // pairing screen as an overlay, link filled in.
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
       on('shim:ready', () => reload().catch(() => {})),
-      // THE UI OWNS THE WATCH-STATE WRITES; the native player only reports. The
-      // host derives the runtime itself, so a position is all that crosses.
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
       }),
       on('player:closed', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+        setContinueRows(null)
       }),
-      // The native player refused what the declaration said it could play - the
-      // chip lied. Re-describe the device without the codec that just failed
-      // and let the host decide again; a transcode verdict resumes the film
-      // where it died. One retry per item, then the failure is shown plainly.
       on('player:error', async (d) => {
         if (!d?.itemId) return
         if (retried.current.has(d.itemId)) {
@@ -338,39 +355,29 @@ export default function App () {
         retried.current.add(d.itemId)
         try {
           const { url, mode } = await call('stream.url', { itemId: d.itemId, deviceRefusedVideo: true })
-          if (mode === 'transcode') {
-            await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
-          } else {
-            setErr('This one failed to play on this device, and the host cannot convert it.')
-          }
-        } catch (e) {
-          setErr(e.message)
-        }
+          if (mode === 'transcode') await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
+          else setErr('This one failed to play on this device, and the host cannot convert it.')
+        } catch (e) { setErr(e.message) }
       })
     ]
-    // The stashed link from the shell - a warm pear:// link remounts the whole
-    // shell (expo-router navigates on it), so the live pair-link event above is
-    // only the fast path; THIS collect is what survives the remount. Opening
-    // the overlay here is harmless when no host is active yet: the full-screen
-    // pairing render wins in that case.
-    call('shell.pendingLink').then((url) => {
-      if (url) { setPairLink(url); setAddingLibrary(true) }
-    }).catch(() => {})
-    // Android back unwinds the UI one level; only with nothing left does the app
-    // close. A RUNNING FILM is the shell's to close - it never reaches here.
+    call('shell.pendingLink').then((url) => { if (url) { setPairLink(url); setAddingLibrary(true) } }).catch(() => {})
+    const offTheme = onSystemThemeChange(() => applyThemePref(loadThemePref(), { persist: false }))
     window.__pearBack = () => {
       const u = uiRef.current
+      if (u.sheet) return setSheet(null)
       if (u.resumeOffer) return setResumeOffer(null)
       if (u.addingLibrary) return setAddingLibrary(false)
-      if (u.showHosts) return setShowHosts(false)
       if (u.season) return setSeason(null)
       if (u.series) return setSeries(null)
+      if (u.tab !== 'library') return setTab('library')
       call('shell.exit').catch(() => {})
     }
-    return () => offs.forEach((f) => f())
+    return () => { offs.forEach((f) => f()); offTheme() }
   }, [])
 
-  uiRef.current = { resumeOffer: !!resumeOffer, addingLibrary, showHosts, season: !!season, series: !!series }
+  uiRef.current = { sheet: !!sheet, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
+
+  // --- library data ---------------------------------------------------------
 
   const fetchList = useCallback(async (params, append = false) => {
     try {
@@ -378,9 +385,7 @@ export default function App () {
       setItems((prev) => (append ? [...prev, ...(page.items || [])] : (page.items || [])))
       setCursor(page.cursor || null)
       setErr('')
-    } catch (e) {
-      setErr(e.message)
-    }
+    } catch (e) { setErr(e.message) }
   }, [])
 
   useEffect(() => {
@@ -391,130 +396,459 @@ export default function App () {
     else fetchList({ type: root, limit: 100 })
   }, [state?.active?.hostKey, root, series?.id, season?.id])
 
-  if (!state) return <div class='empty'>Starting…</div>
+  // Search rides the library tab from anywhere in it, the donor's rule.
+  useEffect(() => {
+    if (!query.trim()) { setResults(null); return }
+    const t = setTimeout(() => {
+      call('library.search', { q: query.trim(), limit: 60 })
+        .then((r) => setResults(r.items || []))
+        .catch(() => setResults([]))
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query])
 
-  if (!state.active) {
-    return <Pairing initialLink={pairLink} onPaired={() => reload()} />
-  }
+  // --- per-tab loads --------------------------------------------------------
 
-  // The overlay screens of a running app. Pairing first: a link that arrived
-  // wants acting on even when the library list is also open.
-  if (addingLibrary) {
-    return (
-      <Pairing
-        initialLink={pairLink}
-        onPaired={() => { setAddingLibrary(false); setShowHosts(false); setPairLink(''); setSeries(null); setSeason(null); reload() }}
-        onCancel={() => { setAddingLibrary(false); setPairLink('') }}
-      />
-    )
-  }
-
-  if (showHosts) {
-    return (
-      <Hosts
-        hosts={state.hosts || []}
-        onSwitch={async (hostKey) => {
-          try { await call('hosts.setActive', { hostKey }); setSeries(null); setSeason(null); setShowHosts(false); await reload() } catch (e) { setErr(e.message) }
-        }}
-        onLeave={async (hostKey) => {
-          try { await call('hosts.remove', { hostKey }); await reload() } catch (e) { setErr(e.message) }
-        }}
-        onAdd={() => setAddingLibrary(true)}
-        onBack={() => setShowHosts(false)}
-      />
-    )
-  }
-
-  // PLAYBACK IS NATIVE - ExoPlayer in the shell, pointed at the shim, because the
-  // WebView's own media stack refuses Matroska and Matroska is 83% of a real
-  // library. The UI fetches the URL and any saved position, then hands over.
-  const play = async (item, url, startMs) => {
-    try {
-      await call('shell.play', { itemId: item.id, url, title: item.title, startMs })
-    } catch (e) {
-      setErr(e.message)
+  useEffect(() => {
+    if (!state?.active) return
+    if (tab === 'watchlist') {
+      call('fav.list').then((r) => {
+        setSavedItems(r.items || [])
+        setSaved(new Set((r.items || []).map((i) => i.id)))
+      }).catch(() => {})
     }
+    if (tab === 'you') loadYou(youView)
+  }, [tab, youView, state?.active?.hostKey])
+
+  const loadYou = async (view) => {
+    try {
+      if (view === 'continue') setContinueRows((await call('resume.list', { limit: 30 })).items || [])
+      if (view === 'watched') {
+        const ids = [...new Set((await call('watched.list')).items || [])].slice(0, 60)
+        const rows = await Promise.all(ids.map((id) => call('library.get', { id }).catch(() => null)))
+        setWatchedRows(rows.filter(Boolean))
+      }
+      if (view === 'requests') setRequests((await call('request.list')).items || [])
+      if (view === 'manage') {
+        setDevices((await call('device.list')).items || [])
+        setAllRequests((await call('request.all')).items || [])
+      }
+    } catch (e) { setErr(e.message) }
+  }
+
+  // --- actions --------------------------------------------------------------
+
+  const play = async (item, url, startMs) => {
+    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs }) } catch (e) { setErr(e.message) }
   }
 
   const open = async (i) => {
-    if (i.type === 'series') return setSeries(i)
-    if (i.type === 'season') return setSeason(i)
+    if (i.type === 'series') { setTab('library'); return setSeries(i) }
+    if (i.type === 'season') { setTab('library'); return setSeason(i) }
     try {
       const [{ url }, prior] = await Promise.all([
         call('stream.url', { itemId: i.id }),
         call('resume.get', { itemId: i.id }).catch(() => null)
       ])
-      // The position is NESTED: resume.get answers { resume: { positionMs } }.
-      // The first cut read prior.positionMs - always undefined - so the
-      // documented auto-resume never actually resumed and nobody had measured
-      // it. The offer below is the first reader that did.
       const startMs = prior?.resume?.positionMs > 0 ? prior.resume.positionMs : 0
       if (startMs > 0) return setResumeOffer({ item: i, url, positionMs: startMs })
       await play(i, url, 0)
-    } catch (e) {
-      setErr(e.message)
-    }
+    } catch (e) { setErr(e.message) }
   }
 
-  return (
-    <div class='shell'>
-      <div class='top'>
-        <span class='brand' onClick={() => { setSeries(null); setSeason(null) }}>Pear<b>Cinema</b></span>
-        <span class='lib' onClick={() => setShowHosts(true)}>{state.active.libraryName}</span>
-      </div>
+  const toggleSave = async (i) => {
+    const kind = ['movie', 'episode', 'series', 'season'].includes(i.type) ? i.type : (i.kind || 'movie')
+    const on = !saved.has(i.id)
+    setSaved((s) => { const n = new Set(s); on ? n.add(i.id) : n.delete(i.id); return n })
+    if (!on) setSavedItems((rows) => (rows || []).filter((r) => r.id !== i.id))
+    try {
+      await call('fav.set', { kind, id: i.id, on })
+      say(on ? 'Added to your watchlist' : 'Removed from your watchlist')
+      if (on) call('fav.list').then((r) => setSavedItems(r.items || [])).catch(() => {})
+    } catch (e) { setErr(e.message) }
+  }
+
+  const markWatched = async (i, on) => {
+    try {
+      await call('watched.set', { itemId: i.id, watched: on })
+      setWatchedIds((s) => { const n = new Set(s); on ? n.add(i.id) : n.delete(i.id); return n })
+      say(on ? 'Marked watched' : 'Marked unwatched')
+      if (youView === 'watched') loadYou('watched')
+    } catch (e) { setErr(e.message) }
+  }
+
+  const longPress = (i) => setSheet(i)
+
+  if (!state) return <div className='center'><p className='muted'>Starting…</p></div>
+  if (!state.active) return <Pairing initialLink={pairLink} onPaired={() => reload()} />
+
+  if (addingLibrary) {
+    return (
+      <Pairing
+        initialLink={pairLink}
+        onPaired={() => { setAddingLibrary(false); setPairLink(''); setSeries(null); setSeason(null); reload() }}
+        onCancel={() => { setAddingLibrary(false); setPairLink('') }}
+      />
+    )
+  }
+
+  // --- screens --------------------------------------------------------------
+
+  const libraryScreen = (
+    <div className='app'>
+      <header>
+        <h1>{state.active.libraryName || 'Library'}</h1>
+        <p className='muted sm'>{series ? (season ? `${series.title} · ${season.title}` : series.title) : 'Your films and shows, straight from your own box'}</p>
+      </header>
 
       {!series && (
-        <div class='tabs'>
-          <button class={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
-          <button class={root === 'series' ? 'on' : ''} onClick={() => setRoot('series')}>Shows</button>
+        <div className='sticky'>
+          <div className='pickrow'>
+            <div className='seg'>
+              <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
+              <button className={root === 'series' ? 'on' : ''} onClick={() => setRoot('series')}>Shows</button>
+            </div>
+          </div>
+          <div className='searchbar'>
+            <input className='search' placeholder='Search your library' value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
+            {query ? <button className='searchclear' onClick={() => setQuery('')} aria-label='Clear search'><X size={14} /></button> : null}
+          </div>
         </div>
       )}
 
       {series && (
-        <div class='crumbs'>
-          <button class='ghost' onClick={() => (season ? setSeason(null) : setSeries(null))}>‹ Back</button>
-          <span>{season ? `${series.title} · ${season.title}` : series.title}</span>
+        <div className='pickrow'>
+          <button className='ghost' onClick={() => (season ? setSeason(null) : setSeries(null))}><CaretLeft size={16} /> Back</button>
         </div>
       )}
 
-      {err && <div class='bad'>{err}</div>}
+      {err && <div className='error'>{err}</div>}
+
+      {results
+        ? (results.length
+            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} />
+            : <p className='muted center-p'>Nothing matches "{query}".</p>)
+        : season
+          ? (
+            <ul className='tracks'>
+              {items.map((e) => (
+                <ItemRow
+                  key={e.id} item={e} onOpen={open} onLong={longPress}
+                  sub={[e.episode != null ? `Episode ${e.episode}` : null, fmtRuntime(e.runtime)].filter(Boolean).join(' · ')}
+                  right={watchedIds.has(e.id) ? <CheckCircle size={18} weight='fill' className='muted' /> : null}
+                />
+              ))}
+            </ul>
+            )
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} />}
+
+      {!results && cursor && (
+        <button
+          className='ghost' style={{ margin: '0.8rem auto', display: 'block' }}
+          onClick={() => fetchList(season ? { type: 'episodes', seasonId: season.id, limit: 200, cursor } : series ? { type: 'seasons', seriesId: series.id, limit: 100, cursor } : { type: root, limit: 100, cursor }, true)}
+        >More</button>
+      )}
+    </div>
+  )
+
+  const watchlistScreen = (
+    <div className='app'>
+      <header>
+        <h1>Watchlist</h1>
+        <p className='muted sm'>{savedItems?.length ? `${savedItems.length} saved to watch` : 'Saved to watch, synced through your library'}</p>
+      </header>
+      {savedItems == null
+        ? <p className='muted center-p'>Loading…</p>
+        : savedItems.length === 0
+          ? (
+            <div className='center-p muted'>
+              <p>Nothing saved yet.</p>
+              <p className='sm'>Hold a film, or tap the bookmark on its poster, to put it here.</p>
+            </div>
+            )
+          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} />}
+    </div>
+  )
+
+  const isOwner = !!ident?.owner
+  const youScreen = (
+    <div className='app'>
+      <header><h1>You</h1><p className='muted sm'>{ident?.belongsTo ? `Watching as ${ident.belongsTo}` : 'This device'}</p></header>
+      <div className='sticky'>
+        <div className='pickrow'>
+          <div className='seg icons'>
+            <button className={youView === 'continue' ? 'on' : ''} aria-label='Continue watching' onClick={() => setYouView('continue')}>
+              <Play size={17} weight={youView === 'continue' ? 'fill' : 'regular'} />
+              {youView === 'continue' && <span>Continue</span>}
+            </button>
+            <button className={youView === 'watched' ? 'on' : ''} aria-label='Watched' onClick={() => setYouView('watched')}>
+              <CheckCircle size={17} weight={youView === 'watched' ? 'fill' : 'regular'} />
+              {youView === 'watched' && <span>Watched</span>}
+            </button>
+            <button className={youView === 'requests' ? 'on' : ''} aria-label='Requests' onClick={() => setYouView('requests')}>
+              <EnvelopeSimple size={17} weight={youView === 'requests' ? 'fill' : 'regular'} />
+              {youView === 'requests' && <span>Requests</span>}
+            </button>
+            <button className={youView === 'downloads' ? 'on' : ''} aria-label='Downloads' onClick={() => setYouView('downloads')}>
+              <DownloadSimple size={17} weight={youView === 'downloads' ? 'fill' : 'regular'} />
+              {youView === 'downloads' && <span>Downloads</span>}
+            </button>
+            {isOwner && (
+              <button className={youView === 'manage' ? 'on' : ''} aria-label='Manage library' onClick={() => setYouView('manage')}>
+                <UsersThree size={17} weight={youView === 'manage' ? 'fill' : 'regular'} />
+                {youView === 'manage' && <span>Manage</span>}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {youView === 'continue' && (
+        continueRows == null
+          ? <p className='muted center-p'>Loading…</p>
+          : continueRows.length === 0
+            ? <p className='muted center-p'>Nothing in progress. Start a film and your place appears here.</p>
+            : (
+              <ul className='tracks'>
+                {continueRows.map((r) => (
+                  <ItemRow
+                    key={r.id} item={r} onOpen={open} onLong={longPress}
+                    sub={`${fmtClock(r.resume?.positionMs || 0)} in${r.runtime ? ` · ${fmtRuntime(r.runtime)}` : ''}`}
+                    right={<Play size={18} className='muted' />}
+                  />
+                ))}
+              </ul>
+              )
+      )}
+
+      {youView === 'watched' && (
+        watchedRows == null
+          ? <p className='muted center-p'>Loading…</p>
+          : watchedRows.length === 0
+            ? <p className='muted center-p'>Nothing finished yet.</p>
+            : (
+              <ul className='tracks'>
+                {watchedRows.map((r) => (
+                  <ItemRow
+                    key={r.id} item={r} onOpen={open} onLong={longPress}
+                    sub={[r.year, fmtRuntime(r.runtime)].filter(Boolean).join(' · ')}
+                    right={<button className='ghost' onClick={(e) => { e.stopPropagation(); markWatched(r, false) }}>Unmark</button>}
+                  />
+                ))}
+              </ul>
+              )
+      )}
+
+      {youView === 'requests' && (
+        <div className='reqview'>
+          <button onClick={() => setAskTitle(true)}><Plus size={16} /> Ask for a film or show</button>
+          {requests == null
+            ? <p className='muted center-p'>Loading…</p>
+            : requests.length === 0
+              ? <p className='muted center-p'>Ask the library's owner for something they do not have, and watch its status here.</p>
+              : (
+                <ul className='tracks'>
+                  {requests.map((r) => (
+                    <li className='track' key={r.id}>
+                      <div className='meta'>
+                        <div className='t'>{r.name}</div>
+                        <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'} · {r.status}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
+                      </div>
+                      {r.status === 'pending' && (
+                        <button className='ghost' aria-label='Withdraw' onClick={() => call('request.remove', { id: r.id }).then(() => loadYou('requests'))}><Trash size={16} /></button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                )}
+        </div>
+      )}
+
+      {youView === 'downloads' && (
+        <div className='center-p muted'>
+          <p>Downloads are on their way.</p>
+          <p className='sm'>Films you save for offline will live here - the storage side exists, the saving side is next.</p>
+        </div>
+      )}
+
+      {youView === 'manage' && isOwner && (
+        <div className='ownerdevs'>
+          <h3>Requests</h3>
+          {allRequests == null
+            ? <p className='muted sm'>Loading…</p>
+            : allRequests.filter((r) => r.status === 'pending').length === 0
+              ? <p className='muted sm'>Nothing waiting.</p>
+              : (
+                <ul className='tracks'>
+                  {allRequests.filter((r) => r.status === 'pending').map((r) => (
+                    <li className='track' key={r.id}>
+                      <div className='meta'>
+                        <div className='t'>{r.name}</div>
+                        <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
+                      </div>
+                      <div className='rowacts'>
+                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'added' }).then(() => loadYou('manage'))}>Added</button>
+                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'declined' }).then(() => loadYou('manage'))}>Decline</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                )}
+          <h3>Devices</h3>
+          {devices == null
+            ? <p className='muted sm'>Loading…</p>
+            : (
+              <ul className='tracks'>
+                {devices.map((d) => (
+                  <li className='track' key={d.deviceKey}>
+                    <div className='meta'>
+                      <div className='t'>{d.label || 'device'}{d.self ? ' (this phone)' : ''}</div>
+                      <div className='sub muted sm'>{[d.platform, d.belongsTo ? `belongs to ${d.belongsTo}` : 'unassigned'].filter(Boolean).join(' · ')}</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              )}
+          <p className='muted sm'>Revoking a device stays on the dashboard for now.</p>
+        </div>
+      )}
+    </div>
+  )
+
+  const hosts = state.hosts || []
+  const settingsScreen = (
+    <div className='app'>
+      <header><h1>Settings</h1><p className='muted sm'>{state.active.libraryName}</p></header>
+
+      <div className='sgroup'>
+        <h3>Appearance</h3>
+        <div className='optlist'>
+          {['system', 'dark', 'light'].map((p) => (
+            <button key={p} className={themePref === p ? 'on' : ''} onClick={() => { setThemePref(p); applyThemePref(p) }}>
+              {p === 'system' ? 'Match this phone' : p === 'dark' ? 'Dark' : 'Light'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className='sgroup'>
+        <h3>This device</h3>
+        <div className='card'>
+          <div className='row'><span className='label'>Device</span><span className='muted sm'>{ident?.deviceName || 'phone'}</span></div>
+          <div className='row'><span className='label'>Belongs to</span><span className='muted sm'>{ident?.belongsTo || 'not assigned yet'}</span></div>
+          <div className='row'><span className='label'>Library</span><span className='muted sm'>{ident?.libraryName || state.active.libraryName}</span></div>
+          {isOwner && <div className='row'><span className='label'>Role</span><span className='muted sm'>Owner</span></div>}
+        </div>
+      </div>
+
+      <div className='sgroup'>
+        <h3>Libraries</h3>
+        <div className='card'>
+          {hosts.map((h) => (
+            <div className='row' key={h.hostKey}>
+              <span className='label'>{h.libraryName || 'Library'}{h.active ? ' · playing from' : ''}</span>
+              <span className='rowacts'>
+                {!h.active && <button className='ghost' aria-label='Switch' onClick={() => call('hosts.setActive', { hostKey: h.hostKey }).then(() => { setSeries(null); setSeason(null); reload() })}><ArrowsLeftRight size={16} /></button>}
+                <button className='ghost' aria-label='Leave' onClick={() => call('hosts.remove', { hostKey: h.hostKey }).then(() => reload())}><SignOut size={16} /></button>
+              </span>
+            </div>
+          ))}
+          <button onClick={() => setAddingLibrary(true)}><Plus size={16} /> Add a library</button>
+        </div>
+      </div>
+
+      <div className='sgroup'>
+        <h3>Streaming</h3>
+        <p className='muted sm'>Full quality, converted by your box only when this phone needs it. A data-saver cap for slow links arrives with the off-home work.</p>
+      </div>
+
+      <div className='sgroup'>
+        <h3>Offline storage</h3>
+        <p className='muted sm'>A size cap for downloaded films arrives with downloads.</p>
+      </div>
+    </div>
+  )
+
+  const aboutScreen = (
+    <div className='app about'>
+      <header><h1>About</h1></header>
+      <div className='wordmark'>Pear<span>Cinema</span></div>
+      <p className='muted sm version'>Version {APP_VERSION}</p>
+      <p>Your film and TV collection, from your own machine or a friend's, playable anywhere. No port forwarding, no VPN, no account - and nobody in the middle.</p>
+      <div className='card'>
+        <button onClick={() => { (navigator.share ? navigator.share({ text: SHARE_TEXT }) : navigator.clipboard.writeText(SHARE_TEXT).then(() => say('Copied'))) }}>
+          <ShareNetwork size={18} /> Share PearCinema
+        </button>
+        <a className='linkbtn' href={STRIKE_TIP_URL} target='_blank' rel='noreferrer'><Lightning size={18} /> Tip with Strike</a>
+        <a className='linkbtn' href={BUYMEACOFFEE_URL} target='_blank' rel='noreferrer'><Coffee size={18} /> Buy us a coffee</a>
+        <div className='row'><span className='label'>Lightning</span><span className='muted sm'>{LIGHTNING_ADDRESS}</span></div>
+        <a className='linkbtn' href={GITHUB_URL} target='_blank' rel='noreferrer'><GithubLogo size={18} /> GitHub</a>
+        <a className='linkbtn' href={`mailto:${CONTACT_EMAIL}?subject=%5BPearCinema%5D%20Feedback`}><EnvelopeOpen size={18} /> {CONTACT_EMAIL}</a>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className='shellwrap'>
+      {tab === 'library' && libraryScreen}
+      {tab === 'you' && youScreen}
+      {tab === 'watchlist' && watchlistScreen}
+      {tab === 'settings' && settingsScreen}
+      {tab === 'about' && aboutScreen}
+
+      {/* The dock is the donor's fixed bottom container; with no mini-player
+          above it, the navbar IS the dock. */}
+      <div className='dock'>
+        <NavBar active={tab} onTab={(k) => { setTab(k); setErr('') }} saved={saved.size} />
+      </div>
+
+      {sheet && (
+        <ActionSheet
+          item={sheet} saved={saved.has(sheet.id)} watched={watchedIds.has(sheet.id)}
+          onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched}
+        />
+      )}
+
+      {askTitle && (
+        <div className='sheetwrap' onClick={() => setAskTitle(false)}>
+          <div className='sheet' onClick={(e) => e.stopPropagation()}>
+            <h3>Ask for something</h3>
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              const name = e.currentTarget.elements.rq.value.trim()
+              const kind = e.currentTarget.elements.kind.value
+              if (!name) return
+              call('request.add', { kind, name })
+                .then(() => { setAskTitle(false); say('Asked - the owner will see it'); loadYou('requests') })
+                .catch((er) => setErr(er.message))
+            }}>
+              <input name='rq' className='search' placeholder='Title' autoFocus />
+              <div className='pickrow' style={{ margin: '.6rem 0' }}>
+                <label><input type='radio' name='kind' value='movie' defaultChecked /> Film</label>
+                <label><input type='radio' name='kind' value='series' /> Show</label>
+              </div>
+              <div className='btnrow'>
+                <button type='submit'>Send</button>
+                <button type='button' className='ghost' onClick={() => setAskTitle(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {resumeOffer && (
-        <div class='resumeover' onClick={() => setResumeOffer(null)}>
-          <div class='card' onClick={(e) => e.stopPropagation()}>
+        <div className='resumeover' onClick={() => setResumeOffer(null)}>
+          <div className='card' onClick={(e) => e.stopPropagation()}>
             <h3>Resume at {fmtClock(resumeOffer.positionMs)}?</h3>
-            <div class='row'>
-              <button onClick={() => {
-                const r = resumeOffer
-                setResumeOffer(null)
-                play(r.item, r.url, r.positionMs)
-              }}>Resume</button>
-              <button class='ghost' onClick={() => {
-                // Start over means FROM ZERO, the dashboard's hard-won rule.
-                const r = resumeOffer
-                setResumeOffer(null)
-                play(r.item, r.url, 0)
-              }}>Start Over</button>
+            <div className='btnrow'>
+              <button onClick={() => { const r = resumeOffer; setResumeOffer(null); play(r.item, r.url, r.positionMs) }}>Resume</button>
+              <button className='ghost' onClick={() => { const r = resumeOffer; setResumeOffer(null); play(r.item, r.url, 0) }}>Start Over</button>
             </div>
           </div>
         </div>
       )}
 
-      <Grid items={items} artBase={artBase} onOpen={open} />
-
-      {cursor && (
-        <button
-          class='more'
-          onClick={() => {
-            const base = season
-              ? { type: 'episodes', seasonId: season.id, limit: 200 }
-              : series
-                ? { type: 'seasons', seriesId: series.id, limit: 100 }
-                : { type: root, limit: 100 }
-            fetchList({ ...base, cursor }, true)
-          }}
-        >More</button>
-      )}
+      {toast && <div className='toast'>{toast}</div>}
     </div>
   )
 }

@@ -1,116 +1,1456 @@
-/* PearCinema phone UI, first cut. The dashboard's palette family on the same
- * darker-than-PearTune ground - the picture is the brightest thing on screen. */
+/* PearTune styles.
+ *
+ * Suite conventions (PearPetal / PearList / PearCircle): --color-* custom
+ * properties under [data-theme], Manrope at weight 300, the shared spacing and
+ * radius scales, --pear-safe-* insets. Dark is the default (bare :root), so a
+ * document with no data-theme attribute still renders correctly.
+ *
+ * PearTune's own hue: "analog amber" - a lit-VU amber-gold on warm graphite, the
+ * palette of a vintage amplifier. Warm and low-glare (this is an app you use with
+ * the screen off half the time), and the neutral graphite chrome lets album art
+ * carry the colour. Amber is the "signal": play, active, the heart you set. Light
+ * mode darkens the amber to a functional bronze so it still reads on cream. */
 
-* { box-sizing: border-box; margin: 0; padding: 0 }
-:root {
-  --bg: #0f0d0a;
-  --card: #1c1813;
-  --line: #2e2820;
-  --fg: #efe9df;
-  --muted: #9a8f7e;
-  --accent: #e0a458;
-  --danger: #e06c58;
+:root, :root[data-theme="dark"] {
+  --color-primary: #e6b24e; --color-primary-dark: #c8933a; --color-accent: #d17a4a;
+  --color-error: #e0705f; --color-warn: #f2b544; --color-success: #8bb877;
+  --color-text-primary: #f3ede1; --color-text-secondary: #c3b7a3;
+  --color-text-muted: #948a76; --color-text-on-primary: #1c1305;
+  --color-surface-base: #17140f; --color-surface-card: #201c15;
+  --color-surface-elevated: #2a251d; --color-surface-input: #221e17;
+  --color-border: #39332a; --color-divider: #2d2820; --color-track: #4d4638;
 }
-html, body, #root { height: 100%; background: var(--bg); color: var(--fg) }
-body { font: 15px/1.45 system-ui, sans-serif; -webkit-tap-highlight-color: transparent }
+:root[data-theme="light"] {
+  --color-primary: #9c6a12; --color-primary-dark: #7a5210; --color-accent: #a85631;
+  --color-error: #c1362b; --color-warn: #8a5a10; --color-success: #3f7d3a;
+  --color-text-primary: #1c1710; --color-text-secondary: #4d4638;
+  --color-text-muted: #7d7360; --color-text-on-primary: #ffffff;
+  --color-surface-base: #faf6ee; --color-surface-card: #ffffff;
+  --color-surface-elevated: #f0e9db; --color-surface-input: #f3ecdf;
+  --color-border: #ddd2bf; --color-divider: #e9e0cf; --color-track: #c7bba3;
+}
+
+:root {
+  --pear-safe-top: env(safe-area-inset-top, 0px);
+  --pear-safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* The height of the fixed dock (player + navbar), measured at runtime. Content
+     pads itself by this so the last row is never trapped under the nav. */
+  --dock-h: 64px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+* { -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none; }
+html, body, #root { height: 100%; margin: 0; background: var(--color-surface-base); }
+body {
+  color: var(--color-text-primary);
+  font: 300 16px/1.5 'Manrope', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+/* 16px, always: anything smaller makes iOS zoom the page on focus. */
+input { font-size: 16px; -webkit-user-select: text; user-select: text; }
+h1 { font-size: 1.35rem; font-weight: 600; margin: 0 0 .1rem; }
+h2 {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .07em;
+  color: var(--color-text-muted); margin: 1.4rem 0 .6rem; font-weight: 600;
+}
+.muted { color: var(--color-text-muted); }
+.sm { font-size: .8rem; }
+.center {
+  display: flex; flex-direction: column; gap: 1rem; align-items: center;
+  justify-content: center; min-height: 100vh; padding: 2rem; text-align: center;
+}
+.center-p { text-align: center; padding: 2rem 0; }
+.app { padding: .6rem 1rem calc(var(--dock-h) + 1rem); max-width: 560px; margin: 0 auto; }
+/* Page titles (Library, You, Queue, Settings) are centered - the h1 and its muted
+   count line. The controls below (search, pickers, cards) stay left-aligned. */
+header { padding: .35rem 0 .3rem; text-align: center; }
+
+/* Library switcher in the header (2026-07-24, replaced the source-filter chip row). The centred title
+   is a dropdown menu: switch which library you're viewing (blend / one library) and "Add a library".
+   `position: relative` anchors the dropdown. */
+.libhead { position: relative; display: flex; align-items: center; justify-content: center; min-height: 2.2rem; }
+.libhead h1 { margin: 0; }
+.libpick {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit;
+}
+/* Mirror the caret's width on the LEFT so the TITLE TEXT is what's centred, not text+caret - the
+   caret just hangs off the right (Tim, 2026-07-24). Keep this equal to the CaretDown size (16). */
+.libpick::before { content: ''; width: 16px; flex: none; }
+.libcaret { color: var(--color-text-muted); transition: transform .18s ease; flex: none; }
+.libpick.open .libcaret { transform: rotate(180deg); }
+/* Full-screen catcher so a tap anywhere else closes the menu. */
+.libmenu-backdrop { position: fixed; inset: 0; z-index: 40; }
+.libmenu {
+  position: absolute; top: calc(100% + .3rem); left: 50%; transform: translateX(-50%);
+  z-index: 41; min-width: 220px; max-width: 92vw; max-height: 60vh; overflow-y: auto;
+  text-align: left; background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border); border-radius: 14px; padding: .35rem;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .45); animation: peartune-fade .14s ease both;
+}
+.libmenu button {
+  display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
+  background: none; border: 0; color: var(--color-text-primary); cursor: pointer;
+  padding: .6rem .7rem; border-radius: 9px; font-size: 1rem; line-height: 1.2;
+}
+.libmenu button:active { background: var(--color-surface-input); }
+.libmenu button.on { color: var(--color-primary); font-weight: 600; }
+.libmenu button.off { opacity: .5; }
+.libmenu-sep { height: 1px; background: var(--color-divider); margin: .35rem .3rem; }
+.libmenu-add { color: var(--color-text-secondary); }
 
 button {
-  font: inherit; color: var(--bg); background: var(--accent);
-  border: none; border-radius: 10px; padding: .65rem 1rem; font-weight: 650;
+  font: inherit; font-weight: 500; padding: .7rem 1.2rem; border-radius: 10px;
+  border: 1px solid var(--color-border); background: var(--color-surface-card);
+  color: var(--color-text-primary); cursor: pointer;
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
 }
-button.ghost { background: transparent; color: var(--fg); border: 1px solid var(--line) }
-button:disabled { opacity: .5 }
-
-.empty { display: grid; place-items: center; height: 100%; color: var(--muted) }
-.bad {
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-  border: 1px solid var(--danger); color: var(--fg);
-  border-radius: 10px; padding: .6rem .8rem; margin: .6rem .8rem;
+button:active { transform: scale(0.97); }
+button.primary {
+  background: var(--color-primary); border-color: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+button:disabled { opacity: .4; }
+input {
+  font-family: inherit; font-weight: 300; width: 100%; padding: .7rem; margin: .6rem 0;
+  border-radius: 10px; border: 1px solid var(--color-border);
+  background: var(--color-surface-input); color: var(--color-text-primary);
+}
+/* The bare red bar. Still used inside the QR scanner overlay, where a full card
+   would cover the viewfinder; everywhere else it is now .problem below. */
+.error {
+  background: color-mix(in srgb, var(--color-error) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-error) 40%, transparent);
+  color: var(--color-text-primary); padding: .7rem 1rem; border-radius: 10px;
+  margin: .75rem 0; font-size: .9rem; text-align: left;
 }
 
-/* --- pairing ---------------------------------------------------------------- */
-.pairing { display: flex; flex-direction: column; gap: .9rem; padding: 2.2rem 1.2rem; height: 100% }
+/* A failure the user has to READ: an icon to catch the eye, a plain-language line,
+   what to do about it, and - for a real bug - the technical text one tap away with
+   a way to send it. Softer than the old red bar on purpose: this reports a problem,
+   it does not accuse the person holding the phone. */
+.problem {
+  background: color-mix(in srgb, var(--color-error) 9%, var(--color-surface-elevated));
+  border: 1px solid color-mix(in srgb, var(--color-error) 30%, transparent);
+  border-radius: 14px; padding: .8rem .9rem; margin: .75rem 0; text-align: left;
+  animation: peartune-fade .18s ease;
+}
+.problem .prow { display: flex; align-items: flex-start; gap: .65rem; }
+.problem .picon { flex: none; color: var(--color-error); margin-top: .1rem; }
+.problem .ptext { flex: 1; min-width: 0; }
+.problem .ptitle { font-size: .95rem; font-weight: 500; line-height: 1.35; }
+.problem .phint {
+  font-size: .82rem; line-height: 1.45; color: var(--color-text-secondary); margin-top: .25rem;
+}
+.problem .pclose {
+  flex: none; background: none; border: 0; padding: .15rem; margin: -.15rem -.2rem 0 0;
+  color: var(--color-text-secondary); line-height: 0;
+}
+/* Text buttons, spaced like a sentence rather than a toolbar - these are offers,
+   not the main action of the screen. */
+.problem .pacts { display: flex; flex-wrap: wrap; gap: 1rem; margin: .6rem 0 0 1.75rem; }
+.problem .plink {
+  background: none; border: 0; padding: 0; font-size: .82rem; font-weight: 500;
+  color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px;
+}
+.problem .ptech {
+  margin: .55rem 0 0 1.75rem; padding: .55rem .6rem; border-radius: 8px;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  color: var(--color-text-secondary); font-size: .72rem; line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap; word-break: break-word; max-height: 9rem; overflow: auto;
+}
+@keyframes peartune-fade { from { opacity: 0; } to { opacity: 1; } }
+
+ul.tracks { list-style: none; margin: 0; padding: 0; }
+ul.tracks li {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: .85rem .25rem; border-bottom: 1px solid var(--color-divider);
+}
+ul.tracks li.on { color: var(--color-primary); }
+ul.tracks li .meta { min-width: 0; flex: 1; }
+ul.tracks li .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.tracks li .sub {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: .15rem;
+}
+ul.tracks li .dur { flex: none; font-variant-numeric: tabular-nums; }
+ul.tracks li .plays { flex: none; white-space: nowrap; }
+ul.tracks li .no {
+  flex: none; width: 1.6rem; text-align: right; font-variant-numeric: tabular-nums;
+}
+ul.tracks li .favbtn {
+  flex: none; background: none; border: 0; padding: .25rem; margin: -.25rem;
+  color: inherit; opacity: .45; cursor: pointer; display: inline-flex; line-height: 0;
+}
+ul.tracks li .favbtn.on { opacity: 1; color: var(--color-primary); }
+ul.tracks li .favbtn:active { transform: scale(.85); }
+
+/* --- favorites: header heart + grouped view -------------------------------- */
+.headmeta { min-width: 0; }
+.favhead {
+  display: inline-flex; align-items: center; gap: .4rem; margin-top: .7rem;
+  padding: .35rem .85rem; border-radius: 9999px; font: inherit; font-size: .85rem;
+  border: 1px solid var(--color-divider); background: none; color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.favhead.on { color: var(--color-primary); border-color: var(--color-primary); }
+.favhead:active { transform: scale(.96); }
+/* --- continue listening card ---------------------------------------------- */
+.contcard {
+  display: flex; align-items: center; gap: .8rem; margin: 0 0 1.2rem;
+  padding: .7rem .8rem; border-radius: 12px; cursor: pointer;
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.contcard:active { transform: scale(.99); }
+.contcard .meta { min-width: 0; flex: 1; }
+.contcard .cont-h { color: var(--color-primary); font-weight: 600; margin-bottom: .1rem; }
+.contcard .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contcard .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contplay {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 2.4rem; border-radius: 50%;
+  background: var(--color-primary); color: var(--color-text-on-primary);
+}
+/* --- demo-mode banner ------------------------------------------------------ */
+/* Says "this is the bundled demo library, not yours" on every visit to Library. Same shape as
+   the continue/handoff cards so it reads as part of the app rather than as an error, but with
+   no press affordance on the card itself - the button is the only action. */
+.demobanner {
+  display: flex; align-items: center; gap: .8rem; margin: 0 0 1.2rem;
+  padding: .7rem .8rem; border-radius: 12px;
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+.demobanner .meta { min-width: 0; flex: 1; }
+.demobanner .meta p { margin: .15rem 0 0; }
+.demo-h { color: var(--color-primary); font-weight: 600; }
+.demo-ic {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 2.4rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  color: var(--color-primary);
+}
+.demobanner button.primary.sm {
+  flex: none; width: auto; margin: 0; padding: .45rem .9rem; font-size: .85rem;
+}
+
+/* Session-handoff card: a device icon where the album cover would be (there is no single
+   cover for a whole session), tinted like the card. */
+.handoff-ic {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 2.9rem; height: 2.9rem; border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  color: var(--color-primary);
+}
+
+.favview section { margin-bottom: 1.6rem; }
+.favh {
+  font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
+  color: var(--color-text-muted); margin: 0 0 .7rem;
+}
+
+/* --- playlists ------------------------------------------------------------- */
+/* The "New playlist" button on the Playlists list and inside the add-to picker. */
+.newpl {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  margin-bottom: .5rem;
+}
+ul.pllist { list-style: none; margin: 0; padding: 0; }
+ul.pllist li {
+  display: flex; align-items: center; gap: .9rem;
+  padding: .85rem .25rem; border-bottom: 1px solid var(--color-divider); cursor: pointer;
+}
+ul.pllist li .plicon {
+  flex: none; width: 2.6rem; height: 2.6rem; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-surface-input); color: var(--color-text-secondary);
+}
+ul.pllist li .meta { min-width: 0; flex: 1; }
+ul.pllist li .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.pllist li .sub { margin-top: .15rem; }
+
+/* A playlist detail: its own head (centered like other pages via `header`? no -
+   it is a drill-down, so left-aligned like the album head), edit tools, edit rows. */
+.plhead { margin: .2rem 0 1rem; }
+/* Title on the left, the edit + delete icons trailing it on the same line. */
+.pltitlerow { display: flex; align-items: center; gap: .5rem; }
+.pltitlerow h1 { margin: 0; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.plhead p { margin: .2rem 0 0; }
+/* The name, made visibly editable in Edit mode - a real input, not a bare heading. */
+.plname {
+  flex: 1; min-width: 0; font-size: 1.35rem; font-weight: 600; font-family: inherit;
+  color: var(--color-text-primary); background: var(--color-surface-input);
+  border: 1px solid var(--color-primary); border-radius: 8px; padding: .25rem .5rem;
+}
+.plheadacts { flex: none; display: inline-flex; gap: .25rem; }
+.plheadacts .plicon {
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.plheadacts .plicon.on { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-text-on-primary); }
+.plheadacts .plicon.del { color: var(--color-error); }
+.plrename { display: flex; flex-direction: column; gap: .5rem; }
+
+/* Reorder (drag the grip) / remove rows, shown only in Edit mode. The list is a
+   positioning context so the drop-highlight can sit behind the rows. */
+ul.tracks.editing { position: relative; }
+/* Rows are opaque (so the drop-highlight only shows in the parted gap) and carry a
+   max-height so a removal can collapse them smoothly. 5rem clears a single-line row. */
+ul.tracks.editing li.editrow { gap: .5rem; background: var(--color-surface-base); max-height: 5rem; }
+.editrow .plgrip {
+  flex: none; background: none; border: 0; padding: .5rem .3rem; margin: 0 0 0 -.3rem;
+  max-height: none; overflow: visible;
+  color: var(--color-text-muted); display: inline-flex; line-height: 0;
+  cursor: grab;
+  /* Critical: the grip owns the gesture, so the page does not scroll under a drag. */
+  touch-action: none;
+}
+.editrow .rm {
+  flex: none; background: none; border: 0; padding: .4rem; color: var(--color-error);
+  display: inline-flex; line-height: 0;
+}
+/* The lifted row: elevated card that follows the finger (its transform is inline). */
+.editrow.lifted {
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  background: var(--color-surface-card); border-bottom-color: transparent;
+}
+.editrow.lifted .plgrip { cursor: grabbing; }
+/* Where the dragged row will land - a tinted slot behind the (parted) rows. */
+.drophl {
+  position: absolute; left: 0; right: 0; z-index: 0; pointer-events: none;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--color-primary) 55%, transparent);
+}
+/* Removal: fade + shrink + collapse height (so the rows below slide up), then the row
+   is dropped from the data once the animation has run. */
+.editrow.removing {
+  opacity: 0; transform: scale(.97);
+  max-height: 0; padding-top: 0; padding-bottom: 0; border-color: transparent;
+  overflow: hidden; pointer-events: none;
+  transition: opacity 240ms ease, transform 240ms ease, max-height 240ms ease, padding 240ms ease;
+}
+
+/* A picked-playlist row in the add-to-playlist sheet: name left, count right. */
+.sheet .acts button.plpick { justify-content: space-between; }
+
+/* --- downloads / pinning (phase 5C) ---------------------------------------- */
+/* The favorite + download pills sit on one wrapping row under the album title. */
+/* Favorite + Download in an album/artist header. They WRAP - the header column is narrow
+   next to a big cover, and "Download 3 more" is a long pill - so they end up stacked as
+   often as they sit side by side.
+   EQUAL WIDTH EITHER WAY (Tim, 2026-08-11): `flex: 1 1 0` gives them the same share of the
+   row when they fit, and full width each when they stack. Content-sized pills stacked into
+   a ragged left edge is the thing being fixed, so the label is centred too. */
+.headacts { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .7rem; }
+.headacts .favhead { margin-top: 0; flex: 1 1 0; justify-content: center; min-width: 8.5rem; }
+/* "Downloading…" badge on an in-progress cover in the Downloads grid. */
+.dlbadge {
+  position: absolute; left: .4rem; bottom: 3.2rem; z-index: 2;
+  padding: .15rem .5rem; border-radius: 9999px; font-size: .7rem; font-weight: 600;
+  background: color-mix(in srgb, var(--color-primary) 88%, transparent);
+  color: var(--color-text-on-primary);
+}
+/* "Remove download" on the offline album detail. */
+.dlremove {
+  display: inline-flex; align-items: center; gap: .4rem; margin: 0 0 1rem;
+  background: transparent; border: 1px solid var(--color-border); color: var(--color-error);
+  font-size: .85rem;
+}
+/* A small On/Off pill toggle (download-over-cellular). */
+.toggle {
+  flex: none; min-width: 3.4rem; padding: .4rem .9rem; border-radius: 9999px;
+  font-size: .82rem; font-weight: 600;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.toggle.on { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-text-on-primary); }
+
+.scanner { position: relative; min-height: 100vh; background: #000; }
+.scanner video { width: 100%; height: 100vh; object-fit: cover; }
+.overlay {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 2rem;
+  display: flex; flex-direction: column; gap: 1rem; align-items: center;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .85));
+  color: #f3ede1; /* over the camera feed (always dark) - the dark text token */
+}
+details { width: 100%; max-width: 22rem; }
+summary { cursor: pointer; padding: .5rem; }
+
+/* --- albums + artists ---------------------------------------------------- */
+/* Search box with an inline clear (X), shown only while there is text. The margin is
+   dropped here (the sticky bar + header already space it) so there is no dead gap
+   between the library info line and the search box. */
+.searchbar { position: relative; }
+.searchbar input.search { margin: 0; padding-right: 2.4rem; }
+.searchclear {
+  position: absolute; right: .45rem; top: 50%; transform: translateY(-50%);
+  width: 1.9rem; height: 1.9rem; padding: 0; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-surface-elevated); border: none;
+  color: var(--color-text-secondary); -webkit-tap-highlight-color: transparent;
+}
+/* minmax(0, 1fr), NOT 1fr. `1fr` is shorthand for minmax(auto, 1fr), and
+   min-width:auto refuses to shrink a column below its content's min-content
+   width. A long nowrap album title ("LED Spirals" (Extended Version) [From
+   "John Wick"]) therefore blows the column out past the screen edge - the
+   classic CSS grid blowout. min-width:0 on the cell is the same guard. */
+/* Recently Added shelf: a horizontal strip of the newest albums above the grid. Fixed
+   tiles that scroll sideways, set apart from the grid so it reads as a shelf. */
+/* The shelf is a SECTION, not the first row of the grid. Without the rule it ran straight into
+   the albums below and read as one list (Tim, 2026-07-30); the grid gets its own heading for the
+   same reason, so the two read as two things rather than one thing with a gap in it. */
+.shelf { margin: .3rem 0 1rem; padding-bottom: .9rem; border-bottom: 1px solid var(--color-divider); }
+.shelf-head { font-size: .95rem; font-weight: 600; color: var(--color-text-primary); margin: 0 0 .6rem; }
+.grid-head { font-size: .95rem; font-weight: 600; color: var(--color-text-primary); margin: 0 0 .7rem; }
+.shelf-scroll { position: relative; }
+.shelf-row { display: flex; gap: .7rem; overflow-x: auto; padding-bottom: .35rem; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+.shelf-row::-webkit-scrollbar { display: none; }
+/* "There is more this way." One at each end, each shown only while there actually is - RecentShelf
+   measures both. The gradient ends in the page background so the outermost cover looks cut off
+   rather than framed, which is the thing that reads as "keep going"; the caret makes it
+   unmissable. Not buttons: pointer-events stay off so they can never eat a tap meant for the
+   cover underneath. */
+.shelf-more, .shelf-back {
+  position: absolute; top: 0; bottom: .35rem; width: 2.6rem;
+  display: flex; align-items: center;
+  color: var(--color-text-muted); pointer-events: none;
+  opacity: 0; transition: opacity .18s ease;
+}
+.shelf-more {
+  right: 0; justify-content: flex-end;
+  background: linear-gradient(90deg, transparent, var(--color-surface-base) 65%);
+}
+.shelf-back {
+  left: 0; justify-content: flex-start;
+  background: linear-gradient(270deg, transparent, var(--color-surface-base) 65%);
+}
+.shelf-scroll.more .shelf-more { opacity: 1; }
+.shelf-scroll.back .shelf-back { opacity: 1; }
+.shelf-item {
+  flex: 0 0 auto; width: 128px; scroll-snap-align: start;
+  background: none; border: none; padding: 0; text-align: left; cursor: pointer; color: inherit;
+}
+.shelf-item .cover { width: 128px; height: 128px; }
+.shelf-t { margin-top: .4rem; font-size: .8rem; font-weight: 500; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-a { font-size: .74rem; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.grid {
+  display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: 1rem .9rem; margin-top: .5rem;
+}
+.album { min-width: 0; position: relative; }
+/* the favorite heart floats over the cover corner; a scrim keeps it readable on any art */
+.tileheart {
+  position: absolute; top: .45rem; right: .45rem; z-index: 2; line-height: 0;
+  display: inline-flex; padding: .32rem; border: 0; border-radius: 9999px; cursor: pointer;
+  background: rgba(0, 0, 0, .5); color: #fff;
+}
+.tileheart.on { color: var(--color-primary); }
+.tileheart:active { transform: scale(.85); }
+.grid.aslist .tileheart { top: 50%; transform: translateY(-50%); background: none; color: var(--color-text-muted); }
+.grid.aslist .tileheart.on { color: var(--color-primary); }
+.album .t {
+  margin-top: .45rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.album .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A list is the SAME component at one column, turned on its side - not a second
+   screen with its own bugs. */
+.grid.aslist { gap: 0; }
+.grid.aslist .album {
+  display: flex; align-items: center; gap: .85rem; padding: .5rem .25rem;
+  border-bottom: 1px solid var(--color-divider);
+}
+.grid.aslist .cover { width: 52px; height: 52px; flex: none; }
+.grid.aslist .meta { min-width: 0; flex: 1; }
+.grid.aslist .t { margin-top: 0; }
+.grid.aslist .artist .t, .grid.aslist .artist .sub { text-align: left; }
+.cover {
+  width: 100%; aspect-ratio: 1; border-radius: 8px; object-fit: cover;
+  background: var(--color-surface-card); display: block;
+}
+/* A library always has albums with no art. A missing cover must look
+   intentional, not broken. */
+.cover.ph {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--color-primary) 18%, var(--color-surface-card)),
+    var(--color-surface-card));
+  display: flex; align-items: center; justify-content: center;
+  color: color-mix(in srgb, var(--color-primary) 55%, var(--color-surface-card));
+}
+.cover.big { width: 96px; height: 96px; aspect-ratio: 1; flex: none; }
+/* An artist is a person, not a record sleeve: round it, like every music app. */
+.cover.artistpic { border-radius: 50%; }
+.artist .t { text-align: center; }
+.artist .sub { text-align: center; }
+.albumhead { display: flex; gap: 1rem; align-items: center; margin: .5rem 0 1.2rem; }
+.albumhead h1 { font-size: 1.15rem; }
+button.back { padding: .4rem .7rem; margin-bottom: .6rem; display: inline-flex;
+              align-items: center; gap: .3rem; }
+button.more { width: 100%; margin: 1.2rem 0 0; }
+/* The scan button pairs a QR glyph with its label, so it needs the same centring the back
+   button uses - a bare inline SVG otherwise sits on the text baseline and rides high. */
+button.scanbtn { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; }
+/* Onboarding / pairing wall: every action button is the SAME width (capped to match the inputs +
+   the paste section), so Scan QR / Pair / Cancel line up instead of each sizing to its own text. */
+.onboard > button { width: 100%; max-width: 22rem; margin-left: auto; margin-right: auto; }
+.onboard details button { width: 100%; }
+/* The intro card's three "what this even is" lines: icon, then a sentence. */
+.obwhy { display: flex; flex-direction: column; gap: .85rem; }
+.obwhy > div { display: flex; gap: .6rem; align-items: flex-start; }
+.obwhy > div > svg { flex: none; color: var(--color-primary); margin-top: .12rem; }
+.obwhy span { font-size: .85rem; line-height: 1.45; }
+/* A card that is one paragraph of guidance (the "whose library" answers). */
+.onboard .namebox > p.sm { margin: 0; line-height: 1.5; }
+/* Separates the two "I have a server" answers from the "I don't have one yet" demo, so the
+   third button reads as a different KIND of answer rather than a third server option. */
+.obsep {
+  width: 100%; max-width: 22rem; height: 1px; margin: .9rem auto .2rem;
+  background: var(--color-divider);
+}
+
+/* The search box and the picker STICK; the library title above them scrolls away.
+   Those two are what you reach for from halfway down a grid of 60 albums, and
+   scrolling back to the top to find them was the whole complaint. The background is
+   opaque because the covers pass underneath. */
+.sticky {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--color-surface-base);
+  padding: .1rem 0 .45rem;
+}
+.pickrow { display: flex; align-items: center; gap: .4rem; margin-top: .4rem; }
+/* min-width:0 lets the four-pill segment shrink instead of shoving the Display
+   button onto a second line. */
+.pickrow .seg { flex: 1; min-width: 0; }
+
+/* Source-filter chips (multi-host step 2): a scrollable pill row under the picker. [All] + one per
+   library; the active chip carries the accent, an offline library is faded. */
+.chips { display: flex; gap: .4rem; margin-top: .4rem; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto; padding: .35rem .7rem; border-radius: 9999px;
+  border: 1px solid var(--color-border); background: var(--color-surface-input);
+  color: var(--color-text-secondary); font-size: .78rem; font-weight: 600;
+  max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip.on { background: var(--color-primary); color: var(--color-text-on-primary); border-color: var(--color-primary); }
+.chip.off { opacity: .45; }
+/* The single Display icon (layout + sort). Disabled + faded when the active view has
+   neither to offer, kept in place so the row does not reflow. */
+button.icon.dens {
+  flex: none; padding: .5rem .6rem; border: 1px solid var(--color-border);
+  background: var(--color-surface-input); border-radius: 9999px;
+  color: var(--color-text-secondary);
+}
+button.icon.dens:disabled { opacity: .4; }
+
+/* Display sheet: a labelled Layout and/or Sort section, each an OptionList, plus a
+   small ascending/descending toggle beside the "Sort by" label. */
+.dispsec { margin-top: .4rem; }
+.dispsec + .dispsec { margin-top: 1.1rem; }
+.displabel {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: .8rem; font-weight: 600; color: var(--color-text-secondary);
+  margin: 0 .1rem .5rem; text-transform: uppercase; letter-spacing: .04em;
+}
+.dirtoggle {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .25rem .6rem; border-radius: 9999px; font-size: .72rem; font-weight: 600;
+  letter-spacing: 0; text-transform: none;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  color: var(--color-primary);
+}
+
+/* Segmented pill. Albums / Artists / Songs here, Favorites / Most Played in the
+   You tab, theme in Settings - one primitive. Its two or three buttons split the
+   width evenly now that the crowded 5-way library picker is gone (split across two
+   tabs). The exception is `.seg.scroll` below. */
+.seg {
+  display: flex; background: var(--color-surface-input);
+  border: 1px solid var(--color-border); border-radius: 9999px; padding: 3px; gap: 2px;
+}
+.seg button {
+  flex: 1; white-space: nowrap; border: none; border-radius: 9999px;
+  padding: .5rem .9rem; font-size: .82rem;
+  font-weight: 500; background: transparent; color: var(--color-text-secondary);
+}
+.seg button.on { background: var(--color-primary); color: var(--color-text-on-primary); }
+/* The library browse segment carries FOUR pills (Genres / Artists / Albums / Songs)
+   next to the Display button, so it runs tighter than the default two/three-pill seg
+   - just enough that the Display button stays on the same row. Scoped to .pickrow so
+   the other segments (quality picker, You sub-picker) keep their roomier padding. */
+.pickrow .seg button { padding: .5rem .4rem; font-size: .8rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The streaming-quality picker has five options (Auto / Original / 320k / 192k /
+   128k) - too many to split the pill evenly without clipping the last one, so it
+   keeps each button its natural width and scrolls instead. */
+.seg.scroll { overflow-x: auto; scrollbar-width: none; }
+.seg.scroll::-webkit-scrollbar { display: none; }
+.seg.scroll button { flex: 0 0 auto; }
+
+/* Icon-first segmented control (the You tab): every option is an icon, and the ACTIVE
+   one also shows its label and grows to fill. The rest collapse to their icon, so four
+   options fit one row without the sideways scroll four full labels needed. */
+.seg.icons button { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.seg.icons button.on { flex: 1 1 auto; }
+.seg.icons button svg { flex: none; }
+
+/* --- the dock: player over navbar ---------------------------------------- */
+.dock {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  background: var(--color-surface-card); border-top: 1px solid var(--color-border);
+  max-width: 560px; margin: 0 auto;
+}
+/* A guest device's time-limited-access strip, at the top of the dock (above the
+   player/navbar) so it never collides with a screen header. Informational, not a
+   warning - a calm primary tint, not the error red. */
+.guestbar {
+  text-align: center; font-size: 11.5px; font-weight: 500; letter-spacing: .01em;
+  padding: 5px 12px; color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-primary) 13%, var(--color-surface-card));
+  border-bottom: 1px solid var(--color-divider);
+}
+/* When the banner is the top of the dock, it already owns the top edge - drop the
+   navbar's own top border to avoid a double line (mirrors the navbar:first-child rule). */
+.dock > .guestbar + .navbar { border-top: none; }
+
+/* Opaque and above the player: a transform-animated player is on its own layer and would
+   otherwise paint OVER the navbar. This keeps the navbar on top so the player slides up from
+   BEHIND it. Its background matches the dock so nothing changes at rest. */
+.navbar {
+  display: flex; border-top: 1px solid var(--color-divider);
+  position: relative; z-index: 1; background: var(--color-surface-card);
+  /* Carry the safe-area inset here (moved off the dock) so the navbar's OPAQUE background
+     reaches the very bottom edge - otherwise the player shows through the gap below it. */
+  padding-bottom: var(--pear-safe-bottom);
+}
+.dock.dock-retro .navbar { background: #17181b; }
+/* No player above it means the navbar IS the top of the dock, and a second
+   border there would draw a double line. */
+.dock > .navbar:first-child { border-top: none; }
+.navbar button {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: .5rem 0; border: none; background: none; border-radius: 0;
+  color: var(--color-text-muted);
+}
+.navbar button.on { color: var(--color-primary); }
+.navbar button span { font-size: 11px; font-weight: 400; }
+.navbar button.on span { font-weight: 600; }
+/* The queue count, on the one surface that is always on screen. */
+.navbar .ic { position: relative; display: flex; }
+.navbar .badge {
+  position: absolute; top: -5px; left: 12px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-primary); color: var(--color-text-on-primary);
+  border-radius: 9999px; font-size: 10px; font-weight: 700; line-height: 1;
+}
+button.more.danger {
+  color: var(--color-error); display: inline-flex; align-items: center;
+  justify-content: center; gap: .4rem;
+}
+
+/* --- queue screen -------------------------------------------------------- */
+/* The queue screen is pinned from the top of the viewport to the top of the dock
+   (top:0 / bottom:var(--dock-h)) - an exact fit, so the list is BOUNDED between the
+   static header and the navbar and never scrolls under either. Inside, a flex column:
+   the header stays put (flex:none) while the track list scrolls in the middle. There is
+   no footer button - clearing lives in the header trash icon. */
+.app.queuescreen {
+  position: fixed; top: 0; bottom: var(--dock-h); left: 0; right: 0;
+  max-width: 560px; margin: 0 auto; height: auto;
+  display: flex; flex-direction: column; min-height: 0;
+  padding: 1rem 1rem 0;
+}
+.queuescreen > header { flex: none; }
+.queuescreen > .tracks { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-bottom: .6rem; }
+
+/* The header action icons (clear + edit) float top-right, out of flow, so "Queue" stays
+   centered. */
+.queuehead { position: relative; }
+.qacts { position: absolute; right: 0; top: .3rem; display: flex; gap: .4rem; }
+.qacts button {
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 9999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+}
+.qacts button.on { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-text-on-primary); }
+.qacts button.qtrash { color: var(--color-error); }
+
+/* --- empty / offline / skeleton states ----------------------------------- */
+.blank {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: .6rem; padding: 3rem 1rem; color: var(--color-text-muted);
+}
+.blank h2 { margin: 0; color: var(--color-text-primary); text-transform: none;
+            letter-spacing: 0; font-size: 1.05rem; }
+.blank p { margin: 0; max-width: 26rem; }
+.blank button { margin-top: .8rem; display: inline-flex; align-items: center; gap: .4rem; }
+
+/* A skeleton is the same SHAPE as the thing it stands in for, so nothing jumps
+   when the real covers land. */
+/* .spin + @keyframes peartune-spin live once, below (~1s). A redundant second copy here
+   (added in #151, 1.1s) is removed - two same-named keyframes is just dead duplication.
+   (The pull-to-refresh spinner's hitch had a separate cause - an inline transform fighting
+   the animation - fixed in App.jsx.) */
+@keyframes peartune-pulse { 0%, 100% { opacity: .45; } 50% { opacity: .8; } }
+.skel {
+  background: var(--color-surface-elevated); border-radius: 8px;
+  animation: peartune-pulse 1.4s ease-in-out infinite;
+}
+.skel.line { height: .72rem; margin-top: .5rem; }
+.skel.line.short { width: 60%; }
+.artist .skel.line { margin-left: auto; margin-right: auto; }
+.artist .skel.line.short { width: 45%; }
+
+/* --- now playing --------------------------------------------------------- */
+.player { padding: .7rem 1rem .5rem; }
+
+/* The resting state: one row, and a hairline of progress. */
+.player.mini { padding: .6rem 1rem .45rem; cursor: pointer; }
+.player.mini .icon.big { flex: none; padding: .45rem .7rem; }
+
+/* THE ANIMATION. One element in two shapes, not two elements swapped - a swap has
+   nothing to tween between, which is why this used to snap. Everything that
+   differs between the shapes is a transition here.
+   max-height, not height: no magic number to rot the first time the transport
+   gains a row. It is generous on purpose (the real content is ~170px); an
+   over-large max-height only makes the LAST few ms of the open ease slightly fast,
+   whereas one that is too small silently clips the buttons. */
+.player .expando {
+  max-height: 0; opacity: 0; overflow: hidden;
+  transition: max-height .46s cubic-bezier(.32, .72, 0, 1), opacity .3s ease-out;
+}
+.player.open .expando { max-height: 260px; opacity: 1; }
+
+.hairline {
+  position: relative; height: 2px; margin-top: .5rem; border-radius: 2px;
+  background: var(--color-track);
+  transition: opacity .3s ease-out, margin .46s cubic-bezier(.32, .72, 0, 1);
+}
+.hairline .fill {
+  position: absolute; left: 0; top: 0; height: 2px; border-radius: 2px;
+  background: var(--color-primary); max-width: 100%;
+}
+/* Expanded, the fat scrub bar takes over - so the hairline gets out of the way
+   rather than sitting above it as a second, thinner progress bar. */
+.player.open .hairline { opacity: 0; height: 0; margin: 0; }
+
+/* The handle you pull the player back down by. Collapsed, it takes no space. */
+button.grip {
+  display: flex; margin: -.3rem auto .1rem; padding: .2rem 1.6rem;
+  background: transparent; border-color: transparent;
+  color: var(--color-text-muted);
+  transition: opacity .3s ease-out, max-height .46s cubic-bezier(.32, .72, 0, 1);
+  max-height: 2rem; overflow: hidden;
+}
+.player.mini button.grip { opacity: 0; max-height: 0; padding: 0; margin: 0; }
+.player .row1 { display: flex; align-items: center; gap: .75rem; }
+.player .meta { flex: 1; min-width: 0; }
+.player .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cover.sm-cover {
+  width: 42px; height: 42px; aspect-ratio: 1; flex: none; border-radius: 6px;
+}
+/* 18px tall so it is actually tappable, with a 3px line drawn inside it. The
+   scrub handler measures THIS element, so its box is the seek geometry. */
+.bar { position: relative; height: 18px; margin: .55rem 0 0; cursor: pointer; }
+.bar::before {
+  content: ''; position: absolute; top: 50%; left: 0; right: 0; height: 3px;
+  transform: translateY(-50%); background: var(--color-track); border-radius: 2px;
+}
+.bar .fill {
+  position: absolute; top: 50%; left: 0; height: 3px; transform: translateY(-50%);
+  background: var(--color-primary); border-radius: 2px; max-width: 100%;
+}
+.times {
+  display: flex; justify-content: space-between; margin-top: -.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.transport {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .4rem; margin-top: .35rem;
+}
+button.icon {
+  flex: 1; padding: .5rem .3rem; background: transparent; border-color: transparent;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-primary);
+}
+button.icon.big {
+  flex: 1.3; background: var(--color-surface-elevated);
+  border-color: var(--color-border);
+}
+button.icon.close { flex: none; padding: .4rem .5rem; color: var(--color-text-muted); }
+button.icon.mode { color: var(--color-text-muted); }
+button.icon.mode.on { color: var(--color-primary); }
+.sub-transport { margin-top: .1rem; justify-content: center; gap: 2.5rem; }
+.sub-transport button.icon {
+  flex: none; font-size: .78rem; color: var(--color-text-muted); gap: .25rem;
+}
+/* Sleep timer: amber when armed, with a compact mm:ss (or "end") next to the moon. */
+.sub-transport button.icon.sleepbtn.on { color: var(--color-primary); }
+.sleeplabel { font-variant-numeric: tabular-nums; font-size: .72rem; }
+
+/* --- classic (retro) player skin ----------------------------------------- */
+/* A deliberately theme-INDEPENDENT face: fixed metal chrome + a green LCD, the look
+   of a vintage amplifier. An ORIGINAL design inspired by the classic player, not
+   anyone's shipped artwork. Only the EXPANDED player uses it; the mini bar and the
+   rest of the app stay on the amber theme. Fluid: the window is the dock's width. */
+/* The expanded classic player FILLS the sheet edge-to-edge - no amber frame, square corners
+   meeting the dock edges - so it reads as a deliberate retro takeover, not a box floating in
+   the app's own chrome. The dock goes metal-dark under it so nothing amber peeks at the seams. */
+/* The classic expanded player is a separate tree (not the .expando transition), so it would
+   otherwise snap in. GROW it (max-height), not slide it: the dock is bottom-anchored, so the
+   growing player extends the dock upward with the navbar fixed at the bottom - exactly the
+   modern expand. A slide (translate) would instead reveal the dock's own background in the
+   space the player is about to fill, since the dock is full height the instant it mounts. */
+.retroplayer {
+  padding: 0; font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  overflow: hidden;
+  animation: pt-retro-grow .44s cubic-bezier(.32, .72, 0, 1) both;
+}
+/* Generous end cap so the docked playlist window is not clipped; the playlist's own
+   max-height:40vh + scroll is what actually bounds the height. */
+@keyframes pt-retro-grow { from { max-height: 44px; } to { max-height: 720px; } }
+@media (prefers-reduced-motion: reduce) { .retroplayer { animation: none; } }
+.dock.dock-retro { background: #17181b; border-top-color: #0d0e10; }
+.retro { --rt-lcd: #3fe08a; --rt-dim: #1f6b45; }
+.rt-win {
+  background: linear-gradient(180deg, #3a3d42, #26282c 46%, #17181b);
+  border-top: 1px solid #5a5e66; border-bottom: 1px solid #0d0e10;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.rt-title {
+  height: 28px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 9px; border-bottom: 1px solid #0d0e10; cursor: pointer;
+  background: linear-gradient(180deg, #53575e, #34373c 60%, #2a2c30);
+}
+.rt-tbtns { display: flex; gap: 5px; }
+.rt-dots { display: flex; gap: 3px; }
+.rt-dots i { width: 5px; height: 5px; border-radius: 1px; background: #1c1d20; box-shadow: inset 0 0 0 1px #4a4d53; }
+.rt-wm {
+  font-size: 10px; letter-spacing: 3px; font-weight: 700;
+  background: linear-gradient(180deg, #e9ecEF, #9aa0a8); -webkit-background-clip: text;
+  background-clip: text; color: transparent; text-shadow: 0 1px 0 rgba(0,0,0,.4);
+}
+.rt-x {
+  width: 15px; height: 14px; border-radius: 2px; padding: 0; line-height: 1; font-size: 12px;
+  color: #cfd2d6; background: linear-gradient(180deg, #4c4f55, #303237);
+  border: 1px solid #0d0e10; box-shadow: inset 0 1px 0 rgba(255,255,255,.12);
+}
+.rt-body { padding: 8px 9px 9px; display: grid; grid-template-columns: auto 1fr; gap: 7px 10px; }
+.rt-lcd, .rt-marq, .rt-viz {
+  background: #070b09; border: 1px solid #000; border-radius: 2px;
+  box-shadow: inset 0 0 8px rgba(0,0,0,.9), inset 0 0 0 1px #14201a;
+}
+.rt-left { display: flex; flex-direction: column; gap: 5px; }
+.rt-time {
+  padding: 3px 9px; font-size: 30px; line-height: .95; font-weight: 700; letter-spacing: 2px;
+  color: var(--rt-lcd); text-shadow: 0 0 6px rgba(63,224,138,.5); font-variant-numeric: tabular-nums;
+}
+.rt-col.off { color: var(--rt-dim); text-shadow: none; }
+.rt-kbps { display: flex; gap: 9px; font-size: 8.5px; letter-spacing: 1px; color: var(--rt-dim); }
+.rt-kbps b { color: var(--rt-lcd); font-weight: 400; }
+.rt-stereo { display: flex; gap: 6px; font-size: 8px; letter-spacing: 1px; text-transform: uppercase; }
+.rt-stereo span { color: var(--rt-dim); }
+.rt-stereo span.on { color: var(--rt-lcd); text-shadow: 0 0 5px rgba(63,224,138,.6); }
+.rt-right { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rt-marq { overflow: hidden; height: 20px; position: relative; }
+.rt-track {
+  position: absolute; white-space: nowrap; color: var(--rt-lcd); font-size: 11px; line-height: 20px;
+  letter-spacing: 1px; text-shadow: 0 0 5px rgba(63,224,138,.4); will-change: transform;
+  display: flex; animation: rt-scroll 22s linear infinite;
+}
+/* -50% = exactly one of the two copies, so the loop is seamless and text is always visible. */
+@keyframes rt-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+.rt-viz { width: 100%; height: 40px; display: block; image-rendering: pixelated; }
+.rt-seek {
+  grid-column: 1 / -1; height: 15px; border-radius: 3px; position: relative; cursor: pointer;
+  background: linear-gradient(180deg, #17181b, #232529); box-shadow: inset 0 1px 3px rgba(0,0,0,.7);
+}
+.rt-prog {
+  position: absolute; top: 0; bottom: 0; left: 0; border-radius: 3px; max-width: 100%;
+  background: linear-gradient(180deg, #4a4d53, #2f3136); box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+.rt-knob {
+  position: absolute; top: 50%; width: 28px; height: 13px; transform: translate(-50%, -50%);
+  background: linear-gradient(180deg, #5a5e66, #33363b); border: 1px solid #0d0e10; border-radius: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.15);
+}
+.rt-transport { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; }
+.rt-btn {
+  height: 30px; min-width: 34px; padding: 0 9px; display: grid; place-items: center;
+  font-size: 13px; color: #d6d9dd; border-radius: 3px; cursor: pointer;
+  background: linear-gradient(180deg, #4a4d53, #2f3136);
+  border-top: 1px solid #62666d; border-left: 1px solid #52555b;
+  border-right: 1px solid #0d0e10; border-bottom: 1px solid #0d0e10;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+}
+.rt-btn:active {
+  background: linear-gradient(180deg, #26282c, #34373c);
+  border-top-color: #0d0e10; border-left-color: #0d0e10; box-shadow: inset 0 2px 4px rgba(0,0,0,.5);
+}
+.rt-play.lit { color: var(--rt-lcd); text-shadow: 0 0 6px rgba(63,224,138,.5); }
+/* Fixed width so SHUF and REP are equal AND the button does not resize when REP -> REP1. */
+.rt-tg { font-size: 9px; letter-spacing: .5px; width: 46px; min-width: 0; padding: 0; }
+.rt-tg.lit { color: var(--rt-lcd); text-shadow: 0 0 5px rgba(63,224,138,.5); }
+.rt-sp { flex: 1; }
+@media (prefers-reduced-motion: reduce) { .rt-track { animation: none; } }
+
+/* The docked "Playlist" window under the main player - Winamp's PL editor. A second metal
+   window whose green-LCD list is the up-next queue. The list has its own bounded scroll so
+   the whole retro player never outgrows the viewport (the .retroplayer max-height is generous
+   but the real height is capped here). */
+.rt-plwin {
+  background: linear-gradient(180deg, #2a2c30, #202225);
+  border-top: 1px solid #4a4d53; border-bottom: 1px solid #0d0e10;
+}
+.rt-pltitle {
+  height: 22px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 9px; background: linear-gradient(180deg, #44474d, #2c2e33);
+  border-bottom: 1px solid #0d0e10;
+}
+.rt-plcount { font-size: 8.5px; letter-spacing: 1px; color: var(--rt-dim); text-transform: uppercase; }
+.rt-pl {
+  list-style: none; margin: 0; padding: 4px 0; background: #0b0e0c;
+  max-height: 40vh; overflow-y: auto; overscroll-behavior: contain;
+}
+.rt-pl li {
+  display: flex; align-items: baseline; gap: 8px; padding: 3px 10px; cursor: pointer;
+  font-size: 11px; line-height: 1.5; color: var(--rt-lcd);
+}
+.rt-pl li .rt-pln { color: var(--rt-dim); min-width: 20px; text-align: right; font-variant-numeric: tabular-nums; }
+.rt-pl li .rt-plt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-pl li .rt-pld { color: var(--rt-dim); font-variant-numeric: tabular-nums; }
+.rt-pl li.played .rt-plt, .rt-pl li.played .rt-pln { color: #2a7a52; }
+.rt-pl li.cur { background: #0c2f1e; }
+.rt-pl li.cur .rt-plt, .rt-pl li.cur .rt-pln { color: #8affc0; text-shadow: 0 0 5px rgba(63,224,138,.4); }
+.rt-plempty { justify-content: center; color: var(--rt-dim) !important; font-style: italic; cursor: default !important; }
+
+/* classic "windowshade": the collapsed player as a thin metal strip, full-bleed like the
+   expanded window (higher specificity than .player.mini, whose padding would otherwise win). */
+.retromini { cursor: pointer; }
+.player.mini.retromini { padding: 0; }
+.rm-win {
+  position: relative; display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 9px 0 10px;
+  overflow: hidden; background: linear-gradient(180deg, #3a3d42, #26282c 55%, #1b1c1f);
+  border-top: 1px solid #5a5e66; border-bottom: 1px solid #0d0e10;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.rm-time {
+  flex: none; padding: 2px 6px; font-size: 15px; line-height: 1; font-weight: 700; letter-spacing: 1px;
+  color: var(--rt-lcd); text-shadow: 0 0 5px rgba(63,224,138,.5); font-variant-numeric: tabular-nums;
+  border-radius: 2px;
+}
+.rm-marq { flex: 1; min-width: 0; overflow: hidden; height: 16px; position: relative; }
+.rm-marq .rt-track { font-size: 10.5px; line-height: 16px; animation-duration: 20s; }
+.rm-viz { flex: none; width: 60px; height: 18px; display: block; image-rendering: pixelated; opacity: .95; }
+.rm-pp {
+  flex: none; height: 24px; min-width: 30px; padding: 0 8px; font-size: 12px;
+}
+.rm-prog {
+  position: absolute; left: 0; bottom: 0; height: 2px; max-width: 100%;
+  background: var(--rt-lcd); box-shadow: 0 0 5px rgba(63,224,138,.5);
+}
+
+/* --- classic skin: the Queue as a green "Playlist Editor" window --------- */
+/* The one non-player surface with a real Winamp counterpart (its playlist window). Restyles the
+   existing QueueScreen - every interaction (tap-to-jump, edit, drag-reorder, remove, clear) is
+   unchanged; only the look is green-on-black. Track numbers come from a CSS counter, so no markup
+   change was needed. Kept OFF the album grid / settings on purpose - those have no analog and the
+   green chrome would fight the cover art. */
+.queuescreen.retroq {
+  --rt-lcd: #3fe08a; --rt-dim: #1f6b45; background: #0b0e0c; padding: 0;
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+.retroq .queuehead {
+  background: linear-gradient(180deg, #3a3d42, #26282c 60%, #1b1c1f);
+  border-bottom: 1px solid #0d0e10; padding-top: .6rem; padding-bottom: .5rem;
+}
+.retroq .queuehead h1 {
+  font-size: .82rem; letter-spacing: 3px; text-transform: uppercase; font-weight: 700;
+  color: #c3c7cd; text-shadow: 0 1px 0 rgba(0,0,0,.4);
+}
+.retroq .queuehead .muted { color: var(--rt-dim); }
+/* Retro toolbar buttons in the titlebar: small beveled-metal, like the player's own title
+   buttons, and pulled in from the right edge so the edit button is not jammed against it. */
+.retroq .qacts { right: 9px; top: 7px; gap: 5px; }
+.retroq .qacts button {
+  width: auto; height: 26px; min-width: 30px; padding: 0 7px; border-radius: 3px;
+  background: linear-gradient(180deg, #4c4f55, #303237);
+  border-top: 1px solid #62666d; border-left: 1px solid #52555b;
+  border-right: 1px solid #0d0e10; border-bottom: 1px solid #0d0e10;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.1); color: #cdd0d5;
+}
+.retroq .qacts button.qtrash { color: #e0705f; }
+.retroq .qacts button.qedit.on {
+  background: linear-gradient(180deg, #26282c, #34373c);
+  border-top-color: #0d0e10; border-left-color: #0d0e10;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.5); color: var(--rt-lcd);
+}
+
+.retroq .tracks { counter-reset: qn; background: #0b0e0c; }
+.retroq .tracks > li { counter-increment: qn; }
+.retroq .queuelist li, .retroq .tracks.editing .editrow {
+  border-bottom: 1px solid #10201700; border-top: 1px solid #0e1a13;
+  padding: .5rem 1rem; color: var(--rt-lcd);
+}
+.retroq .queuelist li::before {
+  content: counter(qn) "."; flex: none; width: 2.4em; margin-right: .5rem; text-align: right;
+  color: var(--rt-dim); font-size: .85rem;
+}
+.retroq .queuelist .cover { display: none; }
+.retroq .queuelist li .t, .retroq .editrow .t { color: var(--rt-lcd); font-weight: 400; letter-spacing: .3px; }
+.retroq .queuelist li .sub, .retroq .editrow .sub { color: var(--rt-dim); }
+/* the playing row: Winamp's selection bar */
+.retroq .queuelist li.on { background: #0c2f1e; }
+.retroq .queuelist li.on .t { color: #8affc0; text-shadow: 0 0 5px rgba(63,224,138,.4); }
+.retroq .queuelist li.played .t { color: #2a7a52; }
+.retroq .queuelist .dur { color: var(--rt-dim); font-variant-numeric: tabular-nums; }
+.retroq .queuelist .cur { color: var(--rt-lcd); }
+/* edit mode stays functional, just greened */
+.retroq .tracks.editing .plgrip { color: var(--rt-dim); }
+.retroq .tracks.editing .editrow.lifted { background: #0c2f1e; box-shadow: 0 6px 16px rgba(0,0,0,.6); }
+.retroq .tracks.editing .drophl { background: rgba(63,224,138,.08); border: 1px dashed var(--rt-lcd); }
+.retroq .tracks.editing .rm { color: #e0705f; }
+
+/* --- cards: settings + about --------------------------------------------- */
+.card {
+  background: var(--color-surface-card); border: 1px solid var(--color-border);
+  border-radius: 14px; padding: 1rem; margin-bottom: .75rem;
+}
+.card.tight { padding: 0; overflow: hidden; }
+.card h3 {
+  margin: 0 0 .6rem; font-size: .875rem; font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .7rem 0; border-top: 1px solid var(--color-divider);
+}
+.row:first-of-type { border-top: none; }
+.row .label { font-size: .9rem; }
+/* Not .row .desc: a description also stands alone in a card (the device key's,
+   for one), and scoping it to a row left that one rendering at body size. */
+.desc { color: var(--color-text-muted); font-size: .75rem; margin-top: .15rem; line-height: 1.45; }
+/* An inline text action inside a .desc, for the relay-consent row in Settings (proposal
+   2026-07-29). Same treatment as .problem .plink - underlined, primary, no chrome - because
+   it is a secondary action sitting in a sentence, not a button competing with the row. */
+.desc .linkbtn {
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 500;
+  color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer;
+}
+.row .val {
+  color: var(--color-text-muted); font-size: .8rem; flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+button.danger { color: var(--color-error); border-color: var(--color-border); }
+/* Icon-only Remove on a library row: just the trash glyph in the error colour, no button chrome. */
+.rowremove {
+  flex: none; border: none; background: none; padding: .35rem;
+  color: var(--color-text-muted); display: inline-flex; align-items: center;
+}
+.rowremove:active { color: var(--color-error); }
+/* Both per-library actions (rename, remove) pinned TOGETHER at the right edge. The row is
+   space-between, so with three children the pencil otherwise drifted with the label's width and
+   sat in a different place on every row (Tim, 2026-07-27). */
+.rowacts { display: flex; align-items: center; gap: .15rem; flex: none; margin-left: auto; }
+button.wide { width: 100%; }
+.btnrow { display: flex; gap: .5rem; margin-top: .25rem; }
+.btnrow button { flex: 1; font-size: .875rem; }
+
+/* Owner pair sheet: a scannable QR up top, and Copy / Share with room to breathe. */
+.pairqr { display: flex; justify-content: center; margin: .25rem 0 .75rem; }
+.pairqr img { width: 220px; height: 220px; border-radius: 12px; background: #fff; padding: 10px; }
+.pairbtns { display: flex; gap: .9rem; margin-top: .75rem; }
+.pairbtns button { flex: 1; font-size: .875rem; }
+.pairbtns + .wide { margin-top: .6rem; }
+
+/* Owner walkthrough: a friendly icon badge above the title. */
+.tourbadge { display: flex; justify-content: center; margin: .1rem 0 .5rem; color: var(--color-accent); }
+
+/* The About accordion: rotating caret + a max-height transition, exactly as in
+   PearPetal / PearList / PearCircle. */
+.acc > button {
+  width: 100%; background: none; border: none; padding: .8rem 1rem;
+  display: flex; align-items: center; justify-content: space-between;
+  color: var(--color-text-secondary); font-size: .85rem; font-weight: 400;
+  border-radius: 0;
+}
+.acc .accleft { display: flex; align-items: center; gap: .5rem; }
+.acc .caret { transition: transform .3s; flex: none; color: var(--color-text-muted); }
+.acc .caret.open { transform: rotate(90deg); }
+.acc .body {
+  max-height: 0; overflow: hidden;
+  transition: max-height .35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.acc .body.open { max-height: 640px; }
+.acc .inner {
+  padding: 0 1rem 1rem; display: flex; flex-direction: column; gap: .6rem;
+  color: var(--color-text-secondary); font-size: .875rem; line-height: 1.5;
+}
+/* Settings profile header - always visible at the top: photo + your name + this
+   device's name, like the other apps. Tapping the photo opens the gallery picker. */
+.profile { display: flex; align-items: center; gap: .9rem; margin: .2rem 0 .6rem; }
+.profile-av { position: relative; flex: 0 0 auto; width: 64px; height: 64px; border: none; background: none; padding: 0; cursor: pointer; }
+.profile-av img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: block; }
+.profile-mono { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 26px; font-weight: 700; color: var(--color-text-on-primary); background: var(--color-primary); }
+.profile-cam { position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--color-surface-elevated); border: 1px solid var(--color-border); color: var(--color-text-secondary); }
+.profile-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .4rem; }
+.profile-fields input { margin: 0; }
+.profile-name { font-size: 1.02rem; font-weight: 600; }
+.profile-dev { font-size: .9rem; }
+.profile-save { flex: 0 0 auto; align-self: center; }
+.profile-note { margin: 0 0 .7rem; }
+
+/* Settings sections hold controls (inputs, pickers), not short About blurbs, so
+   they need more room than the 640px About cap. */
+.settings-acc .acc .body.open { max-height: 1000px; }
+
+/* Vertical option picker (streaming quality, cache cap): every choice visible with
+   no horizontal scroll, each a tappable row with a check on the selected one. */
+.optlist { display: flex; flex-direction: column; margin: .1rem 0; }
+.optlist .opt {
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem;
+  width: 100%; text-align: left; background: none; border: none;
+  border-top: 1px solid var(--color-divider); border-radius: 0;
+  padding: .7rem .1rem; color: var(--color-text-primary);
+}
+.optlist .opt:first-child { border-top: 0; }
+.optlist .opt-main { display: flex; flex-direction: column; gap: .12rem; min-width: 0; }
+.optlist .opt-name { color: var(--color-text-primary); font-weight: 500; }
+.optlist .opt.on .opt-name { color: var(--color-primary); }
+.optlist .opt-desc { font-size: .78rem; color: var(--color-text-muted); }
+.optlist .opt svg { color: var(--color-primary); flex: none; }
+.wordmark { text-align: center; margin: .5rem 0 1rem; }
+.wordmark .name { font-size: 1.35rem; font-weight: 600; letter-spacing: -.01em; }
+.wordmark .name .tune { color: var(--color-primary); }
+/* Same two-tone wordmark on the onboarding + pairing screens (Pear white, Tune amber). */
+h1 .tune { color: var(--color-primary); }
+.version { text-align: center; color: var(--color-text-muted); font-size: .8rem;
+           margin-top: .5rem; }
+.key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem;
+  color: var(--color-text-muted); word-break: break-all; line-height: 1.4;
+  background: var(--color-surface-input); border: 1px solid var(--color-border);
+  border-radius: 8px; padding: .6rem; margin-top: .5rem;
+  /* An address is for reading and copying, so let it be selected. Everything else
+     in the app disables selection (it is a touch UI, not a document). */
+  -webkit-user-select: text; user-select: text;
+}
+
+/* --- play / shuffle / queue ----------------------------------------------- */
+.actions { display: flex; gap: .5rem; margin: 0 0 1rem; }
+.actions button {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center;
+  gap: .4rem; font-size: .9rem; padding: .65rem .8rem;
+}
+.actions button.icon.sq {
+  flex: none; width: 3rem; border: 1px solid var(--color-border);
+  background: var(--color-surface-card); color: var(--color-text-primary);
+}
+.sheet .acts { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
+.sheet .acts button {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+}
+/* The armed sleep option, highlighted so you can see what is set at a glance. */
+.sheet .acts button.wide.on {
+  border-color: var(--color-primary); color: var(--color-primary);
+}
+
+/* The queue, made visible. Collapsed, a pill with the count; expanded, the
+   position counter itself is the way in. Both open the same list. */
+button.icon.qpill {
+  flex: none; gap: .25rem; padding: .4rem .6rem; font-size: .78rem; font-weight: 600;
+  border: 1px solid var(--color-border); border-radius: 9999px;
+  background: var(--color-surface-input); color: var(--color-text-secondary);
+}
+button.qbtn {
+  display: inline-flex; align-items: center; gap: .3rem;
+  padding: .1rem .5rem; font-size: .8rem; font-variant-numeric: tabular-nums;
+  background: transparent; border: 1px solid var(--color-border);
+  border-radius: 9999px; color: var(--color-text-muted);
+}
+/* No max-height cap: the list flows in the page and scrolls with it, so tracks pass
+   under the pinned Clear Queue button instead of scrolling inside a half-height box
+   that left a gap above the button. */
+.queuelist { margin-top: .5rem; }
+.queuelist li { padding: .6rem .25rem; }
+/* Already played, still in the list (you can go back to it) - just quieter. */
+.queuelist li.played { opacity: .45; }
+.queuelist li .cur { color: var(--color-primary); flex: none; }
+
+/* A queued album changes nothing you can see or hear - that is the point of it -
+   so it has to say so, or the button reads as broken. */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--dock-h) + 1rem); z-index: 65;
+  background: var(--color-surface-elevated); color: var(--color-text-primary);
+  border: 1px solid var(--color-border); border-radius: 9999px;
+  padding: .6rem 1.1rem; font-size: .85rem; white-space: nowrap;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .4);
+  animation: peartune-rise .22s cubic-bezier(.2, .8, .2, 1);
+}
+@keyframes peartune-rise {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+/* A failure that is worth mentioning and not worth stopping for ("that artist is
+   empty") gets the same pill, tinted - not the red banner that used to be nailed
+   to the top of the screen until something else happened to clear it. */
+.toast.bad {
+  border-color: color-mix(in srgb, var(--color-error) 45%, transparent);
+  background: color-mix(in srgb, var(--color-error) 16%, var(--color-surface-elevated));
+  max-width: calc(100% - 2rem); white-space: normal; text-align: center;
+}
+
+/* --- grouped search results ---------------------------------------------- */
+.sgroup { border-bottom: 1px solid var(--color-divider); }
+button.shead {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  padding: .85rem .25rem; background: none; border: none; border-radius: 0;
+  color: var(--color-text-secondary); font-size: .8rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em;
+}
+button.shead .cnt {
+  display: inline-block; margin-left: .4rem; padding: .05rem .45rem;
+  background: var(--color-surface-elevated); border-radius: 9999px;
+  color: var(--color-text-muted); font-size: .7rem; letter-spacing: 0;
+}
+button.shead .caret { transition: transform .25s; color: var(--color-text-muted); }
+button.shead .caret.open { transform: rotate(90deg); }
+.sbody { padding-bottom: .8rem; }
+
+/* --- artwork, full screen ------------------------------------------------- */
+.artviewer {
+  position: fixed; inset: 0; z-index: 70; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 1rem; padding: 1.5rem;
+  background: rgba(0, 0, 0, .92);
+}
+.artviewer img {
+  max-width: 100%; max-height: 78vh; border-radius: 10px; object-fit: contain;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, .5);
+}
+.artviewer .cap { color: #c3b7a3; text-align: center; } /* over the black art viewer - the dark secondary token */
+.tapart { cursor: pointer; flex: none; }
+
+/* --- pull to refresh ------------------------------------------------------ */
+.ptr {
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+  color: var(--color-text-muted);
+}
+
+/* --- bottom sheet (donation) --------------------------------------------- */
+.sheetwrap {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end;
+  background: rgba(0, 0, 0, .75);
+  /* Backdrop fades in; the sheet itself slides up (below). A gentle, slightly slow
+     ease so a sheet feels like it rises into place rather than snapping open. */
+  animation: pt-backdrop .34s ease both;
+}
+.sheet {
+  width: 100%; max-width: 560px; margin: 0 auto; max-height: 82vh; overflow-y: auto;
+  background: var(--color-surface-card); border-top: 1px solid var(--color-border);
+  border-radius: 20px 20px 0 0;
+  padding: 1.25rem 1rem calc(1.25rem + var(--pear-safe-bottom));
+  animation: pt-sheet-up .46s cubic-bezier(.32, .72, 0, 1) both;
+}
+@keyframes pt-backdrop { from { background: rgba(0, 0, 0, 0); } to { background: rgba(0, 0, 0, .75); } }
+@keyframes pt-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .sheetwrap, .sheet { animation: none; }
+}
+.sheet h1 { font-size: 1.05rem; text-align: center; }
+.sheet > p { text-align: center; margin: .25rem 0 1rem; }
+.sheet h2 { margin: 1.2rem 0 0; }
+
+/* --- music requests: the You > Requests view ------------------------------- */
+.reqview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.reqview li { display: flex; align-items: center; gap: .6rem; padding: .7rem .1rem; border-top: 1px solid var(--color-border); }
+.reqview li:first-child { border-top: 0; }
+.rqv-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.rqv-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rqv-sub { }
+.rq-status { flex: none; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; color: var(--color-text-muted); }
+.rq-status.added { color: var(--color-success); }
+.rq-status.declined { color: var(--color-error); }
+/* A bare icon button, like the queue's remove - no box/border (the default button
+   chrome was drawing that weird container). */
+.rqv-rm { flex: none; background: none; border: 0; padding: .4rem; color: var(--color-text-muted); display: inline-flex; line-height: 0; cursor: pointer; }
+.rqv-rm:active { color: var(--color-error); }
+.rqv-rm:disabled { opacity: .4; }
+
+/* A device's public key on its Manage row: quiet reference data, tap to copy. Mirrors the
+   dashboard's .devkey so the two surfaces print the same thing and can be compared. */
+.mgkey {
+  background: none; border: 0; padding: .1rem 0 0; margin: 0; cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .68rem;
+  color: var(--color-text-muted); opacity: .6; letter-spacing: .01em;
+}
+.mgkey:active { opacity: 1; color: var(--color-text); }
+
+/* Owner maintenance: the You > Manage view (P2). Section headings + the compact resolve
+   buttons for the request queue. */
+/* Manage library picker: chips over the libraries you own, when you own more than one. */
+/* Settings > Library: two actions up top - add a server, or pair as an owner of one you run. */
+.libactions { display: flex; justify-content: center; gap: 2.5rem; margin: .2rem 0 1rem; }
+.libact { display: flex; flex-direction: column; align-items: center; gap: .4rem; background: none; border: 0; color: var(--color-text); cursor: pointer; padding: .3rem .5rem; }
+.libact span { font-size: .8rem; color: var(--color-text-muted); }
+.libact:active { opacity: .6; }
+
+.mglibs { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .8rem; }
+.mglibs button { flex: 0 1 auto; background: none; border: 1px solid var(--color-border); border-radius: 999px; padding: .35rem .8rem; font-size: .82rem; color: var(--color-text-muted); cursor: pointer; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mglibs button.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink, #1a1200); font-weight: 600; }
+
+.mgh { display: flex; align-items: baseline; gap: .4rem; font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); margin: 1rem 0 .1rem; }
+.mgh .cnt { font-size: .78rem; font-weight: 500; text-transform: none; }
+/* Resolve a request: bare icon buttons - a green check to add, a red x to decline. */
+.reqact { flex: none; background: none; border: 0; padding: .2rem; display: inline-flex; line-height: 0; cursor: pointer; }
+.reqact.added { color: var(--color-success); }
+.reqact.declined { color: var(--color-error); }
+.reqact:active { opacity: .6; }
+.ownerdevs { list-style: none; margin: .5rem 0 0; padding: 0; display: flex; flex-direction: column; }
+.ownerdevs li { display: flex; align-items: center; gap: .6rem; padding: .55rem .1rem; border-top: 1px solid var(--color-border); }
+.ownerdevs li:first-child { border-top: 0; }
+.ownerdevs .who { flex: 1; min-width: 0; }
+.ownerdevs .name { display: flex; align-items: center; gap: .4rem; }
+.ownerdevs .name .badge { font-size: .62rem; text-transform: uppercase; letter-spacing: .04em; padding: .08rem .35rem; border-radius: 999px; background: var(--color-surface-input); color: var(--color-text-muted); }
+
+/* --- identity (naming a device, claiming a user) -------------------------- */
+.namebox {
+  width: 100%; max-width: 22rem; text-align: left;
+  background: var(--color-surface-card); border: 1px solid var(--color-border);
+  border-radius: 14px; padding: 1rem;
+}
+.namebox .hint { margin: .4rem 0 0; }
+label.flabel { display: block; margin-top: .6rem; }
+
+.spin { animation: peartune-spin 1s linear infinite; }
+@keyframes peartune-spin { to { transform: rotate(360deg); } }
+/* A spinner sitting INSIDE a run of text (the library subtitle's "· Updating…"). Icons default
+   to baseline alignment, which drops a 12px glyph a couple of pixels low and makes the whole
+   line look like it sagged; centring it on the text box keeps the row flat while it turns. */
+.inline-spin { vertical-align: -0.15em; }
+
+/* --- StepSlider (Tim, 2026-07-29) ------------------------------------------
+   A discrete slider for an ordered setting: tap the track or drag the thumb, and the text
+   underneath names the stop you are on, live. Replaces the vertical radio list for streaming
+   quality and the cache cap, where the choices are a magnitude and reading them as a scale is
+   the point.
+
+   Built on <input type=range>, so the browser owns touch, tap-to-position and keyboard, and
+   all of this is appearance only. */
+.stepslider { margin: .35rem 0 .2rem; position: relative; }
+
+.stepslider input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  display: block; width: 100%; background: transparent;
+  /* The global `input` rule gives every input a bordered, padded, filled box - right for a
+     text field, wrong here: it drew a rounded frame around the track. Undo it explicitly
+     rather than narrowing the global rule, which every text input in the app depends on. */
+  border: 0; padding: 0; border-radius: 0;
+  /* A comfortable touch target: the visible track is 6px but the input is 34px tall, so a
+     thumb-sized finger does not have to be accurate to grab it. */
+  height: 34px; margin: 0; cursor: pointer;
+}
+.stepslider input[type=range]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 3px; background: var(--color-track);
+}
+.stepslider input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--color-primary);
+  border: 3px solid var(--color-surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .45);
+  /* Centre the 24px thumb on the 6px track. */
+  margin-top: -9px;
+}
+.stepslider input[type=range]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-primary); outline-offset: 2px;
+}
+
+/* The stops, so it is obvious this snaps rather than being continuous. Sits under the track,
+   pointer-events off so it never steals a tap from the input above it. */
+/* The stops, so it is obvious this snaps rather than being continuous.
+   POSITIONED, not nudged. This used to ride up with a -22px margin, which put the dots 3px
+   ABOVE the track's centre line: the input is 34px tall and the 6px track is centred in it, so
+   the centre is at 17px, and the old margin landed the 4px dots at 14px. Absolute positioning
+   against the track centre is exact and survives any change to the dot size.
+   The 7px inset is what aligns dot CENTRES with thumb centres: the thumb is 24px, so its centre
+   travels between 12px and width-12px, and with space-between the first dot's left EDGE sits at
+   the padding - so 12 minus the 5px dot radius. */
+.stepslider-ticks {
+  position: absolute; top: 17px; left: 0; right: 0; transform: translateY(-50%);
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0 7px; pointer-events: none;
+}
+/* Deliberately WIDER than the 6px track (Tim, 2026-07-29) so a stop reads as a notch on the
+   bar rather than a speck inside it. */
+.stepslider-ticks span {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--color-text-muted); opacity: .55;
+  /* A ring in the surface colour, so a dot sitting on the track still reads as a separate
+     mark instead of merging into it. */
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+.stepslider-ticks span.on { background: var(--color-primary); opacity: 1; }
+
+.stepslider-read { margin-top: .1rem; display: flex; flex-direction: column; gap: .1rem; }
+.stepslider-name { font-size: .95rem; font-weight: 600; color: var(--color-primary); }
+.stepslider-desc { color: var(--color-text-muted); font-size: .75rem; line-height: 1.45; }
+
+/* Disabled = the Auto toggle is driving. Still readable, clearly not yours to move. */
+.stepslider.off { opacity: .45; }
+.stepslider.off input[type=range] { cursor: default; }
+.stepslider.off .stepslider-name { color: var(--color-text-muted); }
+
+/* --- PearCinema additions over the donor sheet ------------------------------ */
+
+.shellwrap { min-height: 100%; padding-bottom: 4.6rem }
+.center { display: grid; place-items: center; height: 100vh }
+.bad { color: #e66; font-size: .9rem; margin: .4rem 0 }
+
+.pairing { display: flex; flex-direction: column; gap: .9rem; padding: 2.2rem 1.2rem; min-height: 100vh; justify-content: center }
 .pairing h1 { font-size: 1.9rem; letter-spacing: -.02em }
-.pairing h1 span { color: var(--accent) }
-.pairing p { color: var(--muted) }
+.pairing h1 span { color: var(--color-primary) }
+.pairing p { color: var(--color-text-muted) }
 .pairing .hint { font-size: .9rem }
 .pairing textarea {
-  font: inherit; color: var(--fg); background: var(--card);
-  border: 1px solid var(--line); border-radius: 10px; padding: .7rem;
-  min-height: 6.5rem; resize: none; word-break: break-all;
+  min-height: 5.5rem; border-radius: 10px; border: 1px solid var(--color-divider);
+  background: var(--color-surface); color: var(--color-text); padding: .6rem .7rem; font: inherit;
 }
 
-/* --- shell ------------------------------------------------------------------ */
-.shell { min-height: 100% ; padding-bottom: 2rem }
-.top {
-  display: flex; align-items: baseline; gap: .7rem; padding: .9rem 1rem .4rem;
-  position: sticky; top: 0; z-index: 5;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(8px);
+.tracks { list-style: none; margin: .4rem 0 0; padding: 0 }
+.track {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .65rem 0; border-top: 1px solid var(--color-divider);
 }
-.brand { font-weight: 650; font-size: 1.1rem }
-.brand b { color: var(--accent) }
-.lib { color: var(--muted); font-size: .85rem; margin-left: auto }
+.track:first-child { border-top: none }
+.track .meta { min-width: 0 }
+.track .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 
-.tabs { display: flex; gap: .5rem; padding: .5rem 1rem }
-.tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line) }
-.tabs button.on { background: var(--card); color: var(--fg) }
+.cover { aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--color-surface); display: grid; place-items: center }
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block }
+.cover .blank { color: var(--color-text-muted); font-weight: 700; font-size: 1.3rem; text-transform: uppercase }
+.album .t { font-size: .82rem; line-height: 1.25; margin-top: .35rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical }
+.album .sub { font-size: .72rem; color: var(--color-text-muted) }
 
-.crumbs { display: flex; align-items: center; gap: .6rem; padding: .5rem 1rem; color: var(--muted) }
-
-/* --- the grid --------------------------------------------------------------- */
-.grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
-  gap: .7rem; padding: .6rem 1rem;
+.sgroup { margin: 1.1rem 0 }
+.sgroup h3 { font-size: .95rem; margin-bottom: .5rem }
+.sgroup .card > button, .about .card > button, .about .card .linkbtn {
+  display: flex; align-items: center; gap: .55rem; width: 100%; text-align: left; margin-top: .5rem;
 }
-.poster { display: flex; flex-direction: column; gap: .25rem }
-.poster img, .poster .noart {
-  width: 100%; aspect-ratio: 2 / 3; object-fit: cover;
-  border-radius: 10px; border: 1px solid var(--line); background: var(--card);
-}
-.poster .noart {
-  display: grid; place-items: center; color: var(--muted);
-  font-size: 1.4rem; font-weight: 700;
-}
-.poster .t { font-size: .8rem; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical }
-.poster .s { font-size: .72rem; color: var(--muted) }
-.more { display: block; margin: .8rem auto; background: var(--card); color: var(--fg) }
+.rowacts { display: flex; gap: .4rem }
+.btnrow { display: flex; gap: .6rem }
+.btnrow button { flex: 1 }
 
-/* --- the player ------------------------------------------------------------- */
-.player { display: flex; flex-direction: column; height: 100%; background: #000 }
-.player .bar { display: flex; align-items: center; gap: .7rem; padding: .6rem .8rem }
-.player .bar .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
-.player video { flex: 1; width: 100%; min-height: 0; background: #000 }
+.resumeover { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); z-index: 60 }
+.resumeover .card { width: min(85vw, 340px); display: flex; flex-direction: column; gap: .9rem }
 
-/* The camera over a pairing QR. The video fills the screen; the overlay holds
-   the one sentence and the way out. */
-.scanner { position: relative; height: 100%; background: #000 }
-.scanner video { width: 100%; height: 100%; object-fit: cover }
-.scanner .overlay {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: flex-end; gap: .8rem; padding: 2rem;
-  background: linear-gradient(transparent 60%, rgba(0,0,0,.75));
-}
-.scanner .overlay p { color: #fff; text-shadow: 0 1px 4px #000 }
-
-/* The library list: one row per paired host. */
-.hosts { display: flex; flex-direction: column; gap: .6rem; padding: 0 1rem 2rem }
-.hostrow {
-  display: flex; align-items: center; gap: .6rem;
-  background: var(--card); border: 1px solid var(--line);
-  border-radius: 10px; padding: .7rem .9rem;
-}
-.hostrow .meta { display: flex; flex-direction: column; gap: .15rem; margin-right: auto; min-width: 0 }
-.hostrow .name { font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
-.hostrow .on { font-size: .75rem; color: var(--accent) }
-.hostrow .danger { background: #5c2320; color: #f2d9d7; border: 1px solid #7a2f2b }
-
-/* Pick up where you left off - a question over the library, answered in a tap. */
-.resumeover { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55); z-index: 30 }
-.resumeover .card {
-  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
-  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .9rem;
-  width: min(85vw, 340px);
-}
-.resumeover .row { display: flex; gap: .6rem }
-.resumeover .row button { flex: 1 }
+.about .wordmark { font-size: 1.7rem; font-weight: 750 }
+.about .wordmark span { color: var(--color-primary) }
