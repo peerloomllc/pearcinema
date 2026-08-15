@@ -15,7 +15,7 @@ import {
   FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play,
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
-  Lightning, Coffee, EnvelopeOpen, CaretRight
+  Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal
 } from '@phosphor-icons/react'
 import { call, on } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -170,9 +170,9 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave }) {
   )
 }
 
-function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave }) {
+function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2 }) {
   return (
-    <div className='grid' style={{ '--cols': 2 }}>
+    <div className='grid' style={{ '--cols': cols }}>
       {items.map((i) => (
         <Tile
           key={i.id} item={i} artBase={artBase}
@@ -327,6 +327,22 @@ export default function App () {
   const [season, setSeason] = useState(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
+  // The donor's display options: how the shelf is sorted and how dense the
+  // grid is. Persisted in the worklet's settings so they survive a restart.
+  const [sortKey, setSortKey] = useState('title-asc')
+  const [cols, setCols] = useState(2)
+  const [showDisplay, setShowDisplay] = useState(false)
+  const SORT_PARAM = {
+    'title-asc': { sort: 'title', order: 'asc' },
+    'title-desc': { sort: 'title', order: 'desc' },
+    'year-desc': { sort: 'year', order: 'desc' },
+    'year-asc': { sort: 'year', order: 'asc' }
+  }
+  const setDisplay = (patch) => {
+    if (patch.sortKey) setSortKey(patch.sortKey)
+    if (patch.cols) setCols(patch.cols)
+    call('setSettings', { sortKey: patch.sortKey ?? sortKey, cols: patch.cols ?? cols }).catch(() => {})
+  }
 
   // Cross-tab data.
   const [artBase, setArtBase] = useState('')
@@ -425,6 +441,7 @@ export default function App () {
     window.__pearBack = () => {
       const u = uiRef.current
       if (u.sheet) return setSheet(null)
+      if (u.showDisplay) return setShowDisplay(false)
       if (u.resumeOffer) return setResumeOffer(null)
       if (u.addingLibrary) return setAddingLibrary(false)
       if (u.season) return setSeason(null)
@@ -435,7 +452,7 @@ export default function App () {
     return () => { offs.forEach((f) => f()); offTheme() }
   }, [])
 
-  uiRef.current = { sheet: !!sheet, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
+  uiRef.current = { sheet: !!sheet, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
 
   // --- library data ---------------------------------------------------------
 
@@ -453,8 +470,16 @@ export default function App () {
     setItems([]); setCursor(null)
     if (season) fetchList({ type: 'episodes', seasonId: season.id, limit: 200 })
     else if (series) fetchList({ type: 'seasons', seriesId: series.id, limit: 100 })
-    else fetchList({ type: root, limit: 100 })
-  }, [state?.active?.hostKey, root, series?.id, season?.id])
+    else fetchList({ type: root, limit: 100, ...SORT_PARAM[sortKey] })
+  }, [state?.active?.hostKey, root, series?.id, season?.id, sortKey])
+
+  // The saved display prefs, once the worklet answers.
+  useEffect(() => {
+    call('getSettings').then((s) => {
+      if (s?.sortKey && SORT_PARAM[s.sortKey]) setSortKey(s.sortKey)
+      if ([2, 3, 4].includes(s?.cols)) setCols(s.cols)
+    }).catch(() => {})
+  }, [])
 
   // Search rides the library tab from anywhere in it, the donor's rule.
   useEffect(() => {
@@ -575,6 +600,9 @@ export default function App () {
               <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
               <button className={root === 'series' ? 'on' : ''} onClick={() => setRoot('series')}>Shows</button>
             </div>
+            <button className='ghost' aria-label='Sort and layout' onClick={() => setShowDisplay(true)}>
+              <SlidersHorizontal size={18} />
+            </button>
           </div>
         </div>
       )}
@@ -589,7 +617,7 @@ export default function App () {
 
       {results
         ? (results.length
-            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} />
+            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} />
             : <p className='muted center-p'>Nothing matches "{query}".</p>)
         : season
           ? (
@@ -603,7 +631,7 @@ export default function App () {
               ))}
             </ul>
             )
-          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} />}
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} />}
 
       {!results && cursor && (
         <button
@@ -629,7 +657,7 @@ export default function App () {
               <p className='sm'>Hold a film, or tap the bookmark on its poster, to put it here.</p>
             </div>
             )
-          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} />}
+          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} />}
     </div>
   )
 
@@ -957,6 +985,26 @@ export default function App () {
               <button onClick={() => { const r = resumeOffer; setResumeOffer(null); play(r.item, r.url, r.positionMs) }}>Resume</button>
               <button className='ghost' onClick={() => { const r = resumeOffer; setResumeOffer(null); play(r.item, r.url, 0) }}>Start Over</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {showDisplay && (
+        <div className='sheetwrap' onClick={() => setShowDisplay(false)}>
+          <div className='sheet' onClick={(e) => e.stopPropagation()}>
+            <h3>Sort</h3>
+            <div className='optlist'>
+              {[['title-asc', 'Title, A to Z'], ['title-desc', 'Title, Z to A'], ['year-desc', 'Year, newest first'], ['year-asc', 'Year, oldest first']].map(([k, label]) => (
+                <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setDisplay({ sortKey: k })}>{label}</button>
+              ))}
+            </div>
+            <h3>Layout</h3>
+            <div className='optlist'>
+              {[[2, 'Comfortable'], [3, 'Compact'], [4, 'Dense']].map(([n, label]) => (
+                <button key={n} className={cols === n ? 'on' : ''} onClick={() => setDisplay({ cols: n })}>{label}</button>
+              ))}
+            </div>
+            <button className='ghost' onClick={() => setShowDisplay(false)}>Done</button>
           </div>
         </div>
       )}
