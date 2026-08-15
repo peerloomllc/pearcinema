@@ -16,7 +16,7 @@ import {
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
-  ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code
+  ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile
 } from '@phosphor-icons/react'
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -414,22 +414,46 @@ function Scanner ({ onScan, onCancel }) {
   )
 }
 
-function Pairing ({ onPaired, initialLink = '', onCancel = null }) {
-  const [link, setLink] = useState(initialLink)
-  const [busy, setBusy] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [err, setErr] = useState('')
+// The donor's onboarding: intro -> who are you -> whose library -> pair.
+// PearCinema's one divergence is honest: there is no demo library, so the
+// whose-card offers the two real answers. The names card feeds identity.set
+// the moment pairing succeeds, so the operator's dashboard knows whose phone
+// arrived without a second trip through Settings.
+// The typed names survive OUTSIDE the component, the donor's rule: a pairing
+// link makes the router remount everything (the pendingPairLink scar), and
+// what somebody typed must not be eaten by the machinery mid-flow.
+let obNames = { userName: '', deviceName: '' }
 
-  useEffect(() => {
-    if (initialLink) setLink((cur) => cur || initialLink)
-  }, [initialLink])
+function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = null }) {
+  const [phase, setPhase] = useState(addHost ? 'pair' : 'intro')
+  const [names, setNamesState] = useState(obNames)
+  const setNames = (n) => { obNames = n; setNamesState(n) }
+  const [owner, setOwner] = useState(null)
+  const [link, setLink] = useState(initialLink)
+  const [scanning, setScanning] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const pendingLink = initialLink
+
+  const named = names.userName.trim().length > 0
+  const ready = (addHost || named) && !busy
+
+  const Wordmark = () => <h1>Pear<span className='tune'>Cinema</span></h1>
 
   const pairWith = async (raw) => {
-    setBusy(true); setErr('')
+    setBusy(true); setError('')
     try {
-      const out = await call('pair', { link: String(raw || '').trim(), label: 'phone' })
+      const out = await call('pair', { link: String(raw || '').trim(), label: names.deviceName.trim() || 'phone' })
+      // The claim rides straight after the grant, so the dashboard's device
+      // list names this phone from its first appearance.
+      if (names.userName.trim() || names.deviceName.trim()) {
+        call('identity.set', {
+          userName: names.userName.trim() || undefined,
+          deviceName: names.deviceName.trim() || undefined
+        }).catch(() => {})
+      }
       onPaired(out)
-    } catch (e) { setErr(e.message) }
+    } catch (e) { setError(e.message) }
     setBusy(false)
   }
 
@@ -442,16 +466,128 @@ function Pairing ({ onPaired, initialLink = '', onCancel = null }) {
     return <Scanner onScan={(t) => { setScanning(false); setLink(t); pairWith(t) }} onCancel={() => setScanning(false)} />
   }
 
+  if (phase === 'intro') {
+    return (
+      <div className='center onboard'>
+        <Wordmark />
+        <p className='muted'>Your films, or a friend's. Anywhere.</p>
+        <div className='namebox obwhy'>
+          <div><FilmStrip size={18} weight='bold' /><span>Plays straight off a computer you or a friend owns - an Umbrel, a NAS, an old desktop.</span></div>
+          <div><LockKey size={18} weight='bold' /><span>No account, no cloud copy of the files, and nothing on that machine exposed to the internet.</span></div>
+          <div><DeviceMobile size={18} weight='bold' /><span>Scan a code once and this phone is allowed in. Whoever runs the library can cut it off any time.</span></div>
+        </div>
+        <button className='primary' onClick={() => setPhase('names')}>Get started</button>
+      </div>
+    )
+  }
+
+  if (phase === 'names') {
+    return (
+      <div className='center onboard'>
+        <Wordmark />
+        <p className='muted'>Who is this?</p>
+        <div className='namebox'>
+          <label className='muted sm'>Your name</label>
+          <input
+            value={names.userName}
+            onInput={(e) => setNames({ ...names, userName: e.currentTarget.value })}
+            placeholder='Your name' maxLength={64}
+          />
+          <label className='muted sm'>This device</label>
+          <input
+            value={names.deviceName}
+            onInput={(e) => setNames({ ...names, deviceName: e.currentTarget.value })}
+            placeholder='This phone' maxLength={64}
+          />
+          <p className='muted sm hint'>
+            Whoever runs the library sees these, so they know whose device this is.
+            They confirm your name before it means anything.
+          </p>
+        </div>
+        {pendingLink && (
+          <p className='muted sm'>You opened a pairing link. Name yourself and this phone, then tap Pair.</p>
+        )}
+        {error && <div className='error'>{error}</div>}
+        <button
+          className='primary'
+          onClick={() => { if (pendingLink) pairWith(pendingLink); else setPhase('whose') }}
+          disabled={!ready}
+        >
+          {busy ? 'Pairing…' : pendingLink ? 'Pair' : 'Continue'}
+        </button>
+        <button onClick={() => setPhase('intro')}>Back</button>
+      </div>
+    )
+  }
+
+  if (phase === 'whose') {
+    return (
+      <div className='center onboard'>
+        <Wordmark />
+        <p className='muted'>PearCinema plays from a <b>PearCinema server</b>: a computer with the films on it, running the PearCinema host.</p>
+        {!owner
+          ? (
+            <>
+              <button className='primary' onClick={() => setOwner('mine')}>It's mine</button>
+              <button onClick={() => setOwner('friend')}>It's a friend's</button>
+            </>
+            )
+          : (
+            <>
+              <div className='namebox'>
+                {owner === 'mine'
+                  ? <p className='sm'>
+                      Install the PearCinema host on that computer and open its dashboard - it walks you
+                      through naming the library, pointing it at your films and showing a pairing code.
+                      Then come back here and scan it - or copy the pairing link under the code and paste
+                      it instead, at the pairing step.
+                    </p>
+                  : <p className='sm'>
+                      Ask them to open their PearCinema dashboard and press <b>Pair a device</b>. If you are
+                      with them, scan the QR code it shows. If you are not, they can copy the pairing link
+                      underneath it and send it to you - you can paste that instead of scanning, at the
+                      pairing step. Either way it lasts five minutes, and you do not have to be on their
+                      wifi.
+                    </p>}
+              </div>
+              {owner === 'mine' &&
+                <button onClick={() => openUrl('https://peerloomllc.com/')}>How to set up a server ↗</button>}
+              <button className='primary' onClick={() => setPhase('pair')}>Continue</button>
+              <button onClick={() => setOwner(null)}>Back</button>
+            </>
+            )}
+        {!owner && <button onClick={() => setPhase('names')}>Back</button>}
+      </div>
+    )
+  }
+
   return (
-    <div className='pairing'>
-      <h1>Pear<span>Cinema</span></h1>
-      <p>Your films, from your own machine, anywhere - no port forwarding, no VPN, no account.</p>
-      <p className='hint'>On your library's dashboard press <b>Pair a device</b>, then scan the QR it shows - or paste the link it carries here.</p>
-      <button onClick={scan}><QrCode size={18} /> Scan the code</button>
-      <textarea placeholder='pear://pearcinema/pair?...' value={link} onInput={(e) => setLink(e.currentTarget.value)} />
-      {err && <div className='bad'>{err}</div>}
-      <button disabled={busy || !link.trim()} onClick={() => pairWith(link)}>{busy ? 'Pairing…' : 'Pair with this library'}</button>
-      {onCancel && <button className='ghost' onClick={onCancel}>‹ Back</button>}
+    <div className='center onboard'>
+      <Wordmark />
+      <p className='muted'>
+        {addHost
+          ? 'Open the PearCinema dashboard on the server you want to add - yours or a friend\'s - and show its pairing code.'
+          : owner === 'friend'
+            ? 'Scan the pairing code from their dashboard - or paste the link they sent you.'
+            : 'Show the pairing code on the server\'s dashboard and scan it - or paste the link under it.'}
+      </p>
+      {error && <div className='error'>{error}</div>}
+
+      <button className='primary scanbtn' onClick={scan} disabled={!ready}>
+        <QrCode size={20} weight='bold' /> Scan QR
+      </button>
+      <details>
+        <summary className='muted sm'>Paste a link instead</summary>
+        <input
+          value={link}
+          onInput={(e) => setLink(e.currentTarget.value)}
+          placeholder='pear://pearcinema/pair?…'
+          autocapitalize='none' autocorrect='off' autocomplete='off' spellcheck={false}
+        />
+        <button onClick={() => pairWith(link.trim())} disabled={!ready || !link.trim()}>{busy ? 'Pairing…' : 'Pair'}</button>
+      </details>
+      {!addHost && <button onClick={() => setPhase('names')}>Back</button>}
+      {onCancel && <button onClick={onCancel}>Cancel</button>}
     </div>
   )
 }
@@ -749,12 +885,12 @@ export default function App () {
   const longPress = (i) => setSheet(i)
 
   if (!state) return <div className='center'><p className='muted'>Starting…</p></div>
-  if (!state.active) return <Pairing initialLink={pairLink} onPaired={() => reload()} />
+  if (!state.active) return <Onboarding initialLink={pairLink} onPaired={() => reload()} />
 
   if (addingLibrary) {
     return (
-      <Pairing
-        initialLink={pairLink}
+      <Onboarding
+        initialLink={pairLink} addHost
         onPaired={() => { setAddingLibrary(false); setPairLink(''); setSeries(null); setSeason(null); reload() }}
         onCancel={() => { setAddingLibrary(false); setPairLink('') }}
       />
