@@ -236,6 +236,7 @@ class JellyfinAdapter {
       runtime: this._seconds(item.RunTimeTicks),
       overview: item.Overview,
       genres: item.Genres,
+      addedAt: Date.parse(item.DateCreated) || null,
       artId: this._artId(item),
       media: this._media(item)
     })

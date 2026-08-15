@@ -44,6 +44,7 @@
   "dependencies": {
     "@peerloom/client": "file:../peerloom-client",
     "@peerloom/host": "file:../peerloom-host",
+    "@phosphor-icons/react": "^2.1.10",
     "b4a": "^1.6.7",
     "bare-fs": "^4.7.4",
     "bare-http1": "^4.5.7",

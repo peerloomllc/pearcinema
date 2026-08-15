@@ -134,8 +134,16 @@ async function probeFile (file, { ffprobe = 'ffprobe', timeoutMs = 30_000 } = {}
   // lie in every table downstream.
   if (!video) return null
 
+  // When the file ARRIVED, for the recently-added shelf and sort. The file's
+  // mtime, statted here because the ffprobe beside it dwarfs a stat - and NOT
+  // in the walk, whose one-readdir-per-directory rule exists to avoid exactly
+  // this kind of per-file touch where nothing expensive already happens.
+  let addedAt = null
+  try { addedAt = Math.round((await fsp.stat(file)).mtimeMs) } catch {}
+
   return {
     file,
+    addedAt,
     // ffprobe reports a comma-separated family ("matroska,webm", "mov,mp4,m4a,3gp,3g2,mj2").
     // The FIRST is the one that matters for playback compatibility.
     container: String(parsed.format?.format_name || '').split(',')[0] || null,

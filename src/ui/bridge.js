@@ -36,3 +36,10 @@ export function on (name, fn) {
     if (i >= 0) arr.splice(i, 1)
   }
 }
+
+// Fire-and-forget haptics, the donor's kinds: light (default), medium,
+// success, warn. The shell answers with expo-haptics; a shell that cannot
+// simply ignores it.
+export function haptic (kind = 'light') {
+  call('shell.haptic', { kind }).catch(() => {})
+}

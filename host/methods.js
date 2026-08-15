@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -273,6 +273,97 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return { items: [...await state.watchedSet(ctx.owner)] }
     },
 
+    // --- the watchlist ----------------------------------------------------
+    //
+    // Rides the inherited favourites store with the video kind vocabulary.
+    // Per PERSON via ctx.owner, same as watch state - a watchlist is the same
+    // claim: your phone and the dashboard agree on what you saved.
+
+    'fav.set': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { kind, id, on } = ctx.params
+      if (!['movie', 'episode', 'series', 'season'].includes(kind)) throw ctx.badParams('bad kind')
+      if (!id) throw ctx.badParams('id required')
+      await state.setFav(ctx.owner, String(kind), String(id), !!on)
+      return { ok: true, on: !!on }
+    },
+
+    // Resolved to ITEMS, not ids - the same rule resume.list follows: a client
+    // rendering a shelf needs titles and artwork, and a saved id whose item has
+    // left the library is dropped rather than sent as a card that cannot open.
+    'fav.list': async (ctx) => {
+      if (!state) return { items: [] }
+      const byKind = await state.listFavs(ctx.owner)
+      const adapter = getAdapter()
+      const out = []
+      for (const [kind, ids] of Object.entries(byKind)) {
+        for (const id of ids) {
+          const item = await adapter.get({ id })
+          if (item) out.push({ ...item, kind })
+        }
+      }
+      return { items: out }
+    },
+
+    // --- asking for what is not there --------------------------------------
+
+    'request.add': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { kind, name } = ctx.params
+      if (!['movie', 'series'].includes(kind)) throw ctx.badParams('bad kind')
+      return { request: await state.addRequest(ctx.owner, { kind, name }) }
+    },
+
+    'request.list': async (ctx) => {
+      if (!state) return { items: [] }
+      return { items: await state.listRequests({ requester: ctx.owner }) }
+    },
+
+    'request.remove': async (ctx) => {
+      if (!state) throw ctx.notFound('no user state on this host')
+      const row = await state.getRequest(String(ctx.params.id || ''))
+      // Only your own ask - the id is not a capability.
+      if (!row || row.requester !== ctx.owner) throw ctx.notFound('no such request')
+      await state.deleteRequest(row.id)
+      return { ok: true }
+    },
+
+    // --- the owner's view (scope-gated, never parameter-gated) --------------
+
+    'request.all': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!state) return { items: [] }
+      return { items: await state.listRequests() }
+    },
+
+    'request.resolve': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!state) throw ctx.notFound('no user state on this host')
+      const { id, status } = ctx.params
+      if (!['added', 'declined'].includes(status)) throw ctx.badParams('bad status')
+      const row = await state.resolveRequest(String(id || ''), status)
+      if (!row) throw ctx.notFound('no such request')
+      return { request: row }
+    },
+
+    'device.list': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!grants) return { items: [] }
+      const rows = await grants.list()
+      const labels = await grants.personLabels().catch(() => null)
+      return {
+        items: rows.map((r) => ({
+          deviceKey: r.deviceKey,
+          label: r.label || null,
+          platform: r.platform || null,
+          belongsTo: r.personId ? (labels?.get(r.personId) || null) : null,
+          grantedAt: r.grantedAt || null,
+          expiresAt: r.expiresAt ?? null,
+          self: r.deviceKey === ctx.deviceKey
+        }))
+      }
+    },
+
     // --- identity ---------------------------------------------------------
     //
     // THE CALLER IS THE CONNECTION. What a device may read here is fixed by the
@@ -296,6 +387,47 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       try { await leave(ctx.deviceKey) } catch {}
     },
 
+    // A device claiming who it belongs to and what it calls itself. The claim
+    // GRANTS NOTHING - the package's setClaim leaves personId untouched, and
+    // only the dashboard's confirm flow can move a device to a person. The
+    // deviceKey is the connection's own Noise-proven key; nothing to forge.
+    // An owner cutting another device off, from the phone - the same teeth as
+    // the dashboard's revoke, because it IS the dashboard's revoke. Owner scope
+    // comes off the connection's grant, never a parameter; a device cannot
+    // revoke ITSELF this way (that is what device.leave is for, and the reply
+    // sequencing there exists precisely because the connection dies).
+    'device.revoke': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!revoke) throw ctx.notFound('this host cannot revoke over the wire')
+      const target = String(ctx.params.deviceKey || '')
+      if (!target) throw ctx.badParams('deviceKey required')
+      if (target === ctx.deviceKey) throw ctx.badParams('use device.leave for this device')
+      const out = await revoke(target)
+      return { ok: true, killed: out?.killed ?? 0 }
+    },
+
+    'identity.set': async (ctx) => {
+      if (!grants?.setClaim) throw ctx.notFound('this host cannot record claims yet')
+      const { userName, deviceName } = ctx.params
+      const row = await grants.setClaim(ctx.deviceKey, {
+        claimedUser: userName !== undefined ? String(userName || '') : undefined,
+        label: deviceName !== undefined ? String(deviceName || '') : undefined
+      })
+      if (!row) throw ctx.notFound('no live grant for this device')
+      return { ok: true, claimedUser: row.claimedUser, deviceName: row.label }
+    },
+
+    // This device's own photo, stored host-side so the dashboard can show it
+    // and a re-install gets it back. ~25 KB compressed by the phone; capped
+    // hard here because a "photo" is client input like any other.
+    'avatar.set': async (ctx) => {
+      if (!avatars) throw ctx.notFound('this host does not keep photos')
+      const b64 = ctx.params.avatar ? String(ctx.params.avatar) : null
+      if (b64 && b64.length > 120_000) throw ctx.badParams('photo too large')
+      avatars.set(ctx.deviceKey, b64)
+      return { ok: true }
+    },
+
     'identity.get': async (ctx) => {
       // RE-READ the row rather than answering off `ctx.grant`. That grant was
       // captured once, when the firewall admitted this connection, so answering
@@ -308,6 +440,18 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       const labels = person && grants ? await grants.personLabels() : null
 
       return {
+        // What this device CLAIMED, and whether the operator has confirmed it
+        // (a claim with a person assigned reads as confirmed; the phone words
+        // the in-between honestly). The photo comes back so a re-install shows
+        // your face again.
+        userName: row.claimedUser || null,
+        // Confirmed means the operator confirmed THE CLAIM - the assigned
+        // person carries the claimed name - not merely that the device is
+        // assigned to somebody. A device already filed under Me that claims
+        // to be Timothy is PENDING, and saying "confirmed" there told the
+        // person the exact opposite of the truth (caught live on the TCL).
+        confirmed: !!(row.claimedUser && person && person.name === row.claimedUser),
+        avatar: avatars ? avatars.get(ctx.deviceKey) : null,
         deviceName: row.label || null,
         // Disambiguated where two people share a name, so "belongs to Sam" on the
         // phone names the SAME Sam the dashboard's revoke button does.

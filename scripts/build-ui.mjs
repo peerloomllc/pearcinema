@@ -21,6 +21,9 @@ await build({
   format: 'iife',
   jsx: 'automatic',
   jsxImportSource: 'preact',
+  // The donor UI's dependencies (@phosphor-icons/react) import react; preact
+  // answers, exactly as the donor's own build does it the other way around.
+  alias: { react: 'preact/compat', 'react-dom': 'preact/compat' },
   define: { 'process.env.NODE_ENV': '"production"' },
   outfile: TMP_JS,
   legalComments: 'none',
