@@ -34,6 +34,13 @@ const openUrl = (url) => { call('shell.openUrl', { url }).catch(() => {}) }
 const copyText = (text) => call('shell.clipboard', { text }).catch(() => {})
 const SHARE_TEXT = 'PearCinema - your films and TV, from your own machine or a friend\'s, playable anywhere. No port forwarding, no VPN, no account.\n\nhttps://peerloomllc.com/'
 
+const fmtBytes = (n) => {
+  const x = Number(n) || 0
+  if (x >= 1e9) return (x / 1e9).toFixed(1) + ' GB'
+  if (x >= 1e6) return Math.round(x / 1e6) + ' MB'
+  return Math.round(x / 1e3) + ' KB'
+}
+
 const fmtRuntime = (s) => {
   const n = Number(s) || 0
   if (!n) return ''
@@ -339,7 +346,7 @@ function ItemRow ({ item, sub, onOpen, onLong, right = null }) {
   )
 }
 
-function ActionSheet ({ item, saved, watched, onClose, onPlay, onSave, onWatched }) {
+function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSave, onWatched, onDownload }) {
   const playable = item.type === 'movie' || item.type === 'episode'
   return (
     <div className='sheetwrap' onClick={onClose}>
@@ -353,6 +360,11 @@ function ActionSheet ({ item, saved, watched, onClose, onPlay, onSave, onWatched
           <button onClick={() => { onClose(); onWatched(item, !watched) }}>
             <CheckCircle size={18} /> {watched ? 'Mark unwatched' : 'Mark watched'}
           </button>
+          {playable && (
+            <button onClick={() => { onClose(); onDownload(item, !downloaded) }}>
+              <DownloadSimple size={18} /> {downloaded ? 'Remove download' : 'Download'}
+            </button>
+          )}
           <button className='ghost' onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -638,6 +650,9 @@ export default function App () {
   const [requests, setRequests] = useState(null)
   const [allRequests, setAllRequests] = useState(null)
   const [devices, setDevices] = useState(null)
+  const [dlRows, setDlRows] = useState(null)
+  const [dlRunning, setDlRunning] = useState([])
+  const [dlIds, setDlIds] = useState(new Set())
   // The armed two-tap revoke, the same pattern Leave uses - a WebView's
   // confirm() is at the shell's mercy.
   const [arming, setArming] = useState(null)
@@ -705,6 +720,23 @@ export default function App () {
       on('hosts:changed', () => reload().catch(() => {})),
       on('host:connected', () => setLinkUp(true)),
       on('host:disconnected', () => setLinkUp(false)),
+      on('download:progress', (d) => {
+        setDlRunning((rows) => {
+          const rest = rows.filter((r) => r.itemId !== d.itemId)
+          return [...rest, d]
+        })
+      }),
+      on('download:done', (d) => {
+        setDlRunning((rows) => rows.filter((r) => r.itemId !== d.itemId))
+        say('Downloaded - plays with no connection now')
+        loadYou('downloads')
+      }),
+      on('download:failed', (d) => {
+        setDlRunning((rows) => rows.filter((r) => r.itemId !== d.itemId))
+        if (d?.reason !== 'cancelled') setErr('Download failed: ' + (d?.reason || 'unknown'))
+        loadYou('downloads')
+      }),
+      on('download:removed', () => loadYou('downloads')),
       on('shim:ready', () => reload().catch(() => {})),
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
@@ -833,6 +865,16 @@ export default function App () {
         setWatchedRows(rows.filter(Boolean))
       }
       if (view === 'requests') setRequests((await call('request.list')).items || [])
+      if (view === 'downloads') {
+        const out = await call('download.list')
+        setDlRunning(out.running || [])
+        setDlIds(new Set((out.items || []).map((i) => i.itemId)))
+        const rows = await Promise.all((out.items || []).map(async (i) => {
+          const item = await call('library.get', { id: i.itemId }).catch(() => null)
+          return item ? { ...item, _dlSize: i.size } : { id: i.itemId, title: 'A removed title', _dlSize: i.size }
+        }))
+        setDlRows(rows)
+      }
       if (view === 'manage') {
         setDevices((await call('device.list')).items || [])
         setAllRequests((await call('request.all')).items || [])
@@ -1100,10 +1142,42 @@ export default function App () {
       )}
 
       {youView === 'downloads' && (
-        <div className='center-p muted'>
-          <p>Downloads are on their way.</p>
-          <p className='sm'>Films you save for offline will live here - the storage side exists, the saving side is next.</p>
-        </div>
+        <>
+          {dlRunning.length > 0 && (
+            <ul className='tracks'>
+              {dlRunning.map((r) => (
+                <li className='track' key={r.itemId}>
+                  <div className='meta' style={{ flex: 1 }}>
+                    <div className='t'>Downloading…</div>
+                    <div className='sub muted sm'>{fmtBytes(r.got)} of {fmtBytes(r.size)}</div>
+                    <div className='bar'><div className='fill' style={{ width: `${Math.min(100, Math.round((r.got / (r.size || 1)) * 100))}%` }} /></div>
+                  </div>
+                  <button className='ghost' onClick={() => call('download.cancel', { itemId: r.itemId })}>Cancel</button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {dlRows == null
+            ? <SkeletonRows />
+            : dlRows.length === 0 && dlRunning.length === 0
+              ? (
+                <div className='center-p muted'>
+                  <p>Nothing saved for offline.</p>
+                  <p className='sm'>Hold a film and choose Download - it plays with no connection once it is here.</p>
+                </div>
+                )
+              : (
+                <ul className='tracks'>
+                  {dlRows.map((r) => (
+                    <ItemRow
+                      key={r.id} item={r} onOpen={open} onLong={longPress}
+                      sub={`${fmtBytes(r._dlSize)} on this phone`}
+                      right={<button className='ghost' onClick={(e) => { e.stopPropagation(); call('download.remove', { itemId: r.id }) }}><Trash size={16} /></button>}
+                    />
+                  ))}
+                </ul>
+                )}
+        </>
       )}
 
       {youView === 'manage' && isOwner && (
@@ -1405,7 +1479,15 @@ export default function App () {
       {sheet && (
         <ActionSheet
           item={sheet} saved={saved.has(sheet.id)} watched={watchedIds.has(sheet.id)}
+          downloaded={dlIds.has(sheet.id)}
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched}
+          onDownload={(i, want) => {
+            if (want) {
+              call('download.start', { itemId: i.id }).then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading - watch it in You, Downloads') }).catch((e) => setErr(e.message))
+            } else {
+              call('download.remove', { itemId: i.id }).then(() => { setDlIds((x) => { const n = new Set(x); n.delete(i.id); return n }); say('Removed from this phone') })
+            }
+          }}
         />
       )}
 
