@@ -207,6 +207,38 @@ function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2 }) {
   )
 }
 
+// The donor's loading placeholders: the page keeps its shape while the P2P
+// connection wakes, instead of presenting a blank library that reads as empty.
+function SkeletonGrid ({ cols = 2, n = 8 }) {
+  const list = cols === 'list'
+  return (
+    <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
+      {Array.from({ length: n }, (_, i) => (
+        <div className='album' key={i}>
+          <div className='cover skel' />
+          <div className='skel line' />
+          <div className='skel line short' />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SkeletonRows ({ n = 7 }) {
+  return (
+    <ul className='tracks'>
+      {Array.from({ length: n }, (_, i) => (
+        <li className='track' key={i}>
+          <div className='meta' style={{ flex: 1 }}>
+            <div className='skel line' style={{ width: '55%' }} />
+            <div className='skel line short' />
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 function ItemRow ({ item, sub, onOpen, onLong, right = null }) {
   const press = usePress(() => onOpen(item), onLong ? () => onLong(item) : null)
   return (
@@ -345,7 +377,7 @@ export default function App () {
 
   // Library tab.
   const [root, setRoot] = useState('movies')
-  const [items, setItems] = useState([])
+  const [items, setItems] = useState(null)
   const [cursor, setCursor] = useState(null)
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
@@ -410,6 +442,7 @@ export default function App () {
   const [pairLink, setPairLink] = useState('')
   const [err, setErr] = useState('')
   const [toast, setToast] = useState('')
+  const [linkUp, setLinkUp] = useState(false)
 
   const retried = useRef(new Set())
   const uiRef = useRef({})
@@ -442,6 +475,8 @@ export default function App () {
     const offs = [
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
+      on('host:connected', () => setLinkUp(true)),
+      on('host:disconnected', () => setLinkUp(false)),
       on('shim:ready', () => reload().catch(() => {})),
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
@@ -487,15 +522,20 @@ export default function App () {
   const fetchList = useCallback(async (params, append = false) => {
     try {
       const page = await call('library.list', params)
-      setItems((prev) => (append ? [...prev, ...(page.items || [])] : (page.items || [])))
+      setItems((prev) => (append ? [...(prev || []), ...(page.items || [])] : (page.items || [])))
       setCursor(page.cursor || null)
       setErr('')
-    } catch (e) { setErr(e.message) }
+    } catch (e) {
+      // An error ends the skeleton - a placeholder that never resolves reads
+      // as a hang, and the error line says what actually happened.
+      setItems((prev) => prev || [])
+      setErr(e.message)
+    }
   }, [])
 
   useEffect(() => {
     if (!state?.active) return
-    setItems([]); setCursor(null)
+    setItems(null); setCursor(null)
     if (season) fetchList({ type: 'episodes', seasonId: season.id, limit: 200 })
     else if (series) fetchList({ type: 'seasons', seriesId: series.id, limit: 100 })
     else fetchList({ type: root, limit: 100, ...SORT_PARAM[sortKey] })
@@ -657,6 +697,13 @@ export default function App () {
 
       {err && <div className='error'>{err}</div>}
 
+      {items == null && !results && (
+        <>
+          {!linkUp && <p className='muted sm center-p'>Connecting to {state.active.libraryName || 'your library'}…</p>}
+          {season ? <SkeletonRows /> : <SkeletonGrid cols={series ? 2 : cols} />}
+        </>
+      )}
+
       {!series && !results && root === 'movies' && recentRows.length > 0 && (
         <div className='shelf'>
           <h2 className='shelf-head'>Recently added</h2>
@@ -674,7 +721,7 @@ export default function App () {
         </div>
       )}
 
-      {results
+      {items != null && (results
         ? (results.length
             ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} />
             : <p className='muted center-p'>Nothing matches "{query}".</p>)
@@ -690,7 +737,7 @@ export default function App () {
               ))}
             </ul>
             )
-          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} />}
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} />)}
 
       {!results && cursor && (
         <button
@@ -708,7 +755,7 @@ export default function App () {
         <p className='muted sm'>{savedItems?.length ? `${savedItems.length} saved to watch` : 'Saved to watch, synced through your library'}</p>
       </header>
       {savedItems == null
-        ? <p className='muted center-p'>Loading…</p>
+        ? <SkeletonGrid cols={cols} />
         : savedItems.length === 0
           ? (
             <div className='center-p muted'>
@@ -755,7 +802,7 @@ export default function App () {
 
       {youView === 'continue' && (
         continueRows == null
-          ? <p className='muted center-p'>Loading…</p>
+          ? <SkeletonRows />
           : continueRows.length === 0
             ? <p className='muted center-p'>Nothing in progress. Start a film and your place appears here.</p>
             : (
@@ -773,7 +820,7 @@ export default function App () {
 
       {youView === 'watched' && (
         watchedRows == null
-          ? <p className='muted center-p'>Loading…</p>
+          ? <SkeletonRows />
           : watchedRows.length === 0
             ? <p className='muted center-p'>Nothing finished yet.</p>
             : (
