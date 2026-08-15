@@ -367,6 +367,7 @@ const methods = {
   'request.all': async (args) => (await connected()).request('request.all', args),
   'request.resolve': async (args) => (await connected()).request('request.resolve', args),
   'device.list': async (args) => (await connected()).request('device.list', args),
+  'device.revoke': async (args) => (await connected()).request('device.revoke', args),
   'identity.get': async (args) => (await connected()).request('identity.get', args),
   'identity.set': async (args) => (await connected()).request('identity.set', args),
   'avatar.set': async (args) => (await connected()).request('avatar.set', args),

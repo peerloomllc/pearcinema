@@ -356,6 +356,9 @@ export default function App () {
   const [requests, setRequests] = useState(null)
   const [allRequests, setAllRequests] = useState(null)
   const [devices, setDevices] = useState(null)
+  // The armed two-tap revoke, the same pattern Leave uses - a WebView's
+  // confirm() is at the shell's mercy.
+  const [arming, setArming] = useState(null)
   const [themePref, setThemePref] = useState(loadThemePref())
   const [settingsOpen, setSettingsOpen] = useState(null)
   const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
@@ -796,11 +799,13 @@ export default function App () {
                       <div className='t'>{d.label || 'device'}{d.self ? ' (this phone)' : ''}</div>
                       <div className='sub muted sm'>{[d.platform, d.belongsTo ? `belongs to ${d.belongsTo}` : 'unassigned'].filter(Boolean).join(' · ')}</div>
                     </div>
+                    {!d.self && (arming === d.deviceKey
+                      ? <button className='danger' onClick={() => { setArming(null); call('device.revoke', { deviceKey: d.deviceKey }).then(() => { say('Cut off - within the second'); loadYou('manage') }).catch((e) => setErr(e.message)) }}>Really cut off?</button>
+                      : <button className='ghost' onClick={() => setArming(d.deviceKey)}>Revoke</button>)}
                   </li>
                 ))}
               </ul>
               )}
-          <p className='muted sm'>Revoking a device stays on the dashboard for now.</p>
         </div>
       )}
     </div>

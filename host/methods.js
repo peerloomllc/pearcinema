@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -391,6 +391,21 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     // GRANTS NOTHING - the package's setClaim leaves personId untouched, and
     // only the dashboard's confirm flow can move a device to a person. The
     // deviceKey is the connection's own Noise-proven key; nothing to forge.
+    // An owner cutting another device off, from the phone - the same teeth as
+    // the dashboard's revoke, because it IS the dashboard's revoke. Owner scope
+    // comes off the connection's grant, never a parameter; a device cannot
+    // revoke ITSELF this way (that is what device.leave is for, and the reply
+    // sequencing there exists precisely because the connection dies).
+    'device.revoke': async (ctx) => {
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!revoke) throw ctx.notFound('this host cannot revoke over the wire')
+      const target = String(ctx.params.deviceKey || '')
+      if (!target) throw ctx.badParams('deviceKey required')
+      if (target === ctx.deviceKey) throw ctx.badParams('use device.leave for this device')
+      const out = await revoke(target)
+      return { ok: true, killed: out?.killed ?? 0 }
+    },
+
     'identity.set': async (ctx) => {
       if (!grants?.setClaim) throw ctx.notFound('this host cannot record claims yet')
       const { userName, deviceName } = ctx.params
