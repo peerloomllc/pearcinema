@@ -148,8 +148,31 @@ function Cover ({ src, title }) {
   )
 }
 
-function Tile ({ item, artBase, saved, onOpen, onLong, onSave }) {
+function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false }) {
   const press = usePress(() => onOpen(item), () => onLong(item))
+  if (list) {
+    // The donor's list row: same .album, flexed sideways by .grid.aslist. The
+    // bookmark swallows pointer events so saving never also opens.
+    const swallow = { onPointerDown: (e) => e.stopPropagation(), onPointerUp: (e) => e.stopPropagation() }
+    return (
+      <div className='album' {...press}>
+        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=120` : null} title={item.title} />
+        <div className='meta'>
+          <div className='t'>{item.title}</div>
+          <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
+        </div>
+        {onSave && (
+          <button
+            className={'tileheart' + (saved ? ' on' : '')} {...swallow}
+            aria-label={saved ? 'Remove from watchlist' : 'Add to watchlist'}
+            onClick={(e) => { e.stopPropagation(); onSave(item) }}
+          >
+            <BookmarkSimple size={16} weight={saved ? 'fill' : 'bold'} />
+          </button>
+        )}
+      </div>
+    )
+  }
   return (
     <div className='album'>
       {onSave && (
@@ -171,11 +194,12 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave }) {
 }
 
 function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2 }) {
+  const list = cols === 'list'
   return (
-    <div className='grid' style={{ '--cols': cols }}>
+    <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
       {items.map((i) => (
         <Tile
-          key={i.id} item={i} artBase={artBase}
+          key={i.id} item={i} artBase={artBase} list={list}
           saved={savedSet?.has(i.id)} onOpen={onOpen} onLong={onLong} onSave={onSave}
         />
       ))}
@@ -480,7 +504,7 @@ export default function App () {
   useEffect(() => {
     call('getSettings').then((s) => {
       if (s?.sortKey && SORT_PARAM[s.sortKey]) setSortKey(s.sortKey)
-      if ([2, 3, 4].includes(s?.cols)) setCols(s.cols)
+      if (['list', 2, 3, 4].includes(s?.cols)) setCols(s.cols)
     }).catch(() => {})
   }, [])
 
@@ -1005,7 +1029,7 @@ export default function App () {
             </div>
             <h3>Layout</h3>
             <div className='optlist'>
-              {[[2, 'Comfortable'], [3, 'Compact'], [4, 'Dense']].map(([n, label]) => (
+              {[['list', 'List'], [2, 'Comfortable'], [3, 'Compact'], [4, 'Dense']].map(([n, label]) => (
                 <button key={n} className={cols === n ? 'on' : ''} onClick={() => setDisplay({ cols: n })}>{label}</button>
               ))}
             </div>
