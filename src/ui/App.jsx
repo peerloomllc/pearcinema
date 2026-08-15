@@ -878,7 +878,9 @@ export default function App () {
         setDlIds(new Set((out.items || []).map((i) => i.itemId)))
         const rows = await Promise.all((out.items || []).map(async (i) => {
           const item = await call('library.get', { id: i.itemId }).catch(() => null)
-          return item ? { ...item, _dlSize: i.size } : { id: i.itemId, title: 'A removed title', _dlSize: i.size }
+          // Offline (or a host that dropped the item): the download's own
+          // stored meta names the row instead of 'A removed title'.
+          return item ? { ...item, _dlSize: i.size } : { id: i.itemId, title: i.title || 'A removed title', year: i.year || null, runtime: i.runtime || null, _dlSize: i.size }
         }))
         setDlRows(rows)
       }
@@ -1158,7 +1160,7 @@ export default function App () {
                 <li className='track' key={r.itemId}>
                   <div className='meta' style={{ flex: 1 }}>
                     <div className='t'>Downloading…</div>
-                    <div className='sub muted sm'>{fmtBytes(r.got)} of {fmtBytes(r.size)}</div>
+                    <div className='sub muted sm'>{fmtBytes(r.got)} of {r.approx ? 'about ' : ''}{fmtBytes(r.size)}</div>
                     <div className='bar'><div className='fill' style={{ width: `${Math.min(100, Math.round((r.got / (r.size || 1)) * 100))}%` }} /></div>
                   </div>
                   <button className='ghost' onClick={() => call('download.cancel', { itemId: r.itemId })}>Cancel</button>

@@ -36,6 +36,19 @@ const IDENTITY_FILE = path.join(DATA_DIR, 'identity.json')
 const HOSTS_FILE = path.join(DATA_DIR, 'hosts.json')
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json')
 
+// Title, year and runtime per downloaded item, written at download time. The
+// cache index only knows bytes, so without this an offline Downloads list can
+// name a film nothing better than 'A removed title'.
+const DL_META_FILE = path.join(DATA_DIR, 'download-meta.json')
+
+function readDlMeta () {
+  try { return JSON.parse(fs.readFileSync(DL_META_FILE, 'utf8')) || {} } catch { return {} }
+}
+function writeDlMeta (m) {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(DL_META_FILE, JSON.stringify(m))
+}
+
 // Small device-local preferences (theme and friends), beside the identity the
 // same way the donor keeps them - so the shell could one day read the theme
 // before the WebView paints.
@@ -212,8 +225,19 @@ async function startDownload (itemId) {
   const item = await c.get({ id: itemId })
   const size = item?.media?.size
   if (!size) throw new Error('this one cannot be downloaded')
+  const dlMeta = readDlMeta()
+  dlMeta[itemId] = { title: item.title || '', year: item.year || null, runtime: item.runtime || null }
+  writeDlMeta(dlMeta)
   const mime = CONTAINER_MIME[String(item?.media?.container || '').toLowerCase()] || 'video/mp4'
   const active = H.activeHost(hostsState)
+
+  // THE HOST DECIDES for downloads exactly as for playback: the same declared
+  // capabilities, the same decide(). A transcode verdict - the file busts the
+  // data-saver budget, or this device cannot decode it at all - means the
+  // download is the CONVERTED film, which is also the only version the phone
+  // could have played offline.
+  const verdict = await c.request('media.decide', { itemId, capabilities: capsFor(itemId) }).catch(() => null)
+  if (verdict?.mode === 'transcode') return startExportDownload({ c, itemId, item, active })
   const sink = cache.createSink(itemId, { mime, size, library: active?.libraryId || null, pinned: true })
   let got = 0
   let lastEmit = 0
@@ -242,6 +266,63 @@ async function startDownload (itemId) {
   })
   emit('download:progress', { itemId, got: 0, size })
   return { ok: true }
+}
+
+// The converted-download path: one media.export call streamed whole into the
+// cache. No known final size - the host is encoding as it sends - so progress
+// runs against an estimate from the encoder's own bitrate ladder, and the sink
+// commits whatever cleanly ended. Truncation is the HOST's job to catch: its
+// export stream only ends cleanly when ffmpeg exited 0, anything else arrives
+// here as a wire error and aborts the sink.
+function startExportDownload ({ c, itemId, item, active }) {
+  // The ladder the host encodes with, capped at the declared budget - the same
+  // arithmetic as host/transcode.js bitrateFor/capBitrate, plus audio headroom.
+  const w = Number(item?.media?.width) || 0
+  const ladder = w >= 1600 ? 6000 : w >= 1000 ? 3000 : 1500
+  const budget = Number(capsFor(itemId).maxKbps) || 0
+  const kbps = (budget ? Math.min(ladder, budget) : ladder) + 200
+  const est = Math.max(1, Math.round((kbps * 1000 / 8) * (Number(item?.runtime) || 0)))
+
+  const sink = cache.createSink(itemId, { mime: 'video/mp4', size: null, library: active?.libraryId || null, pinned: true })
+  let got = 0
+  let lastEmit = 0
+  const p = c.request('media.export', { itemId, capabilities: capsFor(itemId) }, {
+    stream: true,
+    buffer: false,
+    onchunk: (chunk) => {
+      got += chunk.length
+      sink.write(chunk)
+      if (got - lastEmit > 16 * 1024 * 1024) {
+        lastEmit = got
+        // The estimate can undershoot; hold the bar at 99% rather than lie past it.
+        emit('download:progress', { itemId, got: Math.min(got, Math.round(est * 0.99)), size: est, approx: true })
+      }
+    }
+  })
+  downloads.set(itemId, { cancel: () => p.cancel?.(), got: () => Math.min(got, Math.round(est * 0.99)), size: est, approx: true })
+  p.then(async (out) => {
+    downloads.delete(itemId)
+    if (out?.cancelled) {
+      sink.abort()
+      emit('download:failed', { itemId, reason: 'cancelled' })
+      return
+    }
+    // The saver was toggled between decide and export - the host refused to
+    // convert what needs no converting. Nothing was streamed; take the bytes.
+    if (out?.direct) {
+      sink.abort()
+      startDownload(itemId).catch((e) => emit('download:failed', { itemId, reason: e.message }))
+      return
+    }
+    const stored = await sink.commit()
+    emit(stored ? 'download:done' : 'download:failed', { itemId, reason: stored ? undefined : 'incomplete' })
+  }).catch((e) => {
+    downloads.delete(itemId)
+    sink.abort()
+    emit('download:failed', { itemId, reason: e.message })
+  })
+  emit('download:progress', { itemId, got: 0, size: est, approx: true })
+  return { ok: true, converting: true }
 }
 
 const shim = createAudioShim({
@@ -451,14 +532,17 @@ const methods = {
     const id = String(itemId || '')
     cache.remove(id)
     cache.save()
+    const dlMeta = readDlMeta()
+    if (dlMeta[id]) { delete dlMeta[id]; writeDlMeta(dlMeta) }
     emit('download:removed', { itemId: id })
     return { ok: true }
   },
   'download.list': async () => {
+    const dlMeta = readDlMeta()
     const items = Object.entries(cache.index || {})
       .filter(([, e]) => e.pinned)
-      .map(([id, e]) => ({ itemId: id, size: e.size || 0, mime: e.mime || null }))
-    const running = [...downloads.entries()].map(([id, d]) => ({ itemId: id, got: d.got(), size: d.size }))
+      .map(([id, e]) => ({ itemId: id, size: e.size || 0, mime: e.mime || null, ...(dlMeta[id] || {}) }))
+    const running = [...downloads.entries()].map(([id, d]) => ({ itemId: id, got: d.got(), size: d.size, approx: !!d.approx }))
     return { items, running }
   },
 
