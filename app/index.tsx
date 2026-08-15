@@ -15,6 +15,7 @@ import { BackHandler, PermissionsAndroid, Platform, Pressable, StyleSheet, Text,
 // second half of the pairing-link gap; the donor shell uses expo-linking too).
 import * as Linking from 'expo-linking'
 import { WebView } from 'react-native-webview'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import { Worklet } from 'react-native-bare-kit'
 import * as FileSystem from 'expo-file-system/legacy'
@@ -439,8 +440,13 @@ export default function App () {
     ipc.write(b4a.from(JSON.stringify(msg) + '\n'))
   }
 
+  // Android 15 draws the app edge-to-edge, so without this the WebView's header
+  // sits under the status bar (Tim, 2026-08-15: nothing may collide with the
+  // notifications bar). The shell pads; the page never needs to know.
+  const insets = useSafeAreaInsets()
+
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingTop: insets.top }]}>
       {uri && (
         <WebView
           ref={webref}

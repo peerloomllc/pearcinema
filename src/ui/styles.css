@@ -1454,3 +1454,8 @@ label.flabel { display: block; margin-top: .6rem; }
 
 .about .wordmark { font-size: 1.7rem; font-weight: 750 }
 .about .wordmark span { color: var(--color-primary) }
+
+/* Search sits above the browse picker with a little air between them, and both
+   span the sticky's full width so their edges line up (Tim, 2026-08-15). */
+.sticky .searchbar { margin-bottom: .55rem }
+.sticky .pickrow, .sticky .searchbar { width: 100% }

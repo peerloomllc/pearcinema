@@ -15,7 +15,7 @@ import {
   FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play,
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
-  Lightning, Coffee, EnvelopeOpen
+  Lightning, Coffee, EnvelopeOpen, CaretRight
 } from '@phosphor-icons/react'
 import { call, on } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -63,6 +63,24 @@ function usePress (onPress, onLongPress) {
     onPointerCancel: () => stop(false),
     onContextMenu: (e) => e.preventDefault()
   }
+}
+
+// The donor's collapsible settings section, one open at a time.
+function Section ({ id, title, Icon, open, onToggle, children }) {
+  return (
+    <div className='card tight acc'>
+      <button onClick={() => onToggle(id)} aria-expanded={open}>
+        <span className='accleft'>
+          <Icon size={17} weight='regular' />
+          {title}
+        </span>
+        <CaretRight size={15} weight='regular' className={'caret' + (open ? ' open' : '')} />
+      </button>
+      <div className={'body' + (open ? ' open' : '')}>
+        <div className='inner'>{children}</div>
+      </div>
+    </div>
+  )
 }
 
 const TABS = [
@@ -297,6 +315,8 @@ export default function App () {
   const [allRequests, setAllRequests] = useState(null)
   const [devices, setDevices] = useState(null)
   const [themePref, setThemePref] = useState(loadThemePref())
+  const [settingsOpen, setSettingsOpen] = useState(null)
+  const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
 
   // Overlays.
   const [sheet, setSheet] = useState(null)
@@ -498,20 +518,23 @@ export default function App () {
     <div className='app'>
       <header>
         <h1>{state.active.libraryName || 'Library'}</h1>
-        <p className='muted sm'>{series ? (season ? `${series.title} · ${season.title}` : series.title) : 'Your films and shows, straight from your own box'}</p>
+        {series && <p className='muted sm'>{season ? `${series.title} · ${season.title}` : series.title}</p>}
       </header>
 
       {!series && (
         <div className='sticky'>
+          {/* Search first - it is global, so it sits ABOVE the browse picker,
+              the donor's order (Tim, 2026-08-15). Both are direct children of
+              the sticky, so their widths match exactly. */}
+          <div className='searchbar'>
+            <input className='search' placeholder='Search your library' value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
+            {query ? <button className='searchclear' onClick={() => setQuery('')} aria-label='Clear search'><X size={14} /></button> : null}
+          </div>
           <div className='pickrow'>
             <div className='seg'>
               <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
               <button className={root === 'series' ? 'on' : ''} onClick={() => setRoot('series')}>Shows</button>
             </div>
-          </div>
-          <div className='searchbar'>
-            <input className='search' placeholder='Search your library' value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
-            {query ? <button className='searchclear' onClick={() => setQuery('')} aria-label='Clear search'><X size={14} /></button> : null}
           </div>
         </div>
       )}
@@ -718,32 +741,29 @@ export default function App () {
   const hosts = state.hosts || []
   const settingsScreen = (
     <div className='app'>
-      <header><h1>Settings</h1><p className='muted sm'>{state.active.libraryName}</p></header>
+      <header><h1>Settings</h1></header>
 
-      <div className='sgroup'>
-        <h3>Appearance</h3>
-        <div className='optlist'>
-          {['system', 'dark', 'light'].map((p) => (
-            <button key={p} className={themePref === p ? 'on' : ''} onClick={() => { setThemePref(p); applyThemePref(p) }}>
-              {p === 'system' ? 'Match this phone' : p === 'dark' ? 'Dark' : 'Light'}
-            </button>
-          ))}
+      {/* Profile header, the donor's - always visible above the sections: your
+          photo, your name, this device. Editing the name arrives with the host's
+          claim support; until then these show what the server has. */}
+      <div className='profile'>
+        <button className='profile-av' aria-label='Your photo'>
+          <span className='profile-mono'>{(ident?.belongsTo || 'Y')[0].toUpperCase()}</span>
+        </button>
+        <div className='profile-fields'>
+          <input className='profile-name' value={ident?.belongsTo || ''} placeholder='Your name' disabled aria-label='Your name' />
+          <input className='profile-dev' value={ident?.deviceName || 'phone'} placeholder='This device' disabled aria-label='Device name' />
         </div>
       </div>
-
-      <div className='sgroup'>
-        <h3>This device</h3>
-        <div className='card'>
-          <div className='row'><span className='label'>Device</span><span className='muted sm'>{ident?.deviceName || 'phone'}</span></div>
-          <div className='row'><span className='label'>Belongs to</span><span className='muted sm'>{ident?.belongsTo || 'not assigned yet'}</span></div>
-          <div className='row'><span className='label'>Library</span><span className='muted sm'>{ident?.libraryName || state.active.libraryName}</span></div>
-          {isOwner && <div className='row'><span className='label'>Role</span><span className='muted sm'>Owner</span></div>}
-        </div>
+      <div className='profile-note desc'>
+        {ident?.belongsTo
+          ? `The server has this device down as ${ident.belongsTo}'s.`
+          : 'The server has not assigned this device to anyone yet.'}
+        {' '}Editing your name and photo from the phone arrives with a host update.
       </div>
 
-      <div className='sgroup'>
-        <h3>Libraries</h3>
-        <div className='card'>
+      <div className='settings-acc'>
+        <Section id='library' title={hosts.length > 1 ? 'Libraries' : 'Library'} Icon={FilmStrip} open={settingsOpen === 'library'} onToggle={toggleSection}>
           {hosts.map((h) => (
             <div className='row' key={h.hostKey}>
               <span className='label'>{h.libraryName || 'Library'}{h.active ? ' · playing from' : ''}</span>
@@ -754,17 +774,31 @@ export default function App () {
             </div>
           ))}
           <button onClick={() => setAddingLibrary(true)}><Plus size={16} /> Add a library</button>
-        </div>
-      </div>
+        </Section>
 
-      <div className='sgroup'>
-        <h3>Streaming</h3>
-        <p className='muted sm'>Full quality, converted by your box only when this phone needs it. A data-saver cap for slow links arrives with the off-home work.</p>
-      </div>
+        <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
+          <p className='desc'>Full quality, converted by your box only when this phone needs it. A data-saver cap for slow links, and a size cap for downloaded films, arrive with the off-home and offline work.</p>
+        </Section>
 
-      <div className='sgroup'>
-        <h3>Offline storage</h3>
-        <p className='muted sm'>A size cap for downloaded films arrives with downloads.</p>
+        <Section id='appearance' title='Appearance' Icon={Gear} open={settingsOpen === 'appearance'} onToggle={toggleSection}>
+          <div className='optlist'>
+            {['system', 'dark', 'light'].map((p) => (
+              <button key={p} className={themePref === p ? 'on' : ''} onClick={() => { setThemePref(p); applyThemePref(p) }}>
+                {p === 'system' ? 'Match this phone' : p === 'dark' ? 'Dark' : 'Light'}
+              </button>
+            ))}
+          </div>
+        </Section>
+
+        <Section id='how' title='How it works' Icon={Info} open={settingsOpen === 'how'} onToggle={toggleSection}>
+          <p className='desc'>Your films stay on your own machine. This phone connects straight to it over an encrypted pear-to-pear link - no port forwarding, no VPN, no account, and nobody in the middle. What its chip cannot play, your box converts on the fly.</p>
+        </Section>
+
+        <Section id='device' title='This device' Icon={UsersThree} open={settingsOpen === 'device'} onToggle={toggleSection}>
+          <div className='row'><span className='label'>Library</span><span className='muted sm'>{ident?.libraryName || state.active.libraryName}</span></div>
+          {isOwner && <div className='row'><span className='label'>Role</span><span className='muted sm'>Owner</span></div>}
+          {ident?.expiresAt && <div className='row'><span className='label'>Guest access</span><span className='muted sm'>until {new Date(ident.expiresAt).toLocaleDateString()}</span></div>}
+        </Section>
       </div>
     </div>
   )
