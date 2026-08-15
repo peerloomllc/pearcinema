@@ -85,7 +85,12 @@ function DeviceRow ({ d, persons, reload }) {
         </div>
         {/* What this device is watching RIGHT NOW - the host's own certainty,
             from the bytes it is serving (Tim, 2026-08-15). */}
-        {d.watching && <div class='accent-t'>watching {d.watching.title}</div>}
+        {d.watching && (
+          <div class='nowrow'>
+            {d.watching.artId && <img src={'/api/art?id=' + encodeURIComponent(d.watching.artId)} alt='' loading='lazy' />}
+            <span>Watching <b>{d.watching.title}</b></span>
+          </div>
+        )}
         <div class='mono' title={d.deviceKey}>{shortKey(d.deviceKey)}</div>
       </div>
 

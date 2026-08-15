@@ -646,7 +646,7 @@ class PearCinemaHost {
       const w = this.watchingOf(r.deviceKey)
       if (!w) continue
       const item = await this.adapter.get({ id: w.itemId }).catch(() => null)
-      if (item) r.watching = { itemId: w.itemId, title: item.title, at: w.at }
+      if (item) r.watching = { itemId: w.itemId, title: item.title, artId: item.artId || null, at: w.at }
     }
     return rows
   }
