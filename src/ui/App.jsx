@@ -15,7 +15,8 @@ import {
   FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play,
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
-  Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal
+  Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
+  ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code
 } from '@phosphor-icons/react'
 import { call, on } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -25,7 +26,12 @@ const LIGHTNING_ADDRESS = 'peerloomllc@strike.me'
 const STRIKE_TIP_URL = 'https://strike.me/peerloomllc/'
 const BUYMEACOFFEE_URL = 'https://buymeacoffee.com/peerloomllc'
 const GITHUB_URL = 'https://github.com/peerloomllc/pearcinema'
+const BTC_ONCHAIN_ADDRESS = 'bc1q0kksenz3j4u9ppe6f4krclvzwxk7sjy00cc9cf'
 const CONTACT_EMAIL = 'peerloomllc@proton.me'
+const CONTACT_URL = `mailto:${CONTACT_EMAIL}?subject=%5BPearCinema%5D%20Feedback`
+
+const openUrl = (url) => { call('shell.openUrl', { url }).catch(() => {}) }
+const copyText = (text) => call('shell.clipboard', { text }).catch(() => {})
 const SHARE_TEXT = 'PearCinema - your films and TV, from your own machine or a friend\'s, playable anywhere. No port forwarding, no VPN, no account.\n\nhttps://peerloomllc.com/'
 
 const fmtRuntime = (s) => {
@@ -89,6 +95,87 @@ async function compressToAvatarB64 (dataUrl, size = 256) {
   const s = Math.min(img.width, img.height)
   ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size)
   return c.toDataURL('image/jpeg', 0.82).split(',')[1]
+}
+
+function OptionList ({ options, value, onChange }) {
+  return (
+    <div className='optlist'>
+      {options.map((o) => (
+        <button
+          key={String(o.value)} className={'opt' + (value === o.value ? ' on' : '')}
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+        >
+          <span className='opt-main'>
+            <span className='opt-name'>{o.label}</span>
+            {o.desc && <span className='opt-desc'>{o.desc}</span>}
+          </span>
+          {value === o.value && <CheckCircle size={19} weight='fill' />}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const LAYOUT_OPTS = [
+  { value: 'list', label: 'List', desc: 'One per row, with the full title' },
+  { value: '2', label: 'Grid, 2 per row', desc: 'Larger posters' },
+  { value: '3', label: 'Grid, 3 per row', desc: 'More on screen' }
+]
+
+const SORT_LABEL = { title: 'Title', year: 'Year', added: 'Recently added' }
+
+function DonationSheet ({ onClose }) {
+  const [hasWallet, setHasWallet] = useState(false)
+  const [copied, setCopied] = useState(null)
+
+  useEffect(() => {
+    call('shell.canOpenURL', { url: 'lightning:test' })
+      .then((r) => setHasWallet(!!r?.can))
+      .catch(() => {})
+  }, [])
+
+  const copy = (what, value) => {
+    copyText(value)
+    setCopied(what)
+    setTimeout(() => setCopied(null), 1500)
+  }
+
+  return (
+    <div className='sheetwrap' onClick={onClose}>
+      <div className='sheet' onClick={(e) => e.stopPropagation()}>
+        <h1>⚡ Bitcoin Lightning ⚡</h1>
+        <p className='muted sm'>
+          Support PearCinema with Bitcoin over Lightning (fast and low-fee), or
+          on-chain.
+        </p>
+
+        {hasWallet && (
+          <button
+            className='primary wide'
+            onClick={() => { openUrl('lightning:' + LIGHTNING_ADDRESS); onClose() }}
+          >
+            Open in your Lightning wallet
+          </button>
+        )}
+
+        <h2>Lightning address</h2>
+        <div className='key'>{LIGHTNING_ADDRESS}</div>
+        <div className='btnrow'>
+          <button onClick={() => copy('ln', LIGHTNING_ADDRESS)}>{copied === 'ln' ? 'Copied' : 'Copy'}</button>
+          <button onClick={() => openUrl(STRIKE_TIP_URL)}>Pay in a browser ↗</button>
+        </div>
+
+        <h2>On-chain Bitcoin</h2>
+        <div className='key'>{BTC_ONCHAIN_ADDRESS}</div>
+        <div className='btnrow'>
+          <button onClick={() => copy('btc', BTC_ONCHAIN_ADDRESS)}>{copied === 'btc' ? 'Copied' : 'Copy'}</button>
+        </div>
+
+        <button className='wide' style={{ marginTop: '1rem' }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  )
 }
 
 // The donor's collapsible settings section, one open at a time.
@@ -385,20 +472,22 @@ export default function App () {
   const [results, setResults] = useState(null)
   // The donor's display options: how the shelf is sorted and how dense the
   // grid is. Persisted in the worklet's settings so they survive a restart.
-  const [sortKey, setSortKey] = useState('title-asc')
+  const [sortField, setSortField] = useState('')
+  const [sortOrder, setSortOrder] = useState('asc')
   const [cols, setCols] = useState(2)
+  const [showRecent, setShowRecent] = useState(true)
   const [showDisplay, setShowDisplay] = useState(false)
-  const SORT_PARAM = {
-    'title-asc': { sort: 'title', order: 'asc' },
-    'added-asc': { sort: 'added', order: 'asc' },
-    'title-desc': { sort: 'title', order: 'desc' },
-    'year-desc': { sort: 'year', order: 'desc' },
-    'year-asc': { sort: 'year', order: 'asc' }
-  }
   const setDisplay = (patch) => {
-    if (patch.sortKey) setSortKey(patch.sortKey)
-    if (patch.cols) setCols(patch.cols)
-    call('setSettings', { sortKey: patch.sortKey ?? sortKey, cols: patch.cols ?? cols }).catch(() => {})
+    if ('sortField' in patch) setSortField(patch.sortField)
+    if ('sortOrder' in patch) setSortOrder(patch.sortOrder)
+    if ('cols' in patch) setCols(patch.cols)
+    if ('showRecent' in patch) setShowRecent(patch.showRecent)
+    call('setSettings', {
+      sortField: patch.sortField ?? sortField,
+      sortOrder: patch.sortOrder ?? sortOrder,
+      cols: patch.cols ?? cols,
+      showRecent: patch.showRecent ?? showRecent
+    }).catch(() => {})
   }
 
   // Cross-tab data.
@@ -419,6 +508,9 @@ export default function App () {
   const [themePref, setThemePref] = useState(loadThemePref())
   const [settingsOpen, setSettingsOpen] = useState(null)
   const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
+  const [aboutOpen, setAboutOpen] = useState(null)
+  const toggleAbout = (id) => setAboutOpen((cur) => (cur === id ? null : id))
+  const [donate, setDonate] = useState(false)
 
   // The profile header's editable claim. Seeded from identity.get; dirty when
   // either field departs from what the server answered.
@@ -504,6 +596,7 @@ export default function App () {
     window.__pearBack = () => {
       const u = uiRef.current
       if (u.sheet) return setSheet(null)
+      if (u.donate) return setDonate(false)
       if (u.showDisplay) return setShowDisplay(false)
       if (u.resumeOffer) return setResumeOffer(null)
       if (u.addingLibrary) return setAddingLibrary(false)
@@ -515,7 +608,7 @@ export default function App () {
     return () => { offs.forEach((f) => f()); offTheme() }
   }, [])
 
-  uiRef.current = { sheet: !!sheet, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
+  uiRef.current = { sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
 
   // --- library data ---------------------------------------------------------
 
@@ -538,8 +631,8 @@ export default function App () {
     setItems(null); setCursor(null)
     if (season) fetchList({ type: 'episodes', seasonId: season.id, limit: 200 })
     else if (series) fetchList({ type: 'seasons', seriesId: series.id, limit: 100 })
-    else fetchList({ type: root, limit: 100, ...SORT_PARAM[sortKey] })
-  }, [state?.active?.hostKey, root, series?.id, season?.id, sortKey])
+    else fetchList({ type: root, limit: 100, sort: sortField || 'title', order: sortOrder })
+  }, [state?.active?.hostKey, root, series?.id, season?.id, sortField, sortOrder])
 
   // The recently-added strip: the newest arrivals by file date, shown only
   // when something actually arrived in the last month - an empty shelf is
@@ -558,8 +651,10 @@ export default function App () {
   // The saved display prefs, once the worklet answers.
   useEffect(() => {
     call('getSettings').then((s) => {
-      if (s?.sortKey && SORT_PARAM[s.sortKey]) setSortKey(s.sortKey)
-      if (['list', 2, 3, 4].includes(s?.cols)) setCols(s.cols)
+      if (['title', 'year', 'added', ''].includes(s?.sortField)) setSortField(s.sortField || '')
+      if (['asc', 'desc'].includes(s?.sortOrder)) setSortOrder(s.sortOrder)
+      if (['list', 2, 3].includes(s?.cols)) setCols(s.cols)
+      if (typeof s?.showRecent === 'boolean') setShowRecent(s.showRecent)
     }).catch(() => {})
   }, [])
 
@@ -704,7 +799,7 @@ export default function App () {
         </>
       )}
 
-      {!series && !results && root === 'movies' && recentRows.length > 0 && (
+      {!series && !results && root === 'movies' && showRecent && recentRows.length > 0 && (
         <div className='shelf'>
           <h2 className='shelf-head'>Recently added</h2>
           <div className='shelf-scroll'>
@@ -742,7 +837,7 @@ export default function App () {
       {!results && cursor && (
         <button
           className='ghost' style={{ margin: '0.8rem auto', display: 'block' }}
-          onClick={() => fetchList(season ? { type: 'episodes', seasonId: season.id, limit: 200, cursor } : series ? { type: 'seasons', seriesId: series.id, limit: 100, cursor } : { type: root, limit: 100, cursor }, true)}
+          onClick={() => fetchList(season ? { type: 'episodes', seasonId: season.id, limit: 200, cursor } : series ? { type: 'seasons', seriesId: series.id, limit: 100, cursor } : { type: root, limit: 100, cursor, sort: sortField || 'title', order: sortOrder }, true)}
         >More</button>
       )}
     </div>
@@ -979,61 +1074,173 @@ export default function App () {
 
       <div className='settings-acc'>
         <Section id='library' title={hosts.length > 1 ? 'Libraries' : 'Library'} Icon={FilmStrip} open={settingsOpen === 'library'} onToggle={toggleSection}>
-          {hosts.map((h) => (
-            <div className='row' key={h.hostKey}>
-              <span className='label'>{h.libraryName || 'Library'}{h.active ? ' · playing from' : ''}</span>
-              <span className='rowacts'>
-                {!h.active && <button className='ghost' aria-label='Switch' onClick={() => call('hosts.setActive', { hostKey: h.hostKey }).then(() => { setSeries(null); setSeason(null); reload() })}><ArrowsLeftRight size={16} /></button>}
-                <button className='ghost' aria-label='Leave' onClick={() => call('hosts.remove', { hostKey: h.hostKey }).then(() => reload())}><SignOut size={16} /></button>
-              </span>
-            </div>
-          ))}
-          <button onClick={() => setAddingLibrary(true)}><Plus size={16} /> Add a library</button>
+          <div className='libactions'>
+            <button className='libact' aria-label='Add a library' title='Add a library' onClick={() => setAddingLibrary(true)}>
+              <Plus size={22} weight='bold' />
+              <span>Add server</span>
+            </button>
+            <button className='libact' aria-label='Pair as owner' title='Pair as owner - manage a server you run' onClick={() => setAddingLibrary(true)}>
+              <UsersThree size={22} weight='bold' />
+              <span>Pair as owner</span>
+            </button>
+          </div>
+          {hosts.map((h) => {
+            const online = h.active && linkUp
+            const desc = h.active
+              ? (linkUp ? 'Active - connected' : 'Active - connecting…')
+              : 'Tap to switch to this library'
+            return (
+              <div
+                className='row' key={h.hostKey}
+                onClick={() => { if (!h.active) call('hosts.setActive', { hostKey: h.hostKey }).then(() => { setSeries(null); setSeason(null); reload() }) }}
+                style={{ cursor: h.active ? 'default' : 'pointer' }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div className='label'>
+                    {h.libraryName || 'Library'}
+                    {h.active && (
+                      <span className='val' style={{ color: online ? 'var(--color-primary)' : undefined, marginLeft: 8 }}>
+                        {online ? '●' : '○'}
+                      </span>
+                    )}
+                  </div>
+                  <div className='desc'>{desc}</div>
+                </div>
+                <div className='rowacts'>
+                  <button className='rowremove' aria-label={'Remove ' + (h.libraryName || 'library')} onClick={(e) => { e.stopPropagation(); call('hosts.remove', { hostKey: h.hostKey }).then(() => reload()) }}>
+                    <Trash size={19} weight='regular' />
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </Section>
 
         <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
           <p className='desc'>Full quality, converted by your box only when this phone needs it. A data-saver cap for slow links, and a size cap for downloaded films, arrive with the off-home and offline work.</p>
         </Section>
 
-        <Section id='appearance' title='Appearance' Icon={Gear} open={settingsOpen === 'appearance'} onToggle={toggleSection}>
-          <div className='optlist'>
-            {['system', 'dark', 'light'].map((p) => (
-              <button key={p} className={themePref === p ? 'on' : ''} onClick={() => { setThemePref(p); applyThemePref(p) }}>
-                {p === 'system' ? 'Match this phone' : p === 'dark' ? 'Dark' : 'Light'}
-              </button>
+        <Section id='appearance' title='Appearance' Icon={Palette} open={settingsOpen === 'appearance'} onToggle={toggleSection}>
+          <div className='label'>Theme</div>
+          <div className='seg'>
+            {[['dark', 'Dark'], ['light', 'Light'], ['system', 'System']].map(([k, l]) => (
+              <button
+                key={k} className={themePref === k ? 'on' : ''}
+                aria-pressed={themePref === k}
+                onClick={() => { setThemePref(k); applyThemePref(k) }}
+              >{l}</button>
             ))}
           </div>
-        </Section>
-
-        <Section id='how' title='How it works' Icon={Info} open={settingsOpen === 'how'} onToggle={toggleSection}>
-          <p className='desc'>Your films stay on your own machine. This phone connects straight to it over an encrypted pear-to-pear link - no port forwarding, no VPN, no account, and nobody in the middle. What its chip cannot play, your box converts on the fly.</p>
-        </Section>
-
-        <Section id='device' title='This device' Icon={UsersThree} open={settingsOpen === 'device'} onToggle={toggleSection}>
-          <div className='row'><span className='label'>Library</span><span className='muted sm'>{ident?.libraryName || state.active.libraryName}</span></div>
-          {isOwner && <div className='row'><span className='label'>Role</span><span className='muted sm'>Owner</span></div>}
-          {ident?.expiresAt && <div className='row'><span className='label'>Guest access</span><span className='muted sm'>until {new Date(ident.expiresAt).toLocaleDateString()}</span></div>}
+          <div className='row' style={{ marginTop: '.7rem' }}>
+            <div>
+              <div className='label'>Recently added row</div>
+              <div className='desc'>The row of newest films above your library.</div>
+            </div>
+            <button
+              className={'toggle' + (showRecent ? ' on' : '')} role='switch' aria-checked={showRecent}
+              onClick={() => setDisplay({ showRecent: !showRecent })}
+            >{showRecent ? 'On' : 'Off'}</button>
+          </div>
         </Section>
       </div>
+
+      <div className='version'>v{APP_VERSION}</div>
     </div>
   )
 
   const aboutScreen = (
-    <div className='app about'>
-      <header><h1>About</h1></header>
-      <div className='wordmark'>Pear<span>Cinema</span></div>
-      <p className='muted sm version'>Version {APP_VERSION}</p>
-      <p>Your film and TV collection, from your own machine or a friend's, playable anywhere. No port forwarding, no VPN, no account - and nobody in the middle.</p>
-      <div className='card'>
-        <button onClick={() => { (navigator.share ? navigator.share({ text: SHARE_TEXT }) : navigator.clipboard.writeText(SHARE_TEXT).then(() => say('Copied'))) }}>
-          <ShareNetwork size={18} /> Share PearCinema
-        </button>
-        <a className='linkbtn' href={STRIKE_TIP_URL} target='_blank' rel='noreferrer'><Lightning size={18} /> Tip with Strike</a>
-        <a className='linkbtn' href={BUYMEACOFFEE_URL} target='_blank' rel='noreferrer'><Coffee size={18} /> Buy us a coffee</a>
-        <div className='row'><span className='label'>Lightning</span><span className='muted sm'>{LIGHTNING_ADDRESS}</span></div>
-        <a className='linkbtn' href={GITHUB_URL} target='_blank' rel='noreferrer'><GithubLogo size={18} /> GitHub</a>
-        <a className='linkbtn' href={`mailto:${CONTACT_EMAIL}?subject=%5BPearCinema%5D%20Feedback`}><EnvelopeOpen size={18} /> {CONTACT_EMAIL}</a>
+    <div className='app'>
+      <div className='wordmark'>
+        <div className='name'>Pear<span className='tune'>Cinema</span></div>
+        <div className='muted sm'>Your films, or a friend's. Anywhere.</div>
       </div>
+
+      <Section id='how' title='How it works' Icon={Info} open={aboutOpen === 'how'} onToggle={toggleAbout}>
+        <p>
+          PearCinema plays your films and shows straight off the machine they
+          already live on - an Umbrel, a NAS, an old desktop - over an encrypted
+          peer-to-peer connection. No port forwarding, no VPN, no dynamic DNS, no
+          account, and no copy of your library in anyone's cloud.
+        </p>
+        <p>
+          The machine does not have to be yours. Whoever runs a library can let a
+          friend or family member in, each as their own person with their own
+          devices, watchlist and resume points - no login to pass around, and no
+          copy of a single file.
+        </p>
+        <p>
+          The server keeps the list of which devices are allowed in, and can cut one
+          off in the middle of a film.
+        </p>
+        <p>
+          PearCinema ships with no relay at all: every stream is a direct
+          peer-to-peer connection, and nothing of yours ever crosses a server run
+          by anyone else.
+        </p>
+        <div className='btnrow'>
+          <button onClick={() => openUrl('https://pears.com/')}>Learn about P2P ↗</button>
+        </div>
+      </Section>
+
+      <Section id='device' title='This device' Icon={Key} open={aboutOpen === 'device'} onToggle={toggleAbout}>
+        <p>
+          The key a library knows this phone by. When someone running a server asks which
+          device is yours, or you are deciding what to remove on their dashboard, this is
+          the row to look for.
+        </p>
+        <div className='key'>{state.deviceKey}</div>
+        <div className='btnrow'>
+          <button onClick={() => { copyText(state.deviceKey); say('Copied') }}>
+            <Copy size={15} /> Copy key
+          </button>
+        </div>
+      </Section>
+
+      <Section id='support' title='Support development' Icon={Heart} open={aboutOpen === 'support'} onToggle={toggleAbout}>
+        <p>PearCinema is free and open source. If it brings you value, consider sending a little back.</p>
+        <div className='btnrow'>
+          <button className='primary' onClick={() => setDonate(true)}>⚡ Bitcoin ⚡</button>
+          <button onClick={() => openUrl(BUYMEACOFFEE_URL)}>$ USD $</button>
+        </div>
+      </Section>
+
+      <Section id='btc' title='Learn about Bitcoin' Icon={CurrencyBtc} open={aboutOpen === 'btc'} onToggle={toggleAbout}>
+        <p>
+          New to Bitcoin? The Satoshi Nakamoto Institute has a free, concise crash
+          course on how it works and why it matters.
+        </p>
+        <div className='btnrow'>
+          <button onClick={() => openUrl('https://nakamotoinstitute.org/crash-course/')}>Bitcoin Crash Course ↗</button>
+        </div>
+      </Section>
+
+      <Section id='oss' title='Open source' Icon={Code} open={aboutOpen === 'oss'} onToggle={toggleAbout}>
+        <p>PearCinema is open source under the MIT license. Read the code, file an issue, or contribute.</p>
+        <div className='btnrow'>
+          <button onClick={() => openUrl(GITHUB_URL)}>View on GitHub ↗</button>
+        </div>
+      </Section>
+
+      <Section id='share' title='Share the app' Icon={ShareNetwork} open={aboutOpen === 'share'} onToggle={toggleAbout}>
+        <p>
+          Know someone with a film collection and no good way to reach it from
+          their phone? Share PearCinema.
+        </p>
+        <div className='btnrow'>
+          <button onClick={() => call('shell.share', { title: 'PearCinema', text: SHARE_TEXT }).catch(() => {})}>
+            Share PearCinema
+          </button>
+        </div>
+      </Section>
+
+      <Section id='contact' title='Contact' Icon={EnvelopeSimple} open={aboutOpen === 'contact'} onToggle={toggleAbout}>
+        <div className='btnrow'>
+          <button onClick={() => openUrl(CONTACT_URL)}>Email</button>
+          <button onClick={() => openUrl(GITHUB_URL + '/issues')}>Issue</button>
+        </div>
+      </Section>
+
+      <div className='version'>v{APP_VERSION}</div>
     </div>
   )
 
@@ -1100,22 +1307,40 @@ export default function App () {
       {showDisplay && (
         <div className='sheetwrap' onClick={() => setShowDisplay(false)}>
           <div className='sheet' onClick={(e) => e.stopPropagation()}>
-            <h3>Sort</h3>
-            <div className='optlist'>
-              {[['title-asc', 'Title, A to Z'], ['title-desc', 'Title, Z to A'], ['year-desc', 'Year, newest first'], ['year-asc', 'Year, oldest first'], ['added-asc', 'Recently added']].map(([k, label]) => (
-                <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setDisplay({ sortKey: k })}>{label}</button>
-              ))}
+            <h1>Display</h1>
+            <div className='dispsec'>
+              <div className='displabel'>Layout</div>
+              <OptionList
+                options={LAYOUT_OPTS} value={String(cols)}
+                onChange={(v) => setDisplay({ cols: v === 'list' ? 'list' : Number(v) })}
+              />
             </div>
-            <h3>Layout</h3>
-            <div className='optlist'>
-              {[['list', 'List'], [2, 'Comfortable'], [3, 'Compact'], [4, 'Dense']].map(([n, label]) => (
-                <button key={n} className={cols === n ? 'on' : ''} onClick={() => setDisplay({ cols: n })}>{label}</button>
-              ))}
+            <div className='dispsec'>
+              <div className='displabel'>
+                <span>Sort by</span>
+                {sortField && (
+                  <button
+                    className='dirtoggle'
+                    onClick={() => setDisplay({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' })}
+                    aria-label={sortOrder === 'asc' ? 'Ascending - tap for descending' : 'Descending - tap for ascending'}
+                  >
+                    {sortOrder === 'desc' ? <ArrowDown size={15} weight='bold' /> : <ArrowUp size={15} weight='bold' />}
+                    {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+                  </button>
+                )}
+              </div>
+              <OptionList
+                options={[{ value: '', label: 'Default order' }, ...['title', 'year', 'added'].map((k) => ({ value: k, label: SORT_LABEL[k] }))]}
+                value={sortField}
+                onChange={(v) => setDisplay({ sortField: v, sortOrder: 'asc' })}
+              />
             </div>
-            <button className='ghost' onClick={() => setShowDisplay(false)}>Done</button>
+            <div className='acts'><button className='wide' onClick={() => setShowDisplay(false)}>Done</button></div>
           </div>
         </div>
       )}
+
+      {donate && <DonationSheet onClose={() => setDonate(false)} />}
 
       {toast && <div className='toast'>{toast}</div>}
     </div>

@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, PermissionsAndroid, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
 // app was running arrived nowhere (measured on the TCL, 2026-08-14 - the
@@ -22,6 +22,7 @@ import * as FileSystem from 'expo-file-system/legacy'
 import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
 import * as ScreenOrientation from 'expo-screen-orientation'
+import * as Clipboard from 'expo-clipboard'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 
@@ -400,6 +401,29 @@ export default function App () {
     }
     if (msg.method === 'shell.stop') {
       stopPlayback()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.openUrl') {
+      Linking.openURL(msg.args?.url).catch(() => {})
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.canOpenURL') {
+      Linking.canOpenURL(msg.args?.url ?? '').then((can) => {
+        feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { can: !!can }, error: null })})`)
+      }).catch(() => {
+        feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { can: false }, error: null })})`)
+      })
+      return
+    }
+    if (msg.method === 'shell.clipboard') {
+      Clipboard.setStringAsync(String(msg.args?.text ?? '')).catch(() => {})
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.share') {
+      Share.share({ message: String(msg.args?.text ?? '') }).catch(() => {})
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }
