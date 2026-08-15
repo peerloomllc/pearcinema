@@ -27,6 +27,7 @@ const { createProtocol } = require('@peerloom/host/protocol')
 const { Client } = require('@peerloom/client/client')
 const H = require('@peerloom/client/hosts')
 const { createAudioShim } = require('@peerloom/client/shim')
+const { AudioCache } = require('@peerloom/client/cache')
 
 const DATA_DIR = Bare.argv[0] || '/tmp/pearcinema'
 const PLATFORM = Bare.argv[1] || 'android'
@@ -178,8 +179,68 @@ async function connected () {
 // boot, because only the shell can read the app's assets.
 let uiPage = null
 
+// The film store: write-through for whole plays (LRU, capped) and the home of
+// pinned DOWNLOADS, which the store exempts from the cap by design. The shim
+// serves a cache hit straight off disk with full Range support - which is the
+// entire offline story: no connection needed once a film is here.
+const cache = new AudioCache({ dir: path.join(DATA_DIR, 'films'), cap: 512 * 1024 * 1024, log: (m, d) => log(m, d) })
+
+const CONTAINER_MIME = {
+  matroska: 'video/x-matroska', mkv: 'video/x-matroska', mov: 'video/mp4',
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo', mpegts: 'video/mp2t'
+}
+
+// Live downloads, itemId -> { cancel, got, size }. RAM-only: a killed app
+// leaves an uncommitted sink, which the store never marks complete - restart
+// and download again.
+const downloads = new Map()
+
+async function startDownload (itemId) {
+  if (cache.has(itemId)) {
+    cache.setPinned(itemId, true)
+    emit('download:done', { itemId })
+    return { ok: true, already: true }
+  }
+  if (downloads.has(itemId)) return { ok: true, running: true }
+  const c = await connected()
+  const item = await c.get({ id: itemId })
+  const size = item?.media?.size
+  if (!size) throw new Error('this one cannot be downloaded')
+  const mime = CONTAINER_MIME[String(item?.media?.container || '').toLowerCase()] || 'video/mp4'
+  const active = H.activeHost(hostsState)
+  const sink = cache.createSink(itemId, { mime, size, library: active?.libraryId || null, pinned: true })
+  let got = 0
+  let lastEmit = 0
+  const p = c.streamTo({ itemId, offset: 0, length: size }, (chunk) => {
+    got += chunk.length
+    sink.write(chunk)
+    if (got - lastEmit > 16 * 1024 * 1024 || got === size) {
+      lastEmit = got
+      emit('download:progress', { itemId, got, size })
+    }
+  })
+  downloads.set(itemId, { cancel: () => p.cancel?.(), got: () => got, size })
+  p.then(async (out) => {
+    downloads.delete(itemId)
+    if (out?.cancelled) {
+      sink.abort()
+      emit('download:failed', { itemId, reason: 'cancelled' })
+      return
+    }
+    const stored = await sink.commit()
+    emit(stored ? 'download:done' : 'download:failed', { itemId, reason: stored ? undefined : 'incomplete' })
+  }).catch((e) => {
+    downloads.delete(itemId)
+    sink.abort()
+    emit('download:failed', { itemId, reason: e.message })
+  })
+  emit('download:progress', { itemId, got: 0, size })
+  return { ok: true }
+}
+
 const shim = createAudioShim({
   log: (m, d) => log(m, d),
+  cache,
   defaultClient: () => connected(),
   streamParams: (id, extra) => ({ itemId: id, ...extra }),
   artParams: (id, size) => ({ artId: id, size }),
@@ -371,6 +432,29 @@ const methods = {
   'identity.get': async (args) => (await connected()).request('identity.get', args),
   'identity.set': async (args) => (await connected()).request('identity.set', args),
   'avatar.set': async (args) => (await connected()).request('avatar.set', args),
+
+  // Downloads: pin a film for offline. The bytes ride the same media.stream
+  // chokepoint as playback; the shim then serves the finished file off disk,
+  // connection or none.
+  'download.start': async ({ itemId }) => startDownload(String(itemId || '')),
+  'download.cancel': async ({ itemId }) => {
+    downloads.get(String(itemId || ''))?.cancel()
+    return { ok: true }
+  },
+  'download.remove': async ({ itemId }) => {
+    const id = String(itemId || '')
+    cache.remove(id)
+    cache.save()
+    emit('download:removed', { itemId: id })
+    return { ok: true }
+  },
+  'download.list': async () => {
+    const items = Object.entries(cache.index || {})
+      .filter(([, e]) => e.pinned)
+      .map(([id, e]) => ({ itemId: id, size: e.size || 0, mime: e.mime || null }))
+    const running = [...downloads.entries()].map(([id, d]) => ({ itemId: id, got: d.got(), size: d.size }))
+    return { items, running }
+  },
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
 
