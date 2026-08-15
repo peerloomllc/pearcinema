@@ -1475,3 +1475,7 @@ label.flabel { display: block; margin-top: .6rem; }
 .grid.aslist .tileheart {
   position: static; transform: none; flex: none; margin-left: 1.1rem;
 }
+
+/* Film posters are portrait; the donor's shelf squares were album art. */
+.shelf-item { width: 104px }
+.shelf-item .cover { width: 104px; height: 156px }

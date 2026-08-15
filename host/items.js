@@ -177,6 +177,7 @@ function movie (row = {}) {
   return {
     type: 'movie',
     id: String(row.id || ''),
+    addedAt: Number.isFinite(Number(row.addedAt)) && Number(row.addedAt) > 0 ? Number(row.addedAt) : null,
     title: clean(row.title) || 'Untitled',
     year: year(row.year),
     runtime: runtime(row.runtime),
@@ -224,6 +225,7 @@ function episode (row = {}) {
   return {
     type: 'episode',
     id: String(row.id || ''),
+    addedAt: Number.isFinite(Number(row.addedAt)) && Number(row.addedAt) > 0 ? Number(row.addedAt) : null,
     seriesId: String(row.seriesId || ''),
     seasonId: String(row.seasonId || ''),
     seriesTitle: clean(row.seriesTitle) || null,
@@ -297,6 +299,12 @@ const byYear = (a, b) =>
   // Undated last, rather than pretending they are year zero.
   ((b.year ?? -Infinity) - (a.year ?? -Infinity)) || byTitle(a, b)
 
+// Newest first at `asc` deliberately: "recently added" MEANS newest-first, and
+// making callers say desc to get the obvious reading would be a trap. Items
+// with no addedAt (an old scan cache, a source that does not know) sort last.
+const byAdded = (a, b) =>
+  ((b.addedAt ?? -Infinity) - (a.addedAt ?? -Infinity)) || byTitle(a, b)
+
 // The one order that is structural rather than cosmetic. Specials (season 0) go
 // LAST despite sorting first numerically, because nobody watches a show starting
 // with its Christmas special.
@@ -313,6 +321,7 @@ const byEpisode = (a, b) =>
 const SORTS = {
   title: byTitle,
   year: byYear,
+  added: byAdded,
   season: bySeason,
   episode: byEpisode
 }
@@ -375,7 +384,11 @@ function buildTree (episodes) {
   }
 
   for (const s of seasonById.values()) {
-    s.episodeCount = episodesBySeason.get(s.id)?.length || 0
+    const eps = episodesBySeason.get(s.id) || []
+    s.episodeCount = eps.length
+    // A season is as fresh as its newest episode.
+    const added = eps.map(e => e.addedAt).filter(Boolean)
+    s.addedAt = added.length ? Math.max(...added) : null
   }
   for (const s of seriesById.values()) {
     const seasons = [...seasonById.values()].filter(x => x.seriesId === s.id)
@@ -388,6 +401,11 @@ function buildTree (episodes) {
       .map(e => e.year)
       .filter(y => y !== null)
     s.year = years.length ? Math.min(...years) : null
+    // A series takes the LATEST addedAt - the opposite pole from year, because
+    // "recently added" asks when something NEW landed in the show, and a
+    // decades-old pilot must not bury last night's episode.
+    const added = seasons.map(x => x.addedAt).filter(Boolean)
+    s.addedAt = added.length ? Math.max(...added) : null
   }
 
   return {

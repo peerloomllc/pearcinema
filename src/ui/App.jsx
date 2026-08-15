@@ -358,6 +358,7 @@ export default function App () {
   const [showDisplay, setShowDisplay] = useState(false)
   const SORT_PARAM = {
     'title-asc': { sort: 'title', order: 'asc' },
+    'added-asc': { sort: 'added', order: 'asc' },
     'title-desc': { sort: 'title', order: 'desc' },
     'year-desc': { sort: 'year', order: 'desc' },
     'year-asc': { sort: 'year', order: 'asc' }
@@ -500,6 +501,20 @@ export default function App () {
     else fetchList({ type: root, limit: 100, ...SORT_PARAM[sortKey] })
   }, [state?.active?.hostKey, root, series?.id, season?.id, sortKey])
 
+  // The recently-added strip: the newest arrivals by file date, shown only
+  // when something actually arrived in the last month - an empty shelf is
+  // noise, and a shelf of years-old files is a lie about the word recently.
+  const [recentRows, setRecentRows] = useState([])
+  useEffect(() => {
+    if (!state?.active) return
+    call('library.list', { type: 'movies', sort: 'added', order: 'asc', limit: 12 })
+      .then((r) => {
+        const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000
+        setRecentRows((r.items || []).filter((i) => i.addedAt && i.addedAt >= cutoff))
+      })
+      .catch(() => setRecentRows([]))
+  }, [state?.active?.hostKey])
+
   // The saved display prefs, once the worklet answers.
   useEffect(() => {
     call('getSettings').then((s) => {
@@ -641,6 +656,23 @@ export default function App () {
       )}
 
       {err && <div className='error'>{err}</div>}
+
+      {!series && !results && root === 'movies' && recentRows.length > 0 && (
+        <div className='shelf'>
+          <h2 className='shelf-head'>Recently added</h2>
+          <div className='shelf-scroll'>
+            <div className='shelf-row'>
+              {recentRows.map((i) => (
+                <button key={i.id} className='shelf-item' onClick={() => open(i)}>
+                  <Cover src={i.artId && artBase ? `${artBase}${encodeURIComponent(i.artId)}?s=200` : null} title={i.title} />
+                  <div className='shelf-t'>{i.title}</div>
+                  <div className='shelf-a'>{[i.year, fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {results
         ? (results.length
@@ -1023,7 +1055,7 @@ export default function App () {
           <div className='sheet' onClick={(e) => e.stopPropagation()}>
             <h3>Sort</h3>
             <div className='optlist'>
-              {[['title-asc', 'Title, A to Z'], ['title-desc', 'Title, Z to A'], ['year-desc', 'Year, newest first'], ['year-asc', 'Year, oldest first']].map(([k, label]) => (
+              {[['title-asc', 'Title, A to Z'], ['title-desc', 'Title, Z to A'], ['year-desc', 'Year, newest first'], ['year-asc', 'Year, oldest first'], ['added-asc', 'Recently added']].map(([k, label]) => (
                 <button key={k} className={sortKey === k ? 'on' : ''} onClick={() => setDisplay({ sortKey: k })}>{label}</button>
               ))}
             </div>

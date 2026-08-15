@@ -571,6 +571,7 @@ class FolderAdapter {
           runtime: merged.runtime ?? probed.duration,
           overview: merged.overview,
           genres: merged.genres,
+          addedAt: probed.addedAt,
           artId: this._artIdFor(artFile, root),
           media: items.media(probed)
         }),
@@ -594,6 +595,7 @@ class FolderAdapter {
         runtime: merged.runtime ?? probed.duration,
         overview: merged.overview,
         genres: merged.genres,
+        addedAt: probed.addedAt,
         artId: this._artIdFor(artFile, root),
         media: items.media(probed)
       }),
