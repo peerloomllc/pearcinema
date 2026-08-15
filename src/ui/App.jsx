@@ -624,6 +624,7 @@ export default function App () {
   const [sortOrder, setSortOrder] = useState('asc')
   const [cols, setCols] = useState(2)
   const [showRecent, setShowRecent] = useState(true)
+  const [dataSaver, setDataSaver] = useState(false)
   const [showDisplay, setShowDisplay] = useState(false)
   const setDisplay = (patch) => {
     if ('sortField' in patch) setSortField(patch.sortField)
@@ -829,6 +830,7 @@ export default function App () {
       if (['asc', 'desc'].includes(s?.sortOrder)) setSortOrder(s.sortOrder)
       if (['list', 2, 3].includes(s?.cols)) setCols(s.cols)
       if (typeof s?.showRecent === 'boolean') setShowRecent(s.showRecent)
+      if (typeof s?.dataSaver === 'boolean') setDataSaver(s.dataSaver)
     }).catch(() => {})
   }, [])
 
@@ -1335,7 +1337,16 @@ export default function App () {
         </Section>
 
         <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
-          <p className='desc'>Full quality, converted by your box only when this phone needs it. A data-saver cap for slow links, and a size cap for downloaded films, arrive with the off-home and offline work.</p>
+          <div className='label'>Streaming quality</div>
+          <OptionList
+            options={[
+              { value: 'auto', label: 'Full quality', desc: 'The file as it is; your box converts only when this phone cannot play it' },
+              { value: 'saver', label: 'Data saver', desc: 'Capped near 2.5 Mbps - your box converts bigger films down. For cellular and slow links' }
+            ]}
+            value={dataSaver ? 'saver' : 'auto'}
+            onChange={(v) => { setDataSaver(v === 'saver'); call('setSettings', { dataSaver: v === 'saver' }).catch(() => {}) }}
+          />
+          <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file. A size cap for them arrives with the offline polish.</p>
         </Section>
 
         <Section id='appearance' title='Appearance' Icon={Palette} open={settingsOpen === 'appearance'} onToggle={toggleSection}>

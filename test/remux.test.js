@@ -301,3 +301,29 @@ test('CHAPTERS ARE DROPPED - a ripped film would otherwise grow a phantom data t
   const info = await probe(await collect(session.stdout), dir, 'nochapters.mp4')
   assert.deepEqual(info.streams.map(s => s.codec_type), ['video', 'audio'], 'exactly two streams, no bin_data')
 })
+
+test('DATA SAVER: a stated budget converts a fat file down, and only with hardware', () => {
+  const { decide } = require('../host/remux')
+  const { capBitrate } = require('../host/transcode')
+  const fat = { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }
+  const client = { containers: ['matroska', 'mp4'], videoCodecs: ['h264'], audioCodecs: ['aac'], maxKbps: 2500 }
+
+  // Over budget, hardware proven: converted down, even though it direct-plays.
+  const v = decide(fat, client, { transcode: true, fileKbps: 3100 })
+  assert.strictEqual(v.mode, 'transcode')
+  assert.match(v.reason, /2500 kbps/)
+
+  // Under budget (with the slack): the file as it is.
+  assert.strictEqual(decide(fat, client, { transcode: true, fileKbps: 2600 }).mode, 'direct')
+
+  // No hardware: a slow stream beats no stream - direct, never software.
+  assert.strictEqual(decide(fat, client, { transcode: false, fileKbps: 9000 }).mode, 'direct')
+
+  // No budget stated: nothing changes.
+  assert.strictEqual(decide(fat, { ...client, maxKbps: 0 }, { transcode: true, fileKbps: 9000 }).mode, 'direct')
+
+  // The segment bitrate honours the budget, in either notation.
+  assert.strictEqual(capBitrate('6M', 2500), '2500k')
+  assert.strictEqual(capBitrate('1500k', 2500), '1500k')
+  assert.strictEqual(capBitrate('3M', 0), '3M')
+})

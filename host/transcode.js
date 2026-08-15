@@ -33,6 +33,15 @@ const HW_DECODE = new Set(['h264', 'hevc', 'vp9', 'av1'])
 // One rendition, the source's own resolution, bitrate by that resolution. Named by
 // WIDTH for the same reason items.resolutionLabel is: a scope-ratio film is 1920
 // wide and 800 tall, and bucketing by height files most of cinema a tier low.
+// The width ladder, held under a client's stated kbps budget. ffmpeg rates
+// are strings ('6M', '1500k'); parse, min, re-emit as kbps.
+function capBitrate (rate, maxKbps) {
+  if (!maxKbps) return rate
+  const m = /^(\d+(?:\.\d+)?)([Mk])$/.exec(String(rate))
+  const kbps = m ? Number(m[1]) * (m[2] === 'M' ? 1000 : 1) : 3000
+  return Math.min(kbps, maxKbps) + 'k'
+}
+
 function bitrateFor (width) {
   const w = Number(width) || 0
   if (w >= 1600) return '6M'
@@ -161,6 +170,7 @@ class Transcoder extends Remuxer {
 }
 
 module.exports = {
+  capBitrate,
   Transcoder, transcodeArgs, probeTranscode, bitrateFor,
   HW_DECODE, DEVICE_DEFAULT
 }
