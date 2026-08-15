@@ -1468,6 +1468,10 @@ label.flabel { display: block; margin-top: .6rem; }
   border-radius: 9999px; padding: .5rem .8rem; color: var(--color-text-muted);
 }
 
-/* A long title stops short of the row's bookmark instead of running under it
-   (Tim, 2026-08-15). */
-.grid.aslist .meta { padding-right: 2.4rem }
+/* The bookmark is a REAL flex column in a list row, not a float over the
+   text - so a long title truncates against reserved space and can never
+   touch the icon, at any screen width (Tim, 2026-08-15: padding was a
+   guess; geometry is a guarantee). */
+.grid.aslist .tileheart {
+  position: static; transform: none; flex: none; margin-left: 1.1rem;
+}
