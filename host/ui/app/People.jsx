@@ -78,9 +78,14 @@ function DeviceRow ({ d, persons, reload }) {
           {[
             d.belongsTo ? `${d.belongsTo}` : (d.claimedUser ? `says it is ${d.claimedUser}` : 'nobody yet'),
             platformLabel(d.platform),
-            `seen ${ago(d.lastSeen)}`
+            // The grant row's field is lastSeenAt; reading d.lastSeen here kept
+            // every device at "never seen" no matter how much it streamed.
+            `seen ${ago(d.lastSeenAt)}`
           ].filter(Boolean).join(' · ')}
         </div>
+        {/* What this device is watching RIGHT NOW - the host's own certainty,
+            from the bytes it is serving (Tim, 2026-08-15). */}
+        {d.watching && <div class='accent-t'>watching {d.watching.title}</div>}
         <div class='mono' title={d.deviceKey}>{shortKey(d.deviceKey)}</div>
       </div>
 

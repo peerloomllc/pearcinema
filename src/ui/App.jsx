@@ -455,7 +455,7 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
   const pairWith = async (raw) => {
     setBusy(true); setError('')
     try {
-      const out = await call('pair', { link: String(raw || '').trim(), label: names.deviceName.trim() || 'phone' })
+      const out = await call('pair', { link: String(raw || '').trim(), label: names.deviceName.trim() })
       // The claim rides straight after the grant, so the dashboard's device
       // list names this phone from its first appearance.
       if (names.userName.trim() || names.deviceName.trim()) {
@@ -742,9 +742,13 @@ export default function App () {
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
       }),
-      on('player:closed', (d) => {
-        if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+      on('player:closed', async (d) => {
+        if (d?.itemId && d.positionMs > 0) await call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+        // Refetch the shelf people are LOOKING at. Nulling alone left You >
+        // Continue on its skeleton forever when the player was opened from it,
+        // because the tab effect only fires on arrival (Tim, 2026-08-15).
         setContinueRows(null)
+        if (uiRef.current.tab === 'you') loadYouRef.current?.(uiRef.current.youView)
       }),
       on('player:error', async (d) => {
         if (!d?.itemId) return
@@ -783,7 +787,7 @@ export default function App () {
     return () => { offs.forEach((f) => f()); offTheme(); document.removeEventListener('click', feel, true) }
   }, [])
 
-  uiRef.current = { sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
+  uiRef.current = { youView, sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
 
   // --- library data ---------------------------------------------------------
 
@@ -858,6 +862,7 @@ export default function App () {
     if (tab === 'you') loadYou(youView)
   }, [tab, youView, state?.active?.hostKey])
 
+  const loadYouRef = useRef(null)
   const loadYou = async (view) => {
     try {
       if (view === 'continue') setContinueRows((await call('resume.list', { limit: 30 })).items || [])
@@ -883,6 +888,8 @@ export default function App () {
       }
     } catch (e) { setErr(e.message) }
   }
+
+  loadYouRef.current = loadYou
 
   // --- actions --------------------------------------------------------------
 

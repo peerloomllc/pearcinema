@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -157,6 +157,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
         throw e
       }
       if (!session) throw ctx.notFound('no such segment')
+      if (seen) seen(ctx.deviceKey, String(ctx.params.itemId))
       return ctx.stream(session.stdout)
     },
 

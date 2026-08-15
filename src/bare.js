@@ -362,7 +362,7 @@ const methods = {
 
   // Pair by the link a QR or a paste carries. On success the host joins the list
   // and becomes active.
-  'pair': async ({ link, label = 'phone' }) => {
+  'pair': async ({ link, label = '' }) => {
     const c = new Client({ protocol, keyPair, log: (m, d) => log(m, d) })
     try {
       const paired = await c.pair(link, { label, platform: PLATFORM })

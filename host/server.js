@@ -147,8 +147,13 @@ class PearCinemaHost {
             decide: (p) => this.decideFor(p),
             playlist: (p) => this.hlsPlaylist(p),
             segment: (p) => this.hlsSegment(p)
-          }
+          },
+          // Something is being WATCHED through this connection - the one thing
+          // the host knows for certain. Feeds the dashboard's now-playing and
+          // keeps lastSeenAt honest on long-lived connections.
+          seen: (deviceKey, itemId) => this.noteWatching(deviceKey, itemId)
         }),
+        onStream: (params, ctx) => this.noteWatching(ctx.deviceKey, params.itemId),
         mutating: MUTATING,
         // media.stream stays in the package - gating a byte stream on a live grant
         // is the one method where a mistake hands out the library rather than an
@@ -633,8 +638,34 @@ class PearCinemaHost {
 
   startPairing (opts) { return this.host.startPairing(opts) }
   stopPairing () { return this.host.stopPairing() }
-  listDevices () { return this.host.listDevices() }
+  // The package's rows, plus what each device is WATCHING right now - resolved
+  // to a title here, because the dashboard renders people, not ids.
+  async listDevices () {
+    const rows = await this.host.listDevices()
+    for (const r of rows) {
+      const w = this.watchingOf(r.deviceKey)
+      if (!w) continue
+      const item = await this.adapter.get({ id: w.itemId }).catch(() => null)
+      if (item) r.watching = { itemId: w.itemId, title: item.title, at: w.at }
+    }
+    return rows
+  }
   revokeDevice (k) { return this.host.revokeDevice(k) }
+
+  // deviceKey -> { itemId, at }. RAM-only and coarse on purpose: the dashboard
+  // asks "what is this person watching", not for a play log.
+  noteWatching (deviceKey, itemId) {
+    if (!deviceKey || !itemId) return
+    if (!this.nowStreaming) this.nowStreaming = new Map()
+    this.nowStreaming.set(String(deviceKey), { itemId: String(itemId), at: Date.now() })
+    this.host.grants.touch(deviceKey).catch(() => {})
+  }
+
+  watchingOf (deviceKey) {
+    const w = this.nowStreaming?.get(String(deviceKey))
+    // Stale after ten minutes without a byte - a paused film holds its buffer.
+    return w && Date.now() - w.at < 10 * 60 * 1000 ? w : null
+  }
   leaveDevice (k) { return this.host.leaveDevice(k) }
   revokePerson (p) { return this.host.revokePerson(p) }
   // Cleanup and edits the dashboard offers. Proxied rather than reached for through
