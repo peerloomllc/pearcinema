@@ -2,6 +2,46 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-14 - FFMPEG SHIPS WITH THE APP, resolved through one seam, and LGPL builds suffice by design
+Tier: T1 (a resolution seam and a packaging convention; no behaviour change on
+any deployed host)
+Context: Tim, 2026-08-14 - "we need to make sure we are including ffmpeg in the
+app host bundle, no matter the platform, since we rely upon it and can't be
+guaranteed a user has it installed." He is right, and for video it is not a
+nice-to-have: ffprobe is how the folder adapter reads what a file IS, so
+without it a folder library cannot even scan.
+
+**The decision**: the binaries ship with the DESKTOP packaging (the artifact
+consumers touch), resolved through one seam built now - `host/ffmpeg-bin.js`:
+
+1. Explicit setting (`PEARCINEMA_FFMPEG` / `PEARCINEMA_FFPROBE`), trusted
+   verbatim.
+2. Bundled binary at `vendor/ffmpeg/<platform>-<arch>/` - the drop point
+   desktop packaging fills; the convention is committed, the binaries never
+   are.
+3. System PATH, VERIFIED by running `-version` once rather than assumed -
+   the Docker image's distro ffmpeg and an operator's own install arrive here.
+4. An honest miss: startup prints one plain sentence naming the env vars and
+   the vendor path, instead of "spawn ffprobe ENOENT" three minutes into a
+   first scan. A miss warns rather than refuses, because a Jellyfin-only
+   direct-play host genuinely works without the binaries.
+
+Docker stays exactly as it is (distro ffmpeg plus the Intel VA driver, the
+PR #9 reasoning untouched). A git checkout stays an operator's machine.
+
+**The licensing alignment worth writing down**: the popular prebuilt statics
+are GPL builds because they carry libx264 - but PearCinema's transcode
+proposal already forbids software video encoding outright, so the
+GPL-triggering encoders are never invoked. Remux is stream copy plus the
+built-in AAC encoder; transcode is hardware only (VAAPI today, VideoToolbox
+when the Mac path lands). **LGPL builds therefore suffice**, keeping the MIT
+posture clean rather than leaning on the separate-process argument. The
+no-melting-small-boxes rule turned out to also be the no-GPL rule.
+
+Bundling the binary does NOT bundle drivers: VAAPI still needs the system VA
+driver, and the startup hardware probe already answers that honestly (no
+proven hardware means no transcode; scanning and remux still work).
+
 ## 2026-08-14 - SUBTITLES ON THE PHONE: one picker, two mechanisms, and the picker hides the difference
 Tier: T1 (player UI and one worklet proxy; no wire change - subtitle.list and
 subtitle.get were already the host's vocabulary)

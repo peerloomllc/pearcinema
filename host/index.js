@@ -79,6 +79,19 @@ async function main () {
     log
   })
 
+  // Say up front where the two binaries this host leans on came from - and say
+  // PLAINLY when one is absent, because the alternative is "spawn ffprobe
+  // ENOENT" three minutes into somebody's first scan. A Jellyfin-only host
+  // still works without them, so a miss warns rather than refuses.
+  const bins = require('./ffmpeg-bin').report()
+  log('ffmpeg:resolved', {
+    ffmpeg: `${bins.ffmpeg.bin} (${bins.ffmpeg.source})`,
+    ffprobe: `${bins.ffprobe.bin} (${bins.ffprobe.source})`
+  })
+  if (bins.missing) {
+    process.stderr.write(`\n!! ffmpeg or ffprobe was NOT FOUND: ${bins.hint}\n\n`)
+  }
+
   // Configuring or checking a source happens BEFORE the host listens. There is
   // nothing to serve until the operator has told us where the films are, and a
   // --test run should never announce itself on the DHT.
