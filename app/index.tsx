@@ -23,6 +23,7 @@ import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import * as Clipboard from 'expo-clipboard'
+import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 
@@ -401,6 +402,19 @@ export default function App () {
     }
     if (msg.method === 'shell.stop') {
       stopPlayback()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.haptic') {
+      const k = msg.args?.kind
+      ;(async () => {
+        try {
+          if (k === 'medium') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+          else if (k === 'success') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
+          else if (k === 'warn') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+          else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
+        } catch (e: any) { console.log('[shell] haptic failed: ' + e?.message) }
+      })()
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }

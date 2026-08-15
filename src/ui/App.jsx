@@ -18,7 +18,7 @@ import {
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
   ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code
 } from '@phosphor-icons/react'
-import { call, on } from './bridge'
+import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
 
 const APP_VERSION = '0.1.0'
@@ -56,11 +56,11 @@ function usePress (onPress, onLongPress) {
   const fired = useRef(false)
   const start = () => {
     fired.current = false
-    if (onLongPress) timer.current = setTimeout(() => { fired.current = true; onLongPress() }, 450)
+    if (onLongPress) timer.current = setTimeout(() => { fired.current = true; haptic('medium'); onLongPress() }, 450)
   }
   const stop = (go) => {
     clearTimeout(timer.current)
-    if (go && !fired.current) onPress?.()
+    if (go && !fired.current) { haptic('light'); onPress?.() }
   }
   return {
     onPointerDown: start,
@@ -592,6 +592,12 @@ export default function App () {
       })
     ]
     call('shell.pendingLink').then((url) => { if (url) { setPairLink(url); setAddingLibrary(true) } }).catch(() => {})
+    // THE GENERAL RULE (Tim, 2026-08-15): almost everything tappable answers
+    // the finger. One capture-phase listener covers every <button> in the app -
+    // capture, so a handler's own stopPropagation cannot silence it - and
+    // usePress covers the pointer-driven tiles and rows that are not buttons.
+    const feel = (e) => { if (e.target?.closest?.('button')) haptic('light') }
+    document.addEventListener('click', feel, true)
     const offTheme = onSystemThemeChange(() => applyThemePref(loadThemePref(), { persist: false }))
     window.__pearBack = () => {
       const u = uiRef.current
@@ -605,7 +611,7 @@ export default function App () {
       if (u.tab !== 'library') return setTab('library')
       call('shell.exit').catch(() => {})
     }
-    return () => { offs.forEach((f) => f()); offTheme() }
+    return () => { offs.forEach((f) => f()); offTheme(); document.removeEventListener('click', feel, true) }
   }, [])
 
   uiRef.current = { sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
@@ -725,6 +731,7 @@ export default function App () {
     if (!on) setSavedItems((rows) => (rows || []).filter((r) => r.id !== i.id))
     try {
       await call('fav.set', { kind, id: i.id, on })
+      haptic('success')
       say(on ? 'Added to your watchlist' : 'Removed from your watchlist')
       if (on) call('fav.list').then((r) => setSavedItems(r.items || [])).catch(() => {})
     } catch (e) { setErr(e.message) }
@@ -1033,6 +1040,7 @@ export default function App () {
               const b64 = await compressToAvatarB64(await readFileDataUrl(f))
               setAvatar(b64)
               await call('avatar.set', { avatar: b64 })
+              haptic('success')
               say('Photo saved')
             } catch (er) { setErr(er.message) }
           }}
@@ -1190,7 +1198,7 @@ export default function App () {
         </p>
         <div className='key'>{state.deviceKey}</div>
         <div className='btnrow'>
-          <button onClick={() => { copyText(state.deviceKey); say('Copied') }}>
+          <button onClick={() => { copyText(state.deviceKey); haptic('success'); say('Copied') }}>
             <Copy size={15} /> Copy key
           </button>
         </div>
