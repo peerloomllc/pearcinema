@@ -52,7 +52,7 @@ function bitrateFor (width) {
 // The ffmpeg argv for one transcode, starting at `at` seconds. The measured
 // invocation from the proposal, plus everything the remux argv already learned the
 // hard way (one video and one audio stream, no chapters, no subtitles, delay_moov).
-function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT }) {
+function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0 }) {
   const v = codec(media?.videoCodec)
   const hw = HW_DECODE.has(v)
 
@@ -79,7 +79,7 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
   // encode is 8-bit, so the engine converts as part of the scale. The software-decode
   // path converts on the CPU and uploads, which for SD content is a rounding error.
   args.push('-vf', hw ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
-  args.push('-c:v', 'h264_vaapi', '-b:v', bitrateFor(media?.width))
+  args.push('-c:v', 'h264_vaapi', '-b:v', capBitrate(bitrateFor(media?.width), maxKbps))
 
   if (audio === 'copy') args.push('-c:a', 'copy')
   else args.push('-c:a', AUDIO_FALLBACK.codec, '-b:a', AUDIO_FALLBACK.bitrate, '-ac', '2')

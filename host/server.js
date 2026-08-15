@@ -146,7 +146,8 @@ class PearCinemaHost {
           media: {
             decide: (p) => this.decideFor(p),
             playlist: (p) => this.hlsPlaylist(p),
-            segment: (p) => this.hlsSegment(p)
+            segment: (p) => this.hlsSegment(p),
+            export: (p) => this.exportFor(p)
           },
           // Something is being WATCHED through this connection - the one thing
           // the host knows for certain. Feeds the dashboard's now-playing and
@@ -543,6 +544,49 @@ class PearCinemaHost {
     const session = this.transcoder.start({ argv, at: k * hls.SEGMENT_SECONDS, audio: 'aac', media: item.media })
     this.log('host:hls-segment', { seq: k, running: this.transcoder.running })
     return session
+  }
+
+  // One whole converted film as a single progressive fMP4, for a download the
+  // phone keeps. Same decide() as playback: an item the client could take as-is
+  // answers { direct: true } and the byte-exact path applies instead - the host
+  // never converts what needs no converting. Runs through the transcoder pool,
+  // so it shares the engine cap, the BUSY message and revoke's killAll.
+  async exportFor ({ itemId, capabilities = {} }) {
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return null
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    if (verdict.mode !== 'transcode') return { direct: true }
+    if (!this.adapter.ffmpegInput) return null
+    const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })
+    if (!source) return null
+
+    const argv = transcode.transcodeArgs({
+      input: source.input,
+      headers: source.headers || null,
+      at: 0,
+      audio: verdict.audio || 'copy',
+      media: item.media || {},
+      device: this.transcoder.device,
+      maxKbps: Number(capabilities.maxKbps) || 0
+    })
+    const session = this.transcoder.start({ argv, at: 0, audio: verdict.audio, media: item.media })
+    this.log('host:export', { itemId: String(itemId), running: this.transcoder.running })
+
+    // THE TRUNCATION GUARD. A crashed ffmpeg ends its stdout CLEANLY, and a
+    // clean end becomes a clean end frame on the wire - the phone would store
+    // half a film as a finished download and only find out at the missing
+    // third act. So the wire stream only ends when the process exited 0;
+    // any other exit destroys it, which reaches the phone as a stream error.
+    const { PassThrough } = require('stream')
+    const out = new PassThrough()
+    session.stdout.pipe(out, { end: false })
+    session.proc.on('close', (code) => {
+      if (code === 0) out.end()
+      else out.destroy(new Error('the conversion died before the end of the film'))
+    })
+    // A cancel from the phone destroys `out`; the kill frees the engine slot.
+    out.on('close', () => session.kill())
+    return { stream: out }
   }
 
   // A candidate's thumbnail for the fix dialog, PROXIED - the promise on the panel

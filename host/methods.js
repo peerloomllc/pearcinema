@@ -161,6 +161,28 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return ctx.stream(session.stdout)
     },
 
+    // The whole converted film, streamed once for keeps - the download side of
+    // data saver. The host still decides: an item the device could take as-is
+    // answers `direct: true` and the client downloads the original bytes.
+    'media.export': async (ctx) => {
+      if (!media || !media.export) throw ctx.notFound('this host cannot convert for download')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      let out
+      try {
+        out = await media.export({
+          itemId: String(ctx.params.itemId),
+          capabilities: ctx.params.capabilities || {}
+        })
+      } catch (e) {
+        if (e.code === 'BUSY') { ctx.fail('BUSY', e.message); return }
+        throw e
+      }
+      if (!out) throw ctx.notFound('no such item')
+      if (out.direct) return { direct: true }
+      if (seen) seen(ctx.deviceKey, String(ctx.params.itemId))
+      return ctx.stream(out.stream)
+    },
+
     'subtitle.list': async (ctx) => {
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
       const adapter = getAdapter()

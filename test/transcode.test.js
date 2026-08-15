@@ -220,3 +220,58 @@ test('the transcoder is its own pool: a busy remuxer does not block a transcode'
   assert.ok(s)
   r.killAll(); t.killAll()
 })
+
+// --- the export path: one converted film, downloaded for keeps ---------------
+
+test('transcodeArgs caps the ladder at the declared budget', () => {
+  const args = transcode.transcodeArgs({ input: '/film.mkv', media: media('matroska', 'hevc', 'dts', 1920), maxKbps: 2500 })
+  const i = args.indexOf('-b:v')
+  assert.strictEqual(args[i + 1], '2500k')
+})
+
+test('transcodeArgs without a budget keeps the width ladder', () => {
+  const args = transcode.transcodeArgs({ input: '/film.mkv', media: media('matroska', 'hevc', 'dts', 1920) })
+  const i = args.indexOf('-b:v')
+  assert.strictEqual(args[i + 1], '6M')
+})
+
+test('exportFor: direct verdict answers direct, transcode verdict streams and the guard kills a crashed encode', async () => {
+  const { PearCinemaHost } = require('../host/server')
+  const bin = await fakeFfmpeg('echo -n MP4BYTES; exit 1')
+  const transcoder = new transcode.Transcoder({ ffmpeg: bin, maxConcurrent: 2 })
+  const fake = {
+    adapter: {
+      get: async ({ id }) => ({
+        id,
+        runtime: 3600,
+        media: id === 'fits'
+          ? { container: 'mp4', videoCodec: 'h264', audioCodec: 'aac', width: 1280, size: 900 * 1024 * 1024 }
+          : { container: 'matroska', videoCodec: 'hevc', audioCodec: 'dts', width: 1920, size: 8 * 1024 * 1024 * 1024 }
+      }),
+      ffmpegInput: async ({ itemId }) => ({ input: '/library/' + itemId + '.mkv' })
+    },
+    transcode: { available: true },
+    transcoder,
+    log: () => {},
+    _fileKbps: PearCinemaHost.prototype._fileKbps
+  }
+  const exportFor = PearCinemaHost.prototype.exportFor.bind(fake)
+
+  // A file already inside the budget is not converted - the host says so.
+  const direct = await exportFor({ itemId: 'fits', capabilities: { containers: ['mp4', 'matroska'], videoCodecs: ['h264', 'hevc'], audioCodecs: ['aac'], video: 'hardware', maxKbps: 2500 } })
+  assert.strictEqual(direct.direct, true)
+
+  // A fat HEVC film converts - and the fake ffmpeg exits 1 after its bytes, so
+  // the guard must turn the clean-looking stdout end into a stream ERROR. This
+  // is what keeps half a film from being stored as a finished download.
+  const out = await exportFor({ itemId: 'fat', capabilities: { containers: ['mp4', 'matroska'], videoCodecs: ['h264', 'hevc'], audioCodecs: ['aac'], video: 'hardware', maxKbps: 2500 } })
+  assert.ok(out.stream)
+  const err = await new Promise((resolve) => {
+    out.stream.on('data', () => {})
+    out.stream.on('error', (e) => resolve(e))
+    out.stream.on('end', () => resolve(null))
+  })
+  assert.ok(err, 'a non-zero ffmpeg exit must error the export stream, not end it')
+  assert.match(err.message, /died before the end/)
+  transcoder.killAll()
+})
