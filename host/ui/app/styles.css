@@ -450,6 +450,14 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .dev .who { flex: 1; min-width: 0 }
 .dev .who b { font-weight: 600 }
 .dev .who div { color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis }
+
+/* The live "Watching <title>" line under a device. Thumbnail plus an accent
+ * title so an operator scanning the page spots who is watching what without
+ * reading the row (Tim, 2026-08-15). Inherits the muted div rule above for
+ * the "Watching" word; only the title lights up. */
+.dev .who .nowrow { display: flex; align-items: center; gap: .45rem; margin-top: .25rem }
+.dev .who .nowrow img { width: 24px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); flex: none }
+.dev .who .nowrow b { color: var(--accent) }
 .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--muted); flex: none }
 .dot.on { background: var(--good) }
 
