@@ -1013,9 +1013,11 @@ async function startDashboard ({
         const { deviceKey, personId } = await readBody(req)
         if (!deviceKey) return json(res, 400, { error: 'deviceKey required' })
         try {
-          const row = await host.grants.assign(deviceKey, personId || null)
-          host.notifyOwnersDevicesChanged()
-          return json(res, 200, { ok: true, grant: row })
+          // Through the host, not the store: assignDevice also refreshes the
+          // device's LIVE connections and nudges it, so the change is true
+          // now rather than at its next reconnect.
+          const out = await host.assignDevice(deviceKey, personId || null)
+          return json(res, 200, { ok: true, grant: out.grant, refreshed: out.refreshed })
         } catch (e) {
           return json(res, 400, { error: e.message })
         }
