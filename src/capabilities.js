@@ -13,16 +13,24 @@
 // The rules, and why each one exists:
 //
 //   - VIDEO NEEDS HARDWARE. Every Android ships c2.android.* software decoders
-//     that claim almost everything, including 10-bit HEVC they cannot decode at
-//     watchable speed. A software claim is not a capability.
+//     that claim almost everything, including 10-bit HEVC they may not decode
+//     at watchable speed. A software claim is not a capability - and DROPPED
+//     FRAMES ARE THE ONE FAILURE THE RETRY NET CANNOT SEE: a hard decoder
+//     error fires the net and the host rescues, silent jank just looks like a
+//     bad film. Hardware is the rule precisely because its failures are the
+//     LOUD kind.
 //   - VIDEO NEEDS 1080p HEADROOM. A decoder capped below 1920x1080 would choke
 //     on essentially the whole library, whatever codec it claims.
-//   - HEVC ADDITIONALLY NEEDS MAIN 10. Nearly all the HEVC in a real library is
-//     the 10-bit kind (measured 2026-08-13, and it is what the transcode design
-//     centres on). The wire's vocabulary is flat - `hevc`, no profiles - so one
-//     bit has to answer for every HEVC file, and a Main-only (8-bit) decoder
-//     answering "yes" would black-screen most of them. Main 10 hardware answers
-//     for the lot.
+//   - HEVC NO LONGER NEEDS THE MAIN 10 PROFILE FLAG, and that is a measured
+//     reversal (2026-08-16). Chips lie in BOTH directions: the TCL's MTK
+//     hardware decoder advertises Main only, yet played real 10-bit x265
+//     television flawlessly when force-declared. The profile gate was taxing
+//     76% of the television with a transcode it never needed, on the phone
+//     that inspired the gate. The other direction - a decoder that really
+//     cannot do 10-bit - is exactly what the player-error retry net catches,
+//     and the net is hardware-proven end to end (same date): one visible
+//     hiccup, an honest re-description, and the host converts. A permanent
+//     tax was traded for a rare one-time stumble.
 //   - AUDIO NEEDS ONLY A DECODER. Software audio decode is cheap and fine, and
 //     a phone that really does decode AC-3 or DTS moves hundreds of Dolby files
 //     from the remux path to direct play.
@@ -32,14 +40,6 @@
 //
 // The host compares plain codec names (host/remux.js `codec()`), so the values
 // here are the canonical spellings that normalization maps TO.
-
-// Android MediaCodecInfo.CodecProfileLevel constants for HEVC. Main10 in any of
-// its guises counts - HDR10 and HDR10+ profiles are Main 10 with metadata.
-const HEVC_MAIN10_PROFILES = new Set([
-  0x02, // HEVCProfileMain10
-  0x1000, // HEVCProfileMain10HDR10
-  0x2000 // HEVCProfileMain10HDR10Plus
-])
 
 const VIDEO_MIME = {
   'video/avc': 'h264',
@@ -91,7 +91,6 @@ function fromProbe (probe) {
     if (v) {
       if (!d.hardware) continue
       if (!(Number(d.maxWidth) >= 1920) || !(Number(d.maxHeight) >= 1080)) continue
-      if (v === 'hevc' && !(d.profiles || []).some((p) => HEVC_MAIN10_PROFILES.has(p))) continue
       videos.add(v)
       continue
     }
