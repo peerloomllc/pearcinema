@@ -363,6 +363,57 @@ function searchIndex (index, q, limit = 60) {
   }
 }
 
+// --- requests across a blended library (phase 2) -----------------------------
+//
+// In merged mode a request is filed with EVERY connected host - none of them
+// has the film, so any of their owners might add it. Each host keeps its own
+// row, so the requester's list would show the same ask twice with different
+// statuses. Collapse to ONE row per ask carrying the BEST status - if any host
+// added it, the film is coming - plus which libraries it went to. The OWNER's
+// queue folds the same rows the opposite way (`pendingWins`): that view is a
+// to-do list, and an ask still pending on ANY library you own is still work.
+// Straight from PearTune's shipped shape; the key drops artist because a film
+// request is its kind and its name.
+const REQUEST_STATUS_RANK = { added: 3, pending: 2, declined: 1 }
+const REQUEST_STATUS_RANK_PENDING_FIRST = { pending: 3, added: 2, declined: 1 }
+
+function collapseRequests (rows, { pendingWins = false } = {}) {
+  const rank = pendingWins ? REQUEST_STATUS_RANK_PENDING_FIRST : REQUEST_STATUS_RANK
+  const byKey = new Map()
+  for (const r of rows || []) {
+    if (!r) continue
+    const key = `${r.kind}|${norm(r.name)}`
+    let g = byKey.get(key)
+    // `refs` carries every per-host (libraryId, id, status) this ask lives on,
+    // so REMOVE can delete it everywhere and RESOLVE can fan out to just the
+    // ones still pending.
+    if (!g) { g = { ...r, libraries: [], refs: [], _rank: 0 }; byKey.set(key, g) }
+    const n = rank[r.status] || 0
+    if (n > g._rank) { g._rank = n; g.status = r.status; g.resolvedAt = r.resolvedAt || null }
+    if (r.libraryName && !g.libraries.includes(r.libraryName)) g.libraries.push(r.libraryName)
+    if (r.libraryId && r.id) g.refs.push({ libraryId: r.libraryId, id: r.id, status: r.status })
+    g.createdAt = Math.max(g.createdAt || 0, r.createdAt || 0)
+    g.count = Math.max(g.count || 1, r.count || 1)
+  }
+  return [...byKey.values()]
+    .map(({ _rank, ...r }) => r)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+// The inverse of the collapse: which per-host copies an action should reach.
+// Resolve targets only the ones still pending - an "added" fan-out must never
+// rewrite a copy another owner already declined. A row with no refs (an old
+// shape, or a single-host read) falls back to its own id.
+function requestTargets ({ refs, id, libraryId } = {}, { pendingOnly = true, fallbackLibraryId = null } = {}) {
+  if (Array.isArray(refs) && refs.length) {
+    return refs
+      .filter((r) => r && r.libraryId && r.id && (!pendingOnly || !r.status || r.status === 'pending'))
+      .map((r) => ({ libraryId: r.libraryId, id: r.id }))
+  }
+  const lib = libraryId || fallbackLibraryId
+  return id && lib ? [{ libraryId: lib, id }] : []
+}
+
 // --- the copy pick -----------------------------------------------------------
 
 // The best copy to STREAM, device-aware (proposal §5). `connected` is a Set of
@@ -409,5 +460,7 @@ module.exports = {
   sortItems,
   filterByLibrary,
   searchIndex,
-  bestCopy
+  bestCopy,
+  collapseRequests,
+  requestTargets
 }

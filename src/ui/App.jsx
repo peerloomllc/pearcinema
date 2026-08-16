@@ -1252,7 +1252,7 @@ export default function App () {
                         <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'} · {r.status}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
                       </div>
                       {r.status === 'pending' && (
-                        <button className='ghost' aria-label='Withdraw' onClick={() => call('request.remove', { id: r.id }).then(() => loadYou('requests'))}><Trash size={16} /></button>
+                        <button className='ghost' aria-label='Withdraw' onClick={() => call('request.remove', { id: r.id, refs: r.refs }).then(() => loadYou('requests'))}><Trash size={16} /></button>
                       )}
                     </li>
                   ))}
@@ -1316,8 +1316,8 @@ export default function App () {
                         <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
                       </div>
                       <div className='rowacts'>
-                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'added' }).then(() => loadYou('manage'))}>Added</button>
-                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'declined' }).then(() => loadYou('manage'))}>Decline</button>
+                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'added', refs: r.refs }).then(() => loadYou('manage'))}>Added</button>
+                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'declined', refs: r.refs }).then(() => loadYou('manage'))}>Decline</button>
                       </div>
                     </li>
                   ))}

@@ -211,3 +211,57 @@ test('bestCopy: equal ranks keep primary-first order', () => {
   const entity = { copies: [{ libraryId: 'A', id: 'a', videoCodec: 'h264' }, { libraryId: 'B', id: 'b', videoCodec: 'h264' }] }
   assert.equal(M.bestCopy(entity, new Set(['A', 'B']), null, () => 1).libraryId, 'A')
 })
+
+// --- requests across the blend (phase 2) -------------------------------------
+
+const req = (over = {}) => ({
+  id: over.id || 'r1',
+  kind: 'movie',
+  name: 'Dune Part Two',
+  status: 'pending',
+  createdAt: 100,
+  libraryId: 'A',
+  libraryName: 'Umbrel',
+  ...over
+})
+
+test('collapseRequests: one ask filed on two hosts is one row, best status wins', () => {
+  const rows = [
+    req({ id: 'ra', libraryId: 'A', libraryName: 'Umbrel', status: 'pending' }),
+    req({ id: 'rb', libraryId: 'B', libraryName: 'Mac', status: 'added', resolvedAt: 200 })
+  ]
+  const out = M.collapseRequests(rows)
+  assert.equal(out.length, 1)
+  assert.equal(out[0].status, 'added')
+  assert.deepEqual(out[0].libraries.sort(), ['Mac', 'Umbrel'])
+  assert.equal(out[0].refs.length, 2)
+})
+
+test('collapseRequests: the owner queue folds pending-first', () => {
+  const rows = [
+    req({ id: 'ra', status: 'added' }),
+    req({ id: 'rb', libraryId: 'B', status: 'pending' })
+  ]
+  const out = M.collapseRequests(rows, { pendingWins: true })
+  assert.equal(out[0].status, 'pending')
+})
+
+test('collapseRequests: different asks stay apart, name normalized', () => {
+  const rows = [
+    req({ id: 'ra', name: 'Dune: Part Two' }),
+    req({ id: 'rb', libraryId: 'B', name: 'dune part two' }),
+    req({ id: 'rc', name: 'Dune', libraryId: 'B' })
+  ]
+  const out = M.collapseRequests(rows)
+  assert.equal(out.length, 2)
+})
+
+test('requestTargets: resolve reaches only the still-pending copies', () => {
+  const row = { refs: [{ libraryId: 'A', id: 'ra', status: 'pending' }, { libraryId: 'B', id: 'rb', status: 'declined' }] }
+  assert.deepEqual(M.requestTargets(row), [{ libraryId: 'A', id: 'ra' }])
+  // Remove reaches everything.
+  assert.equal(M.requestTargets(row, { pendingOnly: false }).length, 2)
+  // No refs falls back to the row's own id.
+  assert.deepEqual(M.requestTargets({ id: 'x' }, { fallbackLibraryId: 'A' }), [{ libraryId: 'A', id: 'x' }])
+  assert.deepEqual(M.requestTargets({ id: 'x' }), [])
+})
