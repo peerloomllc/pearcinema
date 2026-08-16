@@ -351,6 +351,7 @@ async function startDashboard ({
           // probe and nothing else. The app folds it into its verdicts: an HEVC
           // refusal on a host that can convert is a film that plays.
           transcode: host.transcode || { available: false, reason: 'not supported by this host' },
+          transcodeCap: host.transcodeCap(),
           // Enough about the artwork feature for the LIBRARY to act on: whether the
           // tiles should wear a fix control, and the live progress of a pass. Rides
           // here because the page already polls this route - the full summary stays
@@ -920,6 +921,17 @@ async function startDashboard ({
       // on Umbrel is ${APP_PASSWORD}) must be changed where the platform sets it, or
       // the next container restart silently reverts it and the operator is locked
       // out of a box they thought they had secured.
+      // The video engine's cap, from the This host card. Zero is the off
+      // switch and reaches decide() as honest refusals, not BUSY errors.
+      if (req.method === 'POST' && url.pathname === '/api/transcode-cap') {
+        const { cap } = await readBody(req)
+        try {
+          return json(res, 200, host.setTranscodeCap(cap))
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/password') {
         if (!auth.enabled) return json(res, 400, { error: 'this host has no dashboard password (it is bound to loopback)' })
         if (pwSource === 'explicit') {

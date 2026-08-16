@@ -253,7 +253,8 @@ test('exportFor: direct verdict answers direct, transcode verdict streams and th
     transcode: { available: true },
     transcoder,
     log: () => {},
-    _fileKbps: PearCinemaHost.prototype._fileKbps
+    _fileKbps: PearCinemaHost.prototype._fileKbps,
+    transcodeOn: PearCinemaHost.prototype.transcodeOn
   }
   const exportFor = PearCinemaHost.prototype.exportFor.bind(fake)
 

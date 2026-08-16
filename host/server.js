@@ -86,6 +86,13 @@ class PearCinemaHost {
       device: process.env.PEARCINEMA_VAAPI_DEVICE || transcode.DEVICE_DEFAULT,
       log
     })
+    // The DASHBOARD's cap wins over the env var: it is the newer, explicit
+    // intent, saved through setTranscodeCap and restored here. The env var
+    // remains the deployment-level default underneath it.
+    const savedCap = this._readSettings().transcodeCap
+    if (Number.isFinite(Number(savedCap)) && savedCap !== null) {
+      this.transcoder.maxConcurrent = Math.max(0, Math.min(16, Math.trunc(Number(savedCap))))
+    }
     this.transcode = { available: false, reason: 'the hardware has not been probed yet' }
 
     this.host = new LibraryHost({
@@ -153,7 +160,7 @@ class PearCinemaHost {
             // Whether THIS host could burn an image subtitle track into the
             // picture - the engine must have proven itself. subtitle.list uses
             // it to mark tracks, so a phone only offers what would work.
-            canBurn: (codec) => this.transcode.available && subtitles.burnable(codec)
+            canBurn: (codec) => this.transcodeOn() && subtitles.burnable(codec)
           },
           // Something is being WATCHED through this connection - the one thing
           // the host knows for certain. Feeds the dashboard's now-playing and
@@ -270,7 +277,7 @@ class PearCinemaHost {
     // track resolved to a stream index - null unless it survives the same
     // refusals the phone path applies (host/sidecars-adjacent _burnTarget).
     const burn = this._burnTarget(itemId, capabilities)
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, burn: !!burn })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), burn: !!burn })
     if (verdict.mode !== 'remux' && verdict.mode !== 'transcode') {
       return { ...verdict, session: null, item }
     }
@@ -522,13 +529,50 @@ class PearCinemaHost {
     return size > 0 && secs > 0 ? (size * 8) / (secs * 1000) : 0
   }
 
+  // MAY A CONVERSION START? The probe's verdict AND the operator's cap: zero
+  // is the off switch, and it must reach decide() as "no transcode" so phones
+  // and browsers get honest refusals rather than bouncing off a closed pool
+  // as BUSY errors. The probe result itself stays untouched - the dashboard
+  // still says what the hardware CAN do even while the operator says no.
+  transcodeOn () {
+    return this.transcode.available && this.transcoder.maxConcurrent > 0
+  }
+
+  // The cap, where it came from and the measured ceiling - what the dashboard
+  // field needs to say something honest.
+  transcodeCap () {
+    return {
+      cap: this.transcoder.maxConcurrent,
+      source: this._readSettings().transcodeCap !== undefined
+        ? 'dashboard'
+        : (process.env.PEARCINEMA_MAX_TRANSCODE ? 'environment' : 'default'),
+      measured: 10
+    }
+  }
+
+  // Open question 1 of the transcode proposal, answered yes: the default of 4
+  // is sized for sharing the engine, and a box serving one household member
+  // should not refuse at it. Clamped to the measured order of magnitude - a
+  // cap of 200 is a typo, not a plan - and applied LIVE: the next start obeys
+  // it, running conversions are left to finish.
+  setTranscodeCap (cap) {
+    const n = Math.trunc(Number(cap))
+    if (!Number.isFinite(n) || n < 0 || n > 16) {
+      throw new Error('the cap is a whole number from 0 (conversions off) to 16')
+    }
+    this._writeSettings({ transcodeCap: n })
+    this.transcoder.maxConcurrent = n
+    this.log('host:transcode-cap', { cap: n })
+    return this.transcodeCap()
+  }
+
   // The chosen image subtitle track's stream index, or null - and null MEANS
   // the burn request is ignored rather than half-honoured: a stale id, a text
   // track, another item's track, an adapter that cannot resolve one (Jellyfin)
   // or a host with no proven engine all decide as if nothing was asked.
   _burnTarget (itemId, capabilities = {}) {
     const subtitleId = capabilities?.burnSubtitleId
-    if (!subtitleId || !this.transcode.available) return null
+    if (!subtitleId || !this.transcodeOn()) return null
     if (typeof this._inner?.subtitleBurnTarget !== 'function') return null
     return this._inner.subtitleBurnTarget({ itemId: String(itemId), subtitleId: String(subtitleId) })
   }
@@ -537,7 +581,7 @@ class PearCinemaHost {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
     return { mode: verdict.mode, reason: verdict.reason }
   }
 
@@ -545,7 +589,7 @@ class PearCinemaHost {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
     if (verdict.mode !== 'transcode') return { mode: verdict.mode, reason: verdict.reason, playlist: null }
     const playlist = hls.playlistFor(item)
     if (!playlist) return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
@@ -566,7 +610,7 @@ class PearCinemaHost {
     if (!Number.isInteger(k) || k < 0 || k >= n) return null
 
     const burn = this._burnTarget(itemId, capabilities)
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
     if (verdict.mode !== 'transcode') return null
 
     if (!this.adapter.ffmpegInput) return null
@@ -604,7 +648,7 @@ class PearCinemaHost {
     // A download is the film, not the viewing session - a subtitle choice made
     // in the player must not bake itself into the copy the phone keeps.
     const { burnSubtitleId, ...caps } = capabilities
-    const verdict = remux.decide(item.media, caps, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    const verdict = remux.decide(item.media, caps, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item) })
     if (verdict.mode !== 'transcode') return { direct: true }
     if (!this.adapter.ffmpegInput) return null
     const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })

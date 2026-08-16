@@ -123,20 +123,81 @@ function Settings ({ state, reload }) {
         )}
 
         {sec === 'host' && (
-          <div class='card'>
-            <h3>This host</h3>
-            <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
-            <p class='hint'>
-              That is this library's address on the network PearCinema uses. It is not a
-              secret, and it is not enough on its own to get in - a device also needs a
-              grant, which only pairing creates.
-            </p>
-            <div class='actions'>
-              <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
+          <>
+            <div class='card'>
+              <h3>This host</h3>
+              <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
+              <p class='hint'>
+                That is this library's address on the network PearCinema uses. It is not a
+                secret, and it is not enough on its own to get in - a device also needs a
+                grant, which only pairing creates.
+              </p>
+              <div class='actions'>
+                <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
+              </div>
             </div>
-          </div>
+            <TranscodeCap state={state} reload={reload} />
+          </>
         )}
       </div>
+    </div>
+  )
+}
+
+// The video engine's cap - how many films this box will convert at once.
+// Default 4 against a measured ceiling of about 10 on the N100 (DECISIONS
+// 2026-08-13), because a box sharing /dev/dri deserves headroom - but a box
+// serving one household member should not refuse at a limit sized for
+// sharing, which is why this is a field and not just an env var. Zero is the
+// off switch: conversions stop being OFFERED (honest refusals), not merely
+// refused at the door as busy.
+function TranscodeCap ({ state, reload }) {
+  const t = state.transcode || {}
+  const c = state.transcodeCap || {}
+  const [cap, setCap] = useState(String(c.cap ?? 4))
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    const res = await api('/api/transcode-cap', { cap: Number(cap) })
+    setBusy(false)
+    if (res?.error) return notify('Not saved', res.error)
+    notify('Saved', Number(cap) === 0
+      ? 'Conversions are off. Files stream as they are, and anything a device cannot play is refused honestly.'
+      : `Up to ${cap} conversions will run at once. Running ones finish as they were.`)
+    reload()
+  }
+
+  return (
+    <div class='card'>
+      <h3>The video engine</h3>
+      <p class='hint'>
+        {t.available
+          ? 'This box converts films on its video hardware when a device cannot play them as they are.'
+          : `Conversions are not available: ${t.reason || 'the hardware probe did not pass'}.`}
+      </p>
+      {t.available && (
+        <>
+          <div class='field'>
+            <label>How many films it will convert at once</label>
+            <input
+              type='number' min='0' max='16' step='1' value={cap}
+              style='max-width:6rem'
+              onInput={e => setCap(e.currentTarget.value)}
+            />
+          </div>
+          <p class='hint'>
+            The measured ceiling on this class of hardware is about {c.measured || 10} at
+            once; the default of 4 leaves headroom for whatever else shares the engine.
+            0 turns conversions off entirely.
+          </p>
+          <div class='actions'>
+            <button onClick={save} disabled={busy || String(c.cap) === String(cap) || cap === ''}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
