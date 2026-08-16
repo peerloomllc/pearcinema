@@ -1131,3 +1131,20 @@ test('the transcode cap is a dashboard setting, zero is the off switch, and typo
   assert.equal(res.status, 400)
   assert.equal(host.transcoder.maxConcurrent, 0, 'refusals change nothing')
 })
+
+test('log out everywhere drops the other browsers and keeps the presser', async (t) => {
+  const { base } = await cinema(t)
+  const me = client(base)
+  const laptop = client(base)
+  await me.login(PASSWORD)
+  await laptop.login(PASSWORD)
+
+  assert.equal((await laptop.req('GET', '/api/state')).status, 200)
+
+  const res = await me.req('POST', '/api/logout-everywhere', { body: {} })
+  assert.equal(res.status, 200)
+  assert.equal(res.json.others, 1)
+
+  assert.equal((await me.req('GET', '/api/state')).status, 200, 'the presser stays')
+  assert.equal((await laptop.req('GET', '/api/state')).status, 401, 'the laptop is out')
+})

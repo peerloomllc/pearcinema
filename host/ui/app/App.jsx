@@ -118,7 +118,22 @@ function Settings ({ state, reload }) {
                 <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
               )}
               <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Log out</button>
+              {state.auth?.enabled && (
+                <button class='ghost' onClick={async () => {
+                  const res = await api('/api/logout-everywhere', {})
+                  if (res?.error) return notify('Not done', res.error)
+                  notify('Done', res.others === 0
+                    ? 'No other browser was logged in.'
+                    : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} logged out. This one stays.`)
+                }}>Log out everywhere else</button>
+              )}
             </div>
+            {state.auth?.enabled && (
+              <p class='hint'>
+                A browser stays logged in for a week. Log out everywhere else is for the
+                laptop you handed back - every other browser is out at once, this one stays.
+              </p>
+            )}
           </div>
         )}
 
