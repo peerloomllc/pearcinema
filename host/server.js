@@ -743,6 +743,12 @@ class PearCinemaHost {
   deletePerson (p) { return this.host.deletePerson(p) }
   notifyOwnersDevicesChanged () { return this.host.notifyOwnersDevicesChanged() }
 
+  // Assignment applies to LIVE connections, not just future ones - the package
+  // swaps the grant snapshot on every open channel and tells the device
+  // (grant:changed), so a phone watching mid-assignment files its very next
+  // position under the new person.
+  assignDevice (deviceKey, personId) { return this.host.assignDevice(deviceKey, personId) }
+
   async close () {
     // BEFORE the host, and unconditionally. An ffmpeg left running after the daemon
     // exits is an orphan holding a file handle on somebody's library drive, and on a

@@ -744,6 +744,13 @@ export default function App () {
       }),
       on('download:removed', () => loadYou('downloads')),
       on('shim:ready', () => reload().catch(() => {})),
+      // The operator just assigned this device to a (different) person. The
+      // shelves on screen are somebody else's now - drop and reload them.
+      on('host:push', (m) => {
+        if (m?.kind !== 'grant:changed') return
+        setContinueRows(null)
+        if (uiRef.current.tab === 'you') loadYouRef.current?.(uiRef.current.youView)
+      }),
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
       }),
