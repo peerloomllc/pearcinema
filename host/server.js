@@ -579,7 +579,7 @@ class PearCinemaHost {
       hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
       // The width ladder, capped at the client's stated budget when it gave one.
       bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
-      burnIndex: burn ? burn.index : null
+      burn: burn || null
     })
 
     // Through the SAME pool as the browser's transcodes: one engine, one cap,

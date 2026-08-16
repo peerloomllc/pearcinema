@@ -448,6 +448,10 @@ class FolderAdapter {
         external: false,
         forced: !!track.forced,
         sdh: !!track.sdh,
+        // The authored canvas of a picture track, for burn-in's pad. Absent on
+        // text tracks and on caches probed before it was recorded.
+        canvasWidth: track.width ?? null,
+        canvasHeight: track.height ?? null,
         playable,
         reason: playable ? null : subtitles.reasonFor(codec)
       }
@@ -969,7 +973,11 @@ class FolderAdapter {
     if (!embedded) return null
     const input = this._resolveIn(this._paths, itemId, 'burn-source')
     if (!input || input !== path.resolve(embedded.file)) return null
-    return { index: embedded.index }
+    return {
+      index: embedded.index,
+      canvasWidth: track.canvasWidth ?? null,
+      canvasHeight: track.canvasHeight ?? null
+    }
   }
 
   async subtitle ({ itemId, subtitleId } = {}) {

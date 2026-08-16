@@ -62,15 +62,18 @@ test('a segment\'s argv seeks precisely, offsets its timestamps and stays an arr
   assert.equal(sw.includes('-ss'), false)
 })
 
-test('BURN-IN rewires the graph: software decode, overlay by subtitle-relative index, engine encode', () => {
+test('BURN-IN rewires the graph: software decode, pad back to the canvas, overlay by subtitle-relative index', () => {
+  // A scope rip: 1920x816 picture, subtitles authored against the disc's full
+  // 1920x1080 frame with the dialogue in the letterbox bar. Without the pad
+  // the text clips at the picture's bottom edge - seen on the TCL.
   const args = hls.segmentArgs({
     input: '/library/Movies/A New Hope.mkv',
     seq: 150,
-    media: { videoCodec: 'h264', width: 1920 },
+    media: { videoCodec: 'h264', width: 1920, height: 816 },
     device: '/dev/dri/renderD128',
     hwDecode: true,
     bitrate: '6M',
-    burnIndex: 1
+    burn: { index: 1, canvasWidth: 1920, canvasHeight: 1080 }
   })
 
   // SOFTWARE decode, deliberately, even though the codec is hw-decodable: the
@@ -78,11 +81,10 @@ test('BURN-IN rewires the graph: software decode, overlay by subtitle-relative i
   assert.equal(args.includes('-hwaccel'), false)
   assert.equal(args[args.indexOf('-vaapi_device') + 1], '/dev/dri/renderD128')
 
-  // The overlay addresses the track WITHIN the subtitle streams - 0:s:N, the
-  // same vocabulary probe.js records - and the composited frames go up to the
-  // engine for the encode.
+  // Pad to the canvas, overlay by 0:s:N (probe.js's own vocabulary), then up
+  // to the engine for the encode.
   const graph = args[args.indexOf('-filter_complex') + 1]
-  assert.match(graph, /\[0:v:0\]\[0:s:1\]overlay/)
+  assert.match(graph, /\[0:v:0\]pad=1920:1080:\(ow-iw\)\/2:\(oh-ih\)\/2\[p\];\[p\]\[0:s:1\]overlay/)
   assert.match(graph, /format=nv12,hwupload\[out\]/)
   assert.equal(args[args.indexOf('-map') + 1], '[out]')
 
@@ -91,6 +93,31 @@ test('BURN-IN rewires the graph: software decode, overlay by subtitle-relative i
   assert.equal(args.includes('-vf'), false)
   assert.equal(args[args.indexOf('-ss') + 1], String(150 * hls.SEGMENT_SECONDS))
   assert.equal(args[args.indexOf('-c:v') + 1], 'h264_vaapi')
+
+  // A full-height film needs no pad: canvas and picture agree.
+  const full = hls.segmentArgs({
+    input: '/x.mkv',
+    seq: 0,
+    media: { videoCodec: 'h264', width: 1920, height: 1080 },
+    device: '/dev/dri/renderD128',
+    hwDecode: true,
+    bitrate: '6M',
+    burn: { index: 0, canvasWidth: 1920, canvasHeight: 1080 }
+  })
+  assert.match(full[full.indexOf('-filter_complex') + 1], /^\[0:v:0\]\[0:s:0\]overlay/)
+
+  // An older cache with no recorded canvas: pad to 1920x1080, what HD discs
+  // author against, rather than clipping.
+  const unknown = hls.segmentArgs({
+    input: '/x.mkv',
+    seq: 0,
+    media: { videoCodec: 'h264', width: 1920, height: 800 },
+    device: '/dev/dri/renderD128',
+    hwDecode: true,
+    bitrate: '6M',
+    burn: { index: 0 }
+  })
+  assert.match(unknown[unknown.indexOf('-filter_complex') + 1], /pad=1920:1080/)
 
   // No burn asked, nothing changes: the plain path still hw-decodes and -vf's.
   const plain = hls.segmentArgs({ input: '/x.mkv', seq: 0, media: { videoCodec: 'h264' }, device: '/dev/dri/renderD128', hwDecode: true, bitrate: '6M' })

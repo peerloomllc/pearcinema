@@ -436,7 +436,12 @@ test('BURN TARGETS: only an embedded image track of the asking item answers', as
 
   // The image track answers with its subtitle-relative index - the second of
   // the two embedded tracks, so s:1 - ready for the overlay's [0:s:N] pad.
-  assert.deepEqual(a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: pgs.id }), { index: 1 })
+  // The fixture's probe records no canvas, which is also the shape an older
+  // scan cache hands the burn path: nulls, and hls falls back to 1920x1080.
+  assert.deepEqual(
+    a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: pgs.id }),
+    { index: 1, canvasWidth: null, canvasHeight: null }
+  )
 
   // A text track plays without a re-encode and must never trigger one; an
   // external file is not inside the video at all; a foreign item's track and
