@@ -67,7 +67,14 @@ function segmentCount (runtimeSeconds) {
 // worth on the engine, emit MPEG-TS to the pipe with timestamps offset to the
 // segment's place in the film - which is what lets the player stitch independent
 // runs into one continuous stream.
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null }) {
+// The tone filters the 35mm skin can ask for. A LOOKUP, so a client string
+// can only ever select one of these two graphs and never becomes argv.
+const TONES = {
+  bw: 'hue=s=0',
+  sepia: 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131'
+}
+
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null }) {
   const at = seq * SEGMENT_SECONDS
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
 
@@ -79,7 +86,10 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   // of four seek offsets died on A New Hope. The software graph held 4.85x
   // realtime single and 5.8x aggregate at four concurrent, stable everywhere,
   // and the encode stays on the engine either way.
-  if (burn) args.push('-vaapi_device', device)
+  // A tone is a software filter, so it takes the software-decode lane the
+  // same way burning does.
+  const toneStep = TONES[tone] ? TONES[tone] + ',' : ''
+  if (burn || toneStep) args.push('-vaapi_device', device)
   else if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
   else args.push('-vaapi_device', device)
 
@@ -106,13 +116,17 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
     const pad = vw && vh && (cw > vw || ch > vh)
       ? `pad=${cw}:${ch}:(ow-iw)/2:(oh-ih)/2[p];[p]`
       : ''
-    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]format=nv12,hwupload[out]`)
+    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]${toneStep}format=nv12,hwupload[out]`)
     args.push('-map', '[out]', '-map', '0:a:0?')
   } else {
     args.push('-map', '0:v:0', '-map', '0:a:0?')
   }
   args.push('-map_chapters', '-1')
-  if (!burn) args.push('-vf', hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
+  if (!burn) {
+    args.push('-vf', toneStep
+      ? toneStep + 'format=nv12,hwupload'
+      : (hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload'))
+  }
   args.push('-c:v', 'h264_vaapi', '-b:v', bitrate)
   // The soundtrack is always rebuilt on this path: TS + AAC is the least
   // surprising pairing for every HLS demuxer, and audio is a rounding error
@@ -127,4 +141,4 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   return args
 }
 
-module.exports = { playlistFor, segmentCount, segmentArgs, SEGMENT_SECONDS }
+module.exports = { playlistFor, segmentCount, segmentArgs, TONES, SEGMENT_SECONDS }

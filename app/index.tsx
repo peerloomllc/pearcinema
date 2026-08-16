@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, PermissionsAndroid, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, Image, PermissionsAndroid, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -85,7 +85,7 @@ export default function App () {
   // film runs, pointed at the same loopback shim URL, and the UI keeps OWNING the
   // watch-state writes - the shell only reports positions, so there is exactly one
   // copy of the resume rules.
-  const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
+  const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number, skin?: string } | null>(null)
   // Previous/Next episode availability, set by the UI (shell.navSet) once it
   // has asked the host what sits on either side. The buttons only hand an
   // intent back to the UI - which episode that intent lands on is its call.
@@ -109,6 +109,31 @@ export default function App () {
   const [scrub, setScrub] = useState<number | null>(null)
   const hideTimer = useRef<any>(null)
   const seekBarWidth = useRef(1)
+
+  // WHERE THE PICTURE IS, in wrap coordinates - the skins dress the film, not
+  // the letterbox. Same contain-fit arithmetic the subtitle overlay uses,
+  // polled gently only while a skin is on.
+  const [pict, setPict] = useState<{ left: number, top: number, w: number, h: number } | null>(null)
+  useEffect(() => {
+    if (!playing || !playing.skin || playing.skin === 'off') { setPict(null); return }
+    const read = () => {
+      try {
+        const { w, h } = wrapSizeRef.current
+        const vs: any = player.videoTrack?.size
+        if (!(vs?.width > 0 && vs?.height > 0 && w > 0 && h > 0)) return
+        const scale = Math.min(w / vs.width, h / vs.height)
+        const dw = vs.width * scale
+        const dh = vs.height * scale
+        setPict((cur) => {
+          const next = { left: (w - dw) / 2, top: (h - dh) / 2, w: dw, h: dh }
+          return cur && Math.abs(cur.top - next.top) < 1 && Math.abs(cur.w - next.w) < 1 ? cur : next
+        })
+      } catch {}
+    }
+    read()
+    const t = setInterval(read, 500)
+    return () => clearInterval(t)
+  }, [playing])
 
   // Any interaction shows the controls and restarts the hide clock. They only
   // hide themselves while the film is actually rolling - a paused screen with
@@ -506,11 +531,14 @@ export default function App () {
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
       const { itemId, url, title, startMs, burnedSubtitleId } = msg.args || {}
+      // The skin rides fresh plays explicitly; retries, burn restarts and
+      // episode hops inherit the one already worn.
+      const skin = msg.args?.skin ?? playingRef.current?.skin ?? 'off'
       // A DIFFERENT item resets the episode buttons until the UI re-declares
       // them. The same item replayed (the lying-chip transcode retry) keeps
       // its buttons - the neighbours have not changed.
       if (itemId !== playingRef.current?.itemId) setNav(null)
-      setPlaying({ itemId, url, title: title || '', startMs })
+      setPlaying({ itemId, url, title: title || '', startMs, skin })
       // A new film starts with no subtitles chosen and a fresh track list -
       // unless this play IS the burned restart, whose choice survives it.
       setSubTracks([]); setSubPicker(false); setCueText('')
@@ -680,6 +708,39 @@ export default function App () {
               style={StyleSheet.absoluteFill}
               onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             />
+            {/* THE SKINS - purely cosmetic dressings pinned to the PICTURE's
+                edges (Tim, 2026-08-15; PearTune's Winamp-toggle pattern).
+                The 35mm strips are drawn, not an asset: a dark band with a
+                row of light sprocket holes at each edge. The theater row is
+                a silhouette image across the picture's bottom. Deaf to touch
+                like everything else that is not a control. */}
+            {playing.skin === 'film' && pict && (() => {
+              const stripH = Math.max(14, Math.min(30, pict.h * 0.07))
+              const holes = Array.from({ length: Math.max(6, Math.round(pict.w / 46)) }, (_, i) => (
+                <View key={i} style={[styles.sprocket, { width: stripH * 0.52, height: stripH * 0.58 }]} />
+              ))
+              return (
+                <>
+                  <View pointerEvents='none' style={[styles.filmStrip, { left: pict.left, top: pict.top, width: pict.w, height: stripH }]}>{holes}</View>
+                  <View pointerEvents='none' style={[styles.filmStrip, { left: pict.left, top: pict.top + pict.h - stripH, width: pict.w, height: stripH }]}>{holes}</View>
+                </>
+              )
+            })()}
+            {playing.skin === 'mst3k' && pict && (
+              <Image
+                pointerEvents='none'
+                source={require('../assets/mst3k-silhouettes.png')}
+                style={{
+                  position: 'absolute',
+                  left: pict.left,
+                  width: pict.w,
+                  height: pict.w * (300 / 1600),
+                  top: pict.top + pict.h - pict.w * (300 / 1600)
+                }}
+                resizeMode='stretch'
+              />
+            )}
+
             {!!cueText && (
               <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
                 <Text style={styles.cue}>{cueText}</Text>
@@ -827,6 +888,11 @@ const styles = StyleSheet.create({
   ctlBottom: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 18 },
   ctlBtn: { padding: 4 },
   ctlOff: { opacity: 0.35 },
+  filmStrip: {
+    position: 'absolute', flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'space-evenly', backgroundColor: 'rgba(8,8,8,0.92)'
+  },
+  sprocket: { backgroundColor: 'rgba(240,234,220,0.85)', borderRadius: 3 },
   ctlTime: { color: '#efe9df', fontVariant: ['tabular-nums'], fontSize: 12 },
   // The touch target is much taller than the painted track, or a moving thumb
   // is impossible to catch mid-film.
