@@ -327,12 +327,18 @@ function ItemRow ({ item, sub, onOpen, onLong, right = null }) {
   )
 }
 
-function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSave, onWatched, onDownload }) {
+function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSave, onWatched, onDownload, libraryNames = null }) {
   const playable = item.type === 'movie' || item.type === 'episode'
+  // The dedup made inspectable (proposal §3): a merged entry says which
+  // servers hold it, so a collapse is never silent.
+  const copyLibs = Array.isArray(item.copies) && item.copies.length > 1
+    ? [...new Set(item.copies.map((c) => (libraryNames && libraryNames.get(c.libraryId)) || null).filter(Boolean))]
+    : []
   return (
     <div className='sheetwrap' onClick={onClose}>
       <div className='sheet' onClick={(e) => e.stopPropagation()}>
         <h3>{item.title}</h3>
+        {copyLibs.length > 1 && <p className='muted sm'>On {copyLibs.length} servers: {copyLibs.join(', ')}</p>}
         <div className='acts'>
           {playable && <button onClick={() => { onClose(); onPlay(item) }}><Play size={18} /> Play</button>}
           <button onClick={() => { onClose(); onSave(item) }}>
@@ -593,6 +599,10 @@ export default function App () {
 
   // Library tab.
   const [root, setRoot] = useState('movies')
+  // The merged view's filter chip ('_all' or a libraryId) and a tick that
+  // bumps when the worklet rebuilds the blend, so the lists refetch.
+  const [mergedFilter, setMergedFilter] = useState('_all')
+  const [mergedTick, setMergedTick] = useState(0)
   const [items, setItems] = useState(null)
   const [cursor, setCursor] = useState(null)
   const [series, setSeries] = useState(null)
@@ -693,6 +703,7 @@ export default function App () {
   const reload = useCallback(async () => {
     const s = await call('app.state')
     setState(s)
+    setMergedFilter(s.merged?.filter || '_all')
     if (s.active) {
       const b = await call('art.base').catch(() => null)
       if (b) setArtBase(b.base)
@@ -711,6 +722,7 @@ export default function App () {
     const offs = [
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
+      on('merged:changed', () => setMergedTick((t) => t + 1)),
       on('host:connected', () => setLinkUp(true)),
       on('host:disconnected', () => setLinkUp(false)),
       on('download:progress', (d) => {
@@ -873,7 +885,14 @@ export default function App () {
     if (season) fetchList({ type: 'episodes', seasonId: season.id, limit: 200 })
     else if (series) fetchList({ type: 'seasons', seriesId: series.id, limit: 100 })
     else fetchList({ type: root, limit: 100, sort: sortField || 'title', order: sortOrder })
-  }, [state?.active?.hostKey, root, series?.id, season?.id, sortField, sortOrder])
+  }, [state?.active?.hostKey, root, series?.id, season?.id, sortField, sortOrder, mergedFilter, mergedTick])
+
+  // The chip is a persisted preference the worklet applies server-side of the
+  // IPC line, so a change is a write plus a refetch (the dep above).
+  const pickFilter = (lib) => {
+    setMergedFilter(lib)
+    call('merged.filter', { libraryId: lib }).catch(() => {})
+  }
 
   // The recently-added strip: the newest arrivals by file date, shown only
   // when something actually arrived in the last month - an empty shelf is
@@ -887,7 +906,7 @@ export default function App () {
         setRecentRows((r.items || []).filter((i) => i.addedAt && i.addedAt >= cutoff))
       })
       .catch(() => setRecentRows([]))
-  }, [state?.active?.hostKey])
+  }, [state?.active?.hostKey, mergedFilter, mergedTick])
 
   // The saved display prefs, once the worklet answers.
   useEffect(() => {
@@ -1026,10 +1045,17 @@ export default function App () {
 
   // --- screens --------------------------------------------------------------
 
+  // In merged mode the header names the blend, or the one library the chip
+  // narrowed to. Single host keeps its own name, exactly as before.
+  const mergedOn = !!state.merged?.on
+  const filterName = mergedOn && mergedFilter !== '_all'
+    ? (state.hosts.find((h) => h.libraryId === mergedFilter)?.libraryName || 'Library')
+    : null
+
   const libraryScreen = (
     <div className='app'>
       <header>
-        <h1>{state.active.libraryName || 'Library'}</h1>
+        <h1>{mergedOn ? (filterName || 'All libraries') : (state.active.libraryName || 'Library')}</h1>
         {series && <p className='muted sm'>{season ? `${series.title} · ${season.title}` : series.title}</p>}
       </header>
 
@@ -1042,6 +1068,20 @@ export default function App () {
             <input className='search' placeholder='Search your library' value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
             {query ? <button className='searchclear' onClick={() => setQuery('')} aria-label='Clear search'><X size={14} /></button> : null}
           </div>
+          {mergedOn && (
+            <div className='chips'>
+              <button className={'chip' + (mergedFilter === '_all' ? ' on' : '')} onClick={() => pickFilter('_all')}>All</button>
+              {state.hosts.map((h) => (
+                <button
+                  key={h.libraryId}
+                  className={'chip' + (mergedFilter === h.libraryId ? ' on' : '') + (h.online === false && !h.inMerge ? ' off' : '')}
+                  onClick={() => pickFilter(h.libraryId)}
+                >
+                  {h.libraryName || 'Library'}
+                </button>
+              ))}
+            </div>
+          )}
           <div className='pickrow'>
             <div className='seg'>
               <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
@@ -1602,6 +1642,7 @@ export default function App () {
         <ActionSheet
           item={sheet} saved={saved.has(sheet.id)} watched={watchedIds.has(sheet.id)}
           downloaded={dlIds.has(sheet.id)}
+          libraryNames={new Map((state?.hosts || []).map((h) => [h.libraryId, h.libraryName || 'Library']))}
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched}
           onDownload={(i, want) => {
             if (want) {
