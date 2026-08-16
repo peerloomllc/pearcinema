@@ -1,6 +1,8 @@
 # Merged libraries - all your servers as one collection
 
-**Status**: DRAFT, awaiting approval (approval = Tim merges this proposal PR).
+**Status**: APPROVED 2026-08-16 (Tim, via PR #61). Both open questions answered YES
+the same day: watchlist/favorite writes route to the owning host in phase 1, and the
+Continue shelves concatenate in phase 1.
 
 **Goal**: Connect to every paired host at once and present one blended,
 deduplicated library across them. Browse films and shows as if the Umbrel's 240
