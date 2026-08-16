@@ -12,9 +12,9 @@
 //   - DEFAULT OFF, and the dashboard says plainly that the HOST tells a third party
 //     what titles it is identifying. That sentence is the price of the feature and
 //     it is said, not buried.
-//   - THE CACHE LIVES IN THE DATA DIR, never in the library. The library is mounted
-//     `:ro` by design; sidecar-writing would be a separate, explicit action and is
-//     deliberately not built here.
+//   - THE CACHE LIVES IN THE DATA DIR, never in the library. Nothing here writes
+//     into anybody's collection; sidecar-writing is the separate, explicit action
+//     it was always meant to be, and it lives in host/sidecars.js.
 //
 // MATCHING IS BEST-EFFORT, WITH HONESTY ABOUT DOUBT (Tim, 2026-08-14, revising the
 // first cut). The first build held every ambiguous name back for the operator to
@@ -208,6 +208,13 @@ class Enricher {
   get art () { return this.state.art || (this.state.art = {}) }
 
   _posterFile (itemId) { return path.join(this.postersDir, itemId + '.jpg') }
+
+  // The cached poster's path, for sidecar writing to copy OUT of the data dir
+  // (host/sidecars.js). Null when this item has none on disk.
+  posterPath (itemId) {
+    const file = this._posterFile(String(itemId))
+    return fs.existsSync(file) ? file : null
+  }
 
   async _saveImage (itemId, bytes) {
     await fsp.mkdir(this.postersDir, { recursive: true })

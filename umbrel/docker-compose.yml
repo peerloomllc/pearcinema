@@ -58,9 +58,14 @@ services:
       # usually NOT the internal disk. Films are hundreds of gigabytes; the measured
       # real library is 3 TB on a USB drive.
       #
-      # So both are mounted, read-only always: PearCinema plays video, it has no
-      # business writing to it.
-      - ${UMBREL_ROOT}/home/Downloads:/library:ro
+      # WRITABLE since sidecar writing shipped (Tim's call, 2026-08-15; these were
+      # `:ro` before that). The dashboard's explicit save-to-library action puts
+      # fetched metadata beside the films as standard .nfo and poster files, so it
+      # needs the mount to admit writes. The action itself only ever CREATES new
+      # files - never overwrites, never deletes (host/sidecars.js) - and nothing
+      # else in the host writes here at all: playback, scanning, remux and
+      # transcode all still treat the library as read-only.
+      - ${UMBREL_ROOT}/home/Downloads:/library
 
       # EXTERNAL DRIVES, and `propagation: rslave` is the load-bearing part.
       #
@@ -73,7 +78,6 @@ services:
       - type: bind
         source: ${UMBREL_ROOT}/external
         target: /external
-        read_only: true
         bind:
           propagation: rslave
 

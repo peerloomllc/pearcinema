@@ -701,7 +701,7 @@ class FolderAdapter {
     for (const s of this._tree.seasons) this._byId.set(s.id, s)
 
     // Reported rather than repaired. Renaming somebody's files is not this program's
-    // business - the library is mounted `:ro` by design - and the honest fix is for
+    // business - the scanner never touches the library - and the honest fix is for
     // the operator to drop one of two roots that hold the same collection. Kept on
     // the adapter so the dashboard can say it, which is the whole point of noticing.
     this.idCollisions = collisions
@@ -879,6 +879,55 @@ class FolderAdapter {
   async ffmpegInput ({ itemId } = {}) {
     const file = this._resolve(itemId)
     return file ? { input: file } : null
+  }
+
+  // WHERE A THING LIVES ON DISK, for sidecar writing (host/sidecars.js) - the
+  // one explicit action allowed to put NEW files beside the library's own.
+  //
+  // The second deliberate path exit after ffmpegInput, with the same discipline:
+  // host/server.js calls it, nothing puts the answer on the wire.
+  //
+  // A film or an episode answers with its file. A series or a season answers
+  // with the folder that holds it, derived from any of its episodes' paths -
+  // the tree minted those rows from episodes and they have no file of their
+  // own. The derivation repeats _identify's convention on purpose: the top
+  // folder under the root is the show, a deeper folder is the season.
+  //
+  // Null for anything the disk cannot place: an id that is gone, an episode
+  // sitting directly in a root (no show folder exists to receive a tvshow.nfo)
+  // or a season the tree keyed by folder rather than number.
+  locate (id) {
+    const item = this._byId?.get(String(id))
+    if (!item) return null
+
+    if (item.type === 'movie' || item.type === 'episode') {
+      const file = this._paths.get(item.id)
+      return file ? { type: item.type, file } : null
+    }
+    if (item.type !== 'series' && item.type !== 'season') return null
+
+    // The FIRST episode that places it suffices. A show split across two roots
+    // has a folder in each, and both are that show's folder - writing into the
+    // one its first episode names is no more arbitrary than either.
+    for (const [epId, ep] of this._byId) {
+      if (ep.type !== 'episode') continue
+      if ((item.type === 'series' ? ep.seriesId : ep.seasonId) !== item.id) continue
+      const file = this._paths.get(epId)
+      if (!file) continue
+      const root = this.roots.find(r => file.startsWith(r.path + path.sep))
+      if (!root) continue
+      const parts = path.relative(root.path, file).split(path.sep)
+      if (parts.length < 2) continue
+      const seriesDir = path.join(root.path, parts[0])
+      if (item.type === 'series') return { type: 'series', dir: seriesDir }
+      return {
+        type: 'season',
+        dir: parts.length > 2 ? path.dirname(file) : null,
+        seriesDir,
+        number: item.number ?? null
+      }
+    }
+    return null
   }
 
   // CAN THIS TRACK BE SHOWN, and if not, why - decided when it is ASKED FOR rather
