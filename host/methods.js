@@ -284,6 +284,11 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
         playedAt: Number(ctx.params.playedAt) || 0,
         deviceKey: ctx.deviceKey
       })
+      // THE PERSON'S OTHER DEVICES HEAR IT (the donor's exceptSelf shape): put
+      // a phone down mid-film and the tablet's Continue shelf already carries
+      // the new minute, no reopen needed. The device that wrote is skipped -
+      // it is the one place this is not news.
+      ctx.pushToOwner('resume:changed', { itemId, finished: verdict.finished })
       return { ok: true, finished: verdict.finished, positionMs: row?.positionMs || 0 }
     },
 
@@ -323,6 +328,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // Marking something watched clears its position, for the same reason finishing
       // it does. Marking it UNWATCHED does not invent one - it starts over.
       if (on) await state.setResume(ctx.owner, itemId, 0, null)
+      ctx.pushToOwner('watched:changed', { itemId, watched: on })
       return { ok: true, watched: on }
     },
 
@@ -346,6 +352,10 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!['movie', 'episode', 'series', 'season'].includes(kind)) throw ctx.badParams('bad kind')
       if (!id) throw ctx.badParams('id required')
       await state.setFav(ctx.owner, String(kind), String(id), !!on)
+      // The donor's favorites:changed, with its exceptSelf: your other phones'
+      // watchlists follow this one's bookmark, and the phone that tapped it
+      // already re-rendered optimistically.
+      ctx.pushToOwner('favorites:changed', { kind: String(kind), id: String(id), on: !!on })
       return { ok: true, on: !!on }
     },
 
@@ -404,6 +414,12 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!['added', 'declined'].includes(status)) throw ctx.badParams('bad status')
       const row = await state.resolveRequest(String(id || ''), status)
       if (!row) throw ctx.notFound('no such request')
+      // The donor's request:resolved: whoever asked hears the answer wherever
+      // they are signed in - the resolver did not make the request, so nobody
+      // is skipped.
+      if (ctx.presence && row.requester) {
+        ctx.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+      }
       return { request: row }
     },
 
