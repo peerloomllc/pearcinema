@@ -2,6 +2,22 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-16 - THE SERVER IS THE AUTHORITY on what its own files are
+Tier: T0 (a decision closing a TODO question; no code changes)
+Context: raised 2026-08-12 when a misconfigured Jellyfin filed every episode as
+a Movie. A file named S01E01 that the server calls a Movie is a real, common
+situation, and the question was whether PearCinema should second-guess it.
+
+**Decided: no, never, for a SERVER source** (Tim, 2026-08-16, confirming the
+recorded recommendation). Jellyfin is the authority on its own library;
+overriding it would produce a PearCinema that disagrees with the Jellyfin web
+UI on the same machine, which is worse than being wrong in the same way. Show
+the operator what the server says and let them fix the server.
+
+The FOLDER adapter is the opposite case and already behaves so: there is no
+server to defer to, and its own name parsing (root types, sidecars first) is
+the authority there.
+
 ## 2026-08-15 - PGS BURN-IN IS AFFORDABLE on the N100, via software overlay - the GPU compositor is faster but crashes on real discs
 Tier: T0 (a measurement; no code changed)
 Context: the mobile follow-ups bundle owed a costing before burn-in could be

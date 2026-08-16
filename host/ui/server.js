@@ -932,6 +932,17 @@ async function startDashboard ({
         }
       }
 
+      // Log out every OTHER browser - the button people look for after handing
+      // a laptop back. The session pressing it survives, so the answer is a
+      // count rather than the login page. Changing the password does not do
+      // this (sessions deliberately survive a password change), which is
+      // exactly why the button has to exist.
+      if (req.method === 'POST' && url.pathname === '/api/logout-everywhere') {
+        if (!auth.enabled) return json(res, 400, { error: 'this host has no dashboard password (it is bound to loopback)' })
+        const others = auth.logoutEverywhere(auth.sessionIdOf(req))
+        return json(res, 200, { ok: true, others })
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/password') {
         if (!auth.enabled) return json(res, 400, { error: 'this host has no dashboard password (it is bound to loopback)' })
         if (pwSource === 'explicit') {
