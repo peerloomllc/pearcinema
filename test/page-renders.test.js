@@ -328,7 +328,7 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
 
   assert.match(text(), /\/library\/Movies/)
 
-  const selects = [...doc.querySelectorAll('.roots .root select')]
+  const selects = [...doc.querySelectorAll('.rootlist .rootrow select')]
   assert.equal(selects.length, 3, 'one per folder, including the bare string')
   assert.deepEqual(selects.map(s => s.value), ['movies', 'auto', 'auto'])
 
@@ -360,7 +360,7 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   use.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  const rows = [...doc.querySelectorAll('.roots .root')]
+  const rows = [...doc.querySelectorAll('.rootlist .rootrow')]
   assert.equal(rows.length, 4, 'the three it had plus the one just picked')
   assert.equal(rows.every(r => r.querySelector('select')), true, 'every folder can say what it holds')
   assert.equal(rows[3].querySelector('select').value, 'auto')

@@ -352,6 +352,7 @@ async function startDashboard ({
           // refusal on a host that can convert is a film that plays.
           transcode: host.transcode || { available: false, reason: 'not supported by this host' },
           transcodeCap: host.transcodeCap(),
+          rescanIntervalMin: host.getRescanIntervalMin(),
           // Enough about the artwork feature for the LIBRARY to act on: whether the
           // tiles should wear a fix control, and the live progress of a pass. Rides
           // here because the page already polls this route - the full summary stays
@@ -876,6 +877,28 @@ async function startDashboard ({
           // library is gone".
           return json(res, 400, { error: e.message, stillServing: host.adapter.kind })
         }
+      }
+
+      // Scheduled auto-rescan, PearTune's control: pick new files up without a
+      // manual Rescan. 0 turns it off.
+      if (req.method === 'POST' && url.pathname === '/api/rescan-interval') {
+        const { minutes } = await readBody(req)
+        return json(res, 200, { ok: true, minutes: host.setRescanIntervalMin(minutes) })
+      }
+
+      // The Support Development rails, QR included, rendered host-side the same
+      // way the pairing code is - the page never needs a QR library of its own.
+      if (req.method === 'GET' && url.pathname === '/api/donate') {
+        const RAILS = {
+          ln: { value: 'peerloomllc@strike.me', caption: 'Scan with any Lightning wallet (pick your own amount), or copy the address.' },
+          onchain: { value: 'bc1q0kksenz3j4u9ppe6f4krclvzwxk7sjy00cc9cf', caption: 'On-chain Bitcoin - higher fees, so Lightning is cheaper for small tips.' },
+          usd: { value: 'https://buymeacoffee.com/peerloomllc', caption: 'Scan to open Buy Me a Coffee, or open it here to pay by card.' }
+        }
+        const out = {}
+        for (const [k, r] of Object.entries(RAILS)) {
+          out[k] = { ...r, svg: await QRCode.toString(r.value, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }) }
+        }
+        return json(res, 200, { rails: out })
       }
 
       if (req.method === 'POST' && url.pathname === '/api/source/rescan') {

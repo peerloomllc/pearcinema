@@ -88,7 +88,9 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
         </p>
       )}
 
-      <div class='row'>
+      {/* Centered with the buttons below it (Tim, 2026-08-15: symmetry) - a
+          full-bleed input above centered actions read as two different pages. */}
+      <div class='row artkey'>
         <input
           type='password'
           placeholder={meta.hasKey ? 'A key is saved - paste to replace it' : 'Paste your TMDB key'}

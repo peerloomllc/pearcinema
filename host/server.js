@@ -529,6 +529,44 @@ class PearCinemaHost {
     return size > 0 && secs > 0 ? (size * 8) / (secs * 1000) : 0
   }
 
+  // AUTO-RESCAN, PearTune's shape verbatim: a settings-file interval, a timer
+  // armed at ready() and re-armed on change, and unref so a background timer
+  // never keeps the process alive. Most useful for a folder library - a
+  // server source watches its own files, so there the timer is just a
+  // periodic stats refresh.
+  getRescanIntervalMin () { return Number(this._readSettings().rescanIntervalMin) || 0 }
+
+  setRescanIntervalMin (min) {
+    const n = Math.max(0, Math.min(1440, Math.round(Number(min) || 0)))
+    this._writeSettings({ rescanIntervalMin: n })
+    this._armRescan(n)
+    this.log('host:rescan-interval', { minutes: n })
+    return n
+  }
+
+  _armRescan (min = this.getRescanIntervalMin()) {
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = null }
+    if (min > 0) {
+      this._rescanTimer = setInterval(() => {
+        this.rescan().catch(e => this.log('host:auto-rescan-failed', { err: e.message }))
+      }, min * 60000)
+      this._rescanTimer.unref?.()
+    }
+  }
+
+  // The one rescan everybody calls - the dashboard button, the auto-rescan
+  // timer - so the sourceError bookkeeping cannot drift between them.
+  async rescan () {
+    try {
+      const n = await this.adapter.scan({ force: true })
+      this.sourceError = null
+      return n
+    } catch (e) {
+      this.sourceError = e.message
+      throw e
+    }
+  }
+
   // MAY A CONVERSION START? The probe's verdict AND the operator's cap: zero
   // is the off switch, and it must reach decide() as "no transcode" so phones
   // and browsers get honest refusals rather than bouncing off a closed pool
@@ -729,6 +767,8 @@ class PearCinemaHost {
     this._probeTranscode()
 
     const scan = this._scan({ rescan }).then(() => this._autoMetadata())
+    // The saved auto-rescan interval survives a restart the way the name does.
+    this._armRescan()
     if (waitForScan) await scan
     return this
   }
@@ -821,6 +861,7 @@ class PearCinemaHost {
   assignDevice (deviceKey, personId) { return this.host.assignDevice(deviceKey, personId) }
 
   async close () {
+    if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = null }
     // BEFORE the host, and unconditionally. An ffmpeg left running after the daemon
     // exits is an orphan holding a file handle on somebody's library drive, and on a
     // small box it is the whole box.

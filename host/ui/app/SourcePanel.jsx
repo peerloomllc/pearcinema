@@ -251,17 +251,20 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
         }}
       />
 
-      <div class='row' style='margin-bottom:.9rem'>
-        <button class={kind === 'folder' ? '' : 'ghost'} onClick={() => setKind('folder')}>A folder of films</button>
-        <button class={kind === 'jellyfin' ? '' : 'ghost'} onClick={() => setKind('jellyfin')}>Jellyfin or Emby</button>
+      {/* PearTune's segmented picker, full width - the donor design this whole
+          panel copies (Tim, 2026-08-15). */}
+      <div class='seg wide' style='margin-bottom:.9rem'>
+        <button class={kind === 'folder' ? 'on' : ''} onClick={() => setKind('folder')}>A folder of films</button>
+        <button class={kind === 'jellyfin' ? 'on' : ''} onClick={() => setKind('jellyfin')}>Jellyfin or Emby</button>
       </div>
 
       {kind === 'folder' && (
         <>
-          <div class='roots'>
+          <label class='srclabel'>Folders <span class='hint-inline'>- paths inside the PearCinema container</span></label>
+          <div class='rootlist'>
             {roots.map(r => (
-              <div class='root' key={r.path}>
-                <span>{r.path}</span>
+              <div class='rootrow' key={r.path}>
+                <span class='rootpath' title={r.path}>{r.path}</span>
                 <select
                   value={r.type || 'auto'}
                   aria-label={'What is in ' + r.path}
@@ -279,23 +282,20 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
                 <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}><Close size={15} /></button>
               </div>
             ))}
-            {!roots.length && <p class='hint'>No folders yet. Add the one your films are in.</p>}
+            {!roots.length && <div class='rootrow'><span class='hint-inline'>No folders yet - add the one your films are in.</span></div>}
           </div>
-          <button class='ghost' onClick={() => setPicking(true)}>Add a folder…</button>
+          {/* The donor has a free-text path box beside Browse. Ours deliberately
+              does not - the typed-path-inside-the-container trap is this panel's
+              founding scar (see the header comment) - so the row is the picker
+              alone, full width like the donor's. */}
+          <div class='pickrow'>
+            <button class='ghost' onClick={() => setPicking(true)}>Add a folder…</button>
+          </div>
           <p class='hint'>
-            Add films and TV as separate folders if they live apart - that is the normal
-            shape of a collection, and each one is scanned on its own so an unplugged
-            drive does not take the rest down.
-          </p>
-          {/* SAYING WHAT A FOLDER HOLDS IS NOT TIDINESS. Some files are named in a way
-              nothing can read - a box set numbered K05, a disc rip - and without this
-              they end up in the wrong list. On the real library that was 34 television
-              files sitting among the films. */}
-          <p class='hint'>
-            Say what each folder holds and nothing has to be guessed from the file names.
-            In a TV folder, an episode whose name does not say which one it is still goes
-            under its show instead of turning up as a film. Leave it on "work it out" and
-            a folder called Movies or TV Shows is taken at its word.
+            Add films and TV as separate folders if they live apart, and say what each
+            folder holds - in a TV folder, an episode whose name does not say which one
+            it is still goes under its show instead of turning up as a film. On "work it
+            out", a folder called Movies or TV Shows is taken at its word.
           </p>
         </>
       )}
@@ -323,13 +323,39 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
         </>
       )}
 
-      <div class='row' style='margin-top:.9rem'>
+      {/* Equal-width buttons filling the row, the donor's action bar. */}
+      <div class={'srcactions' + (embedded || current.kind === 'empty' ? ' two' : '')}>
         <button class='ghost' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Checking…' : 'Test'}</button>
         <button onClick={save} disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
         {!embedded && current.kind !== 'empty' && (
           <button class='ghost' onClick={rescan} disabled={!!busy}>{busy === 'rescan' ? 'Rescanning…' : 'Rescan now'}</button>
         )}
       </div>
+
+      {/* Scheduled auto-rescan, the donor's control: pick new files up without a
+          manual Rescan. Not offered during first-run setup - there is no library
+          to keep fresh yet. */}
+      {!embedded && (
+        <label class='autoscan'>
+          <span>Auto-rescan</span>
+          <select
+            value={state.rescanIntervalMin || 0}
+            onChange={async e => {
+              const minutes = Number(e.currentTarget.value)
+              const res = await api('/api/rescan-interval', { minutes })
+              if (res?.error) return notify('Not set', res.error)
+              notify('Auto-rescan', minutes ? `The library rechecks itself every ${minutes >= 60 ? (minutes / 60) + ' hour' + (minutes > 60 ? 's' : '') : minutes + ' minutes'}.` : 'Off - rescans are manual.')
+              reload()
+            }}
+          >
+            <option value={0}>Off</option>
+            <option value={15}>Every 15 minutes</option>
+            <option value={30}>Every 30 minutes</option>
+            <option value={60}>Every hour</option>
+            <option value={360}>Every 6 hours</option>
+          </select>
+        </label>
+      )}
 
       {picking && (
         <div class='overlay' onMouseDown={e => { if (e.target === e.currentTarget) setPicking(false) }}>

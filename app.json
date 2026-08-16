@@ -47,6 +47,9 @@
       "bundleIdentifier": "com.pearcinema",
       "supportsTablet": false,
       "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "lightning"
+        ],
         "NSCameraUsageDescription": "PearCinema scans a pairing QR code to connect to your library host.",
         "NSAppTransportSecurity": {
           "NSExceptionDomains": {
@@ -81,6 +84,7 @@
       ],
       "./plugins/with-android-abis",
       "./plugins/with-android-debug-app-id",
+      "./plugins/with-android-queries",
       "./plugins/with-localhost-cleartext",
       "./plugins/with-standalone-debug",
       "./plugins/with-webview-recovery",
