@@ -2,6 +2,39 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-15 - PGS BURN-IN IS AFFORDABLE on the N100, via software overlay - the GPU compositor is faster but crashes on real discs
+Tier: T0 (a measurement; no code changed)
+Context: the mobile follow-ups bundle owed a costing before burn-in could be
+promised - the films' image subtitles show an honest refusal today, and burning
+them in turns a remux into a full re-encode.
+
+Measured on the Umbrel (Intel N100), inside the running container, against the
+real library: A New Hope, 1080p H.264 Bluray with two PGS tracks, 60-second
+segments, the host's own VAAPI pipeline (hw decode, scale_vaapi, h264_vaapi at
+4 Mbps). Subtitle presence verified by eye - the burned frame reads "[Speaking
+Alien Language]" under a toppled R2-D2 - after the first pass measured an EMPTY
+track and looked free. Verify the track has events in the window before
+trusting any burn-in number.
+
+- **Baseline, no burn-in: 9.2x realtime** for one stream (matches the
+  transcode-capacity doc).
+- **GPU overlay (`overlay_vaapi`): 6.1x** - but it SEGFAULTS, reproducibly and
+  solo, at seek offsets where the PGS stream changes composition size
+  mid-stream ("Changing video frame properties on the fly is not supported",
+  then a crash in the upload/overlay pool). Two of four tested offsets die.
+  `-canvas_size` does not save it. NOT SHIPPABLE on this ffmpeg/iHD build;
+  worth one retry after an ffmpeg upgrade.
+- **Software overlay (sw decode + overlay + hwupload + vaapi encode): 4.85x**
+  single stream, **5.8x aggregate at four concurrent** (41.1 s for 240 s of
+  film - every stream still ~1.45x ahead of its viewer), and STABLE at every
+  offset tried, including both that crash the GPU path.
+
+**The verdict: promise it.** Burn-in costs about half the plain-transcode
+headroom and the existing cap (default 4, PEARCINEMA_MAX_TRANSCODE) already
+protects the box. Implementation is the software-overlay filter graph composed
+into the existing transcode path, plus the decide() rule that a PGS-only film
+with burn-in requested takes the transcode lane.
+
 ## 2026-08-14 - FFMPEG SHIPS WITH THE APP, resolved through one seam, and LGPL builds suffice by design
 Tier: T1 (a resolution seam and a packaging convention; no behaviour change on
 any deployed host)

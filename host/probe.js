@@ -169,6 +169,13 @@ async function probeFile (file, { ffprobe = 'ffprobe', timeoutMs = 30_000 } = {}
     subtitles: subtitles.map((s, i) => ({
       index: i,
       codec: s.codec_name || null,
+      // The CANVAS a picture track was authored against - PGS reports it, and
+      // burn-in needs it: discs put dialogue in the letterbox bar of the full
+      // frame, so a cropped rip must be padded back to this size or the text
+      // clips at the picture's edge. Null on text tracks and older caches;
+      // the burn path falls back to 1920x1080, what HD discs author against.
+      width: Number(s.width) || null,
+      height: Number(s.height) || null,
       language: s.tags?.language && s.tags.language !== 'und' ? String(s.tags.language).toLowerCase() : null,
       title: s.tags?.title ? String(s.tags.title).slice(0, 120) : null,
       forced: !!s.disposition?.forced,

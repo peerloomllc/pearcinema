@@ -422,3 +422,33 @@ test('THE VERDICT IS DECIDED WHEN A TRACK IS ASKED FOR, not when it was scanned'
   // And serving agrees with listing, rather than trusting the same stale row.
   assert.equal(await b.subtitle({ itemId: film.id, subtitleId: image.id }), null)
 })
+
+test('BURN TARGETS: only an embedded image track of the asking item answers', async (t) => {
+  const { a } = await library(t, {
+    'Tenet/Tenet.subs-subrip-pgssub.mkv': 'x',
+    'Tenet/Tenet.subs-subrip-pgssub.en.srt': SRT
+  })
+  const tenet = (await a.list({ type: 'movies' })).items.find(m => m.title.startsWith('Tenet'))
+  const subs = await a.subtitles({ itemId: tenet.id })
+  const pgs = subs.find(s => s.codec === 'pgssub')
+  const text = subs.find(s => s.codec === 'subrip' && !s.external)
+  const external = subs.find(s => s.external)
+
+  // The image track answers with its subtitle-relative index - the second of
+  // the two embedded tracks, so s:1 - ready for the overlay's [0:s:N] pad.
+  // The fixture's probe records no canvas, which is also the shape an older
+  // scan cache hands the burn path: nulls, and hls falls back to 1920x1080.
+  assert.deepEqual(
+    a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: pgs.id }),
+    { index: 1, canvasWidth: null, canvasHeight: null }
+  )
+
+  // A text track plays without a re-encode and must never trigger one; an
+  // external file is not inside the video at all; a foreign item's track and
+  // a made-up id are refusals, not guesses.
+  assert.equal(a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: text.id }), null)
+  assert.equal(a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: external.id }), null)
+  const deadpool = await filmNamed(a, 'Deadpool')
+  assert.equal(a.subtitleBurnTarget({ itemId: deadpool.id, subtitleId: pgs.id }), null)
+  assert.equal(a.subtitleBurnTarget({ itemId: tenet.id, subtitleId: 'nope' }), null)
+})

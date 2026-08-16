@@ -81,15 +81,29 @@ let capabilities = caps.STATIC
 // process retries direct play once and re-learns in one failed attempt.
 const refusedVideo = new Map()
 
+// The image subtitle track the viewer chose for an item, to be BURNED into the
+// picture by the host - per item, set and cleared by stream.url. Rides the
+// capability declaration for the same reason data saver does: one seam covers
+// decide, the playlist and every segment, and the host still decides. RAM-only
+// on purpose - a fresh process starts unburned, like a fresh playback.
+const burnSub = new Map()
+
 const DATA_SAVER_KBPS = 2500
 
 function capsFor (itemId) {
   const bad = refusedVideo.get(itemId)
   const base = bad ? caps.without(capabilities, bad) : capabilities
-  // Data saver rides the capability declaration as a stated link budget -
-  // still a description of THIS client's situation, and the host still
-  // decides. One seam covers decide, playlist and every segment.
-  return readSettings().dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
+  const withSaver = readSettings().dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
+  const burn = burnSub.get(itemId)
+  return burn ? { ...withSaver, burnSubtitleId: burn } : withSaver
+}
+
+// Downloads describe the device without the viewing session: a subtitle choice
+// made in the player must not bake itself into the copy the phone keeps, nor
+// steer the download's decide toward a conversion it does not need.
+function capsForDownload (itemId) {
+  const { burnSubtitleId, ...rest } = capsFor(itemId)
+  return rest
 }
 
 // --- IPC --------------------------------------------------------------------
@@ -236,7 +250,7 @@ async function startDownload (itemId) {
   // data-saver budget, or this device cannot decode it at all - means the
   // download is the CONVERTED film, which is also the only version the phone
   // could have played offline.
-  const verdict = await c.request('media.decide', { itemId, capabilities: capsFor(itemId) }).catch(() => null)
+  const verdict = await c.request('media.decide', { itemId, capabilities: capsForDownload(itemId) }).catch(() => null)
   if (verdict?.mode === 'transcode') return startExportDownload({ c, itemId, item, active })
   const sink = cache.createSink(itemId, { mime, size, library: active?.libraryId || null, pinned: true })
   let got = 0
@@ -279,14 +293,14 @@ function startExportDownload ({ c, itemId, item, active }) {
   // arithmetic as host/transcode.js bitrateFor/capBitrate, plus audio headroom.
   const w = Number(item?.media?.width) || 0
   const ladder = w >= 1600 ? 6000 : w >= 1000 ? 3000 : 1500
-  const budget = Number(capsFor(itemId).maxKbps) || 0
+  const budget = Number(capsForDownload(itemId).maxKbps) || 0
   const kbps = (budget ? Math.min(ladder, budget) : ladder) + 200
   const est = Math.max(1, Math.round((kbps * 1000 / 8) * (Number(item?.runtime) || 0)))
 
   const sink = cache.createSink(itemId, { mime: 'video/mp4', size: null, library: active?.libraryId || null, pinned: true })
   let got = 0
   let lastEmit = 0
-  const p = c.request('media.export', { itemId, capabilities: capsFor(itemId) }, {
+  const p = c.request('media.export', { itemId, capabilities: capsForDownload(itemId) }, {
     stream: true,
     buffer: false,
     onchunk: (chunk) => {
@@ -582,11 +596,19 @@ const methods = {
   // this item's video codec, so the device re-describes itself without it and
   // the host decides again - usually landing on transcode. The client still
   // never ASKS for a mode; it only tells the truth about itself.
-  'stream.url': async ({ itemId, deviceRefusedVideo = false }) => {
+  'stream.url': async ({ itemId, deviceRefusedVideo = false, burnSubtitleId = null }) => {
+    // The burn choice is per playback, so EVERY stream.url settles it: a call
+    // that asks for a track sets it, any other call clears it - starting a
+    // film fresh must never inherit the last session's burned subtitles.
+    if (burnSubtitleId) burnSub.set(itemId, String(burnSubtitleId))
+    else burnSub.delete(itemId)
+
     // A downloaded film needs no host at all - the shim serves it off disk
     // with full Range support. Checked BEFORE connecting, or offline playback
-    // would die asking a host it does not need.
-    if (!deviceRefusedVideo && cache.has(String(itemId))) {
+    // would die asking a host it does not need. A burn request skips the disk
+    // copy on purpose: the download has no subtitles pressed in, so the burned
+    // stream must come from the host.
+    if (!deviceRefusedVideo && !burnSubtitleId && cache.has(String(itemId))) {
       return { url: shim.urlFor(itemId), mode: 'download' }
     }
     const c = await connected()

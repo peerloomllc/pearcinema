@@ -780,6 +780,25 @@ export default function App () {
           await playRef.current(target, url, prior?.resume?.positionMs > 0 ? prior.resume.positionMs : 0)
         } catch (e) { setErr(e.message) }
       }),
+      // The viewer chose image subtitles (or turned them off): the host has to
+      // press them into the frames, which is a different stream - so this is a
+      // restart at the same position, burned or clean.
+      on('player:burn', async (d) => {
+        if (!d?.itemId) return
+        try {
+          const { url } = await call('stream.url', {
+            itemId: d.itemId,
+            ...(d.subtitleId ? { burnSubtitleId: d.subtitleId } : {})
+          })
+          await call('shell.play', {
+            itemId: d.itemId,
+            url,
+            title: d.title || '',
+            startMs: d.positionMs || 0,
+            ...(d.subtitleId ? { burnedSubtitleId: d.subtitleId } : {})
+          })
+        } catch (e) { setErr(e.message) }
+      }),
       on('player:error', async (d) => {
         if (!d?.itemId) return
         if (retried.current.has(d.itemId)) {

@@ -45,9 +45,17 @@ function reasonFor (codec) {
   const c = String(codec || '').toLowerCase()
   if (TEXT_SUBTITLE_CODECS.has(c)) return null
   if (IMAGE_SUBTITLE_CODECS.has(c)) {
-    return 'These subtitles are pictures rather than text, so showing them means drawing them into the video - a full re-encode, which this version does not do.'
+    return 'These subtitles are pictures rather than text, so showing them means drawing them into the video - a re-encode on the host, which needs its video hardware.'
   }
   return `unsupported subtitle format: ${c || 'unknown'}`
+}
+
+// Can this track be BURNED into the picture? Exactly the image formats: burning
+// a text track would pay a re-encode for something the client renders free, and
+// an unknown format cannot be composited at all. PGS and DVD bitmaps ride
+// ffmpeg's overlay identically, so one answer covers both vocabularies.
+function burnable (codec) {
+  return IMAGE_SUBTITLE_CODECS.has(String(codec || '').toLowerCase())
 }
 
 // A readable name for one track, from whatever the file bothered to record.
@@ -105,6 +113,7 @@ module.exports = {
   TEXT_SUBTITLE_CODECS,
   IMAGE_SUBTITLE_CODECS,
   reasonFor,
+  burnable,
   titleFor,
   extractSubtitle
 }

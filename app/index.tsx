@@ -450,13 +450,34 @@ export default function App () {
     return () => clearInterval(t)
   }, [playing])
 
-  const chooseSubtitle = async (kind: 'off' | 'embedded' | 'external', track?: any) => {
+  // A burn choice restarts the film through the UI - the pictures have to be
+  // pressed into the frames by the host, which is a different stream. Pausing
+  // first, same reasoning as navTo: old frames under a made choice read as the
+  // tap not working. `subtitleId: null` is the un-burn, also a restart, because
+  // a burned frame cannot be un-burned in place.
+  const requestBurn = (subtitleId: string | null) => {
+    const p = playingRef.current
+    if (!p) return
+    try { player.pause() } catch {}
+    const payload = JSON.stringify({ itemId: p.itemId, subtitleId, title: p.title, positionMs: Math.round(lastPos.current * 1000) })
+    feedWebView(`window.__pearEvent && window.__pearEvent('player:burn', ${payload})`)
+  }
+
+  const chooseSubtitle = async (kind: 'off' | 'embedded' | 'external' | 'burn', track?: any) => {
     setSubPicker(false)
     cuesRef.current = []
     setCueText('')
+    if (kind === 'burn') {
+      setActiveSub('burn:' + track.id)
+      try { player.subtitleTrack = null } catch {}
+      requestBurn(track.id)
+      return
+    }
     if (kind === 'off') {
+      const wasBurn = !!activeSub?.startsWith('burn:')
       setActiveSub(null)
       try { player.subtitleTrack = null } catch {}
+      if (wasBurn) requestBurn(null)
       return
     }
     if (kind === 'embedded') {
@@ -484,17 +505,19 @@ export default function App () {
     // A handful of methods are the SHELL's, not the worklet's.
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
-      const { itemId, url, title, startMs } = msg.args || {}
+      const { itemId, url, title, startMs, burnedSubtitleId } = msg.args || {}
       // A DIFFERENT item resets the episode buttons until the UI re-declares
       // them. The same item replayed (the lying-chip transcode retry) keeps
       // its buttons - the neighbours have not changed.
       if (itemId !== playingRef.current?.itemId) setNav(null)
       setPlaying({ itemId, url, title: title || '', startMs })
-      // A new film starts with no subtitles chosen and a fresh track list.
-      setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
+      // A new film starts with no subtitles chosen and a fresh track list -
+      // unless this play IS the burned restart, whose choice survives it.
+      setSubTracks([]); setSubPicker(false); setCueText('')
+      setActiveSub(burnedSubtitleId ? 'burn:' + burnedSubtitleId : null)
       cuesRef.current = []
       shellCallRef.current?.('subtitle.list', { itemId })
-        .then((r) => setSubTracks((r?.result?.items || []).filter((t: any) => t.playable)))
+        .then((r) => setSubTracks((r?.result?.items || []).filter((t: any) => t.playable || t.burnable)))
         .catch(() => {})
       try {
         player.replace({ uri: url })
@@ -627,9 +650,8 @@ export default function App () {
 
       {playing && (
         <View style={styles.playerOverlay}>
-          <Pressable
+          <View
             style={styles.videoWrap}
-            onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             onLayout={(e) => {
               const { width, height } = e.nativeEvent.layout
               wrapSizeRef.current = { w: width, h: height }
@@ -643,6 +665,20 @@ export default function App () {
               nativeControls={false}
               allowsFullscreen={false}
               contentFit='contain'
+            />
+
+            {/* THE TAP CATCHER, a SIBLING stacked above the video - not a
+                parent around it. Two failed attempts are buried here (Tim's
+                Pixel field reports, both times "taps do nothing once the
+                controls hide"): a Pressable WRAPPING the video never saw the
+                taps its child swallowed, and pointerEvents='none' ON the video
+                is forwarded by expo-video but ignored by its Android view, so
+                it only looked fixed on a device that never had the bug. A
+                plain RN Pressable layered on top depends on nothing native -
+                the video simply never receives a touch again. */}
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             />
             {!!cueText && (
               <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
@@ -708,7 +744,7 @@ export default function App () {
                 </View>
               </View>
             )}
-          </Pressable>
+          </View>
 
           {subPicker && (
             <View style={styles.subPicker}>
@@ -717,13 +753,42 @@ export default function App () {
                 <Pressable style={styles.subRow} onPress={() => chooseSubtitle('off')}>
                   <Text style={[styles.subTxt, !activeSub && styles.subOn]}>Off</Text>
                 </Pressable>
-                {subTracks.map((t: any) => (
-                  <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
-                    <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
-                      {(t.title || t.language || 'Subtitles') + (t.external ? '' : ' (in the file)')}
-                    </Text>
-                  </Pressable>
-                ))}
+                {(() => {
+                  // Discs label tracks lazily - A New Hope carries TWO picture
+                  // tracks both called ENG: the full dialogue and an alien-
+                  // speech-only one that looks broken outside those scenes
+                  // (Tim's field report, 2026-08-15). Identical labels get
+                  // numbered so the rows are at least tellable apart.
+                  const totals: Record<string, number> = {}
+                  const seen: Record<string, number> = {}
+                  for (const t of subTracks) {
+                    const base = t.title || t.language || 'Subtitles'
+                    totals[base] = (totals[base] || 0) + 1
+                  }
+                  const labelFor = (t: any) => {
+                    const base = t.title || t.language || 'Subtitles'
+                    seen[base] = (seen[base] || 0) + 1
+                    return totals[base] > 1 ? `${base} ${seen[base]}` : base
+                  }
+                  return subTracks.map((t: any) => (
+                    t.burnable ? (
+                      // An image track the host can press into the picture. The
+                      // choice restarts the film as a burned stream - the label
+                      // says so, since a beat of buffering follows the tap.
+                      <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('burn', t)}>
+                        <Text style={[styles.subTxt, activeSub === 'burn:' + t.id && styles.subOn]}>
+                          {labelFor(t) + ' (pressed into the picture)'}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
+                        <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
+                          {labelFor(t) + (t.external ? '' : ' (in the file)')}
+                        </Text>
+                      </Pressable>
+                    )
+                  ))
+                })()}
                 {(() => {
                   // The tracks ExoPlayer read out of the file itself - present on
                   // direct play, absent on a transcode (the segments carry none).

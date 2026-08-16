@@ -67,21 +67,52 @@ function segmentCount (runtimeSeconds) {
 // worth on the engine, emit MPEG-TS to the pipe with timestamps offset to the
 // segment's place in the film - which is what lets the player stitch independent
 // runs into one continuous stream.
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate }) {
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null }) {
   const at = seq * SEGMENT_SECONDS
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
 
   if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
 
-  if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
+  // BURN-IN DECODES IN SOFTWARE, deliberately (DECISIONS 2026-08-15). The
+  // engine's own compositor (overlay_vaapi) is a third faster and SEGFAULTS on
+  // real discs when the PGS stream changes composition size mid-stream - two
+  // of four seek offsets died on A New Hope. The software graph held 4.85x
+  // realtime single and 5.8x aggregate at four concurrent, stable everywhere,
+  // and the encode stays on the engine either way.
+  if (burn) args.push('-vaapi_device', device)
+  else if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
   else args.push('-vaapi_device', device)
 
   if (at > 0) args.push('-ss', String(at))
   args.push('-t', String(SEGMENT_SECONDS))
   args.push('-i', input)
-  args.push('-map', '0:v:0', '-map', '0:a:0?')
+  if (burn) {
+    // `burnIndex` counts WITHIN the subtitle streams - `[0:s:N]` - the same
+    // vocabulary probe.js records and extractSubtitle maps by, and the PR #18
+    // trap in reverse: this index would be off by two as an absolute `[0:N]`.
+    //
+    // THE PAD IS WHERE THE TEXT LIVES. Discs author PGS onto the full frame -
+    // 1920x1080 - and put dialogue in the letterbox bar; a scope rip has the
+    // bars CROPPED, so overlaying canvas on picture clips the text at the
+    // picture's bottom edge (seen on the TCL, A New Hope at 1920x816: the top
+    // halves of letters at the frame line). Restoring the frame around the
+    // picture puts the text back in the bar the disc meant it for. The canvas
+    // size rides from the probe when known; 1920x1080 otherwise, which is
+    // what HD discs author against.
+    const vw = Number(media?.width) || 0
+    const vh = Number(media?.height) || 0
+    const cw = Math.max(Number(burn.canvasWidth) || 1920, vw)
+    const ch = Math.max(Number(burn.canvasHeight) || 1080, vh)
+    const pad = vw && vh && (cw > vw || ch > vh)
+      ? `pad=${cw}:${ch}:(ow-iw)/2:(oh-ih)/2[p];[p]`
+      : ''
+    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]format=nv12,hwupload[out]`)
+    args.push('-map', '[out]', '-map', '0:a:0?')
+  } else {
+    args.push('-map', '0:v:0', '-map', '0:a:0?')
+  }
   args.push('-map_chapters', '-1')
-  args.push('-vf', hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
+  if (!burn) args.push('-vf', hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
   args.push('-c:v', 'h264_vaapi', '-b:v', bitrate)
   // The soundtrack is always rebuilt on this path: TS + AAC is the least
   // surprising pairing for every HLS demuxer, and audio is a rounding error

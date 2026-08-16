@@ -448,6 +448,10 @@ class FolderAdapter {
         external: false,
         forced: !!track.forced,
         sdh: !!track.sdh,
+        // The authored canvas of a picture track, for burn-in's pad. Absent on
+        // text tracks and on caches probed before it was recorded.
+        canvasWidth: track.width ?? null,
+        canvasHeight: track.height ?? null,
         playable,
         reason: playable ? null : subtitles.reasonFor(codec)
       }
@@ -953,6 +957,27 @@ class FolderAdapter {
 
   async subtitles ({ itemId } = {}) {
     return (this._subs.get(String(itemId)) || []).map(t => ({ ...t, ...this._verdict(t) }))
+  }
+
+  // Where an IMAGE subtitle track lives inside its own file, for burn-in
+  // (host/server.js resolves this into the transcode's overlay filter). Only an
+  // EMBEDDED image track of THIS item answers: an external file, a text track
+  // (which plays without a re-encode and must never trigger one) or a foreign
+  // subtitle id are all null, and null means the burn request is ignored
+  // rather than half-honoured.
+  subtitleBurnTarget ({ itemId, subtitleId } = {}) {
+    const track = (this._subs.get(String(itemId)) || []).find(s => s.id === String(subtitleId))
+    if (!track || track.external) return null
+    if (!subtitles.burnable(track.codec)) return null
+    const embedded = this._subTracks.get(String(subtitleId))
+    if (!embedded) return null
+    const input = this._resolveIn(this._paths, itemId, 'burn-source')
+    if (!input || input !== path.resolve(embedded.file)) return null
+    return {
+      index: embedded.index,
+      canvasWidth: track.canvasWidth ?? null,
+      canvasHeight: track.canvasHeight ?? null
+    }
   }
 
   async subtitle ({ itemId, subtitleId } = {}) {

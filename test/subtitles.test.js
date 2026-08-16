@@ -182,3 +182,35 @@ test('a file with no subtitles at all reports none, rather than nothing', async 
   const info = await probeFile(file)
   assert.deepEqual(info.subtitles, [])
 })
+
+test('subtitle.list marks burnable image tracks, and only when the host can burn', async () => {
+  const { createMethods } = require('../host/methods')
+  const subtitles = require('../host/subtitles')
+  const rows = [
+    { id: 'pgs1', codec: 'hdmv_pgs_subtitle', external: false, playable: false },
+    { id: 'srt1', codec: 'subrip', external: false, playable: true },
+    { id: 'ext1', codec: 'dvd_subtitle', external: true, playable: false }
+  ]
+  const adapter = { subtitles: async () => rows }
+  const ctx = { params: { itemId: 'x' }, badParams: (m) => new Error(m) }
+
+  // An engine that proved itself: the embedded image track is offered, the
+  // text track is not (it plays free) and the external image file is not
+  // (there is nothing inside the video to overlay from).
+  const can = createMethods({
+    getAdapter: () => adapter,
+    getLibraryName: () => 'L',
+    media: { canBurn: (codec) => subtitles.burnable(codec) }
+  })
+  const out = await can['subtitle.list'](ctx)
+  assert.deepStrictEqual(out.items.map(t => t.burnable), [true, false, false])
+
+  // No engine: nothing is offered, so a phone never shows a burn the segment
+  // path would silently drop.
+  const cant = createMethods({
+    getAdapter: () => adapter,
+    getLibraryName: () => 'L',
+    media: { canBurn: () => false }
+  })
+  assert.deepStrictEqual((await cant['subtitle.list'](ctx)).items.map(t => t.burnable), [false, false, false])
+})

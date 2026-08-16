@@ -327,3 +327,26 @@ test('DATA SAVER: a stated budget converts a fat file down, and only with hardwa
   assert.strictEqual(capBitrate('1500k', 2500), '1500k')
   assert.strictEqual(capBitrate('3M', 0), '3M')
 })
+
+test('BURN-IN: a chosen image track forces the transcode lane, and only with hardware', () => {
+  const { decide } = require('../host/remux')
+  const playsFine = { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }
+  const client = { containers: ['matroska', 'mp4'], videoCodecs: ['h264'], audioCodecs: ['aac'] }
+
+  // The file direct-plays - but the viewer chose picture subtitles, so the
+  // host must press them in, which is a re-encode by definition.
+  const v = decide(playsFine, client, { transcode: true, burn: true })
+  assert.strictEqual(v.mode, 'transcode')
+  assert.match(v.reason, /burned into the film/)
+  assert.strictEqual(v.audio, 'copy')
+
+  // No proven hardware: the burn request is ignored, never a software encode.
+  assert.strictEqual(decide(playsFine, client, { transcode: false, burn: true }).mode, 'direct')
+
+  // No burn asked: nothing changes.
+  assert.strictEqual(decide(playsFine, client, { transcode: true }).mode, 'direct')
+
+  // A client that cannot take H.264 cannot take the burned stream either.
+  const noH264 = { containers: ['mp4'], videoCodecs: ['hevc'], audioCodecs: ['aac'] }
+  assert.notStrictEqual(decide(playsFine, noH264, { transcode: true, burn: true }).reason?.includes('burned'), true)
+})
