@@ -753,24 +753,42 @@ export default function App () {
                 <Pressable style={styles.subRow} onPress={() => chooseSubtitle('off')}>
                   <Text style={[styles.subTxt, !activeSub && styles.subOn]}>Off</Text>
                 </Pressable>
-                {subTracks.map((t: any) => (
-                  t.burnable ? (
-                    // An image track the host can press into the picture. The
-                    // choice restarts the film as a burned stream - the label
-                    // says so, since a beat of buffering follows the tap.
-                    <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('burn', t)}>
-                      <Text style={[styles.subTxt, activeSub === 'burn:' + t.id && styles.subOn]}>
-                        {(t.title || t.language || 'Subtitles') + ' (pressed into the picture)'}
-                      </Text>
-                    </Pressable>
-                  ) : (
-                    <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
-                      <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
-                        {(t.title || t.language || 'Subtitles') + (t.external ? '' : ' (in the file)')}
-                      </Text>
-                    </Pressable>
-                  )
-                ))}
+                {(() => {
+                  // Discs label tracks lazily - A New Hope carries TWO picture
+                  // tracks both called ENG: the full dialogue and an alien-
+                  // speech-only one that looks broken outside those scenes
+                  // (Tim's field report, 2026-08-15). Identical labels get
+                  // numbered so the rows are at least tellable apart.
+                  const totals: Record<string, number> = {}
+                  const seen: Record<string, number> = {}
+                  for (const t of subTracks) {
+                    const base = t.title || t.language || 'Subtitles'
+                    totals[base] = (totals[base] || 0) + 1
+                  }
+                  const labelFor = (t: any) => {
+                    const base = t.title || t.language || 'Subtitles'
+                    seen[base] = (seen[base] || 0) + 1
+                    return totals[base] > 1 ? `${base} ${seen[base]}` : base
+                  }
+                  return subTracks.map((t: any) => (
+                    t.burnable ? (
+                      // An image track the host can press into the picture. The
+                      // choice restarts the film as a burned stream - the label
+                      // says so, since a beat of buffering follows the tap.
+                      <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('burn', t)}>
+                        <Text style={[styles.subTxt, activeSub === 'burn:' + t.id && styles.subOn]}>
+                          {labelFor(t) + ' (pressed into the picture)'}
+                        </Text>
+                      </Pressable>
+                    ) : (
+                      <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
+                        <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
+                          {labelFor(t) + (t.external ? '' : ' (in the file)')}
+                        </Text>
+                      </Pressable>
+                    )
+                  ))
+                })()}
                 {(() => {
                   // The tracks ExoPlayer read out of the file itself - present on
                   // direct play, absent on a transcode (the segments carry none).
