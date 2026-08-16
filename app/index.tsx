@@ -666,6 +666,14 @@ export default function App () {
               nativeControls={false}
               allowsFullscreen={false}
               contentFit='contain'
+              // DEAF TO TOUCH, and this line is the tap-to-show-controls fix
+              // (Tim's Pixel field report, 2026-08-15). The native player view
+              // swallowed taps before the surrounding Pressable saw them -
+              // whether one got through varied by Android version, so the TCL
+              // mostly worked while the Pixel mostly did not. With its own
+              // controls off the video needs no touches at all; deaf, every
+              // tap lands on our layer, deterministically.
+              pointerEvents='none'
             />
             {!!cueText && (
               <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
