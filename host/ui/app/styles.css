@@ -1094,3 +1094,11 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 /* The Artwork page's key row, centered with the actions under it. */
 .row.artkey { max-width: 30rem; margin-left: auto; margin-right: auto }
 .card > .hint:first-of-type { max-width: 38rem }
+
+/* The library switcher (proposal 2026-08-16-desktop-client): visible only when a
+   remote library is paired. A plain select, because it is a rare, deliberate act -
+   chips are for the phone's blend, and the desktop watches ONE library at a time. */
+.libpick {
+  background: var(--card-2); color: inherit; border: 1px solid var(--line);
+  border-radius: 8px; padding: .35rem .5rem; font-size: .85rem; max-width: 14rem;
+}

@@ -78,6 +78,13 @@ COPY peerloom-host/package.json peerloom-host/package-lock.json /peerloom-host/
 RUN cd /peerloom-host && npm ci --no-audit --no-fund
 COPY peerloom-host/src/ /peerloom-host/src/
 
+# The client package too, same layout and same reason: host/remote.js (the
+# desktop-as-client outbound side) requires @peerloom/client, and the file:
+# dependency below resolves to this directory.
+COPY peerloom-client/package.json peerloom-client/package-lock.json /peerloom-client/
+RUN cd /peerloom-client && npm ci --no-audit --no-fund
+COPY peerloom-client/src/ /peerloom-client/src/
+
 # Deps before code, so a code change does not re-resolve the tree.
 COPY pearcinema/package.json pearcinema/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund

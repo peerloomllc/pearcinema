@@ -28,7 +28,7 @@
 // directions.
 
 import { useState, useEffect, useRef } from 'preact/hooks'
-import { api, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } from './api'
+import { api, withBase, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import { Blocked, Check, Close, Info } from './icons'
@@ -127,10 +127,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     return () => { live = false }
   }, [item.id])
 
-  const src = generated
+  const src = withBase(generated
     ? '/api/remux?id=' + encodeURIComponent(item.id) + '&t=' + Math.floor(offset) + '&' + capabilityQuery(caps) +
       (burnSub ? '&burn=' + encodeURIComponent(burnSub) : '')
-    : '/api/stream?id=' + encodeURIComponent(item.id)
+    : '/api/stream?id=' + encodeURIComponent(item.id))
 
   // ONE SEEK, and the controls above it cannot tell the difference.
   //
@@ -278,7 +278,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                     kind='subtitles'
                     label={s.title || s.language || 'Subtitles'}
                     srclang={s.language || undefined}
-                    src={'/api/subtitle?itemId=' + encodeURIComponent(item.id) + '&subtitleId=' + encodeURIComponent(s.id)}
+                    src={withBase('/api/subtitle?itemId=' + encodeURIComponent(item.id) + '&subtitleId=' + encodeURIComponent(s.id))}
                   />
                 ))}
               </video>

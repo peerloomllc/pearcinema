@@ -6,7 +6,7 @@
 // this app closes.
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { api, copyText } from './api'
+import { api, copyText, setRemoteBase } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
@@ -35,6 +35,7 @@ const SETTINGS_SECTIONS = [
   ['library', 'Library'],
   ['security', 'Security'],
   ['support', 'Support development'],
+  ['remotes', 'Remote libraries'],
   ['host', 'This host']
 ]
 
@@ -43,7 +44,67 @@ const SETTINGS_SECTIONS = [
 // load a URL (a bookmark, a support reply, a headless screenshot).
 const hashParts = () => String(location.hash || '').replace(/^#/, '').split('/')
 
-function Settings ({ state, reload }) {
+// Somebody else's libraries (proposal 2026-08-16-desktop-client): paste the
+// pairing link from their dashboard - the QR always carries its link underneath
+// for machines without a camera - and their films play in these same pages.
+function RemotePanel ({ remotes, reload, onSource, source }) {
+  const [link, setLink] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const pair = async () => {
+    setBusy(true); setErr('')
+    const r = await api('/api/remote/pair', { link: link.trim() })
+    setBusy(false)
+    if (r?.error) return setErr(r.error)
+    setLink('')
+    await reload()
+    if (r?.libraryId) onSource(r.libraryId)
+  }
+
+  const remove = async (row) => {
+    if (source === row.libraryId) onSource('')
+    await api('/api/remote/remove', { hostKey: row.hostKey })
+    await reload()
+  }
+
+  return (
+    <div class='card'>
+      <h3>Remote libraries</h3>
+      <p class='hint'>
+        Watch a library that lives on somebody else's server. On their dashboard,
+        open a pairing window and send you the link under the code - paste it here.
+        They can cut this machine off any time, and your spot in a film is kept on
+        their server like any other device's.
+      </p>
+      {remotes.length > 0 && (
+        <div class='rootlist'>
+          {remotes.map(r => (
+            <div class='rootrow' key={r.hostKey}>
+              <span class='rootpath'>{r.libraryName || 'Library'}{r.online ? '' : ' - offline'}</span>
+              <button onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
+                {source === r.libraryId ? 'Watching' : 'Watch'}
+              </button>
+              <button class='ghost' onClick={() => remove(r)}>Remove</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div class='field'>
+        <input
+          type='text' value={link} placeholder='pear://pearcinema/pair?...'
+          onInput={e => setLink(e.currentTarget.value)}
+        />
+      </div>
+      {err && <p class='error'>{err}</p>}
+      <div class='actions'>
+        <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing...' : 'Pair'}</button>
+      </div>
+    </div>
+  )
+}
+
+function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '' }) {
   const [sec, setSec] = useState(() => {
     const [t, s] = hashParts()
     return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
@@ -93,6 +154,8 @@ function Settings ({ state, reload }) {
             </div>
           </div>
         )}
+
+        {sec === 'remotes' && <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />}
 
         {sec === 'security' && (
           <div class='card'>
@@ -290,6 +353,11 @@ export default function App () {
   const [queue, setQueue] = useState([])
   const [pairing, setPairing] = useState(false)
   const [wizard, setWizard] = useState(false)
+  // Somebody else's libraries this machine is paired to, and which library the
+  // watch surface points at ('' is this box's own). Switching swaps the read
+  // base and remounts the library - the control plane stays local throughout.
+  const [remotes, setRemotes] = useState([])
+  const [source, setSource] = useState('')
   // The theme lives up here now rather than inside Settings: it is a light switch, and
   // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
   const [theme, setTheme] = useState(loadThemePref())
@@ -312,6 +380,7 @@ export default function App () {
   const reload = useCallback(async () => {
     const s = await api('/api/state')
     setState(s)
+    api('/api/remote/list').then(r => { if (Array.isArray(r?.remotes)) setRemotes(r.remotes) }).catch(() => {})
     return s
   }, [])
 
@@ -332,9 +401,20 @@ export default function App () {
   // probe passed, because a verdict is a promise about what will happen and what
   // happens depends on both ends. Folded into caps rather than passed beside it so
   // every consumer of a verdict gets both halves or neither.
-  const caps = { ...CAPS, hostTranscode: !!state.transcode?.available }
+  // Watching a REMOTE library, the transcode promise is the friend's to keep -
+  // assume willing and let the remote routes answer honestly (409 with the
+  // reason) when it is not, rather than greying films on a guess.
+  const caps = { ...CAPS, hostTranscode: source ? true : !!state.transcode?.available }
 
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
+
+  const pickSource = (lib) => {
+    setSource(lib)
+    setRemoteBase(lib ? '/remote/' + lib : '')
+    setPlaying(null)
+    setSearch('')
+    reloadWatch()
+  }
 
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
   // Searching means something on the library and nowhere else - not on Devices, not on
@@ -366,6 +446,21 @@ export default function App () {
               middle of the name. */}
           <span class='word'>Pear<span>Cinema</span></span>
         </button>
+        {remotes.length > 0 && (
+          <select
+            class='libpick'
+            value={source}
+            aria-label='Which library to watch'
+            onChange={e => pickSource(e.currentTarget.value)}
+          >
+            <option value=''>{state.library || 'My library'}</option>
+            {remotes.map(r => (
+              <option key={r.libraryId} value={r.libraryId}>
+                {r.libraryName || 'Library'}{r.online ? '' : ' (offline)'}
+              </option>
+            ))}
+          </select>
+        )}
         {/* THE SEARCH SITS IN THE MIDDLE OF THE BAR AND THE BAR NEVER CHANGES HEIGHT.
             It used to be rendered only on the Watch tab, so opening Devices or Settings
             took the box out and the whole header shrank - the page jumped under the
@@ -428,7 +523,7 @@ export default function App () {
 
       <div class='scroller'>
       <div class='content'>
-        {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} />}
+        {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} onRemotePaired={(lib) => { setWizard(false); reload().then(() => pickSource(lib)) }} />}
 
         {!wizard && tab === 'watch' && (
           playing
@@ -449,6 +544,7 @@ export default function App () {
               )
             : (
               <Library
+                key={source}
                 state={state}
                 caps={caps}
                 search={search}
@@ -462,7 +558,7 @@ export default function App () {
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}
-        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} />}
+        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} />}
       </div>
 
       </div>

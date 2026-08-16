@@ -14,7 +14,7 @@
 // collection it says something uncomfortable and true.
 
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
-import { api, fmtRuntime, episodeCode } from './api'
+import { api, withBase, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 import { ArtIcon, Check, List, Grid, Pencil } from './icons'
 import { Modal, notify } from './ui'
@@ -83,7 +83,7 @@ function Art ({ item, started = false, progress = null }) {
   return (
     <div class='art'>
       {inner}
-      <img src={'/api/art?id=' + encodeURIComponent(item.artId) + (item.artBust ? '&v=' + item.artBust : '')} alt='' loading='lazy' onError={() => setBad(true)} />
+      <img src={withBase('/api/art?id=' + encodeURIComponent(item.artId) + (item.artBust ? '&v=' + item.artBust : ''))} alt='' loading='lazy' onError={() => setBad(true)} />
     </div>
   )
 }

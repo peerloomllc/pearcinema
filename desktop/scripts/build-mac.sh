@@ -43,6 +43,8 @@ rsync -az --checksum \
   "$MAC_HOST:$REMOTE_DIR/"
 rsync -az --checksum --exclude='.git' --exclude='node_modules' --exclude='test' \
   ../../peerloom-host/ "$MAC_HOST:~/peerloomllc/peerloom-host/"
+rsync -az --checksum --exclude='.git' --exclude='node_modules' --exclude='test' \
+  ../../peerloom-client/ "$MAC_HOST:~/peerloomllc/peerloom-client/"
 
 # Stage the App Store Connect API key on the Mac so notarytool can run there.
 # scripts/.env at the repo root is the same place PearTune's release reads from -

@@ -78,9 +78,9 @@ function vendorHost () {
   console.log('[prepack] vendored host/ → desktop/vendor/host/')
 }
 
-function derefPeerloomHost () {
-  const pkgDir = path.join(desktopDir, 'node_modules', '@peerloom', 'host')
-  const source = path.join(repoRoot, '..', 'peerloom-host')
+function derefPeerloom (name) {
+  const pkgDir = path.join(desktopDir, 'node_modules', '@peerloom', name)
+  const source = path.join(repoRoot, '..', 'peerloom-' + name)
 
   let isLink = false
   try { isLink = fs.lstatSync(pkgDir).isSymbolicLink() } catch {}
@@ -93,12 +93,12 @@ function derefPeerloomHost () {
   } else if (!fs.existsSync(path.join(desktopDir, 'node_modules'))) {
     // npm install has not run yet (prepack:vendor called directly in a fresh
     // tree). Nothing to dereference; postinstall will come back through here.
-    console.log('[prepack] no node_modules yet - skipping @peerloom/host copy')
+    console.log(`[prepack] no node_modules yet - skipping @peerloom/${name} copy`)
     return
   }
 
   if (!fs.existsSync(source)) {
-    console.error(`[prepack] @peerloom/host source missing at ${source}`)
+    console.error(`[prepack] @peerloom/${name} source missing at ${source}`)
     process.exit(1)
   }
   fs.mkdirSync(path.dirname(pkgDir), { recursive: true })
@@ -106,7 +106,7 @@ function derefPeerloomHost () {
     skipDirs: new Set(['node_modules', 'test', '.git']),
     skipNames: new Set(['package-lock.json', '.gitignore', 'CLAUDE.md'])
   })
-  console.log('[prepack] @peerloom/host symlink replaced with a real copy')
+  console.log(`[prepack] @peerloom/${name} symlink replaced with a real copy`)
 }
 
 // Every platform dir the build config references gets created - package.json
@@ -143,5 +143,6 @@ function stageFfmpeg () {
 }
 
 vendorHost()
-derefPeerloomHost()
+derefPeerloom('host')
+derefPeerloom('client')
 stageFfmpeg()
