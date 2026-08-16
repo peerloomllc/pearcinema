@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd SYSTEM daemon for the PearCinema desktop host.
+
+  Installed to /Library/LaunchDaemons/com.peerloom.pearcinema.plist by
+  `PearCinema.app/Contents/MacOS/PearCinema --install-service`, run with sudo.
+  Everything __LIKE_THIS__ is templated at install time.
+
+  A SYSTEM DAEMON, NOT A LAUNCHAGENT, and that is the entire point. Measured on
+  PearTune (2026-07-31): an agent in ~/Library/LaunchAgents loads into gui/501,
+  a domain loginwindow builds at login and tears down at logout, so KeepAlive
+  cannot save it. macOS also refuses to bootstrap an arbitrary job into user/501
+  (error 5). So it is the GUI session or the system domain, nothing in between.
+
+  THE PATHS BELONG TO A USER, and that is deliberate. The store cannot be
+  copied: hypercore-storage stamps store/CORESTORE with the file's inode via
+  `device-file` and re-checks it on open, so even a byte-perfect copy refuses to
+  open, forever. So the daemon is pointed at the library where it already lives
+  rather than given a copy of it.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.peerloom.pearcinema</string>
+
+  <!-- Run the Electron binary as plain Node. No second runtime and no bundling
+       step: the installed binary already carries Node and every native addon
+       (sodium-native, hyperdht), and asar resolves them out of
+       app.asar.unpacked. A daemon needs no display, which is what this gives.
+       __ENTRY__ is service-entry.js, which also points the process at the
+       bundled ffmpeg in resources/. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>ELECTRON_RUN_AS_NODE</key>
+    <string>1</string>
+    <!-- THE DATA DIR IS THE LIBRARY'S IDENTITY. host.seed under here is the key
+         every paired phone knows this library by, and nothing regenerates it.
+         It MUST stay the path the tray app already uses, or the daemon comes up
+         as a brand-new empty library and every paired phone stops recognising
+         it. -->
+    <key>PEARCINEMA_DATA</key>
+    <string>__DATA__</string>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BIN__</string>
+    <string>__ENTRY__</string>
+  </array>
+
+  <!-- RUN AS THE USER, NOT AS ROOT - while still being a system-domain DAEMON.
+       Those are independent: what survives logout is living in the SYSTEM
+       domain rather than gui/501, and UserName only decides which credentials
+       the job runs with. PearTune's first cut ran as root and was caught on
+       hardware leaving root-owned files inside the user's own store - a
+       rollback that quietly corrupts the thing it is rolling back. -->
+  <key>UserName</key>
+  <string>__USER__</string>
+  <key>GroupName</key>
+  <string>__GROUP__</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/var/log/pearcinema-host.log</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/pearcinema-host.log</string>
+</dict>
+</plist>
