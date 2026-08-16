@@ -13,7 +13,7 @@ import { useState, useEffect, useRef, useCallback } from 'preact/hooks'
 import jsQR from 'jsqr'
 import {
   FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play, ArrowsClockwise,
-  CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
+  CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, CaretDown, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
   ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile
@@ -602,6 +602,10 @@ export default function App () {
   // The merged view's filter chip ('_all' or a libraryId) and a tick that
   // bumps when the worklet rebuilds the blend, so the lists refetch.
   const [mergedFilter, setMergedFilter] = useState('_all')
+  // The header title IS the library menu (PearTune's shape, replacing the chip
+  // row - Tim, 2026-08-16): tap it to pick the blend or one library, or to add
+  // a library without a trip to Settings.
+  const [libMenuOpen, setLibMenuOpen] = useState(false)
   const [mergedTick, setMergedTick] = useState(0)
   const [items, setItems] = useState(null)
   const [cursor, setCursor] = useState(null)
@@ -1052,10 +1056,64 @@ export default function App () {
     ? (state.hosts.find((h) => h.libraryId === mergedFilter)?.libraryName || 'Library')
     : null
 
+  const libTitle = mergedOn ? (filterName || 'All libraries') : (state.active.libraryName || 'Library')
+  const canSwitch = mergedOn && state.hosts.length >= 2
+
   const libraryScreen = (
     <div className='app'>
       <header>
-        <h1>{mergedOn ? (filterName || 'All libraries') : (state.active.libraryName || 'Library')}</h1>
+        {/* The title IS the library menu: the blend, one library, or Add a
+            library - with a single library it is just the Add row, so a solo
+            user can still add a second from here. */}
+        <div className='libhead'>
+          <button
+            className={'libpick' + (libMenuOpen ? ' open' : '')}
+            onClick={() => { haptic('light'); setLibMenuOpen((o) => !o) }}
+            aria-haspopup='menu'
+            aria-expanded={libMenuOpen}
+          >
+            <h1>{libTitle}</h1>
+            <CaretDown size={16} weight='bold' className='libcaret' />
+          </button>
+
+          {libMenuOpen && (
+            <>
+              <div className='libmenu-backdrop' onClick={() => setLibMenuOpen(false)} />
+              <div className='libmenu' role='menu'>
+                {canSwitch && (
+                  <>
+                    <button
+                      role='menuitem'
+                      className={mergedFilter === '_all' ? 'on' : ''}
+                      onClick={() => { pickFilter('_all'); setLibMenuOpen(false) }}
+                    >
+                      All libraries
+                    </button>
+                    {state.hosts.map((h) => (
+                      <button
+                        key={h.libraryId}
+                        role='menuitem'
+                        className={(mergedFilter === h.libraryId ? 'on' : '') + (h.online === false && !h.inMerge ? ' off' : '')}
+                        onClick={() => { pickFilter(h.libraryId); setLibMenuOpen(false) }}
+                        title={h.online === false && !h.inMerge ? 'Offline' : undefined}
+                      >
+                        {h.libraryName || 'Library'}
+                      </button>
+                    ))}
+                    <div className='libmenu-sep' />
+                  </>
+                )}
+                <button
+                  role='menuitem'
+                  className='libmenu-add'
+                  onClick={() => { setLibMenuOpen(false); setAddingLibrary(true) }}
+                >
+                  <Plus size={15} weight='bold' /> Add a library
+                </button>
+              </div>
+            </>
+          )}
+        </div>
         {series && <p className='muted sm'>{season ? `${series.title} · ${season.title}` : series.title}</p>}
       </header>
 
@@ -1068,20 +1126,6 @@ export default function App () {
             <input className='search' placeholder='Search your library' value={query} onInput={(e) => setQuery(e.currentTarget.value)} />
             {query ? <button className='searchclear' onClick={() => setQuery('')} aria-label='Clear search'><X size={14} /></button> : null}
           </div>
-          {mergedOn && (
-            <div className='chips'>
-              <button className={'chip' + (mergedFilter === '_all' ? ' on' : '')} onClick={() => pickFilter('_all')}>All</button>
-              {state.hosts.map((h) => (
-                <button
-                  key={h.libraryId}
-                  className={'chip' + (mergedFilter === h.libraryId ? ' on' : '') + (h.online === false && !h.inMerge ? ' off' : '')}
-                  onClick={() => pickFilter(h.libraryId)}
-                >
-                  {h.libraryName || 'Library'}
-                </button>
-              ))}
-            </div>
-          )}
           <div className='pickrow'>
             <div className='seg'>
               <button className={root === 'movies' ? 'on' : ''} onClick={() => setRoot('movies')}>Films</button>
