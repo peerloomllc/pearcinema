@@ -93,11 +93,20 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // its bytes are still being made - so there the library's own runtime is all there
   // is, and it is why the item model carrying a runtime matters more than it looks.
   const [elDuration, setElDuration] = useState(0)
-  const duration = (!remuxing && elDuration > 0 ? elDuration : item.runtime) || 0
+
+  // The chosen image subtitle track being PRESSED into the picture by the host
+  // (null = none). Burning is a re-encode, so an active burn takes the
+  // generated-bytes route whatever the file could otherwise do, and a seek is
+  // a restart exactly as it is for any remux.
+  const [burnSub, setBurnSub] = useState(null)
+  const generated = remuxing || !!burnSub
+
+  const duration = (!generated && elDuration > 0 ? elDuration : item.runtime) || 0
 
   useEffect(() => {
     setForced(false); setFailed(null); setAt(0); setOffset(0); setSubs([]); setBusy(false)
     setOffer(null)
+    setBurnSub(null)
     wrote.current = 0
     // A different film is a fresh decision. Playing one and clicking another must not
     // start the second one on its own.
@@ -118,8 +127,9 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     return () => { live = false }
   }, [item.id])
 
-  const src = remuxing
-    ? '/api/remux?id=' + encodeURIComponent(item.id) + '&t=' + Math.floor(offset) + '&' + capabilityQuery(caps)
+  const src = generated
+    ? '/api/remux?id=' + encodeURIComponent(item.id) + '&t=' + Math.floor(offset) + '&' + capabilityQuery(caps) +
+      (burnSub ? '&burn=' + encodeURIComponent(burnSub) : '')
     : '/api/stream?id=' + encodeURIComponent(item.id)
 
   // ONE SEEK, and the controls above it cannot tell the difference.
@@ -132,7 +142,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     const t = Math.max(0, duration ? Math.min(seconds, duration - 1) : seconds)
     setFailed(null)
 
-    if (!remuxing && video.current) {
+    if (!generated && video.current) {
       video.current.currentTime = t
       setAt(t)
       return
@@ -255,8 +265,8 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 onPlaying={() => setBusy(false)}
                 onError={() => {
                   setBusy(false)
-                  setFailed(remuxing
-                    ? (verdict.status === 'convert'
+                  setFailed(generated
+                    ? (verdict.status === 'convert' || burnSub
                         ? 'Converting stopped. The film itself is fine - this is the host or the connection rather than the file.'
                         : 'Repackaging stopped. The film itself is fine - this is the host or the connection rather than the file.')
                     : 'The browser stopped without saying why. That is almost always the container or the codec, and the file will play on a phone.')
@@ -290,7 +300,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   wantPlay.current = true
                   seekTo(offer)
                   setOffer(null)
-                  if (!remuxing) video.current?.play().catch(() => {})
+                  if (!generated) video.current?.play().catch(() => {})
                 }}>Resume</button>
                 <button class='ghost' onClick={() => {
                   // START OVER MEANS FROM ZERO, and it used to mean only "stop asking"
@@ -299,7 +309,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   wantPlay.current = true
                   seekTo(0)
                   setOffer(null)
-                  if (!remuxing) video.current?.play().catch(() => {})
+                  if (!generated) video.current?.play().catch(() => {})
                 }}>Start Over</button>
               </div>
             </div>
@@ -315,7 +325,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
             duration={duration}
             onSeek={seekTo}
             busy={busy}
-            live={remuxing}
+            live={generated}
             subs={playableSubs}
           />
         )}
@@ -426,16 +436,43 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 </div>
               ))}
               {unplayableSubs.map(s => (
-                <div class='sub off' key={s.id} title={s.reason || ''}>
-                  <span>{s.title || s.language || 'Subtitles'}</span>
-                  <span class='hint'>not available</span>
-                </div>
+                // An image track the host can press into the picture instead:
+                // the refusal becomes a button. Choosing one restarts the
+                // stream as a conversion at the current position; turning it
+                // off restarts clean, because burned frames cannot be
+                // un-burned in place. The same feature the phone shipped.
+                s.burnable ? (
+                  <div class='sub' key={s.id}>
+                    <span>{s.title || s.language || 'Subtitles'}</span>
+                    {burnSub === s.id ? (
+                      <button class='ghost' onClick={() => { setBurnSub(null); setOffset(at); setBusy(true) }}>
+                        pressed into the picture - turn off
+                      </button>
+                    ) : (
+                      <button class='ghost' onClick={() => { setBurnSub(s.id); setOffset(at); setBusy(true) }}>
+                        press into the picture
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div class='sub off' key={s.id} title={s.reason || ''}>
+                    <span>{s.title || s.language || 'Subtitles'}</span>
+                    <span class='hint'>not available</span>
+                  </div>
+                )
               ))}
             </div>
             {playableSubs.length > 0 && (
               <p class='hint'>Turn one on with the subtitles button in the player.</p>
             )}
-            {unplayableSubs.length > 0 && <p class='hint'>{unplayableSubs[0].reason}</p>}
+            {unplayableSubs.some(s => s.burnable) ? (
+              <p class='hint'>
+                These subtitles are pictures, so your box presses them into the film
+                itself - choosing one restarts the stream where you are.
+              </p>
+            ) : (
+              unplayableSubs.length > 0 && <p class='hint'>{unplayableSubs[0].reason}</p>
+            )}
           </>
         )}
       </aside>

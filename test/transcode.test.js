@@ -275,3 +275,30 @@ test('exportFor: direct verdict answers direct, transcode verdict streams and th
   assert.match(err.message, /died before the end/)
   transcoder.killAll()
 })
+
+test('BURN-IN on the progressive path mirrors the segment graph', () => {
+  const { transcodeArgs } = require('../host/transcode')
+  const args = transcodeArgs({
+    input: '/library/Movies/A New Hope.mkv',
+    at: 600,
+    audio: 'copy',
+    media: { videoCodec: 'h264', width: 1920, height: 816 },
+    device: '/dev/dri/renderD128',
+    burn: { index: 1, canvasWidth: 1920, canvasHeight: 1080 }
+  })
+
+  // Software decode (the compositor ban lives in hls.js), pad back to the
+  // disc's frame, overlay by subtitle-relative index, engine encode.
+  assert.equal(args.includes('-hwaccel'), false)
+  const graph = args[args.indexOf('-filter_complex') + 1]
+  assert.match(graph, /pad=1920:1080/)
+  assert.match(graph, /\[0:s:1\]overlay/)
+  assert.equal(args[args.indexOf('-map') + 1], '[out]')
+  assert.equal(args.includes('-vf'), false)
+  assert.equal(args[args.indexOf('-c:v') + 1], 'h264_vaapi')
+
+  // No burn: the path is exactly what it always was.
+  const plain = transcodeArgs({ input: '/x.mkv', media: { videoCodec: 'h264' }, device: '/dev/dri/renderD128' })
+  assert.equal(plain.includes('-filter_complex'), false)
+  assert.equal(plain.includes('-hwaccel'), true)
+})

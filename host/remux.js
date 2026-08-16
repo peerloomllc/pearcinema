@@ -322,7 +322,7 @@ class Remuxer {
   // Start one. Throws rather than queueing when the box is already busy: a viewer
   // told "the server is busy" can try again, where a viewer watching a spinner for
   // four minutes assumes it is broken.
-  start ({ input, at = 0, audio = 'copy', headers = null, media = null, argv = null }) {
+  start ({ input, at = 0, audio = 'copy', headers = null, media = null, argv = null, burn = null }) {
     if (this.live.size >= this.maxConcurrent) {
       const e = new Error(`this host is already ${this.what} ${this.live.size} films, which is as many as it will do at once`)
       e.code = 'BUSY'
@@ -331,8 +331,10 @@ class Remuxer {
 
     // `argv` overrides the builder for callers whose command differs only in
     // shape, not in lifecycle - the HLS segment path, whose one-segment runs
-    // still deserve the cap, the kill-with-response and killAll.
-    const args = argv || this._args({ input, at, audio, headers, media })
+    // still deserve the cap, the kill-with-response and killAll. `burn` rides
+    // through to the transcode builder; the remux builder ignores it, which is
+    // right - a stream copy cannot press anything into frames it never decodes.
+    const args = argv || this._args({ input, at, audio, headers, media, burn })
     const proc = spawn(this.ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] })
     const session = new RemuxProcess({ proc, at, audio, log: this.log })
     this.live.add(session)

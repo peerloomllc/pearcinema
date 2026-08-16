@@ -45,6 +45,7 @@ const { browse } = require('../browse')
 const { detectSources } = require('../detect')
 const items = require('../items')
 const watch = require('../watch')
+const subtitleRules = require('../subtitles')
 
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
 const LOGIN_PAGE = require('./login')
@@ -425,7 +426,15 @@ async function startDashboard ({
         if (!itemId) return json(res, 400, { error: 'itemId required' })
         if (!host.adapter.subtitles) return json(res, 200, { items: [] })
         const list = await host.adapter.subtitles({ itemId: String(itemId) }).catch(() => [])
-        return json(res, 200, { items: list })
+        // `burnable` mirrors the phone's subtitle.list rule: an unplayable
+        // EMBEDDED image track this host could press into the picture instead,
+        // offered only when the engine has proven itself.
+        return json(res, 200, {
+          items: list.map(t => ({
+            ...t,
+            burnable: !!(host.transcode.available && !t.playable && !t.external && subtitleRules.burnable(t.codec))
+          }))
+        })
       }
 
       if (req.method === 'GET' && url.pathname === '/api/subtitle') {
@@ -526,12 +535,17 @@ async function startDashboard ({
         const at = Math.max(0, Number(url.searchParams.get('t')) || 0)
 
         // What the CLIENT says it can open. The host decides from it; a client
-        // cannot ask to be remuxed, only describe itself.
+        // cannot ask to be remuxed, only describe itself. `burn` is the one
+        // deliberate exception in spirit - the viewer CHOSE image subtitles -
+        // but it still rides the description and the host still decides: a
+        // stale id or a cold engine simply decides as if nothing was asked.
         const caps = {
           containers: (url.searchParams.get('containers') || 'mp4').split(',').filter(Boolean),
           videoCodecs: (url.searchParams.get('video') || 'h264').split(',').filter(Boolean),
           audioCodecs: (url.searchParams.get('audio') || 'aac').split(',').filter(Boolean)
         }
+        const burnId = url.searchParams.get('burn')
+        if (burnId) caps.burnSubtitleId = String(burnId)
 
         let out
         try {

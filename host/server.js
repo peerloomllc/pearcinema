@@ -266,8 +266,11 @@ class PearCinemaHost {
 
     // The transcode flag is rule 2's gate reaching the decision: false until the
     // startup probe produced real bytes, and decide() refuses video exactly as it
-    // always did while it is.
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available })
+    // always did while it is. `burn` is the browser's chosen image subtitle
+    // track resolved to a stream index - null unless it survives the same
+    // refusals the phone path applies (host/sidecars-adjacent _burnTarget).
+    const burn = this._burnTarget(itemId, capabilities)
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, burn: !!burn })
     if (verdict.mode !== 'remux' && verdict.mode !== 'transcode') {
       return { ...verdict, session: null, item }
     }
@@ -286,10 +289,11 @@ class PearCinemaHost {
       headers: source.headers || null,
       at: Math.max(0, Number(at) || 0),
       audio: verdict.audio || 'copy',
-      media: item.media || null
+      media: item.media || null,
+      burn: verdict.mode === 'transcode' ? burn : null
     })
 
-    this.log('host:' + verdict.mode, { at, audio: verdict.audio, running: engine.running })
+    this.log('host:' + verdict.mode, { at, audio: verdict.audio, burn: !!burn, running: engine.running })
     return { ...verdict, session, item }
   }
 
