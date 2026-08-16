@@ -475,6 +475,12 @@ const methods = {
         libraryName: paired.libraryName
       }, Date.now())
       writeHosts(hostsState)
+      // addHost just moved the active pointer to the NEW host, so the live
+      // connection - still dialled into the previous one - must go. Left open,
+      // every later call kept riding the old link and the browse tab showed the
+      // old catalog until an app restart (caught pairing the TCL to the Mac,
+      // 2026-08-16). Same move hosts.setActive makes below.
+      if (client) { try { await client.close() } catch {} ; client = null }
       emit('hosts:changed', {})
       return { libraryId: paired.libraryId, libraryName: paired.libraryName }
     } finally {
@@ -542,7 +548,21 @@ const methods = {
   'request.resolve': async (args) => (await connected()).request('request.resolve', args),
   'device.list': async (args) => (await connected()).request('device.list', args),
   'device.revoke': async (args) => (await connected()).request('device.revoke', args),
-  'identity.get': async (args) => (await connected()).request('identity.get', args),
+  'identity.get': async (args) => {
+    const out = await (await connected()).request('identity.get', args)
+    // The host reports its CURRENT library name here - that is how a dashboard
+    // rename reaches an already-paired phone. Fold it back into the stored host
+    // row, which was captured at pair time and is never otherwise refreshed
+    // (renameHost is idempotent, so the steady state costs nothing). Without
+    // this, two libraries both showing "My Library" is the norm, not the edge.
+    const active = H.activeHost(hostsState)
+    if (active && out?.libraryName && out.libraryName !== active.libraryName) {
+      hostsState = H.renameHost(hostsState, active.hostKey, out.libraryName)
+      writeHosts(hostsState)
+      emit('hosts:changed', {})
+    }
+    return out
+  },
   'identity.set': async (args) => (await connected()).request('identity.set', args),
   'avatar.set': async (args) => (await connected()).request('avatar.set', args),
 
