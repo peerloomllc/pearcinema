@@ -2,6 +2,32 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-16 - NO HOST-SIDE STREAM THROTTLE: backpressure already is one, measured
+Tier: T0 (a measurement closing a research item; no code changes)
+Context: repackaging runs far faster than realtime (2001's 2.5 GB remuxed at
+~100 MB/s, measured again today - an unthrottled reader pulls 60% of the film
+in 15 seconds), and nothing on the HOST enforces a pace. The question was
+whether to add one before anything watches over a slow link.
+
+**Measured on the real box, same film, 400 kB/s reader for 30 seconds:**
+
+- The reader got exactly its 400 kB/s - the whole pipeline follows the
+  consumer, TCP receive window to response socket to stdout pipe to ffmpeg.
+- ffmpeg's memory stayed FLAT at ~52 MB at both samples (t=12s and t=27s).
+  Nothing accumulates host-side while the reader dawdles; the process simply
+  blocks on its pipe.
+- Disk reads track the consumer's pace plus small pipe buffers.
+
+**Decided: no throttle.** A slow LINK self-throttles by the same mechanism a
+slow READER does, so the case the item worried about defends itself. `-re` is
+rejected: it would slow every seek (each seek is a fresh stream that benefits
+from racing ahead into the buffer) to solve a problem the measurement says
+does not exist. The residual truth: a client that deliberately reads flat out
+can pull a whole film at disk speed - which is the same access media.stream
+already grants any device with a grant, not a new exposure. The phone's own
+20-second forward buffer (revoke-latency decision, 2026-08-14) is the
+per-client pace, exactly where pacing belongs.
+
 ## 2026-08-16 - THE SERVER IS THE AUTHORITY on what its own files are
 Tier: T0 (a decision closing a TODO question; no code changes)
 Context: raised 2026-08-12 when a misconfigured Jellyfin filed every episode as

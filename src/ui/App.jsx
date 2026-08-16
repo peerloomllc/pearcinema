@@ -12,7 +12,7 @@
 import { useState, useEffect, useRef, useCallback } from 'preact/hooks'
 import jsQR from 'jsqr'
 import {
-  FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play,
+  FilmStrip, Heart, BookmarkSimple, Gear, Info, X, Play, ArrowsClockwise,
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
@@ -301,35 +301,16 @@ function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2 }) {
   )
 }
 
-// The donor's loading placeholders: the page keeps its shape while the P2P
-// connection wakes, instead of presenting a blank library that reads as empty.
-function SkeletonGrid ({ cols = 2, n = 8 }) {
-  const list = cols === 'list'
+// The donor's connecting screen, replacing the skeleton placeholders (Tim,
+// 2026-08-15): while the library is loading or the P2P link is still waking,
+// one spinning circle and a plain word - the way PearTune does it - instead
+// of grey tile shapes pretending to be films.
+function Loading ({ connecting = false }) {
   return (
-    <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
-      {Array.from({ length: n }, (_, i) => (
-        <div className='album' key={i}>
-          <div className='cover skel' />
-          <div className='skel line' />
-          <div className='skel line short' />
-        </div>
-      ))}
+    <div className='loadwall'>
+      <ArrowsClockwise size={40} weight='thin' className='spin' />
+      <h2>{connecting ? 'Connecting…' : 'Loading…'}</h2>
     </div>
-  )
-}
-
-function SkeletonRows ({ n = 7 }) {
-  return (
-    <ul className='tracks'>
-      {Array.from({ length: n }, (_, i) => (
-        <li className='track' key={i}>
-          <div className='meta' style={{ flex: 1 }}>
-            <div className='skel line' style={{ width: '55%' }} />
-            <div className='skel line short' />
-          </div>
-        </li>
-      ))}
-    </ul>
   )
 }
 
@@ -1047,12 +1028,7 @@ export default function App () {
 
       {err && <div className='error'>{err}</div>}
 
-      {items == null && !results && (
-        <>
-          {!linkUp && <p className='muted sm center-p'>Connecting to {state.active.libraryName || 'your library'}…</p>}
-          {season ? <SkeletonRows /> : <SkeletonGrid cols={series ? 2 : cols} />}
-        </>
-      )}
+      {items == null && !results && <Loading connecting={!linkUp} />}
 
       {!series && !results && root === 'movies' && showRecent && recentRows.length > 0 && (
         <div className='shelf'>
@@ -1105,7 +1081,7 @@ export default function App () {
         <p className='muted sm'>{savedItems?.length ? `${savedItems.length} saved to watch` : 'Saved to watch, synced through your library'}</p>
       </header>
       {savedItems == null
-        ? <SkeletonGrid cols={cols} />
+        ? <Loading connecting={!linkUp} />
         : savedItems.length === 0
           ? (
             <div className='center-p muted'>
@@ -1152,7 +1128,7 @@ export default function App () {
 
       {youView === 'continue' && (
         continueRows == null
-          ? <SkeletonRows />
+          ? <Loading connecting={!linkUp} />
           : continueRows.length === 0
             ? <p className='muted center-p'>Nothing in progress. Start a film and your place appears here.</p>
             : (
@@ -1170,7 +1146,7 @@ export default function App () {
 
       {youView === 'watched' && (
         watchedRows == null
-          ? <SkeletonRows />
+          ? <Loading connecting={!linkUp} />
           : watchedRows.length === 0
             ? <p className='muted center-p'>Nothing finished yet.</p>
             : (
@@ -1228,7 +1204,7 @@ export default function App () {
             </ul>
           )}
           {dlRows == null
-            ? <SkeletonRows />
+            ? <Loading connecting={!linkUp} />
             : dlRows.length === 0 && dlRunning.length === 0
               ? (
                 <div className='center-p muted'>

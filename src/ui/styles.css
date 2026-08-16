@@ -1479,3 +1479,12 @@ label.flabel { display: block; margin-top: .6rem; }
 /* Film posters are portrait; the donor's shelf squares were album art. */
 .shelf-item { width: 104px }
 .shelf-item .cover { width: 104px; height: 156px }
+
+/* The connecting/loading wall - the donor's blank-state shape, under its own
+   name because .blank here already means a poster placeholder. One spinning
+   circle and a word, replacing the skeleton tiles (Tim, 2026-08-15). */
+.loadwall {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: .6rem; padding: 3rem 1rem; color: var(--color-text-muted);
+}
+.loadwall h2 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 1.05rem; }
