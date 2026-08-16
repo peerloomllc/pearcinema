@@ -1,7 +1,22 @@
 // The web interface's data layer. One fetch helper, and the small formatters that
 // would otherwise be re-invented in four components.
 
+// Which library the READ surface points at (proposal 2026-08-16-desktop-client):
+// '' is this machine's own, '/remote/<lib>' is a paired remote's. Only the
+// browse/play/watch routes are rewritten - the control plane (/api/state, the
+// source wizard, people and devices) is always about THIS box, whatever is being
+// watched. Module-level on purpose: the <img> and <video> tags build URLs
+// outside api() and need the same answer.
+let remoteBase = ''
+const REMOTED = /^\/api\/(library\/|art\b|stream\b|remux\b|subtitles?\b|watch\/)/
+
+export function setRemoteBase (base) { remoteBase = base || '' }
+export function withBase (path) {
+  return remoteBase && REMOTED.test(path) ? remoteBase + path : path
+}
+
 export async function api (path, body) {
+  path = withBase(path)
   const res = await fetch(path, {
     method: body === undefined ? 'GET' : 'POST',
     headers: body === undefined ? {} : { 'content-type': 'application/json' },

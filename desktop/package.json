@@ -28,6 +28,7 @@
     "resolved at runtime by host/ffmpeg-bin.js via PEARCINEMA_FFMPEG/FFPROBE."
   ],
   "dependencies": {
+    "@peerloom/client": "file:../../peerloom-client",
     "@peerloom/host": "file:../../peerloom-host",
     "b4a": "^1.6.7",
     "compact-encoding": "^2.16.0",

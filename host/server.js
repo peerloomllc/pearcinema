@@ -20,6 +20,7 @@ const remux = require('./remux')
 const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
+const remoteLibs = require('./remote')
 const sidecars = require('./sidecars')
 const subtitles = require('./subtitles')
 const hls = require('./hls')
@@ -181,6 +182,16 @@ class PearCinemaHost {
           return this.openStream(params)
         }
       })
+    })
+
+    // The OUTBOUND side (proposal 2026-08-16-desktop-client): this machine as a
+    // device of other libraries, riding the host's own DHT node. Costs nothing
+    // until the dashboard pairs one.
+    this.remote = new remoteLibs.RemoteLibraries({
+      dataDir: this.dataDir,
+      protocol: PROTOCOL,
+      dht: this.host.dht,
+      log
     })
 
     // AFTER the host, because an adapter needs the libraryId - and the libraryId is
@@ -869,6 +880,7 @@ class PearCinemaHost {
     // small box it is the whole box.
     this.remuxer.killAll()
     this.transcoder.killAll()
+    await this.remote.close().catch(() => {})
     return this.host.close()
   }
 }

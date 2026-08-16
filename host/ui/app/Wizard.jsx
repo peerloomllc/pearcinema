@@ -17,14 +17,30 @@ import SourcePanel from './SourcePanel'
 import Metadata from './Metadata'
 import Pair from './Pair'
 
-export default function Wizard ({ state, reload, onDone }) {
+export default function Wizard ({ state, reload, onDone, onRemotePaired = null }) {
   const steps = setupSteps(state)
   const [i, setI] = useState(0)
   const [name, setName] = useState(state.library || DEFAULT_LIBRARY_NAME)
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
   const [pwErr, setPwErr] = useState('')
+  // The My server / A friend's server fork (proposal 2026-08-16-desktop-client).
+  // Only a truly blank install sees it: a machine with a source is already a
+  // server, one with a remote library is already a client.
+  const [friend, setFriend] = useState(false)
+  const [friendLink, setFriendLink] = useState('')
+  const [friendBusy, setFriendBusy] = useState(false)
+  const [friendErr, setFriendErr] = useState('')
   const step = steps[i]
+
+  const pairFriend = async () => {
+    setFriendBusy(true); setFriendErr('')
+    const r = await api('/api/remote/pair', { link: friendLink.trim() })
+    setFriendBusy(false)
+    if (r?.error) return setFriendErr(r.error)
+    dismissSetup()
+    if (onRemotePaired) onRemotePaired(r.libraryId)
+  }
 
   const finish = () => { dismissSetup(); onDone() }
   const advance = () => (i + 1 < steps.length ? setI(i + 1) : finish())
@@ -56,14 +72,40 @@ export default function Wizard ({ state, reload, onDone }) {
             Your own film and TV collection, playable on your phone anywhere, without
             opening a single port on your router and without an account anywhere.
           </p>
-          <p class='hint'>
-            Two things to set up: where your films are, and which phone is allowed to
-            watch them. It takes about a minute.
-          </p>
-          <div class='confirm-actions'>
-            <button class='ghost' onClick={finish}>Skip</button>
-            <button onClick={advance}>Start</button>
-          </div>
+          {!friend && (
+            <>
+              <p class='hint'>
+                First question: whose films will this machine play?
+              </p>
+              <div class='confirm-actions'>
+                <button class='ghost' onClick={finish}>Skip</button>
+                <button class='ghost' onClick={() => setFriend(true)}>A friend's server</button>
+                <button onClick={advance}>My server - set it up</button>
+              </div>
+            </>
+          )}
+          {friend && onRemotePaired && (
+            <>
+              <p class='hint'>
+                On your friend's PearCinema dashboard, open a pairing window and have
+                them send you the link under the code. Paste it here - their films
+                play right in this page, and they can cut this machine off any time.
+              </p>
+              <div class='field'>
+                <input
+                  type='text' value={friendLink} placeholder='pear://pearcinema/pair?...'
+                  onInput={e => setFriendLink(e.currentTarget.value)}
+                />
+              </div>
+              {friendErr && <p class='error'>{friendErr}</p>}
+              <div class='confirm-actions'>
+                <button class='ghost' onClick={() => setFriend(false)}>Back</button>
+                <button onClick={pairFriend} disabled={friendBusy || !friendLink.trim()}>
+                  {friendBusy ? 'Pairing...' : 'Pair'}
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
 

@@ -44,6 +44,17 @@ const {
 const { browse } = require('../browse')
 const { detectSources } = require('../detect')
 const items = require('../items')
+const remux = require('../remux')
+
+// The browser's capability description, as the local /api/remux reads it - one
+// parser for both the local route and the remote twins.
+function capsFromQuery (url) {
+  return {
+    containers: (url.searchParams.get('containers') || 'mp4').split(',').filter(Boolean),
+    videoCodecs: (url.searchParams.get('video') || 'h264').split(',').filter(Boolean),
+    audioCodecs: (url.searchParams.get('audio') || 'aac').split(',').filter(Boolean)
+  }
+}
 const watch = require('../watch')
 const subtitleRules = require('../subtitles')
 
@@ -583,6 +594,269 @@ async function startDashboard ({
         res.on('close', () => out.session.kill())
         out.session.stdout.on('error', () => out.session.kill())
         return out.session.stdout.pipe(res)
+      }
+
+      // --- REMOTE LIBRARIES (proposal 2026-08-16-desktop-client) ----------------
+      //
+      // This machine as a CLIENT of somebody else's library, in these same pages.
+      // The routes twin the local read surface under /remote/<lib>/, so the app
+      // swaps a base prefix and nothing else changes shape. All of it sits behind
+      // the same auth gate as the rest of the dashboard: a remote library must
+      // never be reachable to someone the dashboard would refuse.
+      const remote = host.remote || null
+
+      if (remote && req.method === 'GET' && url.pathname === '/api/remote/list') {
+        return json(res, 200, { remotes: remote.list() })
+      }
+      if (remote && req.method === 'POST' && url.pathname === '/api/remote/pair') {
+        const { link, label } = await readBody(req)
+        if (!link) return json(res, 400, { error: 'link required' })
+        try {
+          return json(res, 200, await remote.pair(link, { label: label || 'desktop' }))
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      if (remote && req.method === 'POST' && url.pathname === '/api/remote/remove') {
+        const { hostKey } = await readBody(req)
+        if (!hostKey) return json(res, 400, { error: 'hostKey required' })
+        return json(res, 200, await remote.remove(String(hostKey)))
+      }
+
+      const rmatch = remote && /^\/remote\/([a-z0-9]+)(\/.+)$/.exec(url.pathname)
+      if (rmatch) {
+        const lib = rmatch[1]
+        const sub = rmatch[2]
+        if (!remote.row(lib)) return json(res, 404, { error: 'not paired with that library' })
+
+        // The browse reads, translated query-to-wire. Same response shapes as the
+        // local routes because the WIRE's shapes are the adapter's shapes.
+        if (req.method === 'GET' && sub === '/api/library/list') {
+          const args = {}
+          for (const k of ['type', 'seriesId', 'seasonId', 'sort', 'order']) {
+            const v = url.searchParams.get(k)
+            if (v) args[k] = v
+          }
+          const limit = Number(url.searchParams.get('limit'))
+          if (Number.isFinite(limit)) args.limit = limit
+          const cursor = url.searchParams.get('cursor')
+          if (cursor) args.cursor = cursor
+          return json(res, 200, await remote.call(lib, 'library.list', args))
+        }
+        if (req.method === 'GET' && sub === '/api/library/search') {
+          const q = url.searchParams.get('q') || ''
+          return json(res, 200, await remote.call(lib, 'library.search', { q, limit: 60 }))
+        }
+        if (req.method === 'GET' && sub === '/api/art') {
+          const artId = url.searchParams.get('id')
+          if (!artId) return json(res, 400, { error: 'id required' })
+          try {
+            const c = await remote.connected(lib)
+            const buf = await c.art({ artId: String(artId), size: url.searchParams.get('size') || undefined })
+            res.writeHead(200, { 'content-type': 'image/jpeg', 'cache-control': 'max-age=86400' })
+            return res.end(buf)
+          } catch {
+            res.writeHead(404)
+            return res.end()
+          }
+        }
+        if (req.method === 'GET' && sub === '/api/subtitles') {
+          const itemId = url.searchParams.get('itemId')
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          return json(res, 200, await remote.call(lib, 'subtitle.list', { itemId: String(itemId) }))
+        }
+        if (req.method === 'GET' && sub === '/api/subtitle') {
+          const itemId = url.searchParams.get('itemId')
+          const subtitleId = url.searchParams.get('subtitleId')
+          if (!itemId || !subtitleId) return json(res, 400, { error: 'itemId and subtitleId required' })
+          const c = await remote.connected(lib)
+          const buf = await c.request('subtitle.get', { itemId: String(itemId), subtitleId: String(subtitleId) }, { stream: true })
+          res.writeHead(200, { 'content-type': 'text/vtt; charset=utf-8', 'cache-control': 'no-store' })
+          return res.end(buf)
+        }
+
+        // Watch state, written to the FRIEND's host - it is the authority for its
+        // own films, and this machine is just another device of whoever paired it
+        // (approved open question 2). The rollup extras the local page computes by
+        // walking its own adapter answer empty here; ticks on shows arrive with
+        // phase 2 if they earn it.
+        if (req.method === 'GET' && sub === '/api/watch/state') {
+          const [cont, watched] = await Promise.all([
+            remote.call(lib, 'resume.list', { limit: 20 }).catch(() => ({ items: [] })),
+            remote.call(lib, 'watched.list', {}).catch(() => ({ items: [] }))
+          ])
+          return json(res, 200, {
+            watching: null,
+            choose: [],
+            watched: watched.items || [],
+            continue: cont.items || []
+          })
+        }
+        if (req.method === 'POST' && sub === '/api/watch/position') {
+          const { itemId, positionMs, finished } = await readBody(req)
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          return json(res, 200, await remote.call(lib, 'resume.set', { itemId: String(itemId), positionMs: Number(positionMs) || 0, finished: !!finished }))
+        }
+        if (req.method === 'POST' && sub === '/api/watch/watched') {
+          const { itemId, watched } = await readBody(req)
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          return json(res, 200, await remote.call(lib, 'watched.set', { itemId: String(itemId), watched: watched !== false }))
+        }
+        if (req.method === 'GET' && sub === '/api/watch/shows') return json(res, 200, { shows: {} })
+        if (req.method === 'GET' && sub === '/api/watch/seasons') return json(res, 200, {})
+
+        // The film itself, Range honoured - the twin of /api/stream, bytes off the
+        // wire instead of the disk.
+        if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/stream') {
+          const id = url.searchParams.get('id')
+          if (!id) return json(res, 400, { error: 'id required' })
+          const item = await remote.call(lib, 'library.get', { id: String(id) }).catch(() => null)
+          if (!item) return json(res, 404, { error: 'no such item' })
+          const size = item.media?.size || null
+          const type = mimeFor(item.media?.container)
+          if (!size) return json(res, 409, { error: 'that one cannot be streamed here' })
+
+          const range = req.headers.range ? parseRange(req.headers.range, size) : null
+          if (range?.unsatisfiable) {
+            res.writeHead(416, { 'content-range': `bytes */${size}` })
+            return res.end()
+          }
+          const start = range ? range.start : 0
+          const end = range ? range.end : size - 1
+          const length = end - start + 1
+
+          res.writeHead(range ? 206 : 200, {
+            'content-type': type,
+            'content-length': length,
+            'accept-ranges': 'bytes',
+            'cache-control': 'no-store',
+            ...(range ? { 'content-range': `bytes ${start}-${end}/${size}` } : {})
+          })
+          if (req.method === 'HEAD') return res.end()
+
+          const c = await remote.connected(lib)
+          let dead = false
+          const p = c.streamTo({ itemId: String(id), offset: start, length }, (chunk) => {
+            if (dead) return
+            try { res.write(chunk) } catch { dead = true }
+          })
+          // A browser abandons a range the instant the viewer drags the scrubber;
+          // cancelling on the wire is what frees the friend's disk read.
+          res.on('close', () => { dead = true; try { p.cancel?.() } catch {} })
+          try { await p } catch {}
+          if (!dead) { try { res.end() } catch {} }
+          return
+        }
+
+        // The wire HLS, proxied - the friend's hardware transcoding for us. The
+        // playlist twin exists for ffmpeg below to read, and the segments stream
+        // through one call each.
+        let hm = /^\/hls\/([a-z0-9]+)\.m3u8$/.exec(sub)
+        if (hm && req.method === 'GET') {
+          const itemId = hm[1]
+          const caps = capsFromQuery(url)
+          const out = await remote.call(lib, 'media.playlist', { itemId, capabilities: caps })
+          if (!out?.playlist) return json(res, 409, { error: out?.reason || 'no playlist for this item' })
+          const qs = url.searchParams.toString()
+          const body = out.playlist.replace(/^(\d+)\.ts$/gm, `/remote/${lib}/hlsseg/${itemId}/$1.ts${qs ? '?' + qs : ''}`)
+          res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
+          return res.end(body)
+        }
+        hm = /^\/hlsseg\/([a-z0-9]+)\/(\d+)\.ts$/.exec(sub)
+        if (hm && req.method === 'GET') {
+          const itemId = hm[1]
+          const seq = Number(hm[2])
+          const caps = capsFromQuery(url)
+          const c = await remote.connected(lib)
+          let dead = false
+          let cancelSeg = null
+          res.on('close', () => { dead = true; try { cancelSeg?.() } catch {} })
+          res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
+          const p = c.request('media.segment', { itemId, seq, capabilities: caps }, {
+            stream: true,
+            buffer: false,
+            onchunk: (chunk) => {
+              if (dead) return
+              try { res.write(chunk) } catch { dead = true }
+            }
+          })
+          cancelSeg = p.cancel || null
+          try { await p } catch {}
+          cancelSeg = null
+          if (!dead) { try { res.end() } catch {} }
+          return
+        }
+
+        // Generated MP4 for a remote film - the twin of /api/remux, with one hard
+        // rule: THIS machine never re-encodes someone else's stream. A container
+        // the browser refuses is repackaged here with a stream copy off the raw
+        // bytes; a codec the browser refuses is transcoded by the FRIEND's
+        // hardware into wire HLS and only rewrapped here, still a copy. Both runs
+        // ride host.remuxer, so the same cap and kill-with-response govern them.
+        //
+        // ffmpeg reads its input back through this server on loopback, which is
+        // why this route needs the passwordless loopback bind the desktop always
+        // has - on a passworded LAN dashboard the self-read would be refused, so
+        // the route says so plainly instead.
+        if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/remux') {
+          if (pwSource !== 'none') {
+            return json(res, 501, { error: 'watching a remote library needs the desktop app (this dashboard is password-bound)' })
+          }
+          const id = url.searchParams.get('id')
+          if (!id) return json(res, 400, { error: 'id required' })
+          const at = Math.max(0, Number(url.searchParams.get('t')) || 0)
+          const caps = capsFromQuery(url)
+
+          const item = await remote.call(lib, 'library.get', { id: String(id) }).catch(() => null)
+          if (!item) return json(res, 404, { error: 'no such item' })
+
+          // Decide LOCALLY with transcode off: this machine only copies. What a
+          // copy cannot fix is the remote host's to transcode.
+          const verdict = remux.decide(item.media, caps, { transcode: false })
+          const port = req.socket.localPort
+          let input = null
+          let audio = 'copy'
+          if (verdict.mode === 'direct') return json(res, 409, { mode: 'direct', reason: verdict.reason })
+          if (verdict.mode === 'remux') {
+            input = `http://127.0.0.1:${port}/remote/${lib}/api/stream?id=${encodeURIComponent(id)}`
+            audio = verdict.audio || 'copy'
+          } else {
+            const v = await remote.call(lib, 'media.decide', { itemId: String(id), capabilities: caps }).catch(() => null)
+            if (v?.mode !== 'transcode') {
+              return json(res, 409, { mode: verdict.mode, reason: v?.reason || verdict.reason })
+            }
+            const qs = new URLSearchParams({
+              containers: caps.containers.join(','),
+              video: caps.videoCodecs.join(','),
+              audio: caps.audioCodecs.join(',')
+            }).toString()
+            input = `http://127.0.0.1:${port}/remote/${lib}/hls/${encodeURIComponent(id)}.m3u8?${qs}`
+            audio = 'copy'
+          }
+
+          let session
+          try {
+            session = host.remuxer.start({ input, at, audio })
+          } catch (e) {
+            if (e.code === 'BUSY') return json(res, 503, { error: e.message })
+            throw e
+          }
+
+          res.writeHead(200, {
+            'content-type': 'video/mp4',
+            'accept-ranges': 'none',
+            'cache-control': 'no-store',
+            'x-pearcinema-mode': verdict.mode === 'remux' ? 'remux' : 'transcode',
+            'x-pearcinema-start': String(session.at),
+            'x-pearcinema-audio': session.audio
+          })
+          if (req.method === 'HEAD') { session.kill(); return res.end() }
+          res.on('close', () => session.kill())
+          session.stdout.on('error', () => session.kill())
+          return session.stdout.pipe(res)
+        }
+
+        return json(res, 404, { error: 'no such remote route' })
       }
 
       // --- where you stopped, and what you have finished ------------------------
