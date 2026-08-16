@@ -326,8 +326,10 @@ async function buildMerged (reason) {
     const cats = []
     await Promise.all(hostsState.hosts.map(async (h) => {
       try {
-        const c = await connectedLib(h.libraryId)
-        cats.push(await fetchCatalog(c, h.libraryId))
+        cats.push(await raced((async () => {
+          const c = await connectedLib(h.libraryId)
+          return fetchCatalog(c, h.libraryId)
+        })(), 30000))
       } catch (e) {
         // Offline is absence, not failure: the host's items simply are not in
         // this build, and its next connect triggers another one.
@@ -352,11 +354,26 @@ function buildSoon (reason) {
   buildTimer = setTimeout(() => buildMerged(reason).catch((e) => log('merged:build-failed', { err: e.message })), 800)
 }
 
+// A fan-out branch must not wait forever. A host that is DOWN fails its
+// connect quickly, but a ZOMBIE - a paused container, a machine mid-sleep -
+// black-holes the wire and a request to it simply never answers (found on the
+// TCL with the Umbrel container paused: the resume offer never appeared,
+// because one branch of the fan-out hung the whole Promise.all). Every
+// per-host branch races this; the healthy hosts' answers are what the person
+// gets.
+const FAN_TIMEOUT_MS = 6000
+function raced (p, ms = FAN_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('host timed out')), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
 // Ask every paired host the same question, tolerating the offline ones.
 // Answers come back in host-list order so unions are stable across calls.
 async function fanOut (fn) {
   const rs = await Promise.all(hostsState.hosts.map(async (h) => {
-    try { return await fn(await connectedLib(h.libraryId)) } catch { return null }
+    try { return await raced((async () => fn(await connectedLib(h.libraryId)))()) } catch { return null }
   }))
   return rs.filter(Boolean)
 }
@@ -389,6 +406,38 @@ function mergedEntityFor (id) {
   const key = String(id || '')
   return mergedIndex.movies.find((m) => m.copies.some((c) => c.id === key)) ||
     mergedIndex.episodes.find((e) => e.copies.some((c) => c.id === key)) || null
+}
+
+// Every host holding a copy of an id, each with ITS OWN id for it - the write
+// fan-out's address book (phase 2). Series included: a heart on a show must
+// land on both hosts that carry it. An id the index does not know falls back
+// to its owner alone.
+function copyRefs (id) {
+  const key = String(id || '')
+  const e = mergedEntityFor(key) ||
+    (mergedIndex ? mergedIndex.series.find((s) => s.copies.some((c) => c.id === key)) : null)
+  if (!e) {
+    const lib = owners.get(key)
+    return lib ? [{ libraryId: lib, id: key }] : []
+  }
+  return e.copies.map((c) => ({ libraryId: c.libraryId, id: c.id }))
+}
+
+// A write that must land on EVERY copy - a position or a watched mark saved to
+// one host of two is a shelf that disagrees with itself depending on which
+// server answers first. Best-effort per host; ok when ANY landed, because an
+// offline host misses presence pushes exactly the same way and catches up the
+// next time the state is written.
+async function writeToCopies (id, fn) {
+  const refs = copyRefs(id)
+  if (refs.length < 2) return fn(await clientForId(id), String(id))
+  let ok = 0
+  let out = null
+  await Promise.all(refs.map(async (ref) => {
+    try { out = await raced((async () => fn(await connectedLib(ref.libraryId), ref.id))()); ok++ } catch {}
+  }))
+  if (!ok) throw new Error('no library reachable for that')
+  return out
 }
 
 // Which copy of a merged item should actually stream (proposal §5): the filter
@@ -447,29 +496,34 @@ async function startDownload (itemId) {
     return { ok: true, already: true }
   }
   if (downloads.has(itemId)) return { ok: true, running: true }
-  const c = await clientForId(itemId)
-  const item = await c.get({ id: itemId })
+  // Downloads pick a copy the way play does (phase 3): the bytes come from the
+  // best copy for this device, but they are STORED under the id the UI asked
+  // for - the download list, the cache check in stream.url and the pin all
+  // speak that id, and the shim serves a cache hit by id alone.
+  const srcId = pickCopyId(itemId)
+  const c = await clientForId(srcId)
+  const item = await c.get({ id: srcId })
   const size = item?.media?.size
   if (!size) throw new Error('this one cannot be downloaded')
   const dlMeta = readDlMeta()
   dlMeta[itemId] = { title: item.title || '', year: item.year || null, runtime: item.runtime || null }
   writeDlMeta(dlMeta)
   const mime = CONTAINER_MIME[String(item?.media?.container || '').toLowerCase()] || 'video/mp4'
-  // The cache tags the film with the library it CAME from, which in merged
-  // mode is the owning host, not whichever library happens to be active.
-  const active = { libraryId: owners.get(String(itemId)) || H.activeHost(hostsState)?.libraryId || null }
+  // The cache tags the film with the library the bytes CAME from, which in
+  // merged mode is the picked copy's host, not whichever library is active.
+  const active = { libraryId: owners.get(srcId) || H.activeHost(hostsState)?.libraryId || null }
 
   // THE HOST DECIDES for downloads exactly as for playback: the same declared
   // capabilities, the same decide(). A transcode verdict - the file busts the
   // data-saver budget, or this device cannot decode it at all - means the
   // download is the CONVERTED film, which is also the only version the phone
   // could have played offline.
-  const verdict = await c.request('media.decide', { itemId, capabilities: capsForDownload(itemId) }).catch(() => null)
-  if (verdict?.mode === 'transcode') return startExportDownload({ c, itemId, item, active })
+  const verdict = await c.request('media.decide', { itemId: srcId, capabilities: capsForDownload(srcId) }).catch(() => null)
+  if (verdict?.mode === 'transcode') return startExportDownload({ c, itemId, srcId, item, active })
   const sink = cache.createSink(itemId, { mime, size, library: active?.libraryId || null, pinned: true })
   let got = 0
   let lastEmit = 0
-  const p = c.streamTo({ itemId, offset: 0, length: size }, (chunk) => {
+  const p = c.streamTo({ itemId: srcId, offset: 0, length: size }, (chunk) => {
     got += chunk.length
     sink.write(chunk)
     if (got - lastEmit > 16 * 1024 * 1024 || got === size) {
@@ -502,19 +556,19 @@ async function startDownload (itemId) {
 // commits whatever cleanly ended. Truncation is the HOST's job to catch: its
 // export stream only ends cleanly when ffmpeg exited 0, anything else arrives
 // here as a wire error and aborts the sink.
-function startExportDownload ({ c, itemId, item, active }) {
+function startExportDownload ({ c, itemId, srcId = itemId, item, active }) {
   // The ladder the host encodes with, capped at the declared budget - the same
   // arithmetic as host/transcode.js bitrateFor/capBitrate, plus audio headroom.
   const w = Number(item?.media?.width) || 0
   const ladder = w >= 1600 ? 6000 : w >= 1000 ? 3000 : 1500
-  const budget = Number(capsForDownload(itemId).maxKbps) || 0
+  const budget = Number(capsForDownload(srcId).maxKbps) || 0
   const kbps = (budget ? Math.min(ladder, budget) : ladder) + 200
   const est = Math.max(1, Math.round((kbps * 1000 / 8) * (Number(item?.runtime) || 0)))
 
   const sink = cache.createSink(itemId, { mime: 'video/mp4', size: null, library: active?.libraryId || null, pinned: true })
   let got = 0
   let lastEmit = 0
-  const p = c.request('media.export', { itemId, capabilities: capsForDownload(itemId) }, {
+  const p = c.request('media.export', { itemId: srcId, capabilities: capsForDownload(srcId) }, {
     stream: true,
     buffer: false,
     onchunk: (chunk) => {
@@ -802,11 +856,23 @@ const methods = {
     return { prev: run[at - 1] || null, next: run[at + 1] || null }
   },
 
-  // Watch state - the same per-person store the dashboard writes. Writes route
-  // to the item's OWNING host (approved open question 1); the Continue shelf
-  // is every host's answer concatenated newest-first (approved open question 2).
-  'resume.set': async (args) => (await clientForId(args.itemId)).request('resume.set', args),
-  'resume.get': async (args) => (await clientForId(args.itemId)).request('resume.get', args),
+  // Watch state - the same per-person store the dashboard writes. A position
+  // lands on EVERY host holding a copy (phase 2), so either server resumes the
+  // same film at the same minute; a read takes the freshest answer across
+  // them. The Continue shelf is every host's answer concatenated newest-first.
+  'resume.set': async (args) => writeToCopies(args.itemId, (c, id) => c.request('resume.set', { ...args, itemId: id })),
+  'resume.get': async (args) => {
+    const refs = copyRefs(args.itemId)
+    if (refs.length < 2) return (await clientForId(args.itemId)).request('resume.get', args)
+    let best = { resume: null }
+    await Promise.all(refs.map(async (ref) => {
+      try {
+        const r = await raced((async () => (await connectedLib(ref.libraryId)).request('resume.get', { ...args, itemId: ref.id }))())
+        if (r?.resume && (!best.resume || (r.resume.playedAt || 0) > (best.resume.playedAt || 0))) best = r
+      } catch {}
+    }))
+    return best
+  },
   'resume.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('resume.list', args)
     const rows = await fanOut((c) => c.request('resume.list', args))
@@ -814,17 +880,16 @@ const methods = {
       .sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
     return { items: items.slice(0, Number(args.limit) || 20) }
   },
-  'watched.set': async (args) => (await clientForId(args.itemId)).request('watched.set', args),
+  'watched.set': async (args) => writeToCopies(args.itemId, (c, id) => c.request('watched.set', { ...args, itemId: id })),
   'watched.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('watched.list', args)
     const rows = await fanOut((c) => c.request('watched.list', args))
     return { items: [...new Set(rows.flatMap((r) => r?.items || []))] }
   },
 
-  // The watchlist: a heart routes to the film's owning host, the list is the
-  // union. Requests, the owner's view and identity stay with the ACTIVE host -
-  // phase 2 territory.
-  'fav.set': async (args) => (await clientForId(args.id)).request('fav.set', args),
+  // The watchlist: a heart lands on every host holding a copy (phase 2), the
+  // list is the union.
+  'fav.set': async (args) => writeToCopies(args.id, (c, id) => c.request('fav.set', { ...args, id })),
   'fav.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('fav.list', args)
     const rows = await fanOut((c) => c.request('fav.list', args))
@@ -840,11 +905,62 @@ const methods = {
     }
     return { items }
   },
-  'request.add': async (args) => (await connected()).request('request.add', args),
-  'request.list': async (args) => (await connected()).request('request.list', args),
-  'request.remove': async (args) => (await connected()).request('request.remove', args),
-  'request.all': async (args) => (await connected()).request('request.all', args),
-  'request.resolve': async (args) => (await connected()).request('request.resolve', args),
+  // Requests across the blend (phase 2, PearTune's shipped shape): an ask is
+  // filed with EVERY reachable host - none of them has the film, so any of
+  // their owners might add it - and the lists collapse the per-host rows to
+  // one ask carrying the best status. The owner's queue folds the same rows
+  // pending-first, because that view is a to-do list and one library resolved
+  // must not hide the copies that are not.
+  'request.add': async (args) => {
+    if (!mergedOn()) return (await connected()).request('request.add', args)
+    const rs = await fanOut((c) => c.request('request.add', args))
+    if (!rs.length) throw new Error('no library reachable to ask')
+    return rs[0]
+  },
+  'request.list': async (args) => {
+    if (!mergedOn()) return (await connected()).request('request.list', args)
+    const rows = []
+    await Promise.all(hostsState.hosts.map(async (h) => {
+      try {
+        const r = await raced((async () => (await connectedLib(h.libraryId)).request('request.list', args))())
+        for (const row of r?.items || []) rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
+      } catch {}
+    }))
+    return { items: merge.collapseRequests(rows) }
+  },
+  'request.remove': async ({ id, refs }) => {
+    if (!mergedOn()) return (await connected()).request('request.remove', { id })
+    const targets = merge.requestTargets({ refs, id }, { pendingOnly: false, fallbackLibraryId: owners.get(String(id)) })
+    let ok = 0
+    await Promise.all(targets.map(async (t) => {
+      try { await raced((async () => (await connectedLib(t.libraryId)).request('request.remove', { id: t.id }))()); ok++ } catch {}
+    }))
+    if (!ok) throw new Error('no library reachable for that')
+    return { ok: true }
+  },
+  'request.all': async (args) => {
+    if (!mergedOn()) return (await connected()).request('request.all', args)
+    const rows = []
+    await Promise.all(hostsState.hosts.map(async (h) => {
+      try {
+        const r = await raced((async () => (await connectedLib(h.libraryId)).request('request.all', args))())
+        for (const row of r?.items || []) rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
+      } catch {}
+    }))
+    return { items: merge.collapseRequests(rows, { pendingWins: true }) }
+  },
+  'request.resolve': async ({ id, status, refs }) => {
+    if (!mergedOn()) return (await connected()).request('request.resolve', { id, status })
+    // Only the copies still PENDING: an added fan-out must never rewrite a
+    // copy another owner already declined.
+    const targets = merge.requestTargets({ refs, id }, { fallbackLibraryId: owners.get(String(id)) })
+    let ok = 0
+    await Promise.all(targets.map(async (t) => {
+      try { await raced((async () => (await connectedLib(t.libraryId)).request('request.resolve', { id: t.id, status }))()); ok++ } catch {}
+    }))
+    if (!ok) throw new Error('no library reachable for that')
+    return { ok: true }
+  },
   'device.list': async (args) => (await connected()).request('device.list', args),
   'device.revoke': async (args) => (await connected()).request('device.revoke', args),
   'identity.get': async (args) => {
