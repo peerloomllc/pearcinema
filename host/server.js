@@ -21,6 +21,7 @@ const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const sidecars = require('./sidecars')
+const subtitles = require('./subtitles')
 const hls = require('./hls')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
@@ -148,7 +149,11 @@ class PearCinemaHost {
             decide: (p) => this.decideFor(p),
             playlist: (p) => this.hlsPlaylist(p),
             segment: (p) => this.hlsSegment(p),
-            export: (p) => this.exportFor(p)
+            export: (p) => this.exportFor(p),
+            // Whether THIS host could burn an image subtitle track into the
+            // picture - the engine must have proven itself. subtitle.list uses
+            // it to mark tracks, so a phone only offers what would work.
+            canBurn: (codec) => this.transcode.available && subtitles.burnable(codec)
           },
           // Something is being WATCHED through this connection - the one thing
           // the host knows for certain. Feeds the dashboard's now-playing and
@@ -513,17 +518,30 @@ class PearCinemaHost {
     return size > 0 && secs > 0 ? (size * 8) / (secs * 1000) : 0
   }
 
+  // The chosen image subtitle track's stream index, or null - and null MEANS
+  // the burn request is ignored rather than half-honoured: a stale id, a text
+  // track, another item's track, an adapter that cannot resolve one (Jellyfin)
+  // or a host with no proven engine all decide as if nothing was asked.
+  _burnTarget (itemId, capabilities = {}) {
+    const subtitleId = capabilities?.burnSubtitleId
+    if (!subtitleId || !this.transcode.available) return null
+    if (typeof this._inner?.subtitleBurnTarget !== 'function') return null
+    return this._inner.subtitleBurnTarget({ itemId: String(itemId), subtitleId: String(subtitleId) })
+  }
+
   async decideFor ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    const burn = this._burnTarget(itemId, capabilities)
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
     return { mode: verdict.mode, reason: verdict.reason }
   }
 
   async hlsPlaylist ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    const burn = this._burnTarget(itemId, capabilities)
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
     if (verdict.mode !== 'transcode') return { mode: verdict.mode, reason: verdict.reason, playlist: null }
     const playlist = hls.playlistFor(item)
     if (!playlist) return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
@@ -543,7 +561,8 @@ class PearCinemaHost {
     const k = Number(seq)
     if (!Number.isInteger(k) || k < 0 || k >= n) return null
 
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    const burn = this._burnTarget(itemId, capabilities)
+    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item), burn: !!burn })
     if (verdict.mode !== 'transcode') return null
 
     if (!this.adapter.ffmpegInput) return null
@@ -559,7 +578,8 @@ class PearCinemaHost {
       device: this.transcoder.device,
       hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
       // The width ladder, capped at the client's stated budget when it gave one.
-      bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0)
+      bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
+      burnIndex: burn ? burn.index : null
     })
 
     // Through the SAME pool as the browser's transcodes: one engine, one cap,
@@ -577,7 +597,10 @@ class PearCinemaHost {
   async exportFor ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
+    // A download is the film, not the viewing session - a subtitle choice made
+    // in the player must not bake itself into the copy the phone keeps.
+    const { burnSubtitleId, ...caps } = capabilities
+    const verdict = remux.decide(item.media, caps, { transcode: this.transcode.available, fileKbps: this._fileKbps(item) })
     if (verdict.mode !== 'transcode') return { direct: true }
     if (!this.adapter.ffmpegInput) return null
     const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })

@@ -61,3 +61,39 @@ test('a segment\'s argv seeks precisely, offsets its timestamps and stays an arr
   // Segment zero seeks nowhere and offsets nothing.
   assert.equal(sw.includes('-ss'), false)
 })
+
+test('BURN-IN rewires the graph: software decode, overlay by subtitle-relative index, engine encode', () => {
+  const args = hls.segmentArgs({
+    input: '/library/Movies/A New Hope.mkv',
+    seq: 150,
+    media: { videoCodec: 'h264', width: 1920 },
+    device: '/dev/dri/renderD128',
+    hwDecode: true,
+    bitrate: '6M',
+    burnIndex: 1
+  })
+
+  // SOFTWARE decode, deliberately, even though the codec is hw-decodable: the
+  // engine's own compositor segfaults on real discs (DECISIONS 2026-08-15).
+  assert.equal(args.includes('-hwaccel'), false)
+  assert.equal(args[args.indexOf('-vaapi_device') + 1], '/dev/dri/renderD128')
+
+  // The overlay addresses the track WITHIN the subtitle streams - 0:s:N, the
+  // same vocabulary probe.js records - and the composited frames go up to the
+  // engine for the encode.
+  const graph = args[args.indexOf('-filter_complex') + 1]
+  assert.match(graph, /\[0:v:0\]\[0:s:1\]overlay/)
+  assert.match(graph, /format=nv12,hwupload\[out\]/)
+  assert.equal(args[args.indexOf('-map') + 1], '[out]')
+
+  // One graph, not two: -vf must not also appear, and the seek arithmetic is
+  // untouched by burning.
+  assert.equal(args.includes('-vf'), false)
+  assert.equal(args[args.indexOf('-ss') + 1], String(150 * hls.SEGMENT_SECONDS))
+  assert.equal(args[args.indexOf('-c:v') + 1], 'h264_vaapi')
+
+  // No burn asked, nothing changes: the plain path still hw-decodes and -vf's.
+  const plain = hls.segmentArgs({ input: '/x.mkv', seq: 0, media: { videoCodec: 'h264' }, device: '/dev/dri/renderD128', hwDecode: true, bitrate: '6M' })
+  assert.equal(plain.includes('-filter_complex'), false)
+  assert.equal(plain.includes('-hwaccel'), true)
+})

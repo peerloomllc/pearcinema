@@ -67,21 +67,37 @@ function segmentCount (runtimeSeconds) {
 // worth on the engine, emit MPEG-TS to the pipe with timestamps offset to the
 // segment's place in the film - which is what lets the player stitch independent
 // runs into one continuous stream.
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate }) {
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burnIndex = null }) {
   const at = seq * SEGMENT_SECONDS
+  const burn = burnIndex !== null && burnIndex !== undefined
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
 
   if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
 
-  if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
+  // BURN-IN DECODES IN SOFTWARE, deliberately (DECISIONS 2026-08-15). The
+  // engine's own compositor (overlay_vaapi) is a third faster and SEGFAULTS on
+  // real discs when the PGS stream changes composition size mid-stream - two
+  // of four seek offsets died on A New Hope. The software graph held 4.85x
+  // realtime single and 5.8x aggregate at four concurrent, stable everywhere,
+  // and the encode stays on the engine either way.
+  if (burn) args.push('-vaapi_device', device)
+  else if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
   else args.push('-vaapi_device', device)
 
   if (at > 0) args.push('-ss', String(at))
   args.push('-t', String(SEGMENT_SECONDS))
   args.push('-i', input)
-  args.push('-map', '0:v:0', '-map', '0:a:0?')
+  if (burn) {
+    // `burnIndex` counts WITHIN the subtitle streams - `[0:s:N]` - the same
+    // vocabulary probe.js records and extractSubtitle maps by, and the PR #18
+    // trap in reverse: this index would be off by two as an absolute `[0:N]`.
+    args.push('-filter_complex', `[0:v:0][0:s:${Number(burnIndex)}]overlay[ov];[ov]format=nv12,hwupload[out]`)
+    args.push('-map', '[out]', '-map', '0:a:0?')
+  } else {
+    args.push('-map', '0:v:0', '-map', '0:a:0?')
+  }
   args.push('-map_chapters', '-1')
-  args.push('-vf', hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
+  if (!burn) args.push('-vf', hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
   args.push('-c:v', 'h264_vaapi', '-b:v', bitrate)
   // The soundtrack is always rebuilt on this path: TS + AAC is the least
   // surprising pairing for every HLS demuxer, and audio is a rounding error

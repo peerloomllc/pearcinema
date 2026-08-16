@@ -215,7 +215,17 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
       const adapter = getAdapter()
       if (!adapter.subtitles) return { items: [] }
-      return { items: await adapter.subtitles({ itemId: String(ctx.params.itemId) }) }
+      const items = await adapter.subtitles({ itemId: String(ctx.params.itemId) })
+      // `burnable`: an unplayable IMAGE track this host could press into the
+      // picture instead - only embedded tracks (the burn resolver refuses the
+      // rest) and only when the engine has proven itself, so a phone never
+      // offers a burn the segment path would silently drop.
+      return {
+        items: items.map(t => ({
+          ...t,
+          burnable: !!(media?.canBurn && !t.playable && !t.external && media.canBurn(t.codec))
+        }))
+      }
     },
 
     'subtitle.get': async (ctx) => {

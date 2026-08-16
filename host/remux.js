@@ -132,6 +132,22 @@ function decide (media, client = {}, opts = {}) {
   // guess that sends it down the expensive path would be worse than a failed play.
   if (!box && !v) return { mode: 'direct', reason: 'nothing is known about this file' }
 
+  // BURN-IN. The client chose an image subtitle track (PGS, DVD) that only
+  // exists as pictures, so the host must press it into the frames - which is a
+  // re-encode by definition, costed on the N100 2026-08-15 (DECISIONS) at
+  // about half the plain-transcode headroom. Only with proven hardware and an
+  // H.264-capable client, same rule as data saver; the CALLER has already
+  // verified the track exists and is burnable (opts.burn), so a stale or
+  // foreign subtitle id never forces a conversion.
+  if (opts.burn && opts.transcode && videos.has('h264')) {
+    const audioOkBurn = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    return {
+      mode: 'transcode',
+      reason: 'the chosen subtitles are pictures, so they are burned into the film on the host\'s video hardware',
+      audio: audioOkBurn ? 'copy' : AUDIO_FALLBACK.codec
+    }
+  }
+
   const containerOk = containers.has(box)
 
   // DATA SAVER. The client states a link budget (maxKbps) - a fact about its

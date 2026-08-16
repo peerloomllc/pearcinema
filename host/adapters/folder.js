@@ -955,6 +955,23 @@ class FolderAdapter {
     return (this._subs.get(String(itemId)) || []).map(t => ({ ...t, ...this._verdict(t) }))
   }
 
+  // Where an IMAGE subtitle track lives inside its own file, for burn-in
+  // (host/server.js resolves this into the transcode's overlay filter). Only an
+  // EMBEDDED image track of THIS item answers: an external file, a text track
+  // (which plays without a re-encode and must never trigger one) or a foreign
+  // subtitle id are all null, and null means the burn request is ignored
+  // rather than half-honoured.
+  subtitleBurnTarget ({ itemId, subtitleId } = {}) {
+    const track = (this._subs.get(String(itemId)) || []).find(s => s.id === String(subtitleId))
+    if (!track || track.external) return null
+    if (!subtitles.burnable(track.codec)) return null
+    const embedded = this._subTracks.get(String(subtitleId))
+    if (!embedded) return null
+    const input = this._resolveIn(this._paths, itemId, 'burn-source')
+    if (!input || input !== path.resolve(embedded.file)) return null
+    return { index: embedded.index }
+  }
+
   async subtitle ({ itemId, subtitleId } = {}) {
     // The track must belong to the item that asked for it. Without this check any
     // subtitle id serves against any item id, which is not a disclosure on its own -

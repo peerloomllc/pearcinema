@@ -450,13 +450,34 @@ export default function App () {
     return () => clearInterval(t)
   }, [playing])
 
-  const chooseSubtitle = async (kind: 'off' | 'embedded' | 'external', track?: any) => {
+  // A burn choice restarts the film through the UI - the pictures have to be
+  // pressed into the frames by the host, which is a different stream. Pausing
+  // first, same reasoning as navTo: old frames under a made choice read as the
+  // tap not working. `subtitleId: null` is the un-burn, also a restart, because
+  // a burned frame cannot be un-burned in place.
+  const requestBurn = (subtitleId: string | null) => {
+    const p = playingRef.current
+    if (!p) return
+    try { player.pause() } catch {}
+    const payload = JSON.stringify({ itemId: p.itemId, subtitleId, title: p.title, positionMs: Math.round(lastPos.current * 1000) })
+    feedWebView(`window.__pearEvent && window.__pearEvent('player:burn', ${payload})`)
+  }
+
+  const chooseSubtitle = async (kind: 'off' | 'embedded' | 'external' | 'burn', track?: any) => {
     setSubPicker(false)
     cuesRef.current = []
     setCueText('')
+    if (kind === 'burn') {
+      setActiveSub('burn:' + track.id)
+      try { player.subtitleTrack = null } catch {}
+      requestBurn(track.id)
+      return
+    }
     if (kind === 'off') {
+      const wasBurn = !!activeSub?.startsWith('burn:')
       setActiveSub(null)
       try { player.subtitleTrack = null } catch {}
+      if (wasBurn) requestBurn(null)
       return
     }
     if (kind === 'embedded') {
@@ -484,17 +505,19 @@ export default function App () {
     // A handful of methods are the SHELL's, not the worklet's.
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
-      const { itemId, url, title, startMs } = msg.args || {}
+      const { itemId, url, title, startMs, burnedSubtitleId } = msg.args || {}
       // A DIFFERENT item resets the episode buttons until the UI re-declares
       // them. The same item replayed (the lying-chip transcode retry) keeps
       // its buttons - the neighbours have not changed.
       if (itemId !== playingRef.current?.itemId) setNav(null)
       setPlaying({ itemId, url, title: title || '', startMs })
-      // A new film starts with no subtitles chosen and a fresh track list.
-      setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
+      // A new film starts with no subtitles chosen and a fresh track list -
+      // unless this play IS the burned restart, whose choice survives it.
+      setSubTracks([]); setSubPicker(false); setCueText('')
+      setActiveSub(burnedSubtitleId ? 'burn:' + burnedSubtitleId : null)
       cuesRef.current = []
       shellCallRef.current?.('subtitle.list', { itemId })
-        .then((r) => setSubTracks((r?.result?.items || []).filter((t: any) => t.playable)))
+        .then((r) => setSubTracks((r?.result?.items || []).filter((t: any) => t.playable || t.burnable)))
         .catch(() => {})
       try {
         player.replace({ uri: url })
@@ -718,11 +741,22 @@ export default function App () {
                   <Text style={[styles.subTxt, !activeSub && styles.subOn]}>Off</Text>
                 </Pressable>
                 {subTracks.map((t: any) => (
-                  <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
-                    <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
-                      {(t.title || t.language || 'Subtitles') + (t.external ? '' : ' (in the file)')}
-                    </Text>
-                  </Pressable>
+                  t.burnable ? (
+                    // An image track the host can press into the picture. The
+                    // choice restarts the film as a burned stream - the label
+                    // says so, since a beat of buffering follows the tap.
+                    <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('burn', t)}>
+                      <Text style={[styles.subTxt, activeSub === 'burn:' + t.id && styles.subOn]}>
+                        {(t.title || t.language || 'Subtitles') + ' (pressed into the picture)'}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable key={t.id} style={styles.subRow} onPress={() => chooseSubtitle('external', t)}>
+                      <Text style={[styles.subTxt, activeSub === 'ext:' + t.id && styles.subOn]}>
+                        {(t.title || t.language || 'Subtitles') + (t.external ? '' : ' (in the file)')}
+                      </Text>
+                    </Pressable>
+                  )
                 ))}
                 {(() => {
                   // The tracks ExoPlayer read out of the file itself - present on
