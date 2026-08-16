@@ -24,6 +24,8 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
   const [tested, setTested] = useState(null)
+  const [writing, setWriting] = useState(false)
+  const [written, setWritten] = useState(null)
   const timer = useRef(null)
 
   const reload = async () => {
@@ -73,8 +75,9 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
       <p class='hint'>
         Most files carry no artwork of their own. With this on, the host asks TMDB - a
         third-party film database - for posters, which means <b>this host tells TMDB the
-        titles it is identifying</b>. Nothing else is sent, nothing is written into your
-        library, and artwork found beside your files always wins. Off by default.
+        titles it is identifying</b>. Nothing else is sent and artwork found beside your
+        files always wins. Nothing is written into your library except by the explicit
+        save button below. Off by default.
       </p>
 
       {!meta.hasKey && (
@@ -137,6 +140,54 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
           the pencil on its tile, in the library.
         </p>
       )}
+
+      {/* THE EXPLICIT ACTION. Everything fetched lives in this host's own data
+          folder, which a reinstall or a moved drive loses. This writes it beside
+          the films instead, as the standard files every scanner reads - and it
+          only ever creates, never replaces, so the button is safe to press on a
+          library full of hand-made answers. Shown for folder libraries only:
+          a Jellyfin library is that server's to manage. */}
+      {meta.canWriteSidecars && meta.matched > 0 && !meta.running && (
+        <div style='margin-top:.8rem'>
+          <p class='hint'>
+            The fetched artwork and matches live in this host's own data folder. You can
+            save them <b>into the library itself</b>, beside the films, as the standard
+            files Kodi and Jellyfin also read - so they survive a reinstall and travel
+            with the drive. Only new files are created; anything already beside your
+            films is left exactly as it is.
+          </p>
+          <div class='actions'>
+            <button class='ghost' disabled={writing} onClick={async () => {
+              setWriting(true)
+              setWritten(await api('/api/metadata/sidecars'))
+              setWriting(false)
+            }}>
+              {writing ? 'Saving…' : 'Save into the library'}
+            </button>
+          </div>
+          {written && (
+            <p class='hint' style={written.readOnly || written.error ? 'color:var(--danger)' : ''}>
+              {written.error
+                ? written.error
+                : written.readOnly
+                  ? 'Nothing could be written: the library is mounted read-only. On an Umbrel, update the app - newer versions mount the library writable for exactly this.'
+                  : sentence(written)}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
+}
+
+// One plain sentence per outcome, counts only where they earn their place.
+function sentence (w) {
+  const bits = []
+  bits.push(w.wrote > 0
+    ? `Saved ${w.wrote} file${w.wrote === 1 ? '' : 's'} beside your films.`
+    : 'Nothing new to save.')
+  if (w.skippedExisting > 0) bits.push(`${w.skippedExisting} already had an answer on disk and ${w.skippedExisting === 1 ? 'was' : 'were'} left alone.`)
+  if (w.skippedUncertain > 0) bits.push(`${w.skippedUncertain} uncertain guess${w.skippedUncertain === 1 ? ' was' : 'es were'} held back - confirm them from the pencil on their tiles first.`)
+  if (w.failed > 0) bits.push(`${w.failed} could not be written.`)
+  return bits.join(' ')
 }

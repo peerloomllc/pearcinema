@@ -760,7 +760,19 @@ async function startDashboard ({
       // than none - the library just looks wrong with nothing saying why.
 
       if (req.method === 'GET' && url.pathname === '/api/metadata') {
-        return json(res, 200, { ...host.metadataSettings(), ...host.enricher.summary() })
+        return json(res, 200, {
+          ...host.metadataSettings(),
+          ...host.enricher.summary(),
+          canWriteSidecars: host.canWriteSidecars()
+        })
+      }
+
+      // The explicit save-to-library action. Synchronous on purpose: it is a
+      // few hundred small files at most and the operator is looking at the
+      // button that asked for them - a fire-and-forget here would just move
+      // the answer into a poll nobody wants.
+      if (req.method === 'POST' && url.pathname === '/api/metadata/sidecars') {
+        return json(res, 200, await host.writeSidecars())
       }
 
       if (req.method === 'POST' && url.pathname === '/api/metadata/test') {

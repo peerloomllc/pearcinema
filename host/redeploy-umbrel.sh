@@ -101,6 +101,11 @@ $SUDO test -s "$DATA/dashboard-password" && HAD_PASSWORD=1
 # empty library - which sends an operator hunting through the app instead of at the
 # mount.
 #
+# THE LIBRARY MOUNT IS WRITABLE since sidecar writing shipped (Tim's call,
+# 2026-08-15; it was `readonly` before that). The dashboard's explicit
+# save-to-library action creates .nfo and poster files beside the films; it only
+# ever creates, never overwrites, and nothing else in the host writes there.
+#
 # network_mode host, and no app_proxy: measured twice on a real Umbrel, holepunching
 # does not survive Docker's bridge NAT, and app_proxy is itself a bridged container
 # so it cannot front a host-networked service.
@@ -125,7 +130,7 @@ $SUDO docker run -d \
   -e PEARCINEMA_NAME="$LIBRARY_NAME" \
   -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" \
   -v "$DATA:/data" \
-  --mount "type=bind,source=$LIBRARY,target=/library,readonly,bind-propagation=rslave" \
+  --mount "type=bind,source=$LIBRARY,target=/library,bind-propagation=rslave" \
   "$IMAGE"
 
 # A DEPLOY THAT DOES NOT SERVE THE PAGE HAS FAILED, and must say so rather than

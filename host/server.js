@@ -20,6 +20,7 @@ const remux = require('./remux')
 const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
+const sidecars = require('./sidecars')
 const hls = require('./hls')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
@@ -473,6 +474,28 @@ class PearCinemaHost {
 
   async unmatchMetadata ({ itemId }) {
     return this.enricher.unmatch(String(itemId))
+  }
+
+  // Whether the write-into-the-library button should exist at all: only a
+  // folder library has a disk of its own to write beside. A Jellyfin library
+  // is that server's to manage and writing behind its back would be rude twice
+  // over - it re-scans on its own schedule and it has its own metadata.
+  canWriteSidecars () {
+    return this._inner?.kind === 'folder'
+  }
+
+  // The explicit action (host/sidecars.js). Guarded like the enricher's own
+  // run: a second click while one pass writes joins it rather than racing it.
+  async writeSidecars () {
+    if (!this.canWriteSidecars()) {
+      return { supported: false, reason: 'sidecars can only be written into a folder library' }
+    }
+    if (!this._writingSidecars) {
+      this._writingSidecars = sidecars
+        .write({ adapter: this._inner, enricher: this.enricher, log: this.log })
+        .finally(() => { this._writingSidecars = null })
+    }
+    return this._writingSidecars
   }
 
   // --- the phone's transcode path: decide, playlist, segment ------------------
