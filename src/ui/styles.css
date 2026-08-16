@@ -1488,3 +1488,36 @@ label.flabel { display: block; margin-top: .6rem; }
   gap: .6rem; padding: 3rem 1rem; color: var(--color-text-muted);
 }
 .loadwall h2 { margin: 0; text-transform: none; letter-spacing: 0; font-size: 1.05rem; }
+
+/* The library menu (PearTune's shape verbatim, 2026-08-16): the header title is a
+   dropdown - the blend, one library, or Add a library. Replaces the chip row. */
+.libhead { position: relative; display: flex; align-items: center; justify-content: center; min-height: 2.2rem; }
+.libhead h1 { margin: 0; }
+.libpick {
+  display: inline-flex; align-items: center; gap: .35rem;
+  background: none; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit;
+}
+/* Mirror the caret's width on the LEFT so the TITLE TEXT is what's centred, not
+   text+caret - the caret just hangs off the right. Keep equal to CaretDown (16). */
+.libpick::before { content: ''; width: 16px; flex: none; }
+.libcaret { color: var(--color-text-muted); transition: transform .18s ease; flex: none; }
+.libpick.open .libcaret { transform: rotate(180deg); }
+/* Full-screen catcher so a tap anywhere else closes the menu. */
+.libmenu-backdrop { position: fixed; inset: 0; z-index: 40; }
+.libmenu {
+  position: absolute; top: calc(100% + .3rem); left: 50%; transform: translateX(-50%);
+  z-index: 41; min-width: 220px; max-width: 92vw; max-height: 60vh; overflow-y: auto;
+  text-align: left; background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border); border-radius: 14px; padding: .35rem;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .45); animation: peartune-fade .14s ease both;
+}
+.libmenu button {
+  display: flex; align-items: center; gap: .5rem; width: 100%; text-align: left;
+  background: none; border: 0; color: var(--color-text-primary); cursor: pointer;
+  padding: .6rem .7rem; border-radius: 9px; font-size: 1rem; line-height: 1.2;
+}
+.libmenu button:active { background: var(--color-surface-input); }
+.libmenu button.on { color: var(--color-primary); font-weight: 600; }
+.libmenu button.off { opacity: .5; }
+.libmenu-sep { height: 1px; background: var(--color-divider); margin: .35rem .3rem; }
+.libmenu-add { color: var(--color-text-secondary); }
