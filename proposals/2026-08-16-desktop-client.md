@@ -1,6 +1,9 @@
 # The desktop app is a client as well as a host
 
-**Status**: DRAFT, awaiting approval (approval = Tim merges this proposal PR).
+**Status**: APPROVED 2026-08-16 (Tim, via PR #64). Both open questions answered the
+same day: the fork appears only on truly blank installs (no source and no remote
+library), and a client-only desktop writes watch state to the friend's server as
+just another device of whoever paired it.
 
 **Goal**: One desktop app, two answers to whose films these are. "My server" is
 today's flow - folders, password, pairing devices. "A friend's server" is the
