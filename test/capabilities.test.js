@@ -44,8 +44,11 @@ const capablePhone = [
   d('audio/eac3')
 ]
 
-// A TCL-shaped phone: claims HEVC in hardware but only 8-bit Main - the
-// measured class of chip whose claim and whose playback are different facts.
+// A TCL-shaped phone: hardware HEVC advertising only 8-bit Main. Measured
+// 2026-08-16: this exact chip plays real 10-bit x265 flawlessly - the profile
+// list under-reports, so it must not gate the declaration. The chip whose
+// decoder genuinely cannot do 10-bit is the retry net's job, proven the same
+// day.
 const eightBitPhone = [
   d('video/avc', { profiles: [1, 2, 8] }),
   d('video/hevc', { profiles: [1] }),
@@ -61,9 +64,12 @@ test('a capable phone declares what its hardware really claims', () => {
   assert.deepStrictEqual(out.containers, caps.CONTAINERS)
 })
 
-test('HEVC without Main 10 is not HEVC, because the library is 10-bit', () => {
+test('HARDWARE HEVC counts even when its profile list says Main only - the measured reversal', () => {
+  // The old rule refused this phone's hevc for lacking the Main 10 flag, and
+  // taxed 76% of the television with a transcode the chip never needed. The
+  // flag under-reports; the retry net catches the chip that truly cannot.
   const out = caps.fromProbe(eightBitPhone)
-  assert.ok(!out.videoCodecs.includes('hevc'))
+  assert.ok(out.videoCodecs.includes('hevc'))
   assert.ok(out.videoCodecs.includes('h264'))
 })
 
@@ -125,9 +131,14 @@ test('the host direct-plays HEVC to a phone that proved Main 10 hardware', () =>
   assert.strictEqual(v.mode, 'direct')
 })
 
-test('the host still transcodes HEVC for the 8-bit phone', () => {
-  const v = decide(blade, caps.fromProbe(eightBitPhone), { transcode: true })
-  assert.strictEqual(v.mode, 'transcode')
+test('the 8-bit-flagged phone now DIRECT-plays HEVC, and the retry is its net', () => {
+  // The other half of the measured reversal: this phone used to pay a
+  // transcode for every HEVC file. Now it direct-plays, and if its decoder
+  // truly cannot, the player-error retry re-describes it and THAT verdict is
+  // the transcode - the exact sequence hardware-proven 2026-08-16.
+  const declared = caps.fromProbe(eightBitPhone)
+  assert.strictEqual(decide(blade, declared, { transcode: true }).mode, 'direct')
+  assert.strictEqual(decide(blade, caps.without(declared, 'hevc'), { transcode: true }).mode, 'transcode')
 })
 
 test('the retry declaration turns a lying chip into a transcode verdict', () => {
