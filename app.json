@@ -84,7 +84,8 @@
       "./plugins/with-localhost-cleartext",
       "./plugins/with-standalone-debug",
       "./plugins/with-webview-recovery",
-      "expo-video"
+      "expo-video",
+      "expo-font"
     ],
     "assets": [
       "./assets/bare-universal.bundle"
