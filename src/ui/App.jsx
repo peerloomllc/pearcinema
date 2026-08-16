@@ -725,12 +725,38 @@ export default function App () {
       }),
       on('download:removed', () => loadYou('downloads')),
       on('shim:ready', () => reload().catch(() => {})),
-      // The operator just assigned this device to a (different) person. The
-      // shelves on screen are somebody else's now - drop and reload them.
+      // News from the host, mostly about THIS PERSON's other devices - the
+      // donor's exceptSelf pushes, so what one phone does the others follow
+      // without a reopen. Each handler updates the cheap local state from the
+      // payload and reloads only a view that is actually on screen.
       on('host:push', (m) => {
-        if (m?.kind !== 'grant:changed') return
-        setContinueRows(null)
-        if (uiRef.current.tab === 'you') loadYouRef.current?.(uiRef.current.youView)
+        const u = uiRef.current
+        if (m?.kind === 'grant:changed') {
+          // The operator moved this device to a (different) person - the
+          // shelves on screen are somebody else's now.
+          setContinueRows(null)
+          if (u.tab === 'you') loadYouRef.current?.(u.youView)
+        }
+        if (m?.kind === 'resume:changed') {
+          // Another of this person's devices moved a film. Put a phone down
+          // mid-film and this one's Continue shelf already carries the minute.
+          setContinueRows(null)
+          if (u.tab === 'you' && u.youView === 'continue') loadYouRef.current?.('continue')
+        }
+        if (m?.kind === 'favorites:changed' && m.data) {
+          setSaved((s) => { const n = new Set(s); m.data.on ? n.add(m.data.id) : n.delete(m.data.id); return n })
+          if (u.tab === 'watchlist') call('fav.list').then((r) => setSavedItems(r.items || [])).catch(() => {})
+        }
+        if (m?.kind === 'watched:changed' && m.data) {
+          setWatchedIds((s) => { const n = new Set(s); m.data.watched ? n.add(m.data.itemId) : n.delete(m.data.itemId); return n })
+          if (u.tab === 'you' && u.youView === 'watched') loadYouRef.current?.('watched')
+        }
+        if (m?.kind === 'request:resolved' && m.data) {
+          say(m.data.status === 'added'
+            ? `Your request${m.data.title ? ' for ' + m.data.title : ''} was added`
+            : `Your request${m.data.title ? ' for ' + m.data.title : ''} was declined`)
+          if (u.tab === 'you' && u.youView === 'requests') loadYouRef.current?.('requests')
+        }
       }),
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
