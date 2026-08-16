@@ -6,7 +6,7 @@
 // this app closes.
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { api } from './api'
+import { api, copyText } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
@@ -34,11 +34,20 @@ const SETTINGS_SECTIONS = [
   ['artwork', 'Artwork'],
   ['library', 'Library'],
   ['security', 'Security'],
+  ['support', 'Support development'],
   ['host', 'This host']
 ]
 
+// The hash names the page - #settings/source opens Settings on Source - so a
+// section is linkable, refreshable and reachable by anything that can only
+// load a URL (a bookmark, a support reply, a headless screenshot).
+const hashParts = () => String(location.hash || '').replace(/^#/, '').split('/')
+
 function Settings ({ state, reload }) {
-  const [sec, setSec] = useState('source')
+  const [sec, setSec] = useState(() => {
+    const [t, s] = hashParts()
+    return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
+  })
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
@@ -63,7 +72,7 @@ function Settings ({ state, reload }) {
     <div class='settings'>
       <nav class='setnav' aria-label='Settings sections'>
         {SETTINGS_SECTIONS.map(([id, label]) => (
-          <button key={id} class={sec === id ? 'on' : ''} onClick={() => setSec(id)}>{label}</button>
+          <button key={id} class={sec === id ? 'on' : ''} onClick={() => { setSec(id); location.hash = 'settings/' + id }}>{label}</button>
         ))}
       </nav>
 
@@ -137,6 +146,8 @@ function Settings ({ state, reload }) {
           </div>
         )}
 
+        {sec === 'support' && <SupportPanel />}
+
         {sec === 'host' && (
           <>
             <div class='card'>
@@ -155,6 +166,57 @@ function Settings ({ state, reload }) {
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+// PearTune's Support Development panel, copied per Tim's 2026-08-15 ask -
+// content and rails identical, rendered as a Settings section because that is
+// where he placed it here. The QR comes from the host (/api/donate), the same
+// way the pairing code does, so the page needs no QR library of its own.
+function SupportPanel () {
+  const [rails, setRails] = useState(null)
+  const [tab, setTab] = useState('ln')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api('/api/donate').then(r => { if (live) setRails(r?.rails || null) })
+    return () => { live = false }
+  }, [])
+
+  const rail = rails?.[tab]
+  const copy = async () => {
+    if (rail && await copyText(rail.value)) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
+  }
+
+  return (
+    <div class='card'>
+      <h3>Support development</h3>
+      <p class='hint' style='text-align:center'>
+        No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
+        helps keep it free - entirely optional.
+      </p>
+      <div class='seg' style='max-width:22rem;margin:0 auto .9rem'>
+        <button class={tab === 'ln' ? 'on' : ''} onClick={() => { setTab('ln'); setCopied(false) }}>Lightning</button>
+        <button class={tab === 'onchain' ? 'on' : ''} onClick={() => { setTab('onchain'); setCopied(false) }}>On-chain</button>
+        <button class={tab === 'usd' ? 'on' : ''} onClick={() => { setTab('usd'); setCopied(false) }}>USD</button>
+      </div>
+      {rail
+        ? (
+          <>
+            <div class='donate-qr' dangerouslySetInnerHTML={{ __html: rail.svg }} />
+            <div class='donate-cap'>{rail.caption}</div>
+            <div class='donate-addr'>{rail.value}</div>
+            <div class='actions'>
+              <button class='ghost' onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+              {tab === 'usd' && (
+                <button onClick={() => window.open(rail.value, '_blank', 'noopener')}>Open ↗</button>
+              )}
+            </div>
+          </>
+          )
+        : <p class='hint' style='text-align:center'>Loading…</p>}
     </div>
   )
 }
@@ -219,7 +281,10 @@ function TranscodeCap ({ state, reload }) {
 
 export default function App () {
   const [state, setState] = useState(null)
-  const [tab, setTab] = useState('watch')
+  const [tab, setTab] = useState(() => {
+    const [t] = hashParts()
+    return ['watch', 'who', 'settings'].includes(t) ? t : 'watch'
+  })
   const [search, setSearch] = useState('')
   const [playing, setPlaying] = useState(null)
   const [queue, setQueue] = useState([])

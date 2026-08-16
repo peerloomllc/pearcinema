@@ -479,7 +479,10 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* ONE ACTION ROW PER CARD, right-aligned, and adjacent buttons the same width -
  * a row of mixed-width buttons is the clutter Tim named. */
-.actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: .9rem }
+/* CENTERED, the donor's srcactions.center shape (Tim, 2026-08-15: the
+   off-center buttons across Settings pages). Right-aligned read as leftovers
+   once the cards grew symmetric bodies. */
+.actions { display: flex; gap: .5rem; justify-content: center; margin-top: .9rem; flex-wrap: wrap }
 .actions button { min-width: 7.5rem }
 
 /* On a phone the nav becomes a row of chips above the section. */
@@ -1043,3 +1046,51 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
  * everywhere on the page. */
 .dot { width: .5rem; height: .5rem; border-radius: 999px; background: var(--line-strong); flex: 0 0 auto }
 .dot.on { background: var(--good) }
+
+
+/* --- the Source panel, PearTune's vocabulary (Tim, 2026-08-15) ------------ */
+
+.srclabel { display: block; font-size: .82rem; color: var(--muted); margin-bottom: .4rem }
+.hint-inline { color: var(--muted); font-weight: 400 }
+
+.rootlist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px }
+.rootrow {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 6px 6px 11px;
+}
+.rootpath {
+  flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--mono, monospace); font-size: .82rem;
+}
+.rootrow select { width: auto }
+
+.pickrow { display: flex; margin-bottom: 4px }
+.pickrow button { flex: 1 1 0 }
+
+/* Equal-width buttons filling the row - the donor's action bar. */
+.srcactions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px }
+.srcactions.two { grid-template-columns: repeat(2, 1fr) }
+.srcactions button { width: 100% }
+
+.autoscan {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 12px; font-size: .82rem; color: var(--muted);
+}
+.autoscan select { width: auto; min-width: 10rem }
+
+/* --- Support Development (the donor's modal body, as a Settings card) ----- */
+
+.donate-tabs { display: flex; justify-content: center; gap: .5rem; margin: .3rem 0 .9rem }
+.donate-qr { display: flex; justify-content: center }
+.donate-qr svg { width: 220px; height: 220px; border-radius: 10px; background: #fff; padding: 8px }
+.donate-cap { text-align: center; color: var(--muted); font-size: .82rem; margin: .7rem auto .4rem; max-width: 26rem }
+.donate-addr {
+  font-family: var(--mono, monospace); font-size: .8rem; text-align: center;
+  word-break: break-all; background: var(--card-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: .55rem .7rem; max-width: 30rem; margin: 0 auto;
+}
+
+/* The Artwork page's key row, centered with the actions under it. */
+.row.artkey { max-width: 30rem; margin-left: auto; margin-right: auto }
+.card > .hint:first-of-type { max-width: 38rem }
