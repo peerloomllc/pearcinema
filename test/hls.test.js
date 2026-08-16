@@ -124,3 +124,22 @@ test('BURN-IN rewires the graph: software decode, pad back to the canvas, overla
   assert.equal(plain.includes('-filter_complex'), false)
   assert.equal(plain.includes('-hwaccel'), true)
 })
+
+test('A TONE takes the software lane and its filter is a lookup, alone or over a burn', () => {
+  const base = { input: '/x.mkv', seq: 0, media: { videoCodec: 'h264', width: 1920, height: 1080 }, device: '/dev/dri/renderD128', hwDecode: true, bitrate: '6M' }
+
+  const bw = hls.segmentArgs({ ...base, tone: 'bw' })
+  assert.equal(bw.includes('-hwaccel'), false, 'software decode, same reasoning as burn')
+  assert.equal(bw[bw.indexOf('-vf') + 1], 'hue=s=0,format=nv12,hwupload')
+
+  const sepia = hls.segmentArgs({ ...base, tone: 'sepia' })
+  assert.match(sepia[sepia.indexOf('-vf') + 1], /^colorchannelmixer=/)
+
+  // Tone over a burn: one graph, the tone after the overlay.
+  const both = hls.segmentArgs({ ...base, tone: 'bw', burn: { index: 1, canvasWidth: 1920, canvasHeight: 1080 } })
+  assert.match(both[both.indexOf('-filter_complex') + 1], /overlay\[ov\];\[ov\]hue=s=0,format=nv12,hwupload\[out\]/)
+
+  // Junk never reaches argv - the lookup is the whole gate.
+  const junk = hls.segmentArgs({ ...base, tone: 'vivid; rm -rf /' })
+  assert.equal(junk.includes('-hwaccel'), true, 'unknown tone means the plain hardware path')
+})

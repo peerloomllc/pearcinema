@@ -350,3 +350,19 @@ test('BURN-IN: a chosen image track forces the transcode lane, and only with har
   const noH264 = { containers: ['mp4'], videoCodecs: ['hevc'], audioCodecs: ['aac'] }
   assert.notStrictEqual(decide(playsFine, noH264, { transcode: true, burn: true }).reason?.includes('burned'), true)
 })
+
+test('A TONE forces the transcode lane, exactly like burn-in, and junk tones are ignored', () => {
+  const { decide } = require('../host/remux')
+  const playsFine = { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }
+  const client = { containers: ['matroska', 'mp4'], videoCodecs: ['h264'], audioCodecs: ['aac'] }
+
+  const v = decide(playsFine, { ...client, tone: 'sepia' }, { transcode: true })
+  assert.strictEqual(v.mode, 'transcode')
+  assert.match(v.reason, /sepia/)
+  assert.strictEqual(decide(playsFine, { ...client, tone: 'bw' }, { transcode: true }).mode, 'transcode')
+
+  // No engine: untinted under the skin's overlay, never a software encode.
+  assert.strictEqual(decide(playsFine, { ...client, tone: 'bw' }, { transcode: false }).mode, 'direct')
+  // A tone is a LOOKUP, not a passthrough - junk decides as if nothing was asked.
+  assert.strictEqual(decide(playsFine, { ...client, tone: 'vivid' }, { transcode: true }).mode, 'direct')
+})

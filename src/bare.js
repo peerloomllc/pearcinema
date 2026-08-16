@@ -93,16 +93,24 @@ const DATA_SAVER_KBPS = 2500
 function capsFor (itemId) {
   const bad = refusedVideo.get(itemId)
   const base = bad ? caps.without(capabilities, bad) : capabilities
-  const withSaver = readSettings().dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
+  const settings = readSettings()
+  let out = settings.dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
+  // The 35mm skin's tone rides the declaration like data saver does: a fact
+  // about how this viewer wants to watch, and the host still decides - no
+  // engine means the film arrives untinted under the skin's overlay.
+  if (settings.playerSkin === 'film' && ['bw', 'sepia'].includes(settings.playerTone)) {
+    out = { ...out, tone: settings.playerTone }
+  }
   const burn = burnSub.get(itemId)
-  return burn ? { ...withSaver, burnSubtitleId: burn } : withSaver
+  return burn ? { ...out, burnSubtitleId: burn } : out
 }
 
 // Downloads describe the device without the viewing session: a subtitle choice
-// made in the player must not bake itself into the copy the phone keeps, nor
-// steer the download's decide toward a conversion it does not need.
+// or a skin's tone made in the player must not bake itself into the copy the
+// phone keeps, nor steer the download's decide toward a conversion it does
+// not need.
 function capsForDownload (itemId) {
-  const { burnSubtitleId, ...rest } = capsFor(itemId)
+  const { burnSubtitleId, tone, ...rest } = capsFor(itemId)
   return rest
 }
 

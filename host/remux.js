@@ -132,6 +132,21 @@ function decide (media, client = {}, opts = {}) {
   // guess that sends it down the expensive path would be worse than a failed play.
   if (!box && !v) return { mode: 'direct', reason: 'nothing is known about this file' }
 
+  // A TONE. The viewer turned on the 35mm skin's black-and-white or sepia
+  // look (a phone cannot repaint a native video surface, so the picture is
+  // toned by the host's engine, same seam as burn-in). Same gates: proven
+  // hardware and an H.264 client, or the request decides as if nothing was
+  // asked and the skin's overlay still shows untinted.
+  const tone = ['bw', 'sepia'].includes(client.tone) ? client.tone : null
+  if (tone && opts.transcode && videos.has('h264')) {
+    const audioOkTone = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    return {
+      mode: 'transcode',
+      reason: `the ${tone === 'bw' ? 'black and white' : 'sepia'} look is pressed into the picture on the host's video hardware`,
+      audio: audioOkTone ? 'copy' : AUDIO_FALLBACK.codec
+    }
+  }
+
   // BURN-IN. The client chose an image subtitle track (PGS, DVD) that only
   // exists as pictures, so the host must press it into the frames - which is a
   // re-encode by definition, costed on the N100 2026-08-15 (DECISIONS) at

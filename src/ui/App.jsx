@@ -606,6 +606,12 @@ export default function App () {
   const [cols, setCols] = useState(2)
   const [showRecent, setShowRecent] = useState(true)
   const [dataSaver, setDataSaver] = useState(false)
+  // The player skins - cosmetic overlays drawn by the shell, PearTune's
+  // Winamp-toggle pattern. The 35mm skin's tone is the exception: a phone
+  // cannot repaint a native video surface, so a tone rides the capability
+  // declaration and the BOX presses it into the picture.
+  const [playerSkin, setPlayerSkin] = useState('off')
+  const [playerTone, setPlayerTone] = useState('off')
   const [showDisplay, setShowDisplay] = useState(false)
   const setDisplay = (patch) => {
     if ('sortField' in patch) setSortField(patch.sortField)
@@ -891,6 +897,8 @@ export default function App () {
       if (['list', 2, 3].includes(s?.cols)) setCols(s.cols)
       if (typeof s?.showRecent === 'boolean') setShowRecent(s.showRecent)
       if (typeof s?.dataSaver === 'boolean') setDataSaver(s.dataSaver)
+      if (['off', 'film', 'mst3k'].includes(s?.playerSkin)) setPlayerSkin(s.playerSkin)
+      if (['off', 'bw', 'sepia'].includes(s?.playerTone)) setPlayerTone(s.playerTone)
     }).catch(() => {})
   }, [])
 
@@ -952,7 +960,7 @@ export default function App () {
   // --- actions --------------------------------------------------------------
 
   const play = async (item, url, startMs) => {
-    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs }) } catch (e) { setErr(e.message); return }
+    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs, skin: playerSkin }) } catch (e) { setErr(e.message); return }
     // Episode neighbours arrive AFTER playback starts, so the lookup never
     // delays first frames. Offline or on a film the catch leaves the buttons
     // off, which is the honest answer in both cases.
@@ -1440,6 +1448,39 @@ export default function App () {
               onClick={() => setDisplay({ showRecent: !showRecent })}
             >{showRecent ? 'On' : 'Off'}</button>
           </div>
+
+          <div className='label' style={{ marginTop: '.7rem' }}>Player skin</div>
+          <div className='seg'>
+            {[['off', 'None'], ['film', '35mm film'], ['mst3k', 'Theater']].map(([k, l]) => (
+              <button
+                key={k} className={playerSkin === k ? 'on' : ''}
+                aria-pressed={playerSkin === k}
+                onClick={() => { setPlayerSkin(k); call('setSettings', { playerSkin: k }).catch(() => {}) }}
+              >{l}</button>
+            ))}
+          </div>
+          <div className='desc'>
+            A look laid over the player - sprocket holes and a film border, or a
+            theater row of silhouettes. Just for fun, off by default.
+          </div>
+          {playerSkin === 'film' && (
+            <>
+              <div className='label' style={{ marginTop: '.7rem' }}>Film tone</div>
+              <div className='seg'>
+                {[['off', 'Color'], ['bw', 'Black & white'], ['sepia', 'Sepia']].map(([k, l]) => (
+                  <button
+                    key={k} className={playerTone === k ? 'on' : ''}
+                    aria-pressed={playerTone === k}
+                    onClick={() => { setPlayerTone(k); call('setSettings', { playerTone: k }).catch(() => {}) }}
+                  >{l}</button>
+                ))}
+              </div>
+              <div className='desc'>
+                A tone is pressed into the picture by your box's video hardware, so a
+                toned film streams as a conversion and starts a moment slower.
+              </div>
+            </>
+          )}
         </Section>
       </div>
 

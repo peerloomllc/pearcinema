@@ -665,7 +665,8 @@ class PearCinemaHost {
       hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
       // The width ladder, capped at the client's stated budget when it gave one.
       bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
-      burn: burn || null
+      burn: burn || null,
+      tone: ['bw', 'sepia'].includes(capabilities.tone) ? capabilities.tone : null
     })
 
     // Through the SAME pool as the browser's transcodes: one engine, one cap,
@@ -683,9 +684,10 @@ class PearCinemaHost {
   async exportFor ({ itemId, capabilities = {} }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
-    // A download is the film, not the viewing session - a subtitle choice made
-    // in the player must not bake itself into the copy the phone keeps.
-    const { burnSubtitleId, ...caps } = capabilities
+    // A download is the film, not the viewing session - a subtitle choice or
+    // a skin's tone made in the player must not bake itself into the copy the
+    // phone keeps.
+    const { burnSubtitleId, tone, ...caps } = capabilities
     const verdict = remux.decide(item.media, caps, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item) })
     if (verdict.mode !== 'transcode') return { direct: true }
     if (!this.adapter.ffmpegInput) return null
