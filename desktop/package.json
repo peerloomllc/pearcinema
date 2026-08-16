@@ -1,0 +1,149 @@
+{
+  "name": "pearcinema-desktop",
+  "version": "0.1.0",
+  "description": "PearCinema host as a desktop tray app (macOS / Windows / Linux).",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main/index.js",
+  "author": "PeerLoom LLC <peerloomllc@proton.me>",
+  "homepage": "https://peerloomllc.com/pearcinema/",
+  "scripts": {
+    "prepack:vendor": "node scripts/prepack.js",
+    "postinstall": "node scripts/prepack.js",
+    "start": "npm run prepack:vendor && electron .",
+    "start:dev-linux": "npm run prepack:vendor && ELECTRON_DISABLE_SANDBOX=1 electron --disable-gpu --disable-software-rasterizer .",
+    "build:linux": "bash scripts/build-linux.sh",
+    "build:windows": "bash scripts/build-windows.sh",
+    "build:mac": "bash scripts/build-mac.sh"
+  },
+  "//": [
+    "These are the HOST's runtime dependencies. The Electron main process requires",
+    "the host code directly (plain Node - no Bare worklet), so the host's deps live",
+    "here and get packed into the app. @peerloom/host declares no dependencies of",
+    "its own - it leans on the consuming app's node_modules by design - so its P2P",
+    "stack (hyperdht, corestore, protomux...) is declared here explicitly. They all",
+    "ship cross-platform prebuilds, which is what lets electron-builder cross-build",
+    "the Windows target from Linux. ffmpeg/ffprobe are NOT npm deps: they are",
+    "binaries staged by scripts/prepack.js from ../vendor/ffmpeg/ into resources/,",
+    "resolved at runtime by host/ffmpeg-bin.js via PEARCINEMA_FFMPEG/FFPROBE."
+  ],
+  "dependencies": {
+    "@peerloom/host": "file:../../peerloom-host",
+    "b4a": "^1.6.7",
+    "compact-encoding": "^2.16.0",
+    "corestore": "^7.4.4",
+    "hyperbee": "^2.24.2",
+    "hypercore-crypto": "^3.6.1",
+    "hyperdht": "^6.20.3",
+    "protomux": "^3.10.1",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0",
+    "sodium-universal": "^5.0.1",
+    "z32": "^1.1.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.pearcinema.desktop",
+    "productName": "PearCinema",
+    "copyright": "Copyright © 2026 PeerLoom LLC",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "vendor/**/*",
+      "build/icon.png",
+      "build/tray-icon.png",
+      "build/trayTemplate.png",
+      "build/trayTemplate@2x.png",
+      "build/entitlements.mac.plist",
+      "package.json",
+      "!**/*.test.js",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples,docs,doc,.bin}"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/sodium-native/**/*",
+      "**/node_modules/*/build/Release/*.node",
+      "**/node_modules/*/prebuilds/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "ffmpeg-staging",
+        "to": "ffmpeg"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "LSUIElement": 1
+      },
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extraResources": [
+        {
+          "from": "installer/macos/uninstall.sh",
+          "to": "uninstall.sh"
+        },
+        {
+          "from": "installer/macos/com.peerloom.pearcinema.plist",
+          "to": "com.peerloom.pearcinema.plist"
+        }
+      ],
+      "identity": "22F9540D333EBFB4245EE11170F68A61E6E22689",
+      "notarize": true
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PearCinema"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "maintainer": "PeerLoom LLC <peerloomllc@proton.me>",
+      "synopsis": "Self-hosted films and TV, playable anywhere",
+      "desktop": {
+        "Name": "PearCinema",
+        "StartupWMClass": "pearcinema"
+      },
+      "extraResources": [
+        {
+          "from": "installer/linux/pearcinema-host.service",
+          "to": "pearcinema-host.service"
+        }
+      ]
+    },
+    "deb": {
+      "afterInstall": "installer/linux/postinst.sh",
+      "afterRemove": "installer/linux/postrm.sh"
+    }
+  }
+}
