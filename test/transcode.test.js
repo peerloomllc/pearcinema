@@ -302,3 +302,14 @@ test('BURN-IN on the progressive path mirrors the segment graph', () => {
   assert.equal(plain.includes('-filter_complex'), false)
   assert.equal(plain.includes('-hwaccel'), true)
 })
+
+test('AV1 decodes in software - the engine claims it and the driver cannot deliver it', () => {
+  const { HW_DECODE, transcodeArgs } = require('../host/transcode')
+  // The pin: av1 stays OUT of the hardware-decode set until the whole segment
+  // pipeline is proven on the deployed image. In it, every segment ffmpeg died
+  // ("Failed to inject frame into filter network") and the player starved.
+  assert.equal(HW_DECODE.has('av1'), false)
+  const args = transcodeArgs({ input: '/x.mkv', media: { videoCodec: 'av1' }, device: '/dev/dri/renderD128' })
+  assert.equal(args.includes('-hwaccel'), false)
+  assert.equal(args[args.indexOf('-vf') + 1], 'format=nv12,hwupload')
+})
