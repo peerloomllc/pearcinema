@@ -650,9 +650,8 @@ export default function App () {
 
       {playing && (
         <View style={styles.playerOverlay}>
-          <Pressable
+          <View
             style={styles.videoWrap}
-            onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             onLayout={(e) => {
               const { width, height } = e.nativeEvent.layout
               wrapSizeRef.current = { w: width, h: height }
@@ -666,14 +665,20 @@ export default function App () {
               nativeControls={false}
               allowsFullscreen={false}
               contentFit='contain'
-              // DEAF TO TOUCH, and this line is the tap-to-show-controls fix
-              // (Tim's Pixel field report, 2026-08-15). The native player view
-              // swallowed taps before the surrounding Pressable saw them -
-              // whether one got through varied by Android version, so the TCL
-              // mostly worked while the Pixel mostly did not. With its own
-              // controls off the video needs no touches at all; deaf, every
-              // tap lands on our layer, deterministically.
-              pointerEvents='none'
+            />
+
+            {/* THE TAP CATCHER, a SIBLING stacked above the video - not a
+                parent around it. Two failed attempts are buried here (Tim's
+                Pixel field reports, both times "taps do nothing once the
+                controls hide"): a Pressable WRAPPING the video never saw the
+                taps its child swallowed, and pointerEvents='none' ON the video
+                is forwarded by expo-video but ignored by its Android view, so
+                it only looked fixed on a device that never had the bug. A
+                plain RN Pressable layered on top depends on nothing native -
+                the video simply never receives a touch again. */}
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             />
             {!!cueText && (
               <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>
@@ -739,7 +744,7 @@ export default function App () {
                 </View>
               </View>
             )}
-          </Pressable>
+          </View>
 
           {subPicker && (
             <View style={styles.subPicker}>
