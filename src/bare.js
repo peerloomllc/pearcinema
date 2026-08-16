@@ -176,34 +176,238 @@ function writeHosts (state) {
 const keyPair = loadIdentity()
 let hostsState = readHosts()
 
-// ONE client at a time for the milestone: the active host. The multi-host merged
-// pool is PearTune's later shape and arrives when the app has more than one
-// screen to show it on.
-let client = null
-let connecting = null
+// N clients, one per paired host (proposal 2026-08-16-merged-libraries §1).
+// Each entry is single-flight; all connections come off the one shared DHT.
+// An offline host is a caught error at its call site, never a poisoned pool.
+const merge = require('./merge')
+const hostConns = new Map() // libraryId -> { client, connecting }
 
-async function connected () {
-  const active = H.activeHost(hostsState)
-  if (!active) throw new Error('not paired with any library')
+function hostRow (libraryId) {
+  return hostsState.hosts.find((h) => h.libraryId === libraryId) || null
+}
 
-  if (client && client.conn && !client.conn.destroyed) return client
-  if (connecting) return connecting
+async function connectedLib (libraryId) {
+  const row = hostRow(libraryId)
+  if (!row) throw new Error('not paired with that library')
 
-  connecting = (async () => {
-    if (client) { try { await client.close() } catch {} }
-    client = new Client({ protocol, keyPair, log: (m, d) => log(m, d) })
-    await client.connect({ hostKey: z32.decode(active.hostKey), libraryId: active.libraryId })
-    client.onPush = (m) => emit('host:push', m)
-    client.conn.once('close', () => emit('host:disconnected', { hostKey: active.hostKey }))
-    emit('host:connected', { hostKey: active.hostKey, libraryName: active.libraryName })
-    return client
+  let slot = hostConns.get(libraryId)
+  if (!slot) { slot = { client: null, connecting: null }; hostConns.set(libraryId, slot) }
+  if (slot.client && slot.client.conn && !slot.client.conn.destroyed) return slot.client
+  if (slot.connecting) return slot.connecting
+
+  slot.connecting = (async () => {
+    if (slot.client) { try { await slot.client.close() } catch {} }
+    const c = new Client({ protocol, keyPair, log: (m, d) => log(m, d) })
+    await c.connect({ hostKey: z32.decode(row.hostKey), libraryId: row.libraryId })
+    // Pushes from EVERY connected host flow to the one UI handler, tagged with
+    // their library so a shelf can scope its refetch.
+    c.onPush = (m) => emit('host:push', { ...(m && typeof m === 'object' ? m : { value: m }), libraryId })
+    c.conn.once('close', () => emit('host:disconnected', { hostKey: row.hostKey, libraryId }))
+    slot.client = c
+    emit('host:connected', { hostKey: row.hostKey, libraryId, libraryName: row.libraryName })
+    // A host coming online that the merged index has not heard from yet is
+    // catalog we are not showing - rebuild (debounced, and a no-op single-host).
+    if (mergedOn() && !contributedLibs.has(libraryId)) buildSoon('host-online')
+    return c
   })()
 
   try {
-    return await connecting
+    return await slot.connecting
   } finally {
-    connecting = null
+    slot.connecting = null
   }
+}
+
+// The active host, for everything that is per-device or per-dashboard rather
+// than per-item: identity, devices, pairing, requests.
+async function connected () {
+  const active = H.activeHost(hostsState)
+  if (!active) throw new Error('not paired with any library')
+  return connectedLib(active.libraryId)
+}
+
+// The host that OWNS an id (item, season, series or art), for everything that
+// is per-item: streams, art, watch-state writes. Falls back to the active host
+// when ownership is unknown - which is exactly the single-host case.
+async function clientForId (id) {
+  const lib = owners.get(String(id))
+  if (lib && hostRow(lib)) return connectedLib(lib)
+  return connected()
+}
+
+function closeAllConns () {
+  for (const slot of hostConns.values()) {
+    if (slot.client) { try { slot.client.close() } catch {} }
+    slot.client = null
+  }
+  hostConns.clear()
+}
+
+function connectedLibs () {
+  const out = new Set()
+  for (const [lib, slot] of hostConns) {
+    if (slot.client && slot.client.conn && !slot.client.conn.destroyed) out.add(lib)
+  }
+  return out
+}
+
+// --- the merged library (proposal 2026-08-16-merged-libraries) ---------------
+//
+// With more than one paired host the browse surface is the MERGED index: every
+// reachable host's full catalog, deduped in memory, served without touching
+// the wire. One host keeps today's exact pass-through behavior.
+
+const MERGED_DIR = path.join(DATA_DIR, '_merged')
+const CATALOGS_FILE = path.join(MERGED_DIR, 'catalogs.json')
+
+let mergedIndex = null
+let owners = new Map() // any id (item/season/series) -> owning libraryId
+let artOwners = new Map() // artId -> owning libraryId
+let contributedLibs = new Set() // libraryIds inside the current index
+let buildFlight = null
+let buildTimer = null
+
+function mergedOn () { return hostsState.hosts.length > 1 }
+function libraryFilter () { return readSettings().libraryFilter || '_all' }
+
+function adoptCatalogs (catalogs) {
+  mergedIndex = merge.buildIndex(catalogs)
+  owners = new Map()
+  artOwners = new Map()
+  contributedLibs = new Set()
+  for (const c of catalogs) {
+    contributedLibs.add(c.libraryId)
+    for (const list of [c.movies, c.series, c.episodes]) {
+      for (const x of list || []) {
+        owners.set(String(x.id), c.libraryId)
+        if (x.artId) artOwners.set(String(x.artId), c.libraryId)
+        // Season and series ids ride on episodes, so the real-id tree paths
+        // route without a separate seasons fetch.
+        if (x.seasonId) owners.set(String(x.seasonId), c.libraryId)
+        if (x.seriesId) owners.set(String(x.seriesId), c.libraryId)
+      }
+    }
+  }
+}
+
+// The cold cache: last run's catalogs, so a launch renders the blend instantly
+// and refreshes behind it. Stale is fine - it is the same staleness a single
+// host's first paint always had.
+try { adoptCatalogs(JSON.parse(fs.readFileSync(CATALOGS_FILE, 'utf8'))) } catch {}
+
+// One host's ENTIRE catalog: movies and series paged to exhaustion, episodes
+// walked per series. Personal scale - the Umbrel's 2,746 episodes arrive in a
+// handful of pages.
+async function fetchCatalog (c, libraryId) {
+  const drain = async (params) => {
+    const out = []
+    let cursor = 0
+    for (;;) {
+      const page = await c.list({ ...params, limit: 500, cursor })
+      out.push(...(page.items || []))
+      if (!page.cursor || !(page.items || []).length) break
+      cursor = page.cursor
+    }
+    return out
+  }
+  const movies = await drain({ type: 'movies' })
+  const series = await drain({ type: 'series' })
+  const episodes = []
+  for (const s of series) {
+    episodes.push(...await drain({ type: 'episodes', seriesId: s.id }))
+  }
+  return { libraryId, movies, series, episodes }
+}
+
+async function buildMerged (reason) {
+  if (!mergedOn()) return
+  if (buildFlight) return buildFlight
+  buildFlight = (async () => {
+    const cats = []
+    await Promise.all(hostsState.hosts.map(async (h) => {
+      try {
+        const c = await connectedLib(h.libraryId)
+        cats.push(await fetchCatalog(c, h.libraryId))
+      } catch (e) {
+        // Offline is absence, not failure: the host's items simply are not in
+        // this build, and its next connect triggers another one.
+        log('merged:host-absent', { library: h.libraryName, err: e.message })
+      }
+    }))
+    if (!cats.length) return
+    adoptCatalogs(cats)
+    try {
+      fs.mkdirSync(MERGED_DIR, { recursive: true })
+      fs.writeFileSync(CATALOGS_FILE, JSON.stringify(cats))
+    } catch {}
+    log('merged:built', { reason, hosts: cats.length, movies: mergedIndex.movies.length, series: mergedIndex.series.length, episodes: mergedIndex.episodes.length })
+    emit('merged:changed', { reason })
+  })().finally(() => { buildFlight = null })
+  return buildFlight
+}
+
+function buildSoon (reason) {
+  if (!mergedOn()) return
+  clearTimeout(buildTimer)
+  buildTimer = setTimeout(() => buildMerged(reason).catch((e) => log('merged:build-failed', { err: e.message })), 800)
+}
+
+// Ask every paired host the same question, tolerating the offline ones.
+// Answers come back in host-list order so unions are stable across calls.
+async function fanOut (fn) {
+  const rs = await Promise.all(hostsState.hosts.map(async (h) => {
+    try { return await fn(await connectedLib(h.libraryId)) } catch { return null }
+  }))
+  return rs.filter(Boolean)
+}
+
+// The merged series row a UI-held seriesId belongs to - the UI navigates with
+// real host ids (the primary's), so the tree handlers translate.
+function findMergedSeries (seriesId) {
+  if (!mergedIndex) return null
+  const id = String(seriesId || '')
+  return mergedIndex.series.find((s) => s.copies.some((c) => c.id === id)) || null
+}
+
+// The device-aware copy rank (proposal §5): a copy this chip direct-plays
+// outranks one that would need the host's engine. The declaration is the same
+// one capsFor sends; refusals are per-item so a lying chip's correction rides
+// along.
+function copyRank () {
+  return (copy) => {
+    const codec = String(copy.videoCodec || '').toLowerCase()
+    if (!codec) return 0
+    const declared = (capabilities.videoCodecs || []).includes(codec)
+    const refused = [...refusedVideo.values()].includes(codec)
+    return declared && !refused ? 1 : 0
+  }
+}
+
+// The merged movie or episode an id belongs to, by any of its copies.
+function mergedEntityFor (id) {
+  if (!mergedIndex) return null
+  const key = String(id || '')
+  return mergedIndex.movies.find((m) => m.copies.some((c) => c.id === key)) ||
+    mergedIndex.episodes.find((e) => e.copies.some((c) => c.id === key)) || null
+}
+
+// Which copy of a merged item should actually stream (proposal §5): the filter
+// chip's library if reachable, else the best copy for THIS device among the
+// reachable ones. Returns the copy's own id - the caller streams THAT. When
+// the pick diverges from the asked-for id, resume still records against the
+// asked-for id; a cross-host position merge is phase 2.
+function pickCopyId (itemId) {
+  if (!mergedOn() || !mergedIndex) return String(itemId)
+  const entity = mergedEntityFor(itemId)
+  if (!entity || entity.copies.length < 2) return String(itemId)
+  const live = connectedLibs()
+  const prefer = libraryFilter() === '_all' ? null : libraryFilter()
+  const pick = merge.bestCopy(entity, live.size ? live : null, prefer, copyRank())
+  if (pick && pick.id && pick.id !== String(itemId)) {
+    log('merged:copy-pick', { asked: String(itemId).slice(0, 8), picked: String(pick.id).slice(0, 8), library: pick.libraryId })
+    return String(pick.id)
+  }
+  return String(itemId)
 }
 
 // --- the shim ---------------------------------------------------------------
@@ -243,7 +447,7 @@ async function startDownload (itemId) {
     return { ok: true, already: true }
   }
   if (downloads.has(itemId)) return { ok: true, running: true }
-  const c = await connected()
+  const c = await clientForId(itemId)
   const item = await c.get({ id: itemId })
   const size = item?.media?.size
   if (!size) throw new Error('this one cannot be downloaded')
@@ -251,7 +455,9 @@ async function startDownload (itemId) {
   dlMeta[itemId] = { title: item.title || '', year: item.year || null, runtime: item.runtime || null }
   writeDlMeta(dlMeta)
   const mime = CONTAINER_MIME[String(item?.media?.container || '').toLowerCase()] || 'video/mp4'
-  const active = H.activeHost(hostsState)
+  // The cache tags the film with the library it CAME from, which in merged
+  // mode is the owning host, not whichever library happens to be active.
+  const active = { libraryId: owners.get(String(itemId)) || H.activeHost(hostsState)?.libraryId || null }
 
   // THE HOST DECIDES for downloads exactly as for playback: the same declared
   // capabilities, the same decide(). A transcode verdict - the file busts the
@@ -351,6 +557,13 @@ const shim = createAudioShim({
   log: (m, d) => log(m, d),
   cache,
   defaultClient: () => connected(),
+  // Multi-host routing (proposal 2026-08-16 §5): the shim resolves each
+  // request's OWNING host through the merged index's ownership maps. URLs stay
+  // id-only - ids are namespaced by library, so a lookup is enough - and a
+  // cache hit never gets this far.
+  hostClient: (lib) => connectedLib(lib),
+  libForTrack: (id) => owners.get(String(id)) || null,
+  libForCover: (id) => artOwners.get(String(id)) || null,
   streamParams: (id, extra) => ({ itemId: id, ...extra }),
   artParams: (id, size) => ({ artId: id, size }),
   // THE HLS ROUTES: the playlist is fetched from the host and served with its
@@ -364,7 +577,7 @@ const shim = createAudioShim({
     if (m) {
       const itemId = m[1]
       try {
-        const c = await connected()
+        const c = await clientForId(itemId)
         const out = await c.request('media.playlist', { itemId, capabilities: capsFor(itemId) })
         if (!out?.playlist) {
           res.writeHead(409, { 'content-type': 'text/plain' })
@@ -392,7 +605,7 @@ const shim = createAudioShim({
       // scrub instead of four seconds later (stream-cancel proposal).
       res.on('close', () => { dead = true; try { cancelSeg?.() } catch {} })
       try {
-        const c = await connected()
+        const c = await clientForId(itemId)
         res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
         const p = c.request('media.segment', { itemId, seq, capabilities: capsFor(itemId) }, {
           stream: true,
@@ -454,13 +667,36 @@ const methods = {
   // Everything the UI needs to draw its first screen, in one call.
   'app.state': async () => {
     const active = H.activeHost(hostsState)
+    const live = connectedLibs()
     return {
       platform: PLATFORM,
       deviceKey: z32.encode(keyPair.publicKey),
-      hosts: hostsState.hosts.map((h) => ({ ...h, active: h.hostKey === hostsState.activeHostKey })),
+      hosts: hostsState.hosts.map((h) => ({
+        ...h,
+        active: h.hostKey === hostsState.activeHostKey,
+        online: live.has(h.libraryId),
+        inMerge: contributedLibs.has(h.libraryId)
+      })),
       active: active ? { hostKey: active.hostKey, libraryName: active.libraryName } : null,
+      // The merged view: on with more than one library, filtered by the chip.
+      merged: { on: mergedOn(), ready: !!mergedIndex, filter: libraryFilter() },
       shimPort
     }
+  },
+
+  // The filter chip (proposal §6): '_all' is the blend, a libraryId narrows to
+  // one host. A preference, persisted like the theme.
+  'merged.filter': async ({ libraryId }) => {
+    const next = { ...readSettings(), libraryFilter: String(libraryId || '_all') }
+    writeSettings(next)
+    return { filter: next.libraryFilter }
+  },
+
+  // A pull-to-refresh for the blend, and the boot hook the UI calls once its
+  // first screen is up.
+  'merged.refresh': async () => {
+    await buildMerged('refresh')
+    return { ok: true, ready: !!mergedIndex }
   },
 
   // Pair by the link a QR or a paste carries. On success the host joins the list
@@ -475,12 +711,8 @@ const methods = {
         libraryName: paired.libraryName
       }, Date.now())
       writeHosts(hostsState)
-      // addHost just moved the active pointer to the NEW host, so the live
-      // connection - still dialled into the previous one - must go. Left open,
-      // every later call kept riding the old link and the browse tab showed the
-      // old catalog until an app restart (caught pairing the TCL to the Mac,
-      // 2026-08-16). Same move hosts.setActive makes below.
-      if (client) { try { await client.close() } catch {} ; client = null }
+      // A second library just arrived - the merged view wants its catalog.
+      buildSoon('paired')
       emit('hosts:changed', {})
       return { libraryId: paired.libraryId, libraryName: paired.libraryName }
     } finally {
@@ -491,7 +723,6 @@ const methods = {
   'hosts.setActive': async ({ hostKey }) => {
     hostsState = H.setActive(hostsState, hostKey)
     writeHosts(hostsState)
-    if (client) { try { await client.close() } catch {} ; client = null }
     return { ok: true }
   },
 
@@ -513,34 +744,102 @@ const methods = {
     // the next write. Caught the first time a UI actually called this.
     hostsState = H.removeHost(hostsState, hostKey).file
     writeHosts(hostsState)
-    if (client) { try { await client.close() } catch {} ; client = null }
+    // The removed host's connection dies with its row, and the merged index
+    // must stop offering its items.
+    closeAllConns()
+    buildSoon('removed')
     emit('hosts:changed', {})
     return { ok: true }
   },
 
-  // The library, proxied. The UI's vocabulary IS the host's - no translation
-  // layer to drift.
+  // The library. One host: proxied straight through, the UI's vocabulary IS
+  // the host's. More than one: served from the merged index (proposal
+  // 2026-08-16), which speaks the same vocabulary - the UI cannot tell.
   'library.stats': async () => (await connected()).stats(),
-  'library.list': async (args) => (await connected()).list(args),
-  'library.get': async (args) => (await connected()).get(args),
-  'library.search': async (args) => (await connected()).search(args),
-  // The player's next and previous episode, answered by the host because only
-  // it holds the whole tree in order. Generic request: the client package
-  // needs no new wrapper for a read-only lookup.
-  'library.siblings': async (args) => (await connected()).request('library.siblings', args),
+  'library.list': async (args) => {
+    if (!mergedOn() || !mergedIndex) return (await connected()).list(args)
+    const type = String(args.type || 'movies')
+    if (type === 'movies' || type === 'series') {
+      const src = type === 'movies' ? mergedIndex.movies : mergedIndex.series
+      const sorted = merge.sortItems(merge.filterByLibrary(src, libraryFilter()), args.sort || 'title', args.order || 'asc')
+      const start = Math.max(0, Math.floor(Number(args.cursor) || 0))
+      const size = Math.min(500, Math.max(1, Math.floor(Number(args.limit) || 100)))
+      const items = sorted.slice(start, start + size)
+      return { items, cursor: start + size < sorted.length ? start + size : null, total: sorted.length }
+    }
+    if (type === 'seasons') {
+      const s = findMergedSeries(args.seriesId)
+      if (s) return { items: merge.seasonsFor(mergedIndex, s.key), cursor: null }
+      return (await clientForId(args.seriesId)).list(args)
+    }
+    if (type === 'episodes') {
+      const parsed = merge.parseMergedSeasonId(args.seasonId)
+      if (parsed) {
+        return { items: merge.episodesFor(mergedIndex, parsed.seriesKey, parsed.seasonNumber, parsed.seasonTitle), cursor: null }
+      }
+      return (await clientForId(args.seasonId || args.seriesId)).list(args)
+    }
+    return (await connected()).list(args)
+  },
+  'library.get': async (args) => (await clientForId(args.id)).get(args),
+  'library.search': async (args) => {
+    if (!mergedOn() || !mergedIndex) return (await connected()).search(args)
+    const r = merge.searchIndex(mergedIndex, args.q, Number(args.limit) || 60)
+    const items = [...r.movies, ...r.series, ...r.episodes].slice(0, Number(args.limit) || 60)
+    return { items }
+  },
+  // The player's next and previous episode. One host answers structurally; the
+  // merged view answers from its own interleaved run, because a series can
+  // SPAN hosts and the season-boundary neighbour may live on the other one.
+  'library.siblings': async (args) => {
+    if (!mergedOn() || !mergedIndex) return (await connected()).request('library.siblings', args)
+    const id = String(args.id || '')
+    const ep = mergedIndex.episodes.find((e) => e.copies.some((c) => c.id === id))
+    if (!ep) return (await clientForId(id)).request('library.siblings', args)
+    const run = merge.seriesRun(mergedIndex, ep.seriesKey)
+    const at = run.findIndex((e) => e.key === ep.key)
+    if (at < 0) return { prev: null, next: null }
+    return { prev: run[at - 1] || null, next: run[at + 1] || null }
+  },
 
-  // Watch state - the same per-person store the dashboard writes, which is the
-  // claim this app exists to prove: a laptop and a phone sharing one position.
-  'resume.set': async (args) => (await connected()).request('resume.set', args),
-  'resume.get': async (args) => (await connected()).request('resume.get', args),
-  'resume.list': async (args) => (await connected()).request('resume.list', args),
-  'watched.set': async (args) => (await connected()).request('watched.set', args),
-  'watched.list': async (args) => (await connected()).request('watched.list', args),
+  // Watch state - the same per-person store the dashboard writes. Writes route
+  // to the item's OWNING host (approved open question 1); the Continue shelf
+  // is every host's answer concatenated newest-first (approved open question 2).
+  'resume.set': async (args) => (await clientForId(args.itemId)).request('resume.set', args),
+  'resume.get': async (args) => (await clientForId(args.itemId)).request('resume.get', args),
+  'resume.list': async (args) => {
+    if (!mergedOn()) return (await connected()).request('resume.list', args)
+    const rows = await fanOut((c) => c.request('resume.list', args))
+    const items = rows.flatMap((r) => r?.items || [])
+      .sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
+    return { items: items.slice(0, Number(args.limit) || 20) }
+  },
+  'watched.set': async (args) => (await clientForId(args.itemId)).request('watched.set', args),
+  'watched.list': async (args) => {
+    if (!mergedOn()) return (await connected()).request('watched.list', args)
+    const rows = await fanOut((c) => c.request('watched.list', args))
+    return { items: [...new Set(rows.flatMap((r) => r?.items || []))] }
+  },
 
-  // The watchlist, requests, the owner's view and this device's identity -
-  // straight proxies; the host derives WHO from the connection, never a param.
-  'fav.set': async (args) => (await connected()).request('fav.set', args),
-  'fav.list': async (args) => (await connected()).request('fav.list', args),
+  // The watchlist: a heart routes to the film's owning host, the list is the
+  // union. Requests, the owner's view and identity stay with the ACTIVE host -
+  // phase 2 territory.
+  'fav.set': async (args) => (await clientForId(args.id)).request('fav.set', args),
+  'fav.list': async (args) => {
+    if (!mergedOn()) return (await connected()).request('fav.list', args)
+    const rows = await fanOut((c) => c.request('fav.list', args))
+    const seen = new Set()
+    const items = []
+    for (const r of rows) {
+      for (const i of r?.items || []) {
+        const k = String(i.id)
+        if (seen.has(k)) continue
+        seen.add(k)
+        items.push(i)
+      }
+    }
+    return { items }
+  },
   'request.add': async (args) => (await connected()).request('request.add', args),
   'request.list': async (args) => (await connected()).request('request.list', args),
   'request.remove': async (args) => (await connected()).request('request.remove', args),
@@ -625,21 +924,28 @@ const methods = {
   // the host decides again - usually landing on transcode. The client still
   // never ASKS for a mode; it only tells the truth about itself.
   'stream.url': async ({ itemId, deviceRefusedVideo = false, burnSubtitleId = null }) => {
+    // A downloaded film needs no host at all - the shim serves it off disk
+    // with full Range support. Checked BEFORE connecting, or offline playback
+    // would die asking a host it does not need. A burn request skips the disk
+    // copy on purpose: the download has no subtitles pressed in, so the burned
+    // stream must come from the host. Checked against the id the UI asked for,
+    // BEFORE any copy pick - the download lives under that id.
+    if (!deviceRefusedVideo && !burnSubtitleId && cache.has(String(itemId))) {
+      burnSub.delete(itemId)
+      return { url: shim.urlFor(itemId), mode: 'download' }
+    }
+
+    // The merged copy pick (proposal §5): a film held by two hosts plays from
+    // the one that suits this device. A burn request stays on the asked-for
+    // copy - the subtitle id the person chose belongs to THAT file.
+    if (!burnSubtitleId) itemId = pickCopyId(itemId)
+
     // The burn choice is per playback, so EVERY stream.url settles it: a call
     // that asks for a track sets it, any other call clears it - starting a
     // film fresh must never inherit the last session's burned subtitles.
     if (burnSubtitleId) burnSub.set(itemId, String(burnSubtitleId))
     else burnSub.delete(itemId)
-
-    // A downloaded film needs no host at all - the shim serves it off disk
-    // with full Range support. Checked BEFORE connecting, or offline playback
-    // would die asking a host it does not need. A burn request skips the disk
-    // copy on purpose: the download has no subtitles pressed in, so the burned
-    // stream must come from the host.
-    if (!deviceRefusedVideo && !burnSubtitleId && cache.has(String(itemId))) {
-      return { url: shim.urlFor(itemId), mode: 'download' }
-    }
-    const c = await connected()
+    const c = await clientForId(itemId)
     if (deviceRefusedVideo) {
       const item = await c.get({ id: itemId }).catch(() => null)
       const bad = item?.media?.videoCodec
@@ -701,6 +1007,10 @@ shim.listen().then((port) => {
   shimPort = port
   emit('shim:ready', { port })
 }).catch((e) => log('shim:failed', { err: e.message }))
+
+// The blend refreshes itself at boot: the cold cache above painted instantly,
+// this fetches what changed overnight. A single-host install no-ops.
+buildSoon('boot')
 
 log('worklet:loaded', { platform: PLATFORM })
 emit('ready', {})
