@@ -42,6 +42,7 @@
     "apply and must not be copied here."
   ],
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
     "@peerloom/client": "file:../peerloom-client",
     "@peerloom/host": "file:../peerloom-host",
     "@phosphor-icons/react": "^2.1.10",
@@ -56,6 +57,7 @@
     "expo-build-properties": "^1.0.9",
     "expo-clipboard": "~8.0.8",
     "expo-file-system": "~19.0.21",
+    "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.7",
     "expo-linking": "~8.0.12",
     "expo-network": "~8.0.8",

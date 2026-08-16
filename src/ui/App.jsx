@@ -689,6 +689,11 @@ export default function App () {
   const [linkUp, setLinkUp] = useState(false)
 
   const retried = useRef(new Set())
+  // What sits on either side of the playing episode, kept here because the
+  // native player's Previous/Next buttons only hand back an intent - the UI
+  // owns which episode that intent lands on.
+  const navRef = useRef(null)
+  const playRef = useRef(null)
   const uiRef = useRef({})
   const toastTimer = useRef(null)
 
@@ -749,6 +754,24 @@ export default function App () {
         // because the tab effect only fires on arrival (Tim, 2026-08-15).
         setContinueRows(null)
         if (uiRef.current.tab === 'you') loadYouRef.current?.(uiRef.current.youView)
+      }),
+      on('player:nav', async (d) => {
+        const nav = navRef.current
+        if (!nav || nav.itemId !== d?.itemId) return
+        const target = d.direction === 'prev' ? nav.prev : nav.next
+        if (!target) return
+        // The episode being left keeps its place, same contract as closing.
+        if (d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
+        try {
+          const [{ url }, prior] = await Promise.all([
+            call('stream.url', { itemId: target.id }),
+            call('resume.get', { itemId: target.id }).catch(() => null)
+          ])
+          // No resume OFFER here: the native player covers the screen, so a
+          // sheet under it would be an invisible question. A part-watched
+          // episode just resumes; scrubbing back is one gesture.
+          await playRef.current(target, url, prior?.resume?.positionMs > 0 ? prior.resume.positionMs : 0)
+        } catch (e) { setErr(e.message) }
       }),
       on('player:error', async (d) => {
         if (!d?.itemId) return
@@ -896,8 +919,18 @@ export default function App () {
   // --- actions --------------------------------------------------------------
 
   const play = async (item, url, startMs) => {
-    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs }) } catch (e) { setErr(e.message) }
+    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs }) } catch (e) { setErr(e.message); return }
+    // Episode neighbours arrive AFTER playback starts, so the lookup never
+    // delays first frames. Offline or on a film the catch leaves the buttons
+    // off, which is the honest answer in both cases.
+    if (item.type !== 'episode') { navRef.current = null; return }
+    try {
+      const { prev, next } = await call('library.siblings', { id: item.id })
+      navRef.current = (prev || next) ? { itemId: item.id, prev, next } : null
+      if (navRef.current) await call('shell.navSet', { itemId: item.id, hasPrev: !!prev, hasNext: !!next })
+    } catch { navRef.current = null }
   }
+  playRef.current = play
 
   const open = async (i) => {
     if (i.type === 'series') { setTab('library'); return setSeries(i) }

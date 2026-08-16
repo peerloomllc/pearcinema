@@ -496,6 +496,10 @@ const methods = {
   'library.list': async (args) => (await connected()).list(args),
   'library.get': async (args) => (await connected()).get(args),
   'library.search': async (args) => (await connected()).search(args),
+  // The player's next and previous episode, answered by the host because only
+  // it holds the whole tree in order. Generic request: the client package
+  // needs no new wrapper for a read-only lookup.
+  'library.siblings': async (args) => (await connected()).request('library.siblings', args),
 
   // Watch state - the same per-person store the dashboard writes, which is the
   // claim this app exists to prove: a laptop and a phone sharing one position.

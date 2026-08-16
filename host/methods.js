@@ -100,6 +100,34 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return getAdapter().search({ q, limit: ctx.params.limit })
     },
 
+    // THE EPISODE ON EITHER SIDE, for the player's next and previous buttons
+    // (Tim, 2026-08-15). Structural order across the WHOLE show - seasons in
+    // order, episodes within them - so the last episode of season one answers
+    // with the first of season two, which is what "next" means to a person.
+    //
+    // This is NOT watch.nextEpisode. That rule serves the up-next shelf and
+    // skips everything already watched; a person paging through a season they
+    // are rewatching wants the neighbour, watched or not.
+    //
+    // Anything that is not an episode answers with two nulls rather than an
+    // error, so a client can ask about whatever is playing without branching.
+    'library.siblings': async (ctx) => {
+      if (!ctx.params.id) throw ctx.badParams('id required')
+      const ep = await getAdapter().get({ id: String(ctx.params.id) })
+      if (!ep) throw ctx.notFound('no such item')
+      if (ep.type !== 'episode' || !ep.seriesId) return { prev: null, next: null }
+
+      const seasons = (await getAdapter().list({ type: 'seasons', seriesId: ep.seriesId, limit: 500 })).items || []
+      const all = []
+      for (const s of seasons) {
+        const page = await getAdapter().list({ type: 'episodes', seasonId: s.id, limit: 1000 })
+        all.push(...(page.items || []))
+      }
+      const at = all.findIndex((e) => e.id === ep.id)
+      if (at < 0) return { prev: null, next: null }
+      return { prev: all[at - 1] || null, next: all[at + 1] || null }
+    },
+
     // --- artwork ----------------------------------------------------------
 
     'art.get': async (ctx) => {

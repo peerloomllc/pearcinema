@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { BackHandler, PermissionsAndroid, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
 // app was running arrived nowhere (measured on the TCL, 2026-08-14 - the
@@ -85,6 +86,42 @@ export default function App () {
   // watch-state writes - the shell only reports positions, so there is exactly one
   // copy of the resume rules.
   const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
+  // Previous/Next episode availability, set by the UI (shell.navSet) once it
+  // has asked the host what sits on either side. The buttons only hand an
+  // intent back to the UI - which episode that intent lands on is its call.
+  const [nav, setNav] = useState<{ hasPrev: boolean, hasNext: boolean } | null>(null)
+
+  // THE CONTROLS ARE ALL OURS (Tim, 2026-08-15: no mixture of native player
+  // buttons and our own). expo-video's native row cannot take custom buttons,
+  // its own previous/next only act on a playlist no JS API can supply, and its
+  // CC button appears on its own schedule and cannot see the external subtitle
+  // files the host serves. So nativeControls is OFF and one consistent set of
+  // icon controls is drawn here: back, title and subtitles on top; previous,
+  // jump back, play/pause, jump forward and next in the middle; a scrubbable
+  // time bar along the bottom. Keep-awake is unaffected - it rides the player
+  // (keepScreenOnWhilePlaying), not the native view.
+  const [controlsOn, setControlsOn] = useState(true)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [clock, setClock] = useState({ pos: 0, dur: 0 })
+  // The scrub-in-progress position, 0..1. Displayed live while a finger is on
+  // the bar; the SEEK happens once on release - over a P2P link every seek is
+  // a round of range requests, and seeking on every move would flood it.
+  const [scrub, setScrub] = useState<number | null>(null)
+  const hideTimer = useRef<any>(null)
+  const seekBarWidth = useRef(1)
+
+  // Any interaction shows the controls and restarts the hide clock. They only
+  // hide themselves while the film is actually rolling - a paused screen with
+  // no controls reads as a hang.
+  const poke = () => {
+    setControlsOn(true)
+    clearTimeout(hideTimer.current)
+    hideTimer.current = setTimeout(() => {
+      let rolling = false
+      try { rolling = player.playing } catch {}
+      if (rolling) setControlsOn(false)
+    }, 3500)
+  }
   const playingRef = useRef<typeof playing>(null)
   const lastPos = useRef(0)
 
@@ -283,6 +320,7 @@ export default function App () {
     if (!playing) return
     lastPos.current = (playing.startMs || 0) / 1000
     const sub = player.addListener('timeUpdate', (e: any) => { lastPos.current = e.currentTime })
+    const playSub = player.addListener('playingChange', (e: any) => setIsPlaying(!!e?.isPlaying))
     // THE NET FOR LYING CHIPS. A decoder that claimed a codec and then threw on
     // real frames surfaces here as a player error; the UI answers by asking for
     // the stream again with the honest self-description, and the host usually
@@ -305,8 +343,20 @@ export default function App () {
       const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:tick', ${payload})`)
     }, 15000)
-    return () => { sub.remove(); errSub.remove(); clearInterval(tick) }
+    return () => { sub.remove(); playSub.remove(); errSub.remove(); clearInterval(tick) }
   }, [playing])
+
+  // The time bar's clock: polled only while the controls are actually on
+  // screen - a hidden bar does not need a heartbeat.
+  useEffect(() => {
+    if (!playing || !controlsOn) return
+    const read = () => {
+      try { setClock({ pos: player.currentTime || 0, dur: player.duration || 0 }) } catch {}
+    }
+    read()
+    const t = setInterval(read, 500)
+    return () => clearInterval(t)
+  }, [playing, controlsOn])
 
   const stopPlayback = () => {
     const p = playingRef.current
@@ -316,8 +366,60 @@ export default function App () {
     }
     try { player.pause() } catch {}
     setPlaying(null)
+    setNav(null)
     setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
     cuesRef.current = []
+    clearTimeout(hideTimer.current)
+    setControlsOn(true)
+    setScrub(null)
+  }
+
+  const togglePlay = () => {
+    try { isPlaying ? player.pause() : player.play() } catch {}
+    poke()
+  }
+
+  const jumpBy = (seconds: number) => {
+    try { player.seekBy(seconds) } catch {}
+    poke()
+  }
+
+  // Touch on the time bar: the fill follows the finger, the seek fires once on
+  // release. locationX is relative to the bar through the whole gesture.
+  const scrubAt = (x: number) => {
+    setScrub(Math.max(0, Math.min(1, x / (seekBarWidth.current || 1))))
+    poke()
+  }
+  const scrubEnd = () => {
+    setScrub((s) => {
+      if (s !== null && clock.dur > 0) {
+        try { player.currentTime = s * clock.dur } catch {}
+        setClock((c) => ({ ...c, pos: s * c.dur }))
+      }
+      return null
+    })
+    poke()
+  }
+
+  const fmtTime = (s: number) => {
+    const t = Math.max(0, Math.round(s || 0))
+    const h = Math.floor(t / 3600)
+    const m = Math.floor((t % 3600) / 60)
+    const sec = t % 60
+    const mm = h > 0 ? String(m).padStart(2, '0') : String(m)
+    return (h > 0 ? h + ':' : '') + mm + ':' + String(sec).padStart(2, '0')
+  }
+
+  // Previous/Next tapped: pause where we are and hand the intent to the UI,
+  // which knows the neighbours and answers with a fresh shell.play. The pause
+  // matters - the swap takes a host round trip and old frames playing on under
+  // new buttons reads as the tap not working.
+  const navTo = (direction: 'prev' | 'next') => {
+    const p = playingRef.current
+    if (!p) return
+    try { player.pause() } catch {}
+    const payload = JSON.stringify({ direction, itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
+    feedWebView(`window.__pearEvent && window.__pearEvent('player:nav', ${payload})`)
   }
 
   // The overlay's clock: the active cue, looked up from the player's own time a
@@ -383,6 +485,10 @@ export default function App () {
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
       const { itemId, url, title, startMs } = msg.args || {}
+      // A DIFFERENT item resets the episode buttons until the UI re-declares
+      // them. The same item replayed (the lying-chip transcode retry) keeps
+      // its buttons - the neighbours have not changed.
+      if (itemId !== playingRef.current?.itemId) setNav(null)
       setPlaying({ itemId, url, title: title || '', startMs })
       // A new film starts with no subtitles chosen and a fresh track list.
       setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
@@ -397,11 +503,24 @@ export default function App () {
       } catch (e: any) {
         console.warn('[shell] play failed', e?.message)
       }
+      setIsPlaying(true)
+      setClock({ pos: (startMs || 0) / 1000, dur: 0 })
+      setScrub(null)
+      poke()
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }
     if (msg.method === 'shell.stop') {
       stopPlayback()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.navSet') {
+      // Guarded by item: an answer that arrives after the person already moved
+      // on to something else must not put the wrong show's buttons up.
+      if (msg.args?.itemId === playingRef.current?.itemId) {
+        setNav({ hasPrev: !!msg.args?.hasPrev, hasNext: !!msg.args?.hasNext })
+      }
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }
@@ -508,17 +627,9 @@ export default function App () {
 
       {playing && (
         <View style={styles.playerOverlay}>
-          <View style={styles.playerBar}>
-            <Pressable onPress={stopPlayback} style={styles.backBtn}>
-              <Text style={styles.backTxt}>‹ Back</Text>
-            </Pressable>
-            <Text style={styles.title} numberOfLines={1}>{playing.title}</Text>
-            <Pressable onPress={() => setSubPicker(true)} style={styles.backBtn}>
-              <Text style={styles.backTxt}>Subtitles</Text>
-            </Pressable>
-          </View>
-          <View
+          <Pressable
             style={styles.videoWrap}
+            onPress={() => (controlsOn ? setControlsOn(false) : poke())}
             onLayout={(e) => {
               const { width, height } = e.nativeEvent.layout
               wrapSizeRef.current = { w: width, h: height }
@@ -527,10 +638,9 @@ export default function App () {
             <VideoView
               style={styles.video}
               player={player}
-              nativeControls
-              // No native fullscreen: it presents a SEPARATE activity that the
-              // subtitle overlay and the Subtitles button cannot follow into.
-              // Rotation is the fullscreen story here - turn the phone.
+              // OFF on purpose - see the controls note above. Everything the
+              // native row offered is drawn below in one design.
+              nativeControls={false}
               allowsFullscreen={false}
               contentFit='contain'
             />
@@ -539,7 +649,66 @@ export default function App () {
                 <Text style={styles.cue}>{cueText}</Text>
               </View>
             )}
-          </View>
+
+            {/* box-none: the chrome rows catch their own taps, the empty
+                middle falls through to the show/hide Pressable above. */}
+            {controlsOn && (
+              <View style={styles.controls} pointerEvents='box-none'>
+                <View style={styles.ctlTop}>
+                  <Pressable onPress={stopPlayback} style={styles.ctlBtn} hitSlop={8}>
+                    <MaterialIcons name='arrow-back' size={26} color='#efe9df' />
+                  </Pressable>
+                  <Text style={styles.title} numberOfLines={1}>{playing.title}</Text>
+                  <Pressable onPress={() => { poke(); setSubPicker(true) }} style={styles.ctlBtn} hitSlop={8}>
+                    <MaterialIcons name='closed-caption' size={26} color={activeSub ? '#e2a13d' : '#efe9df'} />
+                  </Pressable>
+                </View>
+
+                <View style={styles.ctlCenter} pointerEvents='box-none'>
+                  {nav && (
+                    <Pressable disabled={!nav.hasPrev} onPress={() => navTo('prev')} style={[styles.ctlBtn, !nav.hasPrev && styles.ctlOff]} hitSlop={8}>
+                      <MaterialIcons name='skip-previous' size={40} color='#efe9df' />
+                    </Pressable>
+                  )}
+                  <Pressable onPress={() => jumpBy(-10)} style={styles.ctlBtn} hitSlop={8}>
+                    <MaterialIcons name='replay-10' size={34} color='#efe9df' />
+                  </Pressable>
+                  <Pressable onPress={togglePlay} style={styles.ctlBtn} hitSlop={12}>
+                    <MaterialIcons name={isPlaying ? 'pause-circle-filled' : 'play-circle-filled'} size={64} color='#efe9df' />
+                  </Pressable>
+                  <Pressable onPress={() => jumpBy(10)} style={styles.ctlBtn} hitSlop={8}>
+                    <MaterialIcons name='forward-10' size={34} color='#efe9df' />
+                  </Pressable>
+                  {nav && (
+                    <Pressable disabled={!nav.hasNext} onPress={() => navTo('next')} style={[styles.ctlBtn, !nav.hasNext && styles.ctlOff]} hitSlop={8}>
+                      <MaterialIcons name='skip-next' size={40} color='#efe9df' />
+                    </Pressable>
+                  )}
+                </View>
+
+                <View style={styles.ctlBottom}>
+                  <Text style={styles.ctlTime}>{fmtTime(scrub !== null ? scrub * clock.dur : clock.pos)}</Text>
+                  <View
+                    style={styles.seekWrap}
+                    onLayout={(e) => { seekBarWidth.current = e.nativeEvent.layout.width }}
+                    // The bar CLAIMS the gesture, or the tap-to-hide Pressable
+                    // underneath fires on release and the controls vanish the
+                    // moment a scrub ends.
+                    onStartShouldSetResponder={() => true}
+                    onResponderGrant={(e) => scrubAt(e.nativeEvent.locationX)}
+                    onResponderMove={(e) => scrubAt(e.nativeEvent.locationX)}
+                    onResponderRelease={scrubEnd}
+                    onResponderTerminate={scrubEnd}
+                  >
+                    <View style={styles.seekTrack}>
+                      <View style={[styles.seekFill, { width: `${Math.round(100 * (scrub !== null ? scrub : (clock.dur > 0 ? Math.min(1, clock.pos / clock.dur) : 0)))}%` }]} />
+                    </View>
+                  </View>
+                  <Text style={styles.ctlTime}>{fmtTime(clock.dur)}</Text>
+                </View>
+              </View>
+            )}
+          </Pressable>
 
           {subPicker && (
             <View style={styles.subPicker}>
@@ -587,9 +756,18 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0f0d0a' },
   web: { flex: 1, backgroundColor: '#0f0d0a' },
   playerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
-  playerBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 40, paddingHorizontal: 12, paddingBottom: 6 },
-  backBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e2820' },
-  backTxt: { color: '#efe9df', fontWeight: '600' },
+  controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'space-between' },
+  ctlTop: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 40, paddingHorizontal: 14, paddingBottom: 6 },
+  ctlCenter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 22 },
+  ctlBottom: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 18 },
+  ctlBtn: { padding: 4 },
+  ctlOff: { opacity: 0.35 },
+  ctlTime: { color: '#efe9df', fontVariant: ['tabular-nums'], fontSize: 12 },
+  // The touch target is much taller than the painted track, or a moving thumb
+  // is impossible to catch mid-film.
+  seekWrap: { flex: 1, height: 32, justifyContent: 'center' },
+  seekTrack: { height: 4, borderRadius: 2, backgroundColor: 'rgba(239,233,223,0.3)', overflow: 'hidden' },
+  seekFill: { height: 4, backgroundColor: '#e2a13d' },
   title: { color: '#efe9df', flex: 1 },
   videoWrap: { flex: 1 },
   video: { flex: 1 },
