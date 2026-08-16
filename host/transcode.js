@@ -52,7 +52,7 @@ function bitrateFor (width) {
 // The ffmpeg argv for one transcode, starting at `at` seconds. The measured
 // invocation from the proposal, plus everything the remux argv already learned the
 // hard way (one video and one audio stream, no chapters, no subtitles, delay_moov).
-function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0 }) {
+function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0, burn = null }) {
   const v = codec(media?.videoCodec)
   const hw = HW_DECODE.has(v)
 
@@ -62,8 +62,11 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
 
   // Hardware decode keeps the frames on the engine end to end; software decode
   // (MPEG-4 Part 2) produces CPU frames that `hwupload` hands to the engine. Both
-  // are input options and must sit before `-i`.
-  if (hw) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
+  // are input options and must sit before `-i`. BURN-IN always decodes in
+  // software - same graph and same reasoning as hls.js segmentArgs, where the
+  // measurements and the overlay_vaapi ban live.
+  if (burn) args.push('-vaapi_device', device)
+  else if (hw) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
   else args.push('-vaapi_device', device)
 
   // Input seek, same as remux: jump in the file rather than decoding to the seek
@@ -72,13 +75,25 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
   if (at > 0) args.push('-ss', String(at))
 
   args.push('-i', input)
-  args.push('-map', '0:v:0', '-map', '0:a:0?')
+  if (burn) {
+    const vw = Number(media?.width) || 0
+    const vh = Number(media?.height) || 0
+    const cw = Math.max(Number(burn.canvasWidth) || 1920, vw)
+    const ch = Math.max(Number(burn.canvasHeight) || 1080, vh)
+    const pad = vw && vh && (cw > vw || ch > vh)
+      ? `pad=${cw}:${ch}:(ow-iw)/2:(oh-ih)/2[p];[p]`
+      : ''
+    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]format=nv12,hwupload[out]`)
+    args.push('-map', '[out]', '-map', '0:a:0?')
+  } else {
+    args.push('-map', '0:v:0', '-map', '0:a:0?')
+  }
   args.push('-map_chapters', '-1')
 
   // `format=nv12` is the 10-bit answer: the library's HEVC is Main 10 and H.264
   // encode is 8-bit, so the engine converts as part of the scale. The software-decode
   // path converts on the CPU and uploads, which for SD content is a rounding error.
-  args.push('-vf', hw ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
+  if (!burn) args.push('-vf', hw ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
   args.push('-c:v', 'h264_vaapi', '-b:v', capBitrate(bitrateFor(media?.width), maxKbps))
 
   if (audio === 'copy') args.push('-c:a', 'copy')
