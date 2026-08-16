@@ -10,9 +10,10 @@
 # Sources:
 #   linux-x64, win32-x64  BtbN/FFmpeg-Builds "latest" release, the -lgpl variants.
 #   darwin-*              NO reliable prebuilt LGPL source (evermeet and most
-#                         others ship GPL). Build on the mac-mini or source one
-#                         deliberately; this script says so and skips rather than
-#                         quietly shipping a GPL binary into an MIT app.
+#                         others ship GPL). scripts/build-ffmpeg-mac.sh compiles
+#                         LGPL-clean binaries on the mac-mini instead. This
+#                         script says so and skips rather than quietly shipping
+#                         a GPL binary into an MIT app.
 #
 # Usage: bash scripts/fetch-ffmpeg.sh [linux|windows|all]   (default: all)
 
@@ -54,4 +55,5 @@ esac
 
 echo
 echo "NOTE: darwin binaries are NOT fetched - no trustworthy prebuilt LGPL source."
-echo "      Build on the mac-mini into vendor/ffmpeg/darwin-arm64/ before a mac release."
+echo "      Run scripts/build-ffmpeg-mac.sh instead - it compiles LGPL-clean binaries"
+echo "      on the mac-mini for both arches and pulls them into vendor/ffmpeg/."

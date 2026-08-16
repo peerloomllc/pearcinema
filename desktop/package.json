@@ -72,12 +72,6 @@
       "**/node_modules/*/build/Release/*.node",
       "**/node_modules/*/prebuilds/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "ffmpeg-staging",
-        "to": "ffmpeg"
-      }
-    ],
     "mac": {
       "category": "public.app-category.video",
       "target": [
@@ -105,6 +99,14 @@
         {
           "from": "installer/macos/com.peerloom.pearcinema.plist",
           "to": "com.peerloom.pearcinema.plist"
+        },
+        {
+          "from": "ffmpeg-staging/darwin-arm64",
+          "to": "ffmpeg/darwin-arm64"
+        },
+        {
+          "from": "ffmpeg-staging/darwin-x64",
+          "to": "ffmpeg/darwin-x64"
         }
       ],
       "identity": "22F9540D333EBFB4245EE11170F68A61E6E22689",
@@ -112,7 +114,13 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico"
+      "icon": "build/icon.ico",
+      "extraResources": [
+        {
+          "from": "ffmpeg-staging/win32-x64",
+          "to": "ffmpeg/win32-x64"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -138,6 +146,10 @@
         {
           "from": "installer/linux/pearcinema-host.service",
           "to": "pearcinema-host.service"
+        },
+        {
+          "from": "ffmpeg-staging/linux-x64",
+          "to": "ffmpeg/linux-x64"
         }
       ]
     },

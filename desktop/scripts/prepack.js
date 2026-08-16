@@ -109,30 +109,36 @@ function derefPeerloomHost () {
   console.log('[prepack] @peerloom/host symlink replaced with a real copy')
 }
 
+// Every platform dir the build config references gets created - package.json
+// maps each target's extraResources from its own ffmpeg-staging/<plat-arch>/,
+// so a Windows build never ships the Linux binaries and vice versa, and a
+// missing `from` never fails the pack. An empty dir just means that target
+// ships without bundled ffmpeg and leans on the system PATH.
+const FFMPEG_PLATFORMS = ['linux-x64', 'win32-x64', 'darwin-arm64', 'darwin-x64']
+
 function stageFfmpeg () {
   const staging = path.join(desktopDir, 'ffmpeg-staging')
   if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true })
-  fs.mkdirSync(staging, { recursive: true })
 
   const source = path.join(repoRoot, 'vendor', 'ffmpeg')
-  let staged = 0
-  if (fs.existsSync(source)) {
-    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue // README.md and friends
-      copyDir(path.join(source, entry.name), path.join(staging, entry.name),
-        { skipDirs: new Set(), skipNames: new Set() })
-      staged++
+  const staged = []
+  for (const plat of FFMPEG_PLATFORMS) {
+    const from = path.join(source, plat)
+    const to = path.join(staging, plat)
+    fs.mkdirSync(to, { recursive: true })
+    if (fs.existsSync(from)) {
+      copyDir(from, to, { skipDirs: new Set(), skipNames: new Set() })
+      staged.push(plat)
     }
   }
-  if (staged > 0) {
-    console.log(`[prepack] staged ffmpeg for ${staged} platform(s) → desktop/ffmpeg-staging/`)
+  if (staged.length > 0) {
+    console.log(`[prepack] staged ffmpeg: ${staged.join(', ')} → desktop/ffmpeg-staging/`)
   } else {
-    // Keep the dir non-empty: electron-builder skips empty extraResources dirs
-    // inconsistently across platforms, and a note beats an absent folder.
-    fs.writeFileSync(path.join(staging, 'MISSING.txt'),
-      'No bundled ffmpeg. Run desktop/scripts/fetch-ffmpeg.sh before building,\n' +
-      'or the packaged app will depend on a system-installed ffmpeg.\n')
-    console.log('[prepack] NO ffmpeg staged (vendor/ffmpeg is empty) - packaged app will need a system ffmpeg')
+    console.log('[prepack] NO ffmpeg staged (vendor/ffmpeg is empty) - packaged apps will need a system ffmpeg')
+  }
+  const missing = FFMPEG_PLATFORMS.filter((p) => !staged.includes(p))
+  if (missing.length > 0) {
+    console.log(`[prepack] ffmpeg absent for: ${missing.join(', ')} (fetch-ffmpeg.sh / build-ffmpeg-mac.sh fill these)`)
   }
 }
 
