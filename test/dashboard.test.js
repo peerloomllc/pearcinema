@@ -1100,3 +1100,34 @@ test('A CODE ALREADY UP COMES BACK WITH ITS QR, not an empty white panel', async
   await c.req('POST', '/api/pair/stop', { body: {} })
   assert.equal((await c.req('GET', '/api/state')).json.pairing.open, false)
 })
+
+test('the transcode cap is a dashboard setting, zero is the off switch, and typos are refused', async (t) => {
+  const { host, base } = await cinema(t)
+  const c = client(base)
+  await c.login(PASSWORD)
+
+  // The field's save: applied live, remembered as the dashboard's choice.
+  let res = await c.req('POST', '/api/transcode-cap', { body: { cap: 6 } })
+  assert.equal(res.status, 200)
+  assert.equal(res.json.cap, 6)
+  assert.equal(res.json.source, 'dashboard')
+  assert.equal(host.transcoder.maxConcurrent, 6)
+
+  const state = await c.req('GET', '/api/state')
+  assert.equal(state.json.transcodeCap.cap, 6)
+
+  // ZERO IS THE OFF SWITCH, and it must reach decide() as "no transcode" -
+  // honest refusals - not as starts bouncing off a closed pool as BUSY.
+  host.transcode = { available: true, reason: null }
+  assert.equal(host.transcodeOn(), true)
+  await c.req('POST', '/api/transcode-cap', { body: { cap: 0 } })
+  assert.equal(host.transcodeOn(), false)
+  assert.equal(host.transcode.available, true, 'the probe verdict itself is untouched')
+
+  // A cap of 200 is a typo, not a plan.
+  res = await c.req('POST', '/api/transcode-cap', { body: { cap: 99 } })
+  assert.equal(res.status, 400)
+  res = await c.req('POST', '/api/transcode-cap', { body: { cap: 'lots' } })
+  assert.equal(res.status, 400)
+  assert.equal(host.transcoder.maxConcurrent, 0, 'refusals change nothing')
+})
