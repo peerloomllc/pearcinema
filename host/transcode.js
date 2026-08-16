@@ -28,7 +28,17 @@ const DEVICE_DEFAULT = '/dev/dri/renderD128'
 // uploaded to the engine for encoding - and that is fine, deliberately: the AVI
 // shelf's MPEG-4 Part 2 is SD content whose software DECODE is cheap. The measured
 // hazard is the encode, and the encode is on the engine either way.
-const HW_DECODE = new Set(['h264', 'hevc', 'vp9', 'av1'])
+//
+// AV1 IS DELIBERATELY ABSENT, and it was in this set once (measured 2026-08-16).
+// The N100's engine decodes AV1 on paper, but the image's VA driver cannot hand
+// the decoded frames onward - every segment ffmpeg died with "Failed to inject
+// frame into filter network: Function not implemented", the phone received
+// nothing and the player starved with no duration and no error. It presented as
+// a PLAYER stall and cost a whole false trail through playlist arithmetic.
+// dav1d in software is fast, works everywhere, and the encode stays on the
+// engine. Re-adding av1 requires proving the whole segment pipeline on the
+// deployed image, not reading a spec sheet.
+const HW_DECODE = new Set(['h264', 'hevc', 'vp9'])
 
 // One rendition, the source's own resolution, bitrate by that resolution. Named by
 // WIDTH for the same reason items.resolutionLabel is: a scope-ratio film is 1920
