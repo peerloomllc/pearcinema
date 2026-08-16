@@ -85,6 +85,10 @@ export default function App () {
   // watch-state writes - the shell only reports positions, so there is exactly one
   // copy of the resume rules.
   const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number } | null>(null)
+  // Previous/Next episode availability, set by the UI (shell.navSet) once it
+  // has asked the host what sits on either side. The buttons only hand an
+  // intent back to the UI - which episode that intent lands on is its call.
+  const [nav, setNav] = useState<{ hasPrev: boolean, hasNext: boolean } | null>(null)
   const playingRef = useRef<typeof playing>(null)
   const lastPos = useRef(0)
 
@@ -316,8 +320,21 @@ export default function App () {
     }
     try { player.pause() } catch {}
     setPlaying(null)
+    setNav(null)
     setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
     cuesRef.current = []
+  }
+
+  // Previous/Next tapped: pause where we are and hand the intent to the UI,
+  // which knows the neighbours and answers with a fresh shell.play. The pause
+  // matters - the swap takes a host round trip and old frames playing on under
+  // new buttons reads as the tap not working.
+  const navTo = (direction: 'prev' | 'next') => {
+    const p = playingRef.current
+    if (!p) return
+    try { player.pause() } catch {}
+    const payload = JSON.stringify({ direction, itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
+    feedWebView(`window.__pearEvent && window.__pearEvent('player:nav', ${payload})`)
   }
 
   // The overlay's clock: the active cue, looked up from the player's own time a
@@ -383,6 +400,10 @@ export default function App () {
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
       const { itemId, url, title, startMs } = msg.args || {}
+      // A DIFFERENT item resets the episode buttons until the UI re-declares
+      // them. The same item replayed (the lying-chip transcode retry) keeps
+      // its buttons - the neighbours have not changed.
+      if (itemId !== playingRef.current?.itemId) setNav(null)
       setPlaying({ itemId, url, title: title || '', startMs })
       // A new film starts with no subtitles chosen and a fresh track list.
       setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
@@ -402,6 +423,15 @@ export default function App () {
     }
     if (msg.method === 'shell.stop') {
       stopPlayback()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    if (msg.method === 'shell.navSet') {
+      // Guarded by item: an answer that arrives after the person already moved
+      // on to something else must not put the wrong show's buttons up.
+      if (msg.args?.itemId === playingRef.current?.itemId) {
+        setNav({ hasPrev: !!msg.args?.hasPrev, hasNext: !!msg.args?.hasNext })
+      }
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }
@@ -541,6 +571,18 @@ export default function App () {
             )}
           </View>
 
+          {nav && (nav.hasPrev || nav.hasNext) && (
+            <View style={styles.navBar}>
+              <Pressable disabled={!nav.hasPrev} onPress={() => navTo('prev')} style={styles.backBtn}>
+                <Text style={[styles.backTxt, !nav.hasPrev && styles.navOff]}>‹ Previous episode</Text>
+              </Pressable>
+              <View style={{ flex: 1 }} />
+              <Pressable disabled={!nav.hasNext} onPress={() => navTo('next')} style={styles.backBtn}>
+                <Text style={[styles.backTxt, !nav.hasNext && styles.navOff]}>Next episode ›</Text>
+              </Pressable>
+            </View>
+          )}
+
           {subPicker && (
             <View style={styles.subPicker}>
               <View style={styles.subCard}>
@@ -588,6 +630,8 @@ const styles = StyleSheet.create({
   web: { flex: 1, backgroundColor: '#0f0d0a' },
   playerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   playerBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 40, paddingHorizontal: 12, paddingBottom: 6 },
+  navBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8 },
+  navOff: { opacity: 0.35 },
   backBtn: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#2e2820' },
   backTxt: { color: '#efe9df', fontWeight: '600' },
   title: { color: '#efe9df', flex: 1 },
