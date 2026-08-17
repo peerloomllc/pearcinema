@@ -648,6 +648,12 @@ button.icon.dens:disabled { opacity: .4; }
   background: var(--color-primary); color: var(--color-text-on-primary);
   border-radius: 9999px; font-size: 10px; font-weight: 700; line-height: 1;
 }
+/* Downloads running, on the You tab. A light rather than a count - progress
+   lives in You, Downloads and this only says "look there". */
+.navbar .ic .dot {
+  position: absolute; top: -3px; right: -5px; width: 8px; height: 8px;
+  border-radius: 9999px; background: var(--color-success);
+}
 button.more.danger {
   color: var(--color-error); display: inline-flex; align-items: center;
   justify-content: center; gap: .4rem;
