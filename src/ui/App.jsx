@@ -377,7 +377,7 @@ function CastSheet ({ sheet, hostCount, onPick, onClose }) {
         {sheet.targets !== null && !sheet.enabled && (
           <p className='muted'>
             No TVs are set up. Casting is turned on at the library's dashboard,
-            under Settings, Casting - it needs the Home Assistant on that machine.
+            under Settings, Casting. It needs the Home Assistant on that machine.
           </p>
         )}
         {sheet.targets !== null && sheet.enabled && sheet.targets.length === 0 && (
@@ -1859,9 +1859,8 @@ export default function App () {
           <div className='sheet' onClick={(e) => e.stopPropagation()}>
             <h3>Cut off {revoking.label || 'this device'}?</h3>
             <p className='muted sm'>
-              {revoking.belongsTo ? `${revoking.belongsTo}'s ` : ''}{revoking.platform || 'device'} loses
-              access within the second - anything it is streaming stops, and anything it put on a TV
-              goes dark. Pairing it again is the only way back in.
+              Access ends within the second. Anything it is streaming stops, and anything it put
+              on a TV goes dark. Pairing again is the only way back in.
             </p>
             <div className='acts'>
               <button
@@ -1870,7 +1869,7 @@ export default function App () {
                   const d = revoking
                   setRevoking(null)
                   call('device.revoke', { deviceKey: d.deviceKey })
-                    .then(() => { say('Cut off - within the second'); loadYou('manage') })
+                    .then(() => { say('Cut off within the second'); loadYou('manage') })
                     .catch((e) => setErr(e.message))
                 }}
               ><Prohibit size={18} /> Cut off</button>
