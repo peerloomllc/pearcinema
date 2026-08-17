@@ -74,7 +74,7 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
       <h3>Remote libraries</h3>
       <p class='hint'>
         Watch a library that lives on somebody else's server. On their dashboard,
-        open a pairing window and send you the link under the code - paste it here.
+        open a pairing window and send you the link under the code. Paste it here.
         They can cut this machine off any time, and your spot in a film is kept on
         their server like any other device's.
       </p>
@@ -82,7 +82,7 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
         <div class='rootlist'>
           {remotes.map(r => (
             <div class='rootrow' key={r.hostKey}>
-              <span class='rootpath'>{r.libraryName || 'Library'}{r.online ? '' : ' - offline'}</span>
+              <span class='rootpath'>{r.libraryName || 'Library'}{r.online ? '' : ' (offline)'}</span>
               <button onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
                 {source === r.libraryId ? 'Watching' : 'Watch'}
               </button>
@@ -274,7 +274,7 @@ function CastPanel () {
     <div class='card'>
       <h3>Casting</h3>
       <p class='hint'>
-        Send films from a phone to a TV - a Chromecast, a Google TV or a
+        Send films from a phone to a TV: a Chromecast, a Google TV or a
         television with Cast built in. PearCinema reaches them through the Home
         Assistant running on this same machine: paste a long-lived access token
         from your Home Assistant profile page. Only phones paired as owner can
@@ -288,7 +288,7 @@ function CastPanel () {
         />
       </div>
       <div class='field'>
-        <label>Access token{cfg.tokenSet ? ' (saved - leave empty to keep it)' : ''}</label>
+        <label>Access token{cfg.tokenSet ? ' (saved, leave empty to keep it)' : ''}</label>
         <input
           type='password' value={token}
           onInput={e => setToken(e.currentTarget.value)}
@@ -319,7 +319,7 @@ function CastPanel () {
           )}
           <p class='hint'>
             Phones offer all of these when casting. Speakers play a film's sound
-            only, so aim at the television - one that is off usually shows as
+            only, so aim at the television. One that is off usually shows as
             "off" or "unavailable" here until you turn it on.
           </p>
         </>
@@ -423,7 +423,7 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
             )}
             {src === 'explicit' && (
               <p class='hint'>
-                This password comes from the platform that installed PearCinema - on Umbrel it is
+                This password comes from the platform that installed PearCinema. On Umbrel it is
                 the app password shown next to PearCinema in your app list. Change it there, or a
                 restart would quietly put it back.
               </p>
@@ -458,7 +458,7 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
             {state.auth?.enabled && (
               <p class='hint'>
                 A browser stays logged in for a week. Log out everywhere else is for the
-                laptop you handed back - every other browser is out at once, this one stays.
+                laptop you handed back. Every other browser is out at once, and this one stays.
               </p>
             )}
           </div>
@@ -473,7 +473,7 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
               <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
               <p class='hint'>
                 That is this library's address on the network PearCinema uses. It is not a
-                secret, and it is not enough on its own to get in - a device also needs a
+                secret, and it is not enough on its own to get in. A device also needs a
                 grant, which only pairing creates.
               </p>
               <div class='actions'>
@@ -513,7 +513,7 @@ function SupportPanel () {
       <h3>Support development</h3>
       <p class='hint' style='text-align:center'>
         No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
-        helps keep it free - entirely optional.
+        helps keep it free, and it is entirely optional.
       </p>
       <div class='seg' style='max-width:22rem;margin:0 auto .9rem'>
         <button class={tab === 'ln' ? 'on' : ''} onClick={() => { setTab('ln'); setCopied(false) }}>Lightning</button>
@@ -829,7 +829,7 @@ export default function App () {
           {dlBusy > 0 && (
             <button
               class='iconbtn dlbusy'
-              aria-label={dlBusy === 1 ? 'One download running - see its progress' : dlBusy + ' downloads running - see their progress'}
+              aria-label={dlBusy === 1 ? 'One download running. See its progress' : dlBusy + ' downloads running. See their progress'}
               title={dlBusy === 1 ? 'One download running' : dlBusy + ' downloads running'}
               onClick={() => { location.hash = 'settings/remotes'; setTab('settings'); setPlaying(null) }}
             >

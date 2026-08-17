@@ -33,7 +33,7 @@ const CONTACT_URL = `mailto:${CONTACT_EMAIL}?subject=%5BPearCinema%5D%20Feedback
 
 const openUrl = (url) => { call('shell.openUrl', { url }).catch(() => {}) }
 const copyText = (text) => call('shell.clipboard', { text }).catch(() => {})
-const SHARE_TEXT = 'PearCinema - your films and TV, from your own machine or a friend\'s, playable anywhere. No port forwarding, no VPN, no account.\n\nhttps://peerloomllc.com/'
+const SHARE_TEXT = 'PearCinema. Your films and TV, from your own machine or a friend\'s, playable anywhere. No port forwarding, no VPN, no account.\n\nhttps://peerloomllc.com/'
 
 const fmtBytes = (n) => {
   const x = Number(n) || 0
@@ -508,7 +508,7 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
         <Wordmark />
         <p className='muted'>Your films, or a friend's. Anywhere.</p>
         <div className='namebox obwhy'>
-          <div><FilmStrip size={18} weight='bold' /><span>Plays straight off a computer you or a friend owns - an Umbrel, a NAS, an old desktop.</span></div>
+          <div><FilmStrip size={18} weight='bold' /><span>Plays straight off a computer you or a friend owns: an Umbrel, a NAS, an old desktop.</span></div>
           <div><LockKey size={18} weight='bold' /><span>No account, no cloud copy of the files, and nothing on that machine exposed to the internet.</span></div>
           <div><DeviceMobile size={18} weight='bold' /><span>Scan a code once and this phone is allowed in. Whoever runs the library can cut it off any time.</span></div>
         </div>
@@ -573,15 +573,15 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
               <div className='namebox'>
                 {owner === 'mine'
                   ? <p className='sm'>
-                      Install the PearCinema host on that computer and open its dashboard - it walks you
+                      Install the PearCinema host on that computer and open its dashboard. It walks you
                       through naming the library, pointing it at your films and showing a pairing code.
-                      Then come back here and scan it - or copy the pairing link under the code and paste
+                      Then come back here and scan it, or copy the pairing link under the code and paste
                       it instead, at the pairing step.
                     </p>
                   : <p className='sm'>
                       Ask them to open their PearCinema dashboard and press <b>Pair a device</b>. If you are
                       with them, scan the QR code it shows. If you are not, they can copy the pairing link
-                      underneath it and send it to you - you can paste that instead of scanning, at the
+                      underneath it and send it to you. You can paste that instead of scanning, at the
                       pairing step. Either way it lasts five minutes, and you do not have to be on their
                       wifi.
                     </p>}
@@ -602,10 +602,10 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
       <Wordmark />
       <p className='muted'>
         {addHost
-          ? 'Open the PearCinema dashboard on the server you want to add - yours or a friend\'s - and show its pairing code.'
+          ? 'Open the PearCinema dashboard on the server you want to add, yours or a friend\'s, and show its pairing code.'
           : owner === 'friend'
-            ? 'Scan the pairing code from their dashboard - or paste the link they sent you.'
-            : 'Show the pairing code on the server\'s dashboard and scan it - or paste the link under it.'}
+            ? 'Scan the pairing code from their dashboard, or paste the link they sent you.'
+            : 'Show the pairing code on the server\'s dashboard and scan it, or paste the link under it.'}
       </p>
       {error && <div className='error'>{error}</div>}
 
@@ -783,7 +783,7 @@ export default function App () {
       }),
       on('download:done', (d) => {
         setDlRunning((rows) => rows.filter((r) => r.itemId !== d.itemId))
-        say('Downloaded - plays with no connection now')
+        say('Downloaded. It plays with no connection now')
         loadYou('downloads')
       }),
       on('download:failed', (d) => {
@@ -1455,7 +1455,7 @@ export default function App () {
               ? (
                 <div className='center-p muted'>
                   <p>Nothing saved for offline.</p>
-                  <p className='sm'>Hold a film and choose Download - it plays with no connection once it is here.</p>
+                  <p className='sm'>Hold a film and choose Download. It plays with no connection once it is here.</p>
                 </div>
                 )
               : (
@@ -1581,7 +1581,7 @@ export default function App () {
           {ident.confirmed
             ? `The server has confirmed this device belongs to ${ident.belongsTo || ident.userName}.`
             : ident.belongsTo
-              ? `The server still has this device down as ${ident.belongsTo}. It is waiting to confirm you are ${ident.userName} - only the person running it can move a device to someone else.`
+              ? `The server still has this device down as ${ident.belongsTo}. It is waiting to confirm you are ${ident.userName}. Only the person running it can move a device to someone else.`
               : `Waiting for the server to confirm you are ${ident.userName}. Until then this is only a label.`}
         </div>
       )}
@@ -1593,7 +1593,7 @@ export default function App () {
               <Plus size={22} weight='bold' />
               <span>Add server</span>
             </button>
-            <button className='libact' aria-label='Pair as owner' title='Pair as owner - manage a server you run' onClick={() => setAddingLibrary(true)}>
+            <button className='libact' aria-label='Pair as owner' title='Pair as owner. Manage a server you run' onClick={() => setAddingLibrary(true)}>
               <UsersThree size={22} weight='bold' />
               <span>Pair as owner</span>
             </button>
@@ -1601,7 +1601,7 @@ export default function App () {
           {hosts.map((h) => {
             const online = h.active && linkUp
             const desc = h.active
-              ? (linkUp ? 'Active - connected' : 'Active - connecting…')
+              ? (linkUp ? 'Active, connected' : 'Active, connecting…')
               : 'Tap to switch to this library'
             return (
               <div
@@ -1635,7 +1635,7 @@ export default function App () {
           <OptionList
             options={[
               { value: 'auto', label: 'Full quality', desc: 'The file as it is; your box converts only when this phone cannot play it' },
-              { value: 'saver', label: 'Data saver', desc: 'Capped near 2.5 Mbps - your box converts bigger films down. For cellular and slow links' }
+              { value: 'saver', label: 'Data saver', desc: 'Capped near 2.5 Mbps. Your box converts bigger films down, for cellular and slow links.' }
             ]}
             value={dataSaver ? 'saver' : 'auto'}
             onChange={(v) => { setDataSaver(v === 'saver'); call('setSettings', { dataSaver: v === 'saver' }).catch(() => {}) }}
@@ -1676,7 +1676,7 @@ export default function App () {
             ))}
           </div>
           <div className='desc'>
-            A look laid over the player - sprocket holes and a film border, or a
+            A look laid over the player: sprocket holes and a film border, or a
             theater row of silhouettes. Just for fun, off by default.
           </div>
           {playerSkin === 'film' && (
@@ -1714,14 +1714,14 @@ export default function App () {
       <Section id='how' title='How it works' Icon={Info} open={aboutOpen === 'how'} onToggle={toggleAbout}>
         <p>
           PearCinema plays your films and shows straight off the machine they
-          already live on - an Umbrel, a NAS, an old desktop - over an encrypted
+          already live on (an Umbrel, a NAS, an old desktop) over an encrypted
           peer-to-peer connection. No port forwarding, no VPN, no dynamic DNS, no
           account, and no copy of your library in anyone's cloud.
         </p>
         <p>
           The machine does not have to be yours. Whoever runs a library can let a
           friend or family member in, each as their own person with their own
-          devices, watchlist and resume points - no login to pass around, and no
+          devices, watchlist and resume points. No login to pass around, and no
           copy of a single file.
         </p>
         <p>
@@ -1837,7 +1837,7 @@ export default function App () {
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched} onCast={openCast}
           onDownload={(i, want) => {
             if (want) {
-              call('download.start', { itemId: i.id }).then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading - watch it in You, Downloads') }).catch((e) => setErr(e.message))
+              call('download.start', { itemId: i.id }).then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading. Watch it in You, Downloads') }).catch((e) => setErr(e.message))
             } else {
               call('download.remove', { itemId: i.id }).then(() => { setDlIds((x) => { const n = new Set(x); n.delete(i.id); return n }); say('Removed from this phone') })
             }
@@ -1889,7 +1889,7 @@ export default function App () {
               const kind = e.currentTarget.elements.kind.value
               if (!name) return
               call('request.add', { kind, name })
-                .then(() => { setAskTitle(false); say('Asked - the owner will see it'); loadYou('requests') })
+                .then(() => { setAskTitle(false); say('Asked. The owner will see it'); loadYou('requests') })
                 .catch((er) => setErr(er.message))
             }}>
               <input name='rq' className='search' placeholder='Title' autoFocus />
@@ -1936,7 +1936,7 @@ export default function App () {
                   <button
                     className='dirtoggle'
                     onClick={() => setDisplay({ sortOrder: sortOrder === 'asc' ? 'desc' : 'asc' })}
-                    aria-label={sortOrder === 'asc' ? 'Ascending - tap for descending' : 'Descending - tap for ascending'}
+                    aria-label={sortOrder === 'asc' ? 'Ascending. Tap for descending' : 'Descending. Tap for ascending'}
                   >
                     {sortOrder === 'desc' ? <ArrowDown size={15} weight='bold' /> : <ArrowUp size={15} weight='bold' />}
                     {sortOrder === 'asc' ? 'Ascending' : 'Descending'}

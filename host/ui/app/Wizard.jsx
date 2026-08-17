@@ -141,7 +141,7 @@ export default function Wizard ({ state, reload, onDone, onRemotePaired = null }
               buttons below are for everybody else: no key yet, or no thanks. */}
           <Metadata embedded onEnabled={advance} />
           <div class='confirm-actions'>
-            <button class='ghost' onClick={advance}>Skip - artwork beside my files is enough</button>
+            <button class='ghost' onClick={advance}>Skip, artwork beside my files is enough</button>
             <button onClick={advance}>Next</button>
           </div>
         </>

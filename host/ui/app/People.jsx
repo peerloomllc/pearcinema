@@ -42,7 +42,7 @@ function DeviceRow ({ d, persons, reload }) {
   const forget = async () => {
     const ok = await askConfirm({
       title: 'Remove this row?',
-      message: 'Tidying only - this device is already cut off. Removing the row just stops the list growing forever.',
+      message: 'Tidying only, since this device is already cut off. Removing the row just stops the list growing forever.',
       confirmLabel: 'Remove'
     })
     if (!ok) return
@@ -175,7 +175,7 @@ export default function People ({ state, reload }) {
     const theirs = holds(p)
     const ok = await askConfirm({
       title: `Cut off ${p.label}?`,
-      message: `Every device they hold loses access immediately${theirs ? ` - that is ${theirs} device${theirs === 1 ? '' : 's'}` : ''}.`,
+      message: `Every device they hold loses access immediately${theirs ? `. That is ${theirs} device${theirs === 1 ? '' : 's'}` : ''}.`,
       confirmLabel: 'Cut them off',
       danger: true
     })
@@ -234,7 +234,7 @@ export default function People ({ state, reload }) {
 
       {nobody && (
         <p class='hint'>
-          Nobody yet. Use <b>Pair a device</b> to let a phone in - or add a person here,
+          Nobody yet. Use <b>Pair a device</b> to let a phone in, or add a person here,
           so what they watch is kept separately from what you do.
         </p>
       )}

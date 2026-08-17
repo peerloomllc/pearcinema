@@ -241,7 +241,7 @@ function FixMatch ({ item, onClose, onFixed }) {
   }
 
   return (
-    <Modal title={'Fix the match - ' + item.title} onClose={onClose} wide>
+    <Modal title={'Fix the match: ' + item.title} onClose={onClose} wide>
       <div class='fixbody'>
       <p class='hint'>
         Pick the right one and its poster replaces the guess. If the name on the file is
@@ -675,7 +675,7 @@ export default function Library ({
       api('/api/metadata').then(m => {
         if (m?.error) return
         notify('Artwork fetched', `${m.matched} title${m.matched === 1 ? ' has' : 's have'} posters now` +
-          (m.uncertain ? `, ${m.uncertain} matched from several possibilities - hover a tile and use the pencil to correct one` : '') + '.')
+          (m.uncertain ? `, ${m.uncertain} matched from several possibilities. Hover a tile and use the pencil to correct one` : '') + '.')
       })
     }
     wasRunning.current = !!artRunning
