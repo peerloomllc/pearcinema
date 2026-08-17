@@ -57,6 +57,7 @@ function capsFromQuery (url) {
 }
 const watch = require('../watch')
 const subtitleRules = require('../subtitles')
+const mergeLib = require('../../src/merge')
 
 // A bounded fan over the wire: the remote rollups ask one episode list per
 // series, and a library of shows should neither go one-at-a-time nor open
@@ -668,6 +669,190 @@ async function startDashboard ({
         const out = await remote.remove(String(hostKey))
         if (leaving && dls) dls.removeLib(leaving.libraryId)
         return json(res, 200, out)
+      }
+
+      // --- THE BLEND (approved proposal 2026-08-17) ----------------------------
+      //
+      // All libraries as one collection: the index answers what it holds, and
+      // everything that touches BYTES or WRITES state redirects (307, which
+      // keeps the method, the body and a Range header) to the owning twin
+      // with the copy's own id - one implementation of every route, the
+      // base-prefix trick one more time.
+      const blend = host.blend || null
+
+      if (blend && req.method === 'GET' && url.pathname === '/api/blend') {
+        await blend.ready().catch(() => {})
+        return json(res, 200, {
+          available: blend.available(),
+          builtAt: blend.builtAt,
+          libraries: [...blend.contributed],
+          movies: blend.index?.movies.length || 0,
+          series: blend.index?.series.length || 0
+        })
+      }
+
+      const bmatch = blend && /^\/blend(\/.+)$/.exec(url.pathname)
+      if (bmatch) {
+        const sub = bmatch[1]
+        await blend.ready().catch(() => {})
+        if (!blend.available()) return json(res, 409, { error: 'the blend needs two libraries with films in them' })
+
+        const localLib = blend.localLibraryId()
+        // Where a real id lives, as a redirect base - '' is this box's own.
+        const baseFor = (lib) => (lib === localLib ? '' : `/remote/${lib}`)
+        const redirect = (target) => {
+          res.writeHead(307, { location: target })
+          return res.end()
+        }
+
+        if (req.method === 'GET' && sub === '/api/library/list') {
+          const out = blend.list({
+            type: url.searchParams.get('type') || 'movies',
+            seriesId: url.searchParams.get('seriesId'),
+            seasonId: url.searchParams.get('seasonId'),
+            sort: url.searchParams.get('sort'),
+            order: url.searchParams.get('order'),
+            limit: url.searchParams.get('limit'),
+            cursor: url.searchParams.get('cursor')
+          })
+          if (out) return json(res, 200, out)
+          // A REAL season or series id rather than a merged one: the tree
+          // navigates with the primary copy's ids, so its owner answers.
+          const anchor = url.searchParams.get('seasonId') || url.searchParams.get('seriesId')
+          const lib = blend.ownerOf(anchor)
+          if (!lib) return json(res, 404, { error: 'no such item' })
+          return redirect(`${baseFor(lib)}/api/library/list?${url.searchParams.toString()}`)
+        }
+
+        if (req.method === 'GET' && sub === '/api/library/search') {
+          return json(res, 200, blend.search(url.searchParams.get('q') || '', url.searchParams.get('limit')))
+        }
+
+        // Bytes go to their owner. Art by artId's owner; streams and remux by
+        // THE PICK - local wins, then the best remote copy for this browser.
+        if (req.method === 'GET' && sub === '/api/art') {
+          const artId = url.searchParams.get('id')
+          const lib = blend.artOwnerOf(artId)
+          if (!lib) { res.writeHead(404); return res.end() }
+          return redirect(`${baseFor(lib)}/api/art?${url.searchParams.toString()}`)
+        }
+        if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/stream') {
+          const pick = blend.pickCopy(url.searchParams.get('id'))
+          if (!pick) return json(res, 404, { error: 'no such item' })
+          const q = new URLSearchParams(url.searchParams)
+          q.set('id', pick.id)
+          return redirect(`${baseFor(pick.libraryId)}/api/stream?${q.toString()}`)
+        }
+        if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/remux') {
+          const pick = blend.pickCopy(url.searchParams.get('id'), capsFromQuery(url))
+          if (!pick) return json(res, 404, { error: 'no such item' })
+          const q = new URLSearchParams(url.searchParams)
+          q.set('id', pick.id)
+          return redirect(`${baseFor(pick.libraryId)}/api/remux?${q.toString()}`)
+        }
+        if (req.method === 'GET' && (sub === '/api/subtitles' || sub === '/api/subtitle')) {
+          const lib = blend.ownerOf(url.searchParams.get('itemId'))
+          if (!lib) return json(res, 404, { error: 'no such item' })
+          return redirect(`${baseFor(lib)}${sub}?${url.searchParams.toString()}`)
+        }
+
+        // Keep a copy HERE: refused for films already on this disk (a copy
+        // for nothing), routed to the picked remote copy otherwise.
+        if (req.method === 'POST' && sub === '/api/download') {
+          const { itemId, capabilities } = await readBody(req)
+          const pick = blend.pickCopy(String(itemId || ''), capabilities || null)
+          if (!pick) return json(res, 404, { error: 'no such item' })
+          if (pick.local) return json(res, 400, { error: 'this one is already on this machine' })
+          if (!dls) return json(res, 501, { error: 'no downloads on this host' })
+          try {
+            return json(res, 200, await dls.start(pick.libraryId, pick.id, capabilities || {}))
+          } catch (e) {
+            return json(res, 400, { error: e.message })
+          }
+        }
+
+        // Asks fan to every REMOTE at once - a note to self is not a request.
+        if (req.method === 'GET' && sub === '/api/requests') {
+          const rows = []
+          await Promise.all(host.remote.state.hosts.map(async (h) => {
+            try {
+              const r = await host.remote.call(h.libraryId, 'request.list', {})
+              for (const row of r?.items || []) rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
+            } catch {}
+          }))
+          return json(res, 200, { items: mergeLib.collapseRequests(rows) })
+        }
+        if (req.method === 'POST' && sub === '/api/request') {
+          const { kind, name } = await readBody(req)
+          if (!name || !['movie', 'series'].includes(kind)) return json(res, 400, { error: 'kind and name required' })
+          let out = null
+          let ok = 0
+          await Promise.all(host.remote.state.hosts.map(async (h) => {
+            try { out = await host.remote.call(h.libraryId, 'request.add', { kind, name: String(name) }); ok++ } catch {}
+          }))
+          if (!ok) return json(res, 400, { error: 'no library reachable to ask' })
+          return json(res, 200, out)
+        }
+        if (req.method === 'POST' && sub === '/api/request/remove') {
+          const { id, refs } = await readBody(req)
+          const targets = mergeLib.requestTargets({ refs, id }, { pendingOnly: false })
+          let ok = 0
+          await Promise.all(targets.map(async (t) => {
+            try { await host.remote.call(t.libraryId, 'request.remove', { id: t.id }); ok++ } catch {}
+          }))
+          if (!ok) return json(res, 400, { error: 'no library reachable for that' })
+          return json(res, 200, { ok: true })
+        }
+
+        // Watch state: read as a union with every id translated to the copy
+        // the blend SHOWS (the primary), same-film positions collapsed newest
+        // first - the proposal's open question 2, answered as recommended.
+        // Writes go to the id's OWNER via redirect; the fan is phase 2.
+        if (req.method === 'GET' && sub === '/api/watch/state') {
+          const cont = []
+          const watched = new Set()
+
+          const who = await watcher(req)
+          if (who.owner) {
+            for (const id of await host.userState.watchedSet(who.owner)) watched.add(blend.primaryIdFor(id))
+            for (const r of await host.userState.listResume(who.owner, 20)) {
+              const item = blend.entityFor(r.itemId) || await host.adapter.get({ id: r.itemId }).catch(() => null)
+              if (item) cont.push({ ...item, id: blend.primaryIdFor(r.itemId), resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
+            }
+          }
+          await Promise.all(host.remote.state.hosts.map(async (h) => {
+            try {
+              const [rc, rw] = await Promise.all([
+                host.remote.call(h.libraryId, 'resume.list', { limit: 20 }),
+                host.remote.call(h.libraryId, 'watched.list', {})
+              ])
+              for (const id of rw?.items || []) watched.add(blend.primaryIdFor(id))
+              for (const row of rc?.items || []) {
+                const item = blend.entityFor(row.id) || row
+                cont.push({ ...item, id: blend.primaryIdFor(row.id), resume: row.resume })
+              }
+            } catch {}
+          }))
+
+          // One card per film: the newest position wins across libraries.
+          cont.sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
+          const seenIds = new Set()
+          const merged = cont.filter((i) => (seenIds.has(i.id) ? false : (seenIds.add(i.id), true)))
+
+          return json(res, 200, { watching: null, choose: [], watched: [...watched], continue: merged.slice(0, 20) })
+        }
+        if (req.method === 'POST' && (sub === '/api/watch/position' || sub === '/api/watch/watched')) {
+          const body = await readBody(req)
+          const lib = blend.ownerOf(String(body.itemId || ''))
+          if (!lib) return json(res, 404, { error: 'no such item' })
+          // Re-serialize the body into the redirect? A 307 replays the
+          // ORIGINAL body, which is exactly what the owner expects.
+          return redirect(`${baseFor(lib)}${sub}`)
+        }
+        if (req.method === 'GET' && sub === '/api/watch/shows') return json(res, 200, { shows: {} })
+        if (req.method === 'GET' && sub === '/api/watch/seasons') return json(res, 200, {})
+
+        return json(res, 404, { error: 'no such blend route' })
       }
 
       const rmatch = remote && /^\/remote\/([a-z0-9]+)(\/.+)$/.exec(url.pathname)

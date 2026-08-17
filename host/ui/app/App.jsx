@@ -613,6 +613,8 @@ export default function App () {
   // base and remounts the library - the control plane stays local throughout.
   const [remotes, setRemotes] = useState([])
   const [source, setSource] = useState('')
+  // Whether the blend exists - two or more libraries holding anything.
+  const [blendOn, setBlendOn] = useState(false)
   // How many downloads are running, for the topbar indicator.
   const [dlBusy, setDlBusy] = useState(0)
   // The theme lives up here now rather than inside Settings: it is a light switch, and
@@ -637,7 +639,13 @@ export default function App () {
   const reload = useCallback(async () => {
     const s = await api('/api/state')
     setState(s)
-    api('/api/remote/list').then(r => { if (Array.isArray(r?.remotes)) setRemotes(r.remotes) }).catch(() => {})
+    api('/api/remote/list').then(r => {
+      if (Array.isArray(r?.remotes)) setRemotes(r.remotes)
+      // The blend option follows the membership - and asking keeps the index
+      // warm, since the ready() behind this is what rebuilds a stale one.
+      if ((r?.remotes || []).length) api('/api/blend').then(b => setBlendOn(!!b?.available)).catch(() => {})
+      else setBlendOn(false)
+    }).catch(() => {})
     // Whether anything is downloading, for the topbar's indicator (Tim,
     // 2026-08-17) - rides the same 8s poll the rest of the bar lives on.
     api('/api/downloads').then(r => setDlBusy((r?.items || []).filter(d => d.downloading).length)).catch(() => {})
@@ -650,9 +658,15 @@ export default function App () {
   // has already captured their bindings - touching one from that closure is
   // the temporal dead zone, and it took the whole page down (the third TDZ
   // of 2026-08-17; everything a top-level effect calls now lives above it).
+  //
+  // '_blend' is the third value of the base trick: '' this box, a libraryId
+  // one remote, '_blend' all of them as one collection. The choice is
+  // remembered per browser - how somebody likes to look at their libraries
+  // is not the host's business.
   const pickSource = (lib) => {
     setSource(lib)
-    setRemoteBase(lib ? '/remote/' + lib : '')
+    setRemoteBase(lib === '_blend' ? '/blend' : lib ? '/remote/' + lib : '')
+    try { localStorage.setItem('pearcinema.library', lib) } catch {}
     setPlaying(null)
     setSearch('')
     reloadWatch()
@@ -670,7 +684,25 @@ export default function App () {
     reload().then(async s => {
       const r = await api('/api/remote/list').catch(() => null)
       const remoteLibs = r?.remotes || []
-      if (s?.source?.kind === 'empty' && remoteLibs.length) pickSource(remoteLibs[0].libraryId)
+      const b = remoteLibs.length ? await api('/api/blend').catch(() => null) : null
+      if (b?.available) setBlendOn(true)
+
+      // Where to open: the remembered choice when it is still valid, else
+      // the blend when there is one (All by default, the phone's rule), else
+      // the client-only fallback onto the friend's library.
+      let stored = null
+      try { stored = localStorage.getItem('pearcinema.library') } catch {}
+      const storedValid = stored === '' ||
+        (stored === '_blend' && b?.available) ||
+        remoteLibs.some(x => x.libraryId === stored)
+      if (stored !== null && storedValid) {
+        if (stored !== '') pickSource(stored)
+      } else if (b?.available) {
+        pickSource('_blend')
+      } else if (s?.source?.kind === 'empty' && remoteLibs.length) {
+        pickSource(remoteLibs[0].libraryId)
+      }
+
       if (!needsSetup(s) || setupDismissed()) return
       if (!remoteLibs.length) setWizard(true)
     })
@@ -752,6 +784,7 @@ export default function App () {
             aria-label='Which library to watch'
             onChange={e => pickSource(e.currentTarget.value)}
           >
+            {blendOn && <option value='_blend'>All libraries</option>}
             <option value=''>{state.library || 'My library'}</option>
             {remotes.map(r => (
               <option key={r.libraryId} value={r.libraryId}>
