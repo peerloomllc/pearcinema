@@ -70,6 +70,23 @@ async function eachLimit (rows, limit, fn) {
   await Promise.all(workers)
 }
 
+// Mark one remote id watched, expanding a show or a season to its episodes -
+// the local route's rule, fanned over the wire because watched.set is per
+// item. Shared by the remote twin and the blend's write fan.
+async function remoteWatched (remote, lib, id, on) {
+  const item = await remote.call(lib, 'library.get', { id }).catch(() => null)
+  if (item && (item.type === 'series' || item.type === 'season')) {
+    const eps = (await remote.call(lib, 'library.list', {
+      type: 'episodes',
+      ...(item.type === 'series' ? { seriesId: item.id } : { seasonId: item.id }),
+      limit: 500
+    })).items || []
+    await eachLimit(eps, 8, (e) => remote.call(lib, 'watched.set', { itemId: e.id, watched: on }))
+    return { ok: true, watched: on, items: eps.length }
+  }
+  return remote.call(lib, 'watched.set', { itemId: id, watched: on })
+}
+
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
 const LOGIN_PAGE = require('./login')
 
@@ -841,16 +858,123 @@ async function startDashboard ({
 
           return json(res, 200, { watching: null, choose: [], watched: [...watched], continue: merged.slice(0, 20) })
         }
-        if (req.method === 'POST' && (sub === '/api/watch/position' || sub === '/api/watch/watched')) {
-          const body = await readBody(req)
-          const lib = blend.ownerOf(String(body.itemId || ''))
-          if (!lib) return json(res, 404, { error: 'no such item' })
-          // Re-serialize the body into the redirect? A 307 replays the
-          // ORIGINAL body, which is exactly what the owner expects.
-          return redirect(`${baseFor(lib)}${sub}`)
+        // THE WRITE FAN (phase 2): a position or a mark lands on EVERY library
+        // holding the film - one host of two with the mark is a shelf that
+        // disagrees with itself depending on who answers first, the phone's
+        // shipped lesson. Best-effort per library, ok when ANY landed; an
+        // offline member catches up the next time the state is written.
+        if (req.method === 'POST' && sub === '/api/watch/position') {
+          const { itemId, positionMs, ended } = await readBody(req)
+          const refs = blend.copyRefs(String(itemId || ''))
+          if (!refs.length) return json(res, 404, { error: 'no such item' })
+          let ok = 0
+          await Promise.all(refs.map(async (ref) => {
+            try {
+              if (ref.libraryId === localLib) {
+                const who = await watcher(req, { create: true })
+                if (!who.owner) return
+                const item = await host.adapter.get({ id: ref.id })
+                if (!item) return
+                const v = watch.decide({ positionMs, runtimeSeconds: item.runtime, ended: !!ended })
+                if (v.finished) await host.userState.setWatched(who.owner, ref.id, true, { auto: true })
+                await host.userState.setResume(who.owner, ref.id, v.positionMs, v.durationMs, { playedAt: Date.now() })
+              } else {
+                await host.remote.call(ref.libraryId, 'resume.set', { itemId: ref.id, positionMs: Number(positionMs) || 0, ended: !!ended })
+              }
+              ok++
+            } catch {}
+          }))
+          return json(res, 200, { ok: ok > 0, landed: ok, of: refs.length })
         }
-        if (req.method === 'GET' && sub === '/api/watch/shows') return json(res, 200, { shows: {} })
-        if (req.method === 'GET' && sub === '/api/watch/seasons') return json(res, 200, {})
+
+        if (req.method === 'POST' && sub === '/api/watch/watched') {
+          const { itemId, watched: on } = await readBody(req)
+          const yes = on !== false
+          const id = String(itemId || '')
+
+          // CONTAINERS EXPAND IN THE BLEND: a merged season or series becomes
+          // its merged episodes, and each episode fans to its own copies -
+          // which is the only reading under which "mark the season" is true
+          // on every library at once, spanning shows included.
+          const parsed = mergeLib.parseMergedSeasonId(id)
+          const series = parsed ? null : blend.seriesFor(id)
+          let leafRefs
+          if (parsed) {
+            leafRefs = (mergeLib.episodesFor(blend.index, parsed.seriesKey, parsed.seasonNumber, parsed.seasonTitle) || [])
+              .flatMap((e) => blend.copyRefs(e.id))
+          } else if (series) {
+            leafRefs = (mergeLib.seriesRun(blend.index, series.key) || [])
+              .flatMap((e) => blend.copyRefs(e.id))
+          } else {
+            leafRefs = blend.copyRefs(id)
+          }
+          if (!leafRefs.length) return json(res, 404, { error: 'no such item' })
+
+          const who = await watcher(req, { create: true })
+          let ok = 0
+          await eachLimit(leafRefs, 8, async (ref) => {
+            try {
+              if (ref.libraryId === localLib) {
+                if (!who.owner) return
+                await host.userState.setWatched(who.owner, ref.id, yes, { auto: false })
+                if (yes) await host.userState.setResume(who.owner, ref.id, 0, null)
+              } else {
+                await host.remote.call(ref.libraryId, 'watched.set', { itemId: ref.id, watched: yes })
+              }
+              ok++
+            } catch {}
+          })
+          return json(res, 200, { ok: ok > 0, watched: yes, items: leafRefs.length })
+        }
+
+        // THE MERGED ROLLUPS (phase 2): ticks computed over the BLENDED
+        // episode runs with the watched and resumed sets unioned across every
+        // library and translated to the ids the blend shows - a season split
+        // across two servers rolls up as one season, which neither alone
+        // could say.
+        const unionWatch = async () => {
+          const watchedSet = new Set()
+          const resumed = new Set()
+          const who = await watcher(req)
+          if (who.owner) {
+            for (const wid of await host.userState.watchedSet(who.owner)) watchedSet.add(blend.primaryIdFor(wid))
+            for (const r of await host.userState.listResume(who.owner, 200)) resumed.add(blend.primaryIdFor(r.itemId))
+          }
+          await Promise.all(host.remote.state.hosts.map(async (h) => {
+            try {
+              const [rw, rc] = await Promise.all([
+                host.remote.call(h.libraryId, 'watched.list', {}),
+                host.remote.call(h.libraryId, 'resume.list', { limit: 200 })
+              ])
+              for (const wid of rw?.items || []) watchedSet.add(blend.primaryIdFor(wid))
+              for (const row of rc?.items || []) resumed.add(blend.primaryIdFor(row.id))
+            } catch {}
+          }))
+          return { watchedSet, resumed }
+        }
+
+        if (req.method === 'GET' && sub === '/api/watch/shows') {
+          const { watchedSet, resumed } = await unionWatch()
+          const shows = {}
+          for (const s of blend.index?.series || []) {
+            shows[s.id] = watch.rollup(mergeLib.seriesRun(blend.index, s.key) || [], watchedSet, resumed)
+          }
+          return json(res, 200, { shows })
+        }
+        if (req.method === 'GET' && sub === '/api/watch/seasons') {
+          const s = blend.seriesFor(url.searchParams.get('seriesId'))
+          if (!s) return json(res, 200, { seasons: {} })
+          const { watchedSet, resumed } = await unionWatch()
+          const seasons = {}
+          for (const row of mergeLib.seasonsFor(blend.index, s.key) || []) {
+            const parsed = mergeLib.parseMergedSeasonId(row.id)
+            const eps = parsed
+              ? mergeLib.episodesFor(blend.index, parsed.seriesKey, parsed.seasonNumber, parsed.seasonTitle) || []
+              : []
+            seasons[row.id] = watch.rollup(eps, watchedSet, resumed)
+          }
+          return json(res, 200, { seasons })
+        }
 
         return json(res, 404, { error: 'no such blend route' })
       }
@@ -927,30 +1051,18 @@ async function startDashboard ({
           })
         }
         if (req.method === 'POST' && sub === '/api/watch/position') {
-          const { itemId, positionMs, finished } = await readBody(req)
+          // `ended`, matching what the page sends and what the wire reads -
+          // this used to read `finished` and forward a field resume.set
+          // ignores, so the credits moment never traveled (caught building
+          // the blend's write fan, 2026-08-17).
+          const { itemId, positionMs, ended } = await readBody(req)
           if (!itemId) return json(res, 400, { error: 'itemId required' })
-          return json(res, 200, await remote.call(lib, 'resume.set', { itemId: String(itemId), positionMs: Number(positionMs) || 0, finished: !!finished }))
+          return json(res, 200, await remote.call(lib, 'resume.set', { itemId: String(itemId), positionMs: Number(positionMs) || 0, ended: !!ended }))
         }
         if (req.method === 'POST' && sub === '/api/watch/watched') {
           const { itemId, watched } = await readBody(req)
           if (!itemId) return json(res, 400, { error: 'itemId required' })
-          const on = watched !== false
-          const id = String(itemId)
-
-          // MARKING A SHOW OR A SEASON MARKS ITS EPISODES, the local route's
-          // rule exactly - the wire's watched.set is per item, so the fan
-          // happens here, bounded the same way the rollups are.
-          const item = await remote.call(lib, 'library.get', { id }).catch(() => null)
-          if (item && (item.type === 'series' || item.type === 'season')) {
-            const eps = (await remote.call(lib, 'library.list', {
-              type: 'episodes',
-              ...(item.type === 'series' ? { seriesId: item.id } : { seasonId: item.id }),
-              limit: 500
-            })).items || []
-            await eachLimit(eps, 8, (e) => remote.call(lib, 'watched.set', { itemId: e.id, watched: on }))
-            return json(res, 200, { ok: true, watched: on, items: eps.length })
-          }
-          return json(res, 200, await remote.call(lib, 'watched.set', { itemId: id, watched: on }))
+          return json(res, 200, await remoteWatched(remote, lib, String(itemId), watched !== false))
         }
 
         // HOW MUCH OF EACH SHOW IS LEFT, over the wire - one episode list per

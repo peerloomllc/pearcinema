@@ -59,14 +59,46 @@ const L_ONLY = items.movie({
   media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', size: 11 }
 })
 
-function adapterOf (rows, bytesById) {
+// THE SPANNING SHOW, the blend's flagship case: episode one lives on the
+// friend, episode two on the local disk, and only the blend can say the
+// season is two episodes long.
+function spanEpisode (side, n) {
+  return items.episode({
+    id: side + 'ep' + n,
+    seriesId: side + 'span',
+    seasonId: side + 'spanS1',
+    seriesTitle: 'The Span',
+    seasonNumber: 1,
+    episodeNumber: n,
+    title: 'Part ' + n,
+    runtime: 1500,
+    media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', size: 90 }
+  })
+}
+function spanSeries (side) {
+  return items.series({ id: side + 'span', title: 'The Span', seasonCount: 1, episodeCount: 1 })
+}
+
+function adapterOf (rows, bytesById, { series = [], episodes = [] } = {}) {
   return {
     kind: 'test',
     async ping () { return { ok: true, detail: 'test' } },
     async scan () { return rows.length },
-    async stats () { return { movies: rows.length, series: 0, seasons: 0, episodes: 0, source: 'test' } },
-    async list ({ type }) { return type === 'movies' ? items.page(rows, {}) : items.page([], {}) },
-    async get ({ id }) { return rows.find((r) => r.id === id) || null },
+    async stats () { return { movies: rows.length, series: series.length, seasons: series.length, episodes: episodes.length, source: 'test' } },
+    async list ({ type, seriesId = null, seasonId = null }) {
+      if (type === 'movies') return items.page(rows, {})
+      if (type === 'series') return items.page(series, {})
+      if (type === 'episodes') {
+        return items.page(episodes.filter((e) =>
+          (!seriesId || e.seriesId === seriesId) && (!seasonId || e.seasonId === seasonId)
+        ), {})
+      }
+      return items.page([], {})
+    },
+    async get ({ id }) {
+      return rows.find((r) => r.id === id) || series.find((s) => s.id === id) ||
+        episodes.find((e) => e.id === id) || null
+    },
     async search ({ q }) { return { items: rows.filter((r) => r.title.toLowerCase().includes(String(q).toLowerCase())) } },
     async art () { return null },
     async subtitles () { return [] },
@@ -87,13 +119,17 @@ async function rig (t) {
   const friend = new PearCinemaHost({
     dataDir: dirA, libraryName: 'The Friend', bootstrap: testnet.bootstrap, log: () => {}
   })
-  friend.adapter = adapterOf([F_SHARED, F_ONLY], { fshared: REMOTE_BYTES, fonly: ONLY_BYTES })
+  friend.adapter = adapterOf([F_SHARED, F_ONLY], { fshared: REMOTE_BYTES, fonly: ONLY_BYTES }, {
+    series: [spanSeries('f')], episodes: [spanEpisode('f', 1)]
+  })
   await friend.ready()
 
   const desktop = new PearCinemaHost({
     dataDir: dirB, libraryName: 'The Desktop', bootstrap: testnet.bootstrap, log: () => {}
   })
-  desktop.adapter = adapterOf([L_SHARED, L_ONLY], { lshared: LOCAL_BYTES })
+  desktop.adapter = adapterOf([L_SHARED, L_ONLY], { lshared: LOCAL_BYTES }, {
+    series: [spanSeries('l')], episodes: [spanEpisode('l', 2)]
+  })
   await desktop.ready()
 
   const dash = await startDashboard({
@@ -186,19 +222,13 @@ test('watch state reads as one union with ids translated to the shown copy', { t
 
   await (await get('/api/blend')).json()
 
-  // A position lands on the FRIEND's copy of the shared film over the wire
-  // (the write redirect in action: the blend hands the POST to the owner).
+  // A position on a remote-only film lands on its one copy through the fan
+  // (phase 2 replaced phase 1's owner redirect with the fan-out).
   const rows = await (await get('/blend/api/library/list?type=movies&limit=100')).json()
   const only = rows.items.find((i) => i.title === 'City Lights')
-  const w = await post('/blend/api/watch/position', { itemId: only.id, positionMs: 120000 })
-  assert.equal(w.status, 307)
-  assert.equal(w.headers.get('location'), `/remote/${lib}/api/watch/position`)
-  // Follow it the way a browser replays a 307.
-  await fetch((await get('/api/state')).url.replace('/api/state', '') + w.headers.get('location'), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ itemId: only.id, positionMs: 120000 })
-  })
+  const w = await (await post('/blend/api/watch/position', { itemId: only.id, positionMs: 120000 })).json()
+  assert.equal(w.ok, true)
+  assert.equal(w.landed, 1)
 
   // Mark the friend's copy of SUNRISE watched directly on the friend - the
   // union must light the tick on the id the blend SHOWS (the local primary).
@@ -214,4 +244,52 @@ test('watch state reads as one union with ids translated to the shown copy', { t
   assert.equal(state.continue.length, 1)
   assert.equal(state.continue[0].id, only.id)
   assert.equal(state.continue[0].resume.positionMs, 120000)
+})
+
+test('the write fan and the merged rollups span the disk and the wire', { timeout: 120000 }, async (t) => {
+  const { friend, desktop, get, post } = await rig(t)
+  const { ownerOf } = require('@peerloom/host')
+
+  await (await get('/api/blend')).json()
+
+  // One show out of two halves: episode one on the friend, episode two on
+  // this disk - only the blend can count to two.
+  const shows = await (await get('/blend/api/library/list?type=series&limit=50')).json()
+  assert.equal(shows.items.length, 1)
+  const span = shows.items[0]
+  assert.equal(span.episodeCount, 2)
+
+  // Mark the whole SHOW watched through the blend: it expands to the merged
+  // episodes and fans each to its own library - the friend's copy over the
+  // wire, the local one into this box's own store.
+  const marked = await (await post('/blend/api/watch/watched', { itemId: span.id })).json()
+  assert.equal(marked.items, 2)
+
+  const grant = (await friend.host.grants.list())[0]
+  const friendSet = await friend.host.userState.watchedSet(ownerOf(grant))
+  assert.ok(friendSet.has('fep1'), 'the friend heard about its half')
+  const localPersons = await desktop.host.grants.listPersons()
+  const localSet = await desktop.host.userState.watchedSet('p:' + localPersons[0].id)
+  assert.ok(localSet.has('lep2'), 'the local store heard about its half')
+
+  // The rollup agrees from both directions: complete on the show, complete
+  // on the merged season.
+  const rollups = await (await get('/blend/api/watch/shows')).json()
+  assert.equal(rollups.shows[span.id].total, 2)
+  assert.equal(rollups.shows[span.id].complete, true)
+  const seasons = await (await get(`/blend/api/watch/seasons?seriesId=${span.id}`)).json()
+  const season = Object.values(seasons.seasons)[0]
+  assert.equal(season.total, 2)
+  assert.equal(season.complete, true)
+
+  // A position on the shared film lands on BOTH libraries - the shelf can
+  // never disagree with itself depending on who answers first.
+  const films = await (await get('/blend/api/library/list?type=movies&limit=100')).json()
+  const sunrise = films.items.find((i) => i.title === 'Sunrise')
+  const fanned = await (await post('/blend/api/watch/position', { itemId: sunrise.id, positionMs: 300000 })).json()
+  assert.equal(fanned.landed, 2)
+  const friendResume = await friend.host.userState.getResume(ownerOf(grant), 'fshared')
+  assert.equal(friendResume.positionMs, 300000)
+  const localResume = await desktop.host.userState.getResume('p:' + localPersons[0].id, 'lshared')
+  assert.equal(localResume.positionMs, 300000)
 })
