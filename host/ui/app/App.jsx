@@ -6,7 +6,7 @@
 // this app closes.
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { api, copyText, setRemoteBase } from './api'
+import { api, copyText, setRemoteBase, fmtSize } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
@@ -104,7 +104,101 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
   )
 }
 
-function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '' }) {
+// Films kept on this machine from friends' libraries (phase 2). Hidden until
+// there is one - an empty downloads card is a feature announcement, and the
+// place downloads are discovered is the player's details sheet.
+function DownloadsCard ({ remotes, onPlay }) {
+  const [items, setItems] = useState(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    let t = null
+    const look = async () => {
+      const r = await api('/api/downloads')
+      if (!live) return
+      setItems(r.items || [])
+      // The poll keeps itself alive only while something is actually moving.
+      if ((r.items || []).some(d => d.downloading)) t = setTimeout(look, 2000)
+    }
+    look()
+    return () => { live = false; clearTimeout(t) }
+  }, [tick])
+  if (!items?.length) return null
+  const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
+  return (
+    <div class='card'>
+      <h3>Downloads</h3>
+      <p class='hint'>
+        Films kept on this machine. They play here even while the library they
+        came from is offline.
+      </p>
+      <div class='rootlist'>
+        {items.map(d => (
+          <div class='rootrow' key={d.itemId}>
+            <span class='rootpath'>
+              {d.title || 'Untitled'}
+              {' · '}
+              {d.downloading
+                ? `downloading ${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%${d.converting ? ', being converted' : ''}`
+                : `${fmtSize(d.size)} · from ${nameOf(d.lib)}`}
+            </span>
+            {d.downloading
+              ? <button class='ghost' onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}>Cancel</button>
+              : (
+                <>
+                  <button onClick={() => onPlay(d)}>Play</button>
+                  <button class='ghost' onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}>Remove</button>
+                </>
+                )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Your open asks, per remote library (phase 2) - made from an empty search on
+// a friend's library, watched and withdrawn here. Hidden until there is one.
+function RequestsCard ({ remotes }) {
+  const [rows, setRows] = useState(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    ;(async () => {
+      const out = []
+      for (const r of remotes) {
+        const res = await api(`/remote/${r.libraryId}/api/requests`).catch(() => null)
+        for (const q of res?.items || []) out.push({ ...q, lib: r.libraryId, libraryName: r.libraryName })
+      }
+      if (live) setRows(out)
+    })()
+    return () => { live = false }
+  }, [remotes.map(r => r.libraryId).join(','), tick])
+  if (!rows?.length) return null
+  return (
+    <div class='card'>
+      <h3>Your requests</h3>
+      <p class='hint'>
+        What you have asked these libraries for. Ask by searching a friend's
+        library for something it does not have.
+      </p>
+      <div class='rootlist'>
+        {rows.map(q => (
+          <div class='rootrow' key={q.lib + q.id}>
+            <span class='rootpath'>
+              {q.name} · {q.kind === 'series' ? 'show' : 'film'} · {q.status} · {q.libraryName || 'a library'}
+            </span>
+            {q.status === 'pending' && (
+              <button class='ghost' onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}>Withdraw</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
   const [sec, setSec] = useState(() => {
     const [t, s] = hashParts()
     return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
@@ -155,7 +249,13 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
           </div>
         )}
 
-        {sec === 'remotes' && <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />}
+        {sec === 'remotes' && (
+          <>
+            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />
+            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} />
+            <RequestsCard remotes={remotes} />
+          </>
+        )}
 
         {sec === 'security' && (
           <div class='card'>
@@ -416,6 +516,26 @@ export default function App () {
     reloadWatch()
   }
 
+  // Play a kept copy from the Downloads card: switch to its library so the
+  // routes and the shim prefix line up, then open the player on an item built
+  // from the download's own stored facts - which is what lets it open with the
+  // friend's server off, when the library pages themselves cannot load.
+  const playDownload = (row) => {
+    pickSource(row.lib)
+    setTab('watch')
+    setPlaying({
+      id: row.itemId,
+      type: row.type || 'movie',
+      title: row.title || 'Untitled',
+      year: row.year || null,
+      runtime: row.runtime || null,
+      seriesTitle: row.seriesTitle || null,
+      seasonNumber: row.seasonNumber ?? null,
+      episodeNumber: row.episodeNumber ?? null,
+      media: row.media || null
+    })
+  }
+
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
   // Searching means something on the library and nowhere else - not on Devices, not on
   // Settings, and not while a film is open.
@@ -532,6 +652,7 @@ export default function App () {
                 item={playing}
                 caps={caps}
                 queue={queue}
+                remote={!!source}
                 watch={watch}
                 onWatchChange={reloadWatch}
                 onPlay={setPlaying}
@@ -547,6 +668,7 @@ export default function App () {
                 key={source}
                 state={state}
                 caps={caps}
+                remote={!!source}
                 search={search}
                 watch={watch}
                 startAt={startAt}
@@ -558,7 +680,7 @@ export default function App () {
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}
-        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} />}
+        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} onPlayDownload={playDownload} />}
       </div>
 
       </div>

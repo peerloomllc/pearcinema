@@ -1102,3 +1102,8 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
   background: var(--card-2); color: inherit; border: 1px solid var(--line);
   border-radius: 8px; padding: .35rem .5rem; font-size: .85rem; max-width: 14rem;
 }
+
+/* Phase 2 of the same proposal: the ask-for-it block under an empty remote
+   search, and a colour for the inline error line phase 1 left unstyled. */
+.askfor { margin-top: .9rem }
+p.error { color: var(--danger); font-size: .85rem }

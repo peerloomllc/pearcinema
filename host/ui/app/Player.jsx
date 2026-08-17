@@ -33,7 +33,7 @@ import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import { Blocked, Check, Close, Info } from './icons'
 
-export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {} }) {
+export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {}, remote = false }) {
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
   const [failed, setFailed] = useState(null)
@@ -65,7 +65,33 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // nothing has moved - a paused film should not keep writing the same number.
   const wrote = useRef(0)
 
-  const verdict = verdictFor(item, caps)
+  // THE KEPT COPY CHANGES THE VERDICT (desktop-client phase 2). A downloaded
+  // film answers off this machine's own disk through the same routes, and for
+  // a converted download what is IN the file is the mp4 the friend's hardware
+  // made - not what the library says sits on their disk. So the verdict runs
+  // against the download's own facts, and everything downstream (which route,
+  // whose scrubber) falls out correctly. `dlTick` re-looks after start/cancel/
+  // remove, and the poll keeps itself alive only while a download runs.
+  const [dl, setDl] = useState(null)
+  const [dlErr, setDlErr] = useState('')
+  const [dlTick, setDlTick] = useState(0)
+  useEffect(() => {
+    if (!remote) { setDl(null); return }
+    let live = true
+    let t = null
+    const look = async () => {
+      const r = await api('/api/downloads')
+      if (!live) return
+      const row = (r.items || []).find(d => d.itemId === item.id) || null
+      setDl(row)
+      if (row?.downloading) t = setTimeout(look, 2000)
+    }
+    look()
+    return () => { live = false; clearTimeout(t) }
+  }, [item.id, remote, dlTick])
+  const kept = dl && !dl.downloading ? dl : null
+
+  const verdict = verdictFor(kept?.media ? { ...item, media: kept.media } : item, caps)
   // The browser can see the common case without a round trip: the container is
   // refused and the streams inside it are ones it can decode. The host still makes
   // the real decision and will answer 409 if it disagrees.
@@ -420,6 +446,53 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
             {!blocked && !remuxing && verdict.status === 'unknown' && 'Your browser has not said whether it can open this one.'}
           </dd>
         </dl>
+
+        {/* KEEP A COPY HERE (desktop-client phase 2), remote libraries only -
+            downloading your own files to the machine they are on is a copy for
+            nothing. The friend's box decides converted-or-raw exactly as it
+            decides playback; once kept, the film plays off this disk even with
+            their server switched off. */}
+        {remote && (
+          <>
+            <h3 style='margin-top:1rem'>On this computer</h3>
+            {!dl && (
+              <>
+                <p class='hint'>
+                  Keep a copy on this machine and it plays here even when their
+                  server is off.
+                </p>
+                <button
+                  class='ghost'
+                  onClick={async () => {
+                    setDlErr('')
+                    const r = await api('/api/download', { itemId: item.id, capabilities: caps })
+                    if (r?.error) return setDlErr(r.error)
+                    setDlTick(t => t + 1)
+                  }}
+                >Download to this computer</button>
+              </>
+            )}
+            {dl?.downloading && (
+              <>
+                <p class='hint'>
+                  Downloading - {dl.size ? Math.min(99, Math.round((dl.got / dl.size) * 100)) : 0}%
+                  {dl.converting ? ', their box is converting it as it sends' : ''}.
+                </p>
+                <button class='ghost' onClick={async () => { await api('/api/downloads/cancel', { itemId: item.id }); setDlTick(t => t + 1) }}>Cancel</button>
+              </>
+            )}
+            {kept && (
+              <>
+                <p class='hint'>
+                  Downloaded{kept.converted ? ', as converted by their machine' : ''} -
+                  it plays from this computer now, even with their server off.
+                </p>
+                <button class='ghost' onClick={async () => { await api('/api/downloads/remove', { itemId: item.id }); setDlTick(t => t + 1) }}>Remove the copy</button>
+              </>
+            )}
+            {dlErr && <p class='error'>{dlErr}</p>}
+          </>
+        )}
 
         {(playableSubs.length > 0 || unplayableSubs.length > 0) && (
           <>

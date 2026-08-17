@@ -28,13 +28,41 @@ const FILM = items.movie({
   media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', width: 1920, height: 1080, size: BYTES.length }
 })
 
+// A small show beside the film, for the phase 2 rollups: two episodes in one
+// season, enough to tell "one watched" from "complete".
+const SHOW = items.series({ id: 'show1', title: 'The Show', seasonCount: 1, episodeCount: 2 })
+const SEASON = items.season({ id: 'sea1', seriesId: 'show1', number: 1 })
+const EPS = [1, 2].map((n) => items.episode({
+  id: 'ep' + n,
+  seriesId: 'show1',
+  seasonId: 'sea1',
+  seasonNumber: 1,
+  episodeNumber: n,
+  title: 'Episode ' + n,
+  runtime: 1200,
+  media: { container: 'mov', videoCodec: 'h264', audioCodec: 'aac', size: 100 }
+}))
+
+const ALL = new Map([FILM, SHOW, SEASON, ...EPS].map((i) => [i.id, i]))
+
 class FriendAdapter {
   constructor () { this.kind = 'test' }
   async ping () { return { ok: true, detail: 'test' } }
   async scan () { return 1 }
-  async stats () { return { movies: 1, series: 0, seasons: 0, episodes: 0, source: 'test' } }
-  async list ({ type }) { return type === 'movies' ? items.page([FILM], {}) : items.page([], {}) }
-  async get ({ id }) { return id === FILM.id ? FILM : null }
+  async stats () { return { movies: 1, series: 1, seasons: 1, episodes: 2, source: 'test' } }
+  async list ({ type, seriesId = null, seasonId = null }) {
+    if (type === 'movies') return items.page([FILM], {})
+    if (type === 'series') return items.page([SHOW], {})
+    if (type === 'seasons') return items.page(seriesId === SHOW.id ? [SEASON] : [], {})
+    if (type === 'episodes') {
+      return items.page(EPS.filter((e) =>
+        (!seriesId || e.seriesId === seriesId) && (!seasonId || e.seasonId === seasonId)
+      ), {})
+    }
+    return items.page([], {})
+  }
+
+  async get ({ id }) { return ALL.get(id) || null }
   async search ({ q }) { return { items: FILM.title.toLowerCase().includes(String(q).toLowerCase()) ? [FILM] : [] } }
   async art () { return null }
   async subtitles () { return [] }
@@ -80,7 +108,9 @@ async function rig (t) {
   t.after(async () => {
     await dash.close()
     await desktop.close()
-    await friend.close()
+    // Tolerates a test that already closed the friend on purpose - the
+    // downloads test does, to prove a kept film outlives its library.
+    await friend.close().catch(() => {})
     await testnet.destroy()
     await fsp.rm(dirA, { recursive: true, force: true })
     await fsp.rm(dirB, { recursive: true, force: true })
@@ -161,4 +191,99 @@ test('an unknown remote id is a 404, not a hang', { timeout: 60000 }, async (t) 
   const { get } = await rig(t)
   const res = await get('/remote/nope/api/library/list?type=movies')
   assert.equal(res.status, 404)
+})
+
+// Wait for a condition, politely - downloads land on their own schedule.
+async function until (fn, ms = 30000) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    const v = await fn()
+    if (v) return v
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  throw new Error('timed out waiting')
+}
+
+test('a downloaded film is byte-exact and outlives the friend', { timeout: 120000 }, async (t) => {
+  const { friend, desktop, post, get } = await rig(t)
+
+  const link = friend.startPairing()
+  const paired = await post('/api/remote/pair', { link })
+  const lib = paired.libraryId
+
+  // The friend decides raw-or-converted with the same decide() playback uses;
+  // a browser that takes the container as-is gets the original bytes.
+  const started = await post(`/remote/${lib}/api/download`, {
+    itemId: FILM.id,
+    capabilities: { containers: ['mp4', 'mov'], videoCodecs: ['h264'], audioCodecs: ['aac'] }
+  })
+  assert.equal(started.ok, true)
+
+  const row = await until(async () => {
+    const r = await (await get('/api/downloads')).json()
+    const d = (r.items || []).find((x) => x.itemId === FILM.id)
+    return d && !d.downloading ? d : null
+  })
+  assert.equal(row.size, BYTES.length)
+  assert.equal(row.title, 'Nosferatu')
+
+  // THE POINT OF A DOWNLOAD: the friend goes dark and the film still plays,
+  // Range and all, because nothing in the kept path touches the wire.
+  await friend.close()
+
+  const part = await get(`/remote/${lib}/api/stream?id=${FILM.id}`, { range: 'bytes=10-19' })
+  assert.equal(part.status, 206)
+  assert.equal(part.headers.get('content-range'), `bytes 10-19/${BYTES.length}`)
+  assert.equal(b4a.toString(b4a.from(await part.arrayBuffer())), b4a.toString(BYTES.subarray(10, 20)))
+
+  const whole = await get(`/remote/${lib}/api/stream?id=${FILM.id}`)
+  assert.equal(whole.status, 200)
+  assert.equal(b4a.toString(b4a.from(await whole.arrayBuffer())), b4a.toString(BYTES))
+
+  // Remove: the file and the row both go.
+  await post('/api/downloads/remove', { itemId: FILM.id })
+  const after = await (await get('/api/downloads')).json()
+  assert.equal(after.items.length, 0)
+  assert.equal(desktop.downloads.fileFor(FILM.id), null)
+})
+
+test('requests and the rollups travel the wire', { timeout: 120000 }, async (t) => {
+  const { friend, post, get } = await rig(t)
+
+  const link = friend.startPairing()
+  const paired = await post('/api/remote/pair', { link })
+  const lib = paired.libraryId
+
+  // Ask the friend for what is not there, see it, withdraw it.
+  const asked = await post(`/remote/${lib}/api/request`, { kind: 'movie', name: 'The General' })
+  assert.ok(asked.request?.id)
+  const mine = await (await get(`/remote/${lib}/api/requests`)).json()
+  assert.equal(mine.items.length, 1)
+  assert.equal(mine.items[0].name, 'The General')
+  assert.equal(mine.items[0].status, 'pending')
+  // And it genuinely landed on the FRIEND's host, where their devices answer it.
+  assert.equal((await friend.userState.listRequests()).length, 1)
+  await post(`/remote/${lib}/api/request/remove`, { id: asked.request.id })
+  assert.equal((await (await get(`/remote/${lib}/api/requests`)).json()).items.length, 0)
+
+  // One episode watched: the show's rollup knows, over the wire.
+  await post(`/remote/${lib}/api/watch/watched`, { itemId: 'ep1' })
+  const shows = await (await get(`/remote/${lib}/api/watch/shows`)).json()
+  assert.equal(shows.shows.show1.total, 2)
+  assert.equal(shows.shows.show1.watched, 1)
+  assert.equal(shows.shows.show1.complete, false)
+  const seasons = await (await get(`/remote/${lib}/api/watch/seasons?seriesId=show1`)).json()
+  assert.equal(seasons.seasons.sea1.watched, 1)
+
+  // Marking the SEASON marks its episodes - the local route's rule, fanned
+  // over the wire because watched.set is per item.
+  const marked = await post(`/remote/${lib}/api/watch/watched`, { itemId: 'sea1' })
+  assert.equal(marked.items, 2)
+  const done = await (await get(`/remote/${lib}/api/watch/shows`)).json()
+  assert.equal(done.shows.show1.complete, true)
+
+  // The LOCAL twins answer honestly rather than 404.
+  const local = await post('/api/download', { itemId: FILM.id })
+  assert.match(local.error, /already on this machine/)
+  assert.equal((await (await get('/api/requests')).json()).items.length, 0)
 })

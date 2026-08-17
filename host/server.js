@@ -21,6 +21,7 @@ const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const remoteLibs = require('./remote')
+const remoteDownloads = require('./remote-downloads')
 const sidecars = require('./sidecars')
 const subtitles = require('./subtitles')
 const hls = require('./hls')
@@ -191,6 +192,14 @@ class PearCinemaHost {
       dataDir: this.dataDir,
       protocol: PROTOCOL,
       dht: this.host.dht,
+      log
+    })
+
+    // Films kept HERE from those libraries (phase 2 of the same proposal): the
+    // phone's download shape, a directory of plain files beside the data.
+    this.downloads = new remoteDownloads.RemoteDownloads({
+      dataDir: this.dataDir,
+      remote: this.remote,
       log
     })
 
@@ -880,6 +889,7 @@ class PearCinemaHost {
     // small box it is the whole box.
     this.remuxer.killAll()
     this.transcoder.killAll()
+    this.downloads.close()
     await this.remote.close().catch(() => {})
     return this.host.close()
   }

@@ -8,9 +8,13 @@
 // watched. Module-level on purpose: the <img> and <video> tags build URLs
 // outside api() and need the same answer.
 let remoteBase = ''
-const REMOTED = /^\/api\/(library\/|art\b|stream\b|remux\b|subtitles?\b|watch\/)/
+// `download\b` is the per-library START and deliberately does not match
+// /api/downloads - the finished list is global, one card for every library.
+// `requests?\b` covers asking, listing and withdrawing, all per-library.
+const REMOTED = /^\/api\/(library\/|art\b|stream\b|remux\b|subtitles?\b|watch\/|download\b|requests?\b)/
 
 export function setRemoteBase (base) { remoteBase = base || '' }
+export function isRemote () { return !!remoteBase }
 export function withBase (path) {
   return remoteBase && REMOTED.test(path) ? remoteBase + path : path
 }

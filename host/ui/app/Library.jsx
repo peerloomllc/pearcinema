@@ -284,6 +284,32 @@ function FixMatch ({ item, onClose, onFixed }) {
   )
 }
 
+// ASK THE FRIEND FOR IT, from the exact place its absence is discovered - the
+// phone's request feature, offered where a search on a remote library came up
+// empty. Never on your own library: asking your own machine for a film is a
+// note to self. Your open asks live in Settings, Remote libraries.
+function AskFor ({ name }) {
+  const [sent, setSent] = useState(false)
+  const [err, setErr] = useState('')
+  const ask = async (kind) => {
+    setErr('')
+    const r = await api('/api/request', { kind, name })
+    if (r?.error) return setErr(r.error)
+    setSent(true)
+  }
+  if (sent) return <p class='hint'>Asked. Your requests live in Settings, under Remote libraries.</p>
+  return (
+    <div class='askfor'>
+      <p class='hint'>It is not in this library, but you can ask for it.</p>
+      <div class='row' style='justify-content:center'>
+        <button class='ghost' onClick={() => ask('movie')}>Ask for it as a film</button>
+        <button class='ghost' onClick={() => ask('series')}>Ask for it as a show</button>
+      </div>
+      {err && <p class='error'>{err}</p>}
+    </div>
+  )
+}
+
 // WHO THIS BROWSER IS WATCHING AS.
 //
 // Only ever shown once a SECOND person exists on the box (Tim, 2026-08-13): a
@@ -525,7 +551,13 @@ export default function Library ({
   // Where to open, when somebody has climbed out of the player rather than gone all
   // the way back to the library. Consumed once and cleared, so it does not fight with
   // wherever they navigate next.
-  startAt = null, onStarted = () => {}
+  startAt = null, onStarted = () => {},
+  // Browsing somebody ELSE's library through the /remote twins. The reads are
+  // already rewritten by the api layer; what this flag governs is everything
+  // that is about THIS box and would be wrong or dishonest on a friend's -
+  // the local source's empty/scanning/error states, and the metadata pencil,
+  // whose fix routes only know the local library.
+  remote = false
 }) {
   // 'films' | 'shows', and where we are inside the show tree.
   const [root, setRoot] = useState('films')
@@ -626,8 +658,8 @@ export default function Library ({
   // THE TILE IS THE PLACE A MATCH GETS FIXED. `fixItem` is the tile whose pencil
   // was pressed.
   const [fixItem, setFixItem] = useState(null)
-  const canFix = !!(state.metadata?.enabled && state.metadata?.hasKey)
-  const artRunning = state.metadata?.running || null
+  const canFix = !remote && !!(state.metadata?.enabled && state.metadata?.hasKey)
+  const artRunning = remote ? null : (state.metadata?.running || null)
 
   const films = useList('/api/library/list?type=movies&limit=100', [root])
   const shows = useList('/api/library/list?type=series&limit=100', [root])
@@ -668,7 +700,11 @@ export default function Library ({
   // 2,986 films and episodes on a USB disk. The host now serves this page while it
   // works rather than after, so this is what fills the gap. Without it the grid is
   // simply empty, which reads as broken.
-  if (state.scanning) {
+  // THE LOCAL SOURCE'S STATES DO NOT APPLY TO A FRIEND'S LIBRARY. A client-only
+  // desktop has no source at all, and gating the remote pages on it showed
+  // "No films yet" over somebody's 240 films. The remote routes answer their
+  // own errors honestly per request.
+  if (!remote && state.scanning) {
     const { done = 0, total = 0 } = state.scanning
     return (
       <div class='empty'>
@@ -688,7 +724,7 @@ export default function Library ({
     )
   }
 
-  if (state.source?.kind === 'empty') {
+  if (!remote && state.source?.kind === 'empty') {
     return (
       <div class='empty'>
         <h2>No films yet</h2>
@@ -697,7 +733,7 @@ export default function Library ({
     )
   }
 
-  if (state.sourceError) {
+  if (!remote && state.sourceError) {
     return (
       <>
         <div class='banner bad'>
@@ -733,7 +769,12 @@ export default function Library ({
             }} />
           ))}
         </div>
-        {!hits.length && <div class='empty'>Nothing matched.</div>}
+        {!hits.length && (
+          <div class='empty'>
+            Nothing matched.
+            {remote && search.trim() && <AskFor key={search.trim()} name={search.trim()} />}
+          </div>
+        )}
       </div>
       {fixModal}
       </>
@@ -779,7 +820,7 @@ export default function Library ({
               <ViewToggle view={view} onChange={chooseView} />
             </div>
             <CompatLine list={episodes.items} caps={caps} />
-            <ArtNote list={episodes.items} source={state.source?.kind} />
+            <ArtNote list={episodes.items} source={remote ? 'remote' : state.source?.kind} />
 
             {view === 'grid'
               ? (
@@ -887,7 +928,7 @@ export default function Library ({
       <div class={'screen ' + dir} key={root}>
 
       {root === 'films' && <CompatLine list={films.items} caps={caps} />}
-      <ArtNote list={showing.items} source={state.source?.kind} />
+      <ArtNote list={showing.items} source={remote ? 'remote' : state.source?.kind} />
 
       {/* THE PASS IS VISIBLE WHERE ITS RESULT LANDS (Tim, 2026-08-14). Progress in a
           Settings panel nobody is looking at is progress nobody sees; the posters
