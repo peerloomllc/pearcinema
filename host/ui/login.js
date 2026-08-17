@@ -36,7 +36,7 @@ module.exports = `<!doctype html>
   }
   .box { width:100%; max-width:22rem; padding:2rem; text-align:center }
   h1 { font-size:1.6rem; margin:0 0 .25rem; font-weight:600; letter-spacing:-.01em }
-  h1 span { color:var(--accent) }
+  h1 .word span { color:var(--accent) }
   h1.brand { display:flex; align-items:center; justify-content:center; gap:.4rem }
   h1.brand svg { color:var(--accent) }
   p.sub { color:var(--muted); font-size:.9rem; margin:0 0 1.5rem }
@@ -71,7 +71,10 @@ module.exports = `<!doctype html>
           <rect x="12.8" y="13.4" width="1.6" height="1.6" rx=".4"/>
         </g>
       </svg>
-      Pear<span>Cinema</span>
+      <!-- ONE element, the topbar's scar relearned here (Tim, 2026-08-17):
+           the flex gap falls between text nodes as readily as between boxes,
+           which is what put a space in the middle of the name. -->
+      <span class="word">Pear<span>Cinema</span></span>
     </h1>
     <p class="sub">This page can play your library and hand out access to it. It wants a password.</p>
 
