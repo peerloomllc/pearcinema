@@ -1,6 +1,18 @@
 # Desktop merged libraries - the phone's blend, in the dashboard
 
-**Status**: PROPOSED 2026-08-17. Tim asked for it during the phase 2 review
+**Status**: APPROVED 2026-08-17 (Tim, via PR #72) and BUILT the same day -
+phase 1 in PR #73, phase 2 in PR #74, plus two follow-ons the build earned:
+the year-less dedup rule (PR #75, from Tim's live double-Arrival find) and
+the packaging of src/merge.js everywhere the host ships (PR #76, after the
+image crash-looped on its first deploy). Phase 3 was RESOLVED 2026-08-17 as
+**local copies only**, Tim's call: casting from the blend rides the phone's
+shipped picker constraint (only libraries holding a copy offer their TVs,
+PR #68) and a host's refusal of ids it does not hold - no new plumbing. The
+proxy-remote-bytes option stays here, costed, for the day a real need
+returns. Both open questions were answered as recommended: a flat switcher
+list, and the Continue shelf collapsing same-film positions newest-first.
+
+Originally proposed 2026-08-17: Tim asked during the phase 2 review
 ("can we adopt the mixed/merged libraries approach like we're doing on
 mobile?"); the desktop-client proposal had deferred it deliberately ("one
 library at a time in v1 - merging desktop-side comes later and follows the
