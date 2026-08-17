@@ -303,7 +303,7 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
 
   // The dialog carries the candidates AS TILES - the poster is the choice, so the
   // candidate itself is the button, with its thumbnail relayed through the host.
-  assert.match(text(), /Fix the match - Metropolis/)
+  assert.match(text(), /Fix the match: Metropolis/)
   const cards = [...doc.querySelectorAll('.cand')]
   assert.equal(cards.length, 2)
   assert.match(cards[0].textContent, /Crash/)

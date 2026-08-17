@@ -212,20 +212,26 @@ const TABS = [
   { key: 'about', label: 'About', Icon: Info }
 ]
 
-function NavBar ({ active, onTab, saved = 0 }) {
+function NavBar ({ active, onTab, saved = 0, busy = 0 }) {
   return (
     <nav className='navbar'>
       {TABS.map(({ key, label, Icon }) => {
         const onNow = active === key
         const badge = key === 'watchlist' && saved > 0 ? saved : null
+        // A light rather than a count, matching the desktop topbar: progress
+        // lives in You, Downloads, the tab only says "look there".
+        const dot = key === 'you' && busy > 0
+        const dotLabel = busy === 1 ? 'One download running' : `${busy} downloads running`
         return (
           <button
             key={key} className={onNow ? 'on' : ''} onClick={() => onTab(key)}
-            aria-current={onNow ? 'page' : undefined} aria-label={label}
+            aria-current={onNow ? 'page' : undefined}
+            aria-label={dot ? `${label}. ${dotLabel}` : label}
           >
             <span className='ic'>
               <Icon size={22} weight={onNow ? 'fill' : 'regular'} />
               {badge && <span className='badge'>{badge > 99 ? '99+' : badge}</span>}
+              {dot && <span className='dot' aria-hidden='true' />}
             </span>
             <span>{label}</span>
           </button>
@@ -763,6 +769,9 @@ export default function App () {
         setSavedItems(r.items || [])
       }).catch(() => {})
       call('watched.list').then((r) => setWatchedIds(new Set(r.items || []))).catch(() => {})
+      // Seed the running list so the navbar's download light is truthful after
+      // a WebView reload mid-download; events alone only cover this page-load.
+      call('download.list').then((r) => setDlRunning(r.running || [])).catch(() => {})
     }
     return s
   }, [])
@@ -1826,7 +1835,15 @@ export default function App () {
             <button aria-label='Stop the TV' onClick={stopCast}><X size={20} /></button>
           </div>
         )}
-        <NavBar active={tab} onTab={(k) => { setTab(k); setErr('') }} saved={saved.size} />
+        <NavBar
+          active={tab} saved={saved.size} busy={dlRunning.length}
+          onTab={(k) => {
+            // The dot's tap-through: entering You while downloads run lands on
+            // the Downloads view they point at. Moving WITHIN You stays free.
+            if (k === 'you' && tab !== 'you' && dlRunning.length > 0) setYouView('downloads')
+            setTab(k); setErr('')
+          }}
+        />
       </div>
 
       {sheet && (
