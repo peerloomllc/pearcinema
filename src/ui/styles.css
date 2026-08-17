@@ -1266,6 +1266,9 @@ button.shead .caret.open { transform: rotate(90deg); }
   .sheetwrap, .sheet { animation: none; }
 }
 .sheet h1 { font-size: 1.05rem; text-align: center; }
+/* Sheet titles are CENTERED, all of them - h1 always was, and the h3 the
+   action/cast/revoke sheets use now matches (Tim, 2026-08-17). */
+.sheet h3 { font-size: 1.05rem; text-align: center; margin: 0 0 .6rem; }
 .sheet > p { text-align: center; margin: .25rem 0 1rem; }
 .sheet h2 { margin: 1.2rem 0 0; }
 
