@@ -1521,3 +1521,22 @@ label.flabel { display: block; margin-top: .6rem; }
 .libmenu button.off { opacity: .5; }
 .libmenu-sep { height: 1px; background: var(--color-divider); margin: .35rem .3rem; }
 .libmenu-add { color: var(--color-text-secondary); }
+
+/* The cast remote (video-deltas §5), above the navbar while a TV plays - the
+   donor's mini-player slot, repurposed: title and TV on the left, pause and
+   stop on the right, one glance and one tap from any screen. */
+.castbar {
+  display: flex; align-items: center; gap: .65rem;
+  padding: .55rem .9rem; border-bottom: 1px solid var(--color-border);
+}
+.castbar > svg { flex: none; color: var(--color-primary); }
+.castbar .meta { flex: 1; min-width: 0; }
+.castbar .meta .t {
+  font-weight: 600; font-size: .92rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.castbar button {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 50%;
+  background: none; border: none; color: inherit;
+}

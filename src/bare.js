@@ -961,6 +961,67 @@ const methods = {
     if (!ok) throw new Error('no library reachable for that')
     return { ok: true }
   },
+  // --- casting to a television (video-deltas §5) ---------------------------
+  //
+  // The HOST does the casting - the phone only says which film on which TV.
+  // Every target carries the library whose Home Assistant reported it, because
+  // the film must stream FROM that host: a cast URL minted by one server
+  // cannot serve another server's file. That is also the merged-mode copy-pick
+  // rule in cast.play below.
+  'cast.list': async (args) => {
+    const out = { enabled: false, targets: [], active: [] }
+    // Asked FOR a film, only libraries holding a copy answer - a television
+    // whose host cannot serve the film is a button that ends in an error.
+    let libsWithCopy = null
+    if (args?.itemId && mergedOn() && mergedIndex) {
+      const entity = mergedEntityFor(String(args.itemId))
+      if (entity) libsWithCopy = new Set(entity.copies.map((c) => c.libraryId))
+    }
+    const hosts = hostsState.hosts.filter((h) => !libsWithCopy || libsWithCopy.has(h.libraryId))
+    await Promise.all(hosts.map(async (h) => {
+      try {
+        const r = await raced((async () => (await connectedLib(h.libraryId)).request('cast.list', {}))())
+        if (r?.enabled) out.enabled = true
+        for (const t of r?.targets || []) out.targets.push({ ...t, libraryId: h.libraryId, libraryName: h.libraryName })
+        for (const a of r?.active || []) out.active.push({ ...a, libraryId: h.libraryId, libraryName: h.libraryName })
+      } catch {}
+    }))
+    return out
+  },
+  'cast.play': async (args) => {
+    const lib = args.libraryId || null
+    // THE COPY PICK, merged phase 3's last sliver: the television belongs to
+    // one host's Home Assistant, so the copy that streams must be THAT host's
+    // own - the blend offers only televisions from libraries holding a copy,
+    // and this resolves the blended id to that library's file.
+    let id = String(args.itemId)
+    if (mergedOn() && mergedIndex && lib) {
+      const entity = mergedEntityFor(id)
+      if (entity) {
+        const copy = entity.copies.find((c) => c.libraryId === lib)
+        if (!copy) throw new Error('that library does not hold this film')
+        id = String(copy.id)
+      }
+    }
+    const c = lib ? await connectedLib(lib) : await connected()
+    return c.request('cast.play', { entityId: args.entityId, itemId: id, at: Number(args.at) || 0 })
+  },
+  'cast.stop': async (args) => {
+    const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
+    return c.request('cast.stop', { entityId: args.entityId })
+  },
+  'cast.pause': async (args) => {
+    const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
+    return c.request('cast.pause', { entityId: args.entityId })
+  },
+  'cast.resume': async (args) => {
+    const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
+    return c.request('cast.resume', { entityId: args.entityId })
+  },
+  'cast.state': async (args) => {
+    const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
+    return c.request('cast.state', { entityId: args.entityId })
+  },
   'device.list': async (args) => (await connected()).request('device.list', args),
   'device.revoke': async (args) => (await connected()).request('device.revoke', args),
   'identity.get': async (args) => {

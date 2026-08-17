@@ -36,6 +36,7 @@ const SETTINGS_SECTIONS = [
   ['security', 'Security'],
   ['support', 'Support development'],
   ['remotes', 'Remote libraries'],
+  ['casting', 'Casting'],
   ['host', 'This host']
 ]
 
@@ -104,6 +105,95 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
   )
 }
 
+// Casting to a television (video-deltas §5). The host talks to the Home
+// Assistant on THIS machine; paired phones then send films to the TVs it
+// knows about, and revoking a phone darkens whatever it started. The token is
+// write-only - the page learns one is saved, never what it is.
+function CastPanel () {
+  const [cfg, setCfg] = useState(null)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [test, setTest] = useState(null)
+
+  useEffect(() => {
+    let live = true
+    api('/api/cast').then(r => {
+      if (!live || r?.error) return
+      setCfg(r)
+      setBaseUrl(r.baseUrl || '')
+    })
+    return () => { live = false }
+  }, [])
+
+  const save = async (enabled) => {
+    setBusy(true); setTest(null)
+    const r = await api('/api/cast', { enabled, baseUrl, ...(token ? { token } : {}) })
+    setBusy(false)
+    if (r?.error) return notify('Not saved', r.error)
+    setToken('')
+    setCfg(r)
+    notify('Saved', enabled
+      ? 'Casting is on. Phones paired as owner can now send films to your TVs.'
+      : 'Casting is off.')
+  }
+
+  const runTest = async () => {
+    setBusy(true)
+    const r = await api('/api/cast/test', {})
+    setBusy(false)
+    setTest(r?.error ? { bad: r.error } : { ok: r.targets })
+  }
+
+  if (!cfg) return <div class='card'><h3>Casting</h3><p class='hint'>Loading…</p></div>
+
+  return (
+    <div class='card'>
+      <h3>Casting</h3>
+      <p class='hint'>
+        Send films from a phone to a TV - a Chromecast, a Google TV or a
+        television with Cast built in. PearCinema reaches them through the Home
+        Assistant running on this same machine: paste a long-lived access token
+        from your Home Assistant profile page. Only phones paired as owner can
+        cast, and cutting a phone off also stops whatever it put on a TV.
+      </p>
+      <div class='field'>
+        <label>Home Assistant address</label>
+        <input
+          type='text' value={baseUrl} placeholder='http://127.0.0.1:8123'
+          onInput={e => setBaseUrl(e.currentTarget.value)}
+        />
+      </div>
+      <div class='field'>
+        <label>Access token{cfg.tokenSet ? ' (saved - leave empty to keep it)' : ''}</label>
+        <input
+          type='password' value={token}
+          onInput={e => setToken(e.currentTarget.value)}
+        />
+      </div>
+      {cfg.problem && <p class='error'>{cfg.problem}</p>}
+      {test?.bad && <p class='error'>{test.bad}</p>}
+      {test?.ok !== undefined && (
+        <p class='hint'>
+          Connected. Home Assistant knows about {test.ok} media player{test.ok === 1 ? '' : 's'}.
+        </p>
+      )}
+      <div class='actions'>
+        <button onClick={() => save(true)} disabled={busy || (!cfg.tokenSet && !token.trim())}>
+          {cfg.enabled ? 'Save' : 'Save and turn on'}
+        </button>
+        {cfg.enabled && (
+          <button class='ghost' onClick={() => save(false)} disabled={busy}>Turn off</button>
+        )}
+        {/* Tests what is SAVED, so it only appears once something is. */}
+        {cfg.tokenSet && (
+          <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '' }) {
   const [sec, setSec] = useState(() => {
     const [t, s] = hashParts()
@@ -156,6 +246,8 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
         )}
 
         {sec === 'remotes' && <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />}
+
+        {sec === 'casting' && <CastPanel />}
 
         {sec === 'security' && (
           <div class='card'>
