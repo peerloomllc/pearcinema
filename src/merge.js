@@ -109,9 +109,50 @@ function idCopy (x) {
 
 // --- per-type merges ---------------------------------------------------------
 
+// A YEAR-LESS RIP OF A DATED FILM (Tim's live find, 2026-08-17: his real
+// Arrival is `Blurays/Arrival.mkv`, no year anywhere, so it keyed apart from
+// a dated copy of the same film). A title-only match is allowed ONLY when:
+//
+//   1. exactly ONE dated group carries the title - a remake pair keeps its
+//      ambiguity, and a year-less copy must never guess between Nosferatu
+//      1922 and Nosferatu 2024;
+//   2. BOTH runtimes are known and agree within max(90s, 3%) - runtime is
+//      the fingerprint the filename lost, and it is what keeps a 20-second
+//      test clip named Arrival out of the real film's entry.
+//
+// Mutates the group map in place, folding matching year-less groups into
+// their dated sibling before the entities are emitted.
+function reconcileYearless (groups) {
+  const byTitle = new Map()
+  for (const g of groups.values()) {
+    const title = g.key.slice(0, g.key.lastIndexOf('|'))
+    if (!byTitle.has(title)) byTitle.set(title, [])
+    byTitle.get(title).push(g)
+  }
+  for (const bucket of byTitle.values()) {
+    const yearless = bucket.filter((g) => g.key.endsWith('|0'))
+    const dated = bucket.filter((g) => !g.key.endsWith('|0'))
+    if (!yearless.length || dated.length !== 1) continue
+    const target = dated[0]
+    for (const g of yearless) {
+      const a = Number(g.primary.runtime) || 0
+      const b = Number(target.primary.runtime) || 0
+      if (!a || !b) continue
+      if (Math.abs(a - b) > Math.max(90, 0.03 * Math.max(a, b))) continue
+      for (const e of g.copies) {
+        target.copies.push(e)
+        if (betterItem(e, target.primary)) target.primary = e
+      }
+      groups.delete(g.key)
+    }
+  }
+}
+
 function mergeMovies (movies) {
   const out = []
-  for (const g of groupByKey(movies, movieKey, betterItem).values()) {
+  const groups = groupByKey(movies, movieKey, betterItem)
+  reconcileYearless(groups)
+  for (const g of groups.values()) {
     const p = g.primary
     out.push({
       type: 'movie',
@@ -119,7 +160,9 @@ function mergeMovies (movies) {
       key: g.key,
       libraryId: p.libraryId,
       title: p.title,
-      year: p.year ?? null,
+      // The KNOWN year wins the display even when a year-less copy won
+      // primary - the reconcile above is what makes this reachable.
+      year: p.year ?? g.copies.find((c) => c.year != null)?.year ?? null,
       runtime: p.runtime ?? null,
       overview: p.overview ?? null,
       genres: p.genres || [],

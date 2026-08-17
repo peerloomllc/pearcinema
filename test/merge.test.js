@@ -265,3 +265,48 @@ test('requestTargets: resolve reaches only the still-pending copies', () => {
   assert.deepEqual(M.requestTargets({ id: 'x' }, { fallbackLibraryId: 'A' }), [{ libraryId: 'A', id: 'x' }])
   assert.deepEqual(M.requestTargets({ id: 'x' }), [])
 })
+
+test('a year-less rip folds into the one dated film when runtimes agree', () => {
+  const idx = M.buildIndex([
+    { libraryId: 'A', movies: [{ id: 'a1', type: 'movie', title: 'Arrival', year: 2016, runtime: 6983, media: { size: 5 } }] },
+    { libraryId: 'B', movies: [{ id: 'b1', type: 'movie', title: 'Arrival', year: null, runtime: 6990, media: { size: 9 } }] }
+  ])
+  assert.equal(idx.movies.length, 1)
+  assert.equal(idx.movies[0].copies.length, 2)
+  // The bigger year-less copy won primary, but the KNOWN year still shows.
+  assert.equal(idx.movies[0].year, 2016)
+})
+
+test('a year-less title with a WRONG runtime stays its own entry', () => {
+  // The live case that must never merge: a 20-second clip named Arrival.
+  const idx = M.buildIndex([
+    { libraryId: 'A', movies: [{ id: 'a1', type: 'movie', title: 'Arrival', year: null, runtime: 6983, media: {} }] },
+    { libraryId: 'B', movies: [{ id: 'b1', type: 'movie', title: 'Arrival', year: 2016, runtime: 20, media: {} }] }
+  ])
+  assert.equal(idx.movies.length, 2)
+})
+
+test('a year-less copy never guesses between two remakes', () => {
+  const idx = M.buildIndex([
+    { libraryId: 'A', movies: [
+      { id: 'a1', type: 'movie', title: 'Nosferatu', year: 1922, runtime: 5700, media: {} },
+      { id: 'a2', type: 'movie', title: 'Nosferatu', year: 2024, runtime: 5710, media: {} }
+    ] },
+    { libraryId: 'B', movies: [{ id: 'b1', type: 'movie', title: 'Nosferatu', year: null, runtime: 5700, media: {} }] }
+  ])
+  // Three entries: the ambiguity is kept rather than guessed at.
+  assert.equal(idx.movies.length, 3)
+})
+
+test('a year-less pair with unknown runtimes keeps the old behaviour', () => {
+  // No runtime evidence on either side: no fold, and two undated copies of
+  // one title still merge with each other via the |0 key as they always did.
+  const idx = M.buildIndex([
+    { libraryId: 'A', movies: [{ id: 'a1', type: 'movie', title: 'Moon', year: null, runtime: null, media: {} }] },
+    { libraryId: 'B', movies: [
+      { id: 'b1', type: 'movie', title: 'Moon', year: null, runtime: null, media: {} },
+      { id: 'b2', type: 'movie', title: 'Moon', year: 2009, runtime: null, media: {} }
+    ] }
+  ])
+  assert.equal(idx.movies.length, 2)
+})
