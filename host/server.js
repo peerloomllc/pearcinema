@@ -12,7 +12,7 @@
 const path = require('path')
 const fs = require('fs')
 
-const { createProtocol, LibraryHost } = require('@peerloom/host')
+const { createProtocol, LibraryHost, ownerOf } = require('@peerloom/host')
 
 const { buildAdapter } = require('./adapters')
 const { createMethods, MUTATING } = require('./methods')
@@ -21,6 +21,9 @@ const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const remoteLibs = require('./remote')
+const { Speakers } = require('./speakers')
+const castLib = require('./cast')
+const watch = require('./watch')
 const sidecars = require('./sidecars')
 const subtitles = require('./subtitles')
 const hls = require('./hls')
@@ -114,6 +117,13 @@ class PearCinemaHost {
       bootstrap,
       dhtPort,
       log,
+      // THE TELEVISION HOOKS (video-deltas §5). A cast target is not a HyperDHT
+      // connection, so the package calls `silence` wherever it kills
+      // connections - revoke, leave, person revoke, expiry - and sweeps the
+      // extra keys so a phone that cast and closed its app still expires.
+      // Lazy closures: this.casts is built a few lines further down.
+      silence: (deviceKey) => this.casts ? this.casts.stopFor(deviceKey) : 0,
+      extraLiveKeys: () => this.casts ? this.casts.deviceKeys() : [],
       media: () => ({
         methods: createMethods({
           // Getters, not values. A connection outlives a source change and a
@@ -166,7 +176,10 @@ class PearCinemaHost {
           // Something is being WATCHED through this connection - the one thing
           // the host knows for certain. Feeds the dashboard's now-playing and
           // keeps lastSeenAt honest on long-lived connections.
-          seen: (deviceKey, itemId) => this.noteWatching(deviceKey, itemId)
+          seen: (deviceKey, itemId) => this.noteWatching(deviceKey, itemId),
+          // The television, one getter away - a getter because the sessions
+          // object is built after the host that calls this factory.
+          cast: () => this.casts
         }),
         onStream: (params, ctx) => this.noteWatching(ctx.deviceKey, params.itemId),
         mutating: MUTATING,
@@ -182,6 +195,29 @@ class PearCinemaHost {
           return this.openStream(params)
         }
       })
+    })
+
+    // Casting to a television (video-deltas §5): PearTune's HA client trimmed
+    // to video, and the session machinery with the video deltas. Disabled and
+    // binding nothing until the operator configures Home Assistant.
+    this.speakers = new Speakers({ dataDir: this.dataDir, log })
+    this.casts = new castLib.CastSessions({
+      speakers: this.speakers,
+      grants: this.host.grants,
+      media: {
+        getItem: (id) => this.adapter.get({ id: String(id) }),
+        decide: (p) => this.decideFor(p),
+        openStream: (p) => this.openStream(p),
+        openRemux: (p) => this.openRemux(p),
+        // The HLS pair, for cast targets that refuse unbounded progressive
+        // streams (a Roku does, measured) - the same playlist and per-segment
+        // engine the phone rides.
+        playlist: (p) => this.hlsPlaylist(p),
+        segment: (p) => this.hlsSegment(p)
+      },
+      presence: this.host.presence,
+      report: (p) => this.reportCastProgress(p),
+      log
     })
 
     // The OUTBOUND side (proposal 2026-08-16-desktop-client): this machine as a
@@ -857,6 +893,28 @@ class PearCinemaHost {
     // Stale after ten minutes without a byte - a paused film holds its buffer.
     return w && Date.now() - w.at < 10 * 60 * 1000 ? w : null
   }
+
+  // A television's position, landing in watch state under the CASTING DEVICE's
+  // owner - the same rules resume.set applies on the wire: the runtime comes
+  // from the library, finishing writes the tick and clears the position, and
+  // the person's other devices hear about it. Put the phone down, cast from
+  // the sofa, pick the film up on a laptop at the right minute.
+  async reportCastProgress ({ deviceKey, itemId, positionMs = null, ended = false }) {
+    const lookup = await this.host.grants.lookup(deviceKey)
+    if (!lookup?.grant || lookup.grant.revokedAt) return
+    const owner = ownerOf(lookup.grant)
+
+    const item = await this.adapter.get({ id: String(itemId) })
+    if (!item) return
+
+    const verdict = watch.decide({ positionMs: positionMs || 0, runtimeSeconds: item.runtime, ended })
+    if (verdict.finished) await this.host.userState.setWatched(owner, String(itemId), true, { auto: true })
+    await this.host.userState.setResume(owner, String(itemId), verdict.positionMs, verdict.durationMs, {
+      playedAt: Date.now(),
+      deviceKey
+    })
+    this.host.presence.notifyOwner(owner, 'resume:changed', { itemId: String(itemId), finished: verdict.finished })
+  }
   leaveDevice (k) { return this.host.leaveDevice(k) }
   revokePerson (p) { return this.host.revokePerson(p) }
   // Cleanup and edits the dashboard offers. Proxied rather than reached for through
@@ -880,6 +938,9 @@ class PearCinemaHost {
     // small box it is the whole box.
     this.remuxer.killAll()
     this.transcoder.killAll()
+    // Before the store closes: stopFor() darkens televisions, and a TV left
+    // playing a dead URL freezes on the last buffered frame.
+    await this.casts.close().catch(() => {})
     await this.remote.close().catch(() => {})
     return this.host.close()
   }

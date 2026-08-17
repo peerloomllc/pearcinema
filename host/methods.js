@@ -28,7 +28,7 @@ const watch = require('./watch')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke', 'cast.play', 'cast.stop', 'cast.pause', 'cast.resume']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -52,7 +52,7 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -421,6 +421,95 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
         ctx.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
       }
       return { request: row }
+    },
+
+    // --- casting to a television (video-deltas proposal §5) ----------------
+    //
+    // OWNER only, the donor's phase 1 rule kept with its reasoning: a guest
+    // streaming to their own phone is one thing, a guest starting the
+    // living-room TV in somebody else's house is another. The scope is also
+    // re-checked on every video fetch in host/cast.js, long after this
+    // connection's grant was captured.
+    //
+    // An unconfigured host answers `enabled: false` rather than an error, so
+    // the phone can hide the button without treating a normal state as a
+    // failure.
+
+    'cast.list': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!casts.speakers.enabled) return { enabled: false, targets: [] }
+      let targets
+      try {
+        targets = await casts.speakers.list()
+      } catch (e) {
+        // HA down is a state, not a crash: the phone shows "not reachable"
+        // instead of a stack.
+        return { enabled: true, targets: [], problem: e.message }
+      }
+      return {
+        enabled: true,
+        // `unavailable` means HA cannot reach the device, so offering it is
+        // offering a button that does nothing.
+        targets: targets.filter(t => t.state !== 'unavailable'),
+        active: casts.active(ctx.deviceKey)
+      }
+    },
+
+    'cast.play': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId || !ctx.params.itemId) throw ctx.badParams('entityId and itemId required')
+      // deviceKey comes from the Noise-authenticated grant, never from params -
+      // a device can only ever cast as itself, which is what makes revoke able
+      // to find it.
+      return casts.play({
+        deviceKey: ctx.deviceKey,
+        itemId: String(ctx.params.itemId),
+        entityId: String(ctx.params.entityId),
+        at: Math.max(0, Number(ctx.params.at) || 0)
+      })
+    },
+
+    'cast.stop': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId) throw ctx.badParams('entityId required')
+      return casts.stop(ctx.deviceKey, String(ctx.params.entityId))
+    },
+
+    // Pause and resume the TELEVISION - without these the phone's own controls
+    // would drive the phone and put a second copy of the film in the room, the
+    // donor's exact bug.
+    'cast.pause': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId) throw ctx.badParams('entityId required')
+      await casts.speakers.pause(String(ctx.params.entityId))
+      return { ok: true }
+    },
+
+    'cast.resume': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId) throw ctx.badParams('entityId required')
+      await casts.speakers.resume(String(ctx.params.entityId))
+      return { ok: true }
+    },
+
+    // Read-only, so not in MUTATING - but still owner-gated, because what a
+    // television is doing is information about somebody's house.
+    'cast.state': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId) throw ctx.badParams('entityId required')
+      return await casts.speakers.getState(String(ctx.params.entityId)) || { state: 'unknown' }
     },
 
     'device.list': async (ctx) => {

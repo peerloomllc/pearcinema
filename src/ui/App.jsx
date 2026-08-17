@@ -16,7 +16,8 @@ import {
   CheckCircle, DownloadSimple, UsersThree, EnvelopeSimple, CaretLeft, CaretDown, Plus,
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
-  ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile
+  ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile,
+  Screencast, Pause
 } from '@phosphor-icons/react'
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -327,7 +328,7 @@ function ItemRow ({ item, sub, onOpen, onLong, right = null }) {
   )
 }
 
-function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSave, onWatched, onDownload, libraryNames = null }) {
+function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSave, onWatched, onDownload, onCast = null, libraryNames = null }) {
   const playable = item.type === 'movie' || item.type === 'episode'
   // The dedup made inspectable (proposal §3): a merged entry says which
   // servers hold it, so a collapse is never silent.
@@ -352,6 +353,42 @@ function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSav
               <DownloadSimple size={18} /> {downloaded ? 'Remove download' : 'Download'}
             </button>
           )}
+          {playable && onCast && (
+            <button onClick={() => { onClose(); onCast(item) }}>
+              <Screencast size={18} /> Play on TV
+            </button>
+          )}
+          <button className='ghost' onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Which television (video-deltas §5). The worklet already filtered the
+// targets to libraries that hold a copy of this film, and each row remembers
+// whose Home Assistant reported it - the cast must stream from that host.
+function CastSheet ({ sheet, hostCount, onPick, onClose }) {
+  return (
+    <div className='sheetwrap' onClick={onClose}>
+      <div className='sheet' onClick={(e) => e.stopPropagation()}>
+        <h3>Play on a TV</h3>
+        {sheet.targets === null && <p className='muted center-p'>Looking for TVs…</p>}
+        {sheet.targets !== null && !sheet.enabled && (
+          <p className='muted'>
+            No TVs are set up. Casting is turned on at the library's dashboard,
+            under Settings, Casting - it needs the Home Assistant on that machine.
+          </p>
+        )}
+        {sheet.targets !== null && sheet.enabled && sheet.targets.length === 0 && (
+          <p className='muted'>Home Assistant reports no TVs right now.</p>
+        )}
+        <div className='acts'>
+          {(sheet.targets || []).map((t) => (
+            <button key={t.libraryId + t.entityId} onClick={() => onPick(sheet.item, t)}>
+              <Screencast size={18} /> {t.name}{hostCount > 1 ? ` · ${t.libraryName || 'Library'}` : ''}
+            </button>
+          ))}
           <button className='ghost' onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -684,6 +721,13 @@ export default function App () {
   const [askTitle, setAskTitle] = useState(false)
   const [addingLibrary, setAddingLibrary] = useState(false)
   const [resumeOffer, setResumeOffer] = useState(null)
+  // Casting (video-deltas §5): the sheet that picks a TV, and the live cast
+  // this phone is remote for. The HOST owns the session - this is only what
+  // the bar at the bottom needs to say and where to send stop.
+  const [castSheet, setCastSheet] = useState(null)
+  const [casting, setCasting] = useState(null)
+  const castingRef = useRef(null)
+  castingRef.current = casting
   const [pairLink, setPairLink] = useState('')
   const [err, setErr] = useState('')
   const [toast, setToast] = useState('')
@@ -778,6 +822,15 @@ export default function App () {
             ? `Your request${m.data.title ? ' for ' + m.data.title : ''} was added`
             : `Your request${m.data.title ? ' for ' + m.data.title : ''} was declined`)
           if (u.tab === 'you' && u.youView === 'requests') loadYouRef.current?.('requests')
+        }
+        if (m?.kind === 'cast:ended' && m.data) {
+          // The TV ran out of film. Only this phone's own cast clears the bar -
+          // the host pushes to the device that started it.
+          const c = castingRef.current
+          if (c && c.entityId === m.data.entityId) {
+            setCasting(null)
+            say('The TV finished playing')
+          }
         }
       }),
       on('player:tick', (d) => {
@@ -938,6 +991,30 @@ export default function App () {
 
   // --- per-tab loads --------------------------------------------------------
 
+  // A cast outlives the app on purpose - the HOST owns the session. Reopening
+  // re-attaches this phone as the remote for whatever it left on a TV.
+  useEffect(() => {
+    if (!state?.active) return
+    let live = true
+    call('cast.list').then(async (r) => {
+      if (!live) return
+      const a = (r?.active || [])[0]
+      if (!a) return
+      const t = (r.targets || []).find((x) => x.entityId === a.entityId && x.libraryId === a.libraryId)
+      const item = await call('library.get', { id: a.itemId }).catch(() => null)
+      if (!live) return
+      setCasting((cur) => cur || {
+        entityId: a.entityId,
+        libraryId: a.libraryId,
+        name: t?.name || 'the TV',
+        itemId: a.itemId,
+        title: item?.title || 'A film',
+        paused: false
+      })
+    }).catch(() => {})
+    return () => { live = false }
+  }, [state?.active?.hostKey])
+
   useEffect(() => {
     if (!state?.active) return
     if (tab === 'watchlist') {
@@ -1033,6 +1110,55 @@ export default function App () {
   }
 
   const longPress = (i) => setSheet(i)
+
+  // --- casting (video-deltas §5) --------------------------------------------
+
+  const openCast = async (item) => {
+    setCastSheet({ item, targets: null, enabled: false })
+    try {
+      const r = await call('cast.list', { itemId: item.id })
+      setCastSheet((s) => (s && s.item.id === item.id
+        ? { ...s, targets: r?.targets || [], enabled: !!r?.enabled }
+        : s))
+    } catch (e) {
+      setCastSheet(null)
+      setErr(e.message)
+    }
+  }
+
+  const castTo = async (item, t) => {
+    try {
+      // The TV starts where this person is, the same resume the phone offers -
+      // a generated stream begins there outright, a direct one lets the TV
+      // seek itself.
+      const prior = await call('resume.get', { itemId: item.id }).catch(() => null)
+      const at = prior?.resume?.positionMs > 0 ? Math.floor(prior.resume.positionMs / 1000) : 0
+      await call('cast.play', { entityId: t.entityId, libraryId: t.libraryId, itemId: item.id, at })
+      setCastSheet(null)
+      setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, paused: false })
+      haptic('success')
+      say(`Playing on ${t.name}`)
+    } catch (e) {
+      setCastSheet(null)
+      setErr(e.message)
+    }
+  }
+
+  const toggleCastPause = async () => {
+    const c = casting
+    if (!c) return
+    try {
+      await call(c.paused ? 'cast.resume' : 'cast.pause', { entityId: c.entityId, libraryId: c.libraryId })
+      setCasting({ ...c, paused: !c.paused })
+    } catch (e) { setErr(e.message) }
+  }
+
+  const stopCast = async () => {
+    const c = casting
+    if (!c) return
+    setCasting(null)
+    try { await call('cast.stop', { entityId: c.entityId, libraryId: c.libraryId }) } catch (e) { setErr(e.message) }
+  }
 
   if (!state) return <div className='center'><p className='muted'>Starting…</p></div>
   if (!state.active) return <Onboarding initialLink={pairLink} onPaired={() => reload()} />
@@ -1676,9 +1802,24 @@ export default function App () {
       {tab === 'settings' && settingsScreen}
       {tab === 'about' && aboutScreen}
 
-      {/* The dock is the donor's fixed bottom container; with no mini-player
-          above it, the navbar IS the dock. */}
+      {/* The dock is the donor's fixed bottom container; the cast bar rides
+          above the navbar the way the donor's mini-player did - the phone is
+          the remote while a TV plays, and the remote should be one glance and
+          one tap from anywhere. */}
       <div className='dock'>
+        {casting && (
+          <div className='castbar'>
+            <Screencast size={20} />
+            <div className='meta'>
+              <div className='t'>{casting.title}</div>
+              <div className='sub muted sm'>on {casting.name}</div>
+            </div>
+            <button aria-label={casting.paused ? 'Resume the TV' : 'Pause the TV'} onClick={toggleCastPause}>
+              {casting.paused ? <Play size={20} /> : <Pause size={20} />}
+            </button>
+            <button aria-label='Stop the TV' onClick={stopCast}><X size={20} /></button>
+          </div>
+        )}
         <NavBar active={tab} onTab={(k) => { setTab(k); setErr('') }} saved={saved.size} />
       </div>
 
@@ -1687,7 +1828,7 @@ export default function App () {
           item={sheet} saved={saved.has(sheet.id)} watched={watchedIds.has(sheet.id)}
           downloaded={dlIds.has(sheet.id)}
           libraryNames={new Map((state?.hosts || []).map((h) => [h.libraryId, h.libraryName || 'Library']))}
-          onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched}
+          onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched} onCast={openCast}
           onDownload={(i, want) => {
             if (want) {
               call('download.start', { itemId: i.id }).then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading - watch it in You, Downloads') }).catch((e) => setErr(e.message))
@@ -1695,6 +1836,15 @@ export default function App () {
               call('download.remove', { itemId: i.id }).then(() => { setDlIds((x) => { const n = new Set(x); n.delete(i.id); return n }); say('Removed from this phone') })
             }
           }}
+        />
+      )}
+
+      {castSheet && (
+        <CastSheet
+          sheet={castSheet}
+          hostCount={(state?.hosts || []).length}
+          onPick={castTo}
+          onClose={() => setCastSheet(null)}
         />
       )}
 
