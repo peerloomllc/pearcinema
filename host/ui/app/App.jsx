@@ -115,6 +115,16 @@ function CastPanel () {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [test, setTest] = useState(null)
+  // The media players BY NAME. A count alone cannot say which of seven
+  // entities is the television and which are the kitchen speakers (Tim,
+  // 2026-08-17) - so once casting is on, the panel lists what Home Assistant
+  // actually reports, name, id and state.
+  const [targets, setTargets] = useState(null)
+
+  const loadTargets = async () => {
+    const r = await api('/api/cast/targets')
+    setTargets(r?.error ? [] : (r.targets || []))
+  }
 
   useEffect(() => {
     let live = true
@@ -122,6 +132,7 @@ function CastPanel () {
       if (!live || r?.error) return
       setCfg(r)
       setBaseUrl(r.baseUrl || '')
+      if (r.enabled && r.tokenSet) loadTargets()
     })
     return () => { live = false }
   }, [])
@@ -133,6 +144,8 @@ function CastPanel () {
     if (r?.error) return notify('Not saved', r.error)
     setToken('')
     setCfg(r)
+    if (r.enabled && r.tokenSet) loadTargets()
+    else setTargets(null)
     notify('Saved', enabled
       ? 'Casting is on. Phones paired as owner can now send films to your TVs.'
       : 'Casting is off.')
@@ -143,6 +156,7 @@ function CastPanel () {
     const r = await api('/api/cast/test', {})
     setBusy(false)
     setTest(r?.error ? { bad: r.error } : { ok: r.targets })
+    if (!r?.error) loadTargets()
   }
 
   if (!cfg) return <div class='card'><h3>Casting</h3><p class='hint'>Loading…</p></div>
@@ -177,6 +191,29 @@ function CastPanel () {
         <p class='hint'>
           Connected. Home Assistant knows about {test.ok} media player{test.ok === 1 ? '' : 's'}.
         </p>
+      )}
+      {targets !== null && (
+        <>
+          <h3 style='margin-top:1rem'>What Home Assistant reports</h3>
+          {targets.length === 0 && <p class='hint'>No media players right now.</p>}
+          {targets.length > 0 && (
+            <div class='rootlist'>
+              {targets.map(t => (
+                <div class='rootrow' key={t.entityId}>
+                  <span class='rootpath'>
+                    {t.name}
+                    <span class='hint'> · {t.entityId} · {t.state}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p class='hint'>
+            Phones offer all of these when casting. Speakers play a film's sound
+            only, so aim at the television - one that is off usually shows as
+            "off" or "unavailable" here until you turn it on.
+          </p>
+        </>
       )}
       <div class='actions'>
         <button onClick={() => save(true)} disabled={busy || (!cfg.tokenSet && !token.trim())}>

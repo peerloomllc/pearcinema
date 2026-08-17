@@ -1241,6 +1241,16 @@ async function startDashboard ({
           return json(res, 400, { error: e.message })
         }
       }
+      // The media players BY NAME, because a count is not enough to find the
+      // television among the kitchen speakers (Tim, 2026-08-17) - PearTune's
+      // panel lists them and this one does too.
+      if (req.method === 'GET' && url.pathname === '/api/cast/targets') {
+        try {
+          return json(res, 200, { targets: await host.speakers.list() })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
 
       // The video engine's cap, from the This host card. Zero is the off
       // switch and reaches decide() as honest refusals, not BUSY errors.
