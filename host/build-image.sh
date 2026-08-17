@@ -36,9 +36,17 @@ fi
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUITE="$(cd "$REPO/.." && pwd)"
 HOST_PKG="$SUITE/peerloom-host"
+# The OUTBOUND side too: the Dockerfile has copied @peerloom/client since the
+# desktop-client merge (#65), but nothing staged it - so every image build
+# since then failed at COPY. Found deploying the cast host, 2026-08-17.
+CLIENT_PKG="$SUITE/peerloom-client"
 
 if [ ! -d "$HOST_PKG/src" ]; then
   echo "@peerloom/host not found at $HOST_PKG - the image cannot be built without it" >&2
+  exit 1
+fi
+if [ ! -d "$CLIENT_PKG/src" ]; then
+  echo "@peerloom/client not found at $CLIENT_PKG - the image cannot be built without it" >&2
   exit 1
 fi
 
@@ -51,11 +59,13 @@ echo "staging build context in $STAGE"
 # image runs `npm ci` itself, and a host's node_modules carries native addons built
 # for the WRONG architecture on a cross-arch build - which fails at runtime, deep
 # inside the hypercore stack, with an error that looks like a code bug.
-mkdir -p "$STAGE/pearcinema" "$STAGE/peerloom-host"
+mkdir -p "$STAGE/pearcinema" "$STAGE/peerloom-host" "$STAGE/peerloom-client"
 cp "$REPO/package.json" "$REPO/package-lock.json" "$STAGE/pearcinema/"
 cp -r "$REPO/host" "$STAGE/pearcinema/host"
 cp "$HOST_PKG/package.json" "$HOST_PKG/package-lock.json" "$STAGE/peerloom-host/"
 cp -r "$HOST_PKG/src" "$STAGE/peerloom-host/src"
+cp "$CLIENT_PKG/package.json" "$CLIENT_PKG/package-lock.json" "$STAGE/peerloom-client/"
+cp -r "$CLIENT_PKG/src" "$STAGE/peerloom-client/src"
 
 # A stray host-data/ inside host/ would ship somebody's identity seed in a public
 # image. Belt and braces on top of .gitignore.
