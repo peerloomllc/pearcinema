@@ -334,7 +334,9 @@ class CastSessions {
     // castHost(), not loopback: the television fetches this URL ITSELF.
     const url = `http://${castHost()}:${this.port}/v/${token}`
     try {
-      await this.speakers.play(entityId, url)
+      // The title rides along for the receiver's own display - a Roku shows
+      // it on its player, a Cast device on its loading screen.
+      await this.speakers.play(entityId, url, { title: item.title || null })
     } catch (e) {
       // Do not leave a live token behind for a play that never started.
       this.tokens.delete(token)

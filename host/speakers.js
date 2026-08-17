@@ -204,17 +204,40 @@ class Speakers {
     return this._call(`/api/services/${domain}/${service}`, { method: 'POST', body: data })
   }
 
-  play (entityId, url) {
-    return this._service('media_player', 'play_media', {
+  // TWO DIALECTS OF "PLAY THIS URL", measured on the living-room hardware
+  // (2026-08-17). Google Cast takes media_content_type 'video'. A Roku takes
+  // 'url' plus an extra.format hint, delivered through a channel that
+  // supports the PlayOnRoku API - on Roku OS 11.5+ the built-in one is gone
+  // (ECP answers 404 for input 15985), so the operator installs Media
+  // Assistant (channel 782875) and points the HA Roku integration's "Play
+  // Media Roku Application ID" option at it. A Roku on the HDMI port is the
+  // whole TV story for a Samsung with no Cast built in, the proposal's
+  // predicted case.
+  //
+  // The entity id names the family well enough to pick first; the other
+  // dialect is retried once on refusal, so a Roku hiding behind a renamed
+  // entity still plays - just one failed call later.
+  async play (entityId, url, { title = null } = {}) {
+    const rokuShape = {
       entity_id: entityId,
       media_content_id: url,
-      // 'video', not 'movie': it is the one type BOTH target families take.
-      // Google Cast passes either through, but the Roku integration only
-      // accepts its own enum (music/video/episode/...) - and a Roku on the
-      // HDMI port is the whole TV story for a Samsung with no Cast built in
-      // (Tim's UN65TU7000F, 2026-08-17, the proposal's predicted case).
+      media_content_type: 'url',
+      extra: { format: 'mp4', ...(title ? { name: title } : {}) }
+    }
+    const castShape = {
+      entity_id: entityId,
+      media_content_id: url,
       media_content_type: 'video'
-    })
+    }
+    const looksRoku = /roku/i.test(entityId)
+    const first = looksRoku ? rokuShape : castShape
+    const second = looksRoku ? castShape : rokuShape
+    try {
+      return await this._service('media_player', 'play_media', first)
+    } catch (e) {
+      this.log('cast:play-shape-retry', { entityId, err: e?.message })
+      return this._service('media_player', 'play_media', second)
+    }
   }
 
   stop (entityId) {
