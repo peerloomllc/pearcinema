@@ -22,6 +22,7 @@ const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const remoteLibs = require('./remote')
 const remoteDownloads = require('./remote-downloads')
+const blendLib = require('./blend')
 const { Speakers } = require('./speakers')
 const castLib = require('./cast')
 const watch = require('./watch')
@@ -238,6 +239,18 @@ class PearCinemaHost {
       remote: this.remote,
       log
     })
+
+    // The blend (approved proposal 2026-08-17): the phone's merged index in
+    // this process, local library plus remotes. Rebuilds follow the members:
+    // pairing changes, a remote coming back, a local scan.
+    this.blend = new blendLib.Blend({
+      getAdapter: () => this.adapter,
+      getLibraryId: () => this.host.libraryId,
+      remote: this.remote,
+      log
+    })
+    this.remote.onchange = () => this.blend.buildSoon('libraries-changed')
+    this.remote.onconnect = () => this.blend.buildSoon('host-online')
 
     // AFTER the host, because an adapter needs the libraryId - and the libraryId is
     // derived from the host identity, which does not exist until LibraryHost has
@@ -864,6 +877,8 @@ class PearCinemaHost {
       })
       this.sourceError = null
       this.log('host:scanned', { source: this.adapter.kind, items: n })
+      // The blend's local member just changed shape.
+      this.blend.buildSoon('scan')
     } catch (e) {
       this.sourceError = e.message
       this.log('host:source-failed', { source: this.adapter.kind, err: e.message })

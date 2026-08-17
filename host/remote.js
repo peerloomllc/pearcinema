@@ -46,6 +46,7 @@ class RemoteLibraries {
     this.state = this._readHosts()
     this.conns = new Map() // libraryId -> { client, connecting }
     this.onchange = null // set by the wiring; fired after any list change
+    this.onconnect = null // set by the wiring; fired when a member comes (back) online
   }
 
   _loadIdentity () {
@@ -141,6 +142,8 @@ class RemoteLibraries {
       await c.connect({ hostKey: z32.decode(row.hostKey), libraryId: row.libraryId })
       slot.client = c
       this.log('remote:connected', { library: row.libraryName })
+      // A member coming back is news the blend rebuilds on.
+      this.onconnect?.(libraryId)
       return c
     })()
 
