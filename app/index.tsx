@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Image, PermissionsAndroid, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native'
+import { BackHandler, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -807,10 +807,17 @@ export default function App () {
             )}
           </View>
 
+          {/* THE SCRIM DISMISSES AND THE TRACKS SCROLL (Tim, 2026-08-17): a
+              real film carries a dozen tracks and the card grew taller than
+              the player with no way to reach the rest - and no way out short
+              of choosing one. The card swallows its own taps so only a tap
+              OUTSIDE it closes; the header and Close stay pinned while the
+              tracks scroll between them. */}
           {subPicker && (
-            <View style={styles.subPicker}>
-              <View style={styles.subCard}>
+            <Pressable style={styles.subPicker} onPress={() => setSubPicker(false)}>
+              <Pressable style={styles.subCard} onPress={() => {}}>
                 <Text style={styles.subHead}>Subtitles</Text>
+                <ScrollView style={styles.subScroll}>
                 <Pressable style={styles.subRow} onPress={() => chooseSubtitle('off')}>
                   <Text style={[styles.subTxt, !activeSub && styles.subOn]}>Off</Text>
                 </Pressable>
@@ -866,11 +873,12 @@ export default function App () {
                 {subTracks.length === 0 && (
                   <Text style={styles.subNone}>No subtitle files for this one - anything listed above came from inside the file.</Text>
                 )}
+                </ScrollView>
                 <Pressable style={styles.subRow} onPress={() => setSubPicker(false)}>
                   <Text style={styles.subTxt}>Close</Text>
                 </Pressable>
-              </View>
-            </View>
+              </Pressable>
+            </Pressable>
           )}
         </View>
       )}
@@ -917,8 +925,10 @@ const styles = StyleSheet.create({
   },
   subCard: {
     backgroundColor: '#1a1712', borderColor: '#2e2820', borderWidth: 1,
-    borderRadius: 12, padding: 8, alignSelf: 'stretch', maxWidth: 420
+    borderRadius: 12, padding: 8, alignSelf: 'stretch', maxWidth: 420,
+    maxHeight: '80%'
   },
+  subScroll: { flexGrow: 0 },
   subHead: { color: '#efe9df', fontWeight: '700', fontSize: 16, padding: 10 },
   subRow: { paddingVertical: 12, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#241f18' },
   subTxt: { color: '#efe9df' },
