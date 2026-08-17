@@ -65,15 +65,31 @@ const PREFERRED_PORT = Number(process.env.PEARCINEMA_CAST_PORT || 8752)
 
 const BIND = process.env.PEARCINEMA_CAST_BIND || '0.0.0.0'
 
-// What the Default Media Receiver actually plays, declared the way any client
-// declares itself. Conservative on purpose: an HEVC-capable Google TV will get
-// an H.264 conversion it did not strictly need, which costs the engine some
-// work; the liberal list would hand an older Chromecast a film it plays as a
-// black screen, which costs the feature its credibility.
+// What the receiver actually plays, declared the way any client declares
+// itself - PER FAMILY, because the living room proved the two main families
+// disagree. Conservative on purpose: an HEVC-capable device gets an H.264
+// conversion it did not strictly need, which costs the engine some work; the
+// liberal list would hand an older device a film it plays as a black screen,
+// which costs the feature its credibility.
 const CAST_CAPS = {
+  // The Default Media Receiver: H.264 in MP4 and nothing Matroska.
   containers: ['mp4', 'mov'],
   videoCodecs: ['h264'],
   audioCodecs: ['aac', 'mp3']
+}
+const ROKU_CAPS = {
+  // A Roku opens Matroska natively (mkv is on its documented format list), so
+  // most of a real library DIRECT-plays with Range and real seek - the best
+  // transport there is. Video stays h264-only: the 4K sticks decode HEVC but
+  // the Express class does not, and per-model caps are a refinement for the
+  // day a real HEVC-capable Roku shows the need.
+  containers: ['mp4', 'mov', 'matroska', 'mkv'],
+  videoCodecs: ['h264'],
+  audioCodecs: ['aac', 'mp3']
+}
+
+function capsFor (entityId) {
+  return /roku/i.test(String(entityId)) ? ROKU_CAPS : CAST_CAPS
 }
 
 // Who may light up a television. OWNER only, the donor's phase 1 rule kept
@@ -188,7 +204,7 @@ class CastSessions {
 
     try {
       const url = new URL(req.url, 'http://127.0.0.1')
-      const m = /^\/v\/([A-Za-z0-9_-]+)$/.exec(url.pathname)
+      const m = /^\/v\/([A-Za-z0-9_-]+)(?:\/(index\.m3u8|\d+\.ts))?$/.exec(url.pathname)
       if (!m) return deny(404)
       if (req.method !== 'GET' && req.method !== 'HEAD') return deny(405)
 
@@ -201,7 +217,8 @@ class CastSessions {
 
       // THE LIVE RE-READ. Not the grant we minted with - the grant as it is
       // right now. This is what makes a revoked, expired or person-revoked
-      // device fail its next fetch mid-film.
+      // device fail its next fetch mid-film - and on an HLS cast the next
+      // fetch is at most one segment away.
       const lookup = await this.grants.lookup(entry.deviceKey)
       const verdict = decide(lookup)
       if (!verdict.allow || !CAST_SCOPES.has(lookup.grant?.scope)) {
@@ -213,12 +230,72 @@ class CastSessions {
         return deny(403)
       }
 
+      const sub = m[2] || null
+      if (sub === 'index.m3u8') return this._servePlaylist(req, res, entry, deny)
+      if (sub) return this._serveSegment(req, res, entry, Number(sub.slice(0, -3)), deny)
       if (entry.mode === 'direct') return this._serveDirect(req, res, entry, deny)
       return this._serveGenerated(req, res, entry, deny)
     } catch (e) {
       this.log('cast:serve-failed', { err: e?.message })
       try { deny(500) } catch {}
     }
+  }
+
+  // The playlist, sliced to START at the resume segment: an HLS receiver
+  // cannot be told where to begin, so the playlist begins there instead - the
+  // web player's restart shape, one level up. Segment NAMES keep their true
+  // indices, so each fetch maps to the right minutes of film and the
+  // position arithmetic in the poll stays honest through row.at.
+  async _servePlaylist (req, res, entry, deny) {
+    const out = await this.media.playlist({ itemId: entry.itemId, capabilities: entry.caps || CAST_CAPS })
+    if (!out?.playlist) return deny(409)
+
+    let body = out.playlist
+    const skip = Math.floor(entry.at / (out.segmentSeconds || 4))
+    if (skip > 0) {
+      const lines = body.split('\n')
+      const kept = []
+      let dropped = 0
+      for (let i = 0; i < lines.length; i++) {
+        const seg = /^(\d+)\.ts$/.exec(lines[i])
+        if (seg && Number(seg[1]) < skip) {
+          // The EXTINF line above this segment goes with it.
+          if (kept.length && kept[kept.length - 1].startsWith('#EXTINF')) kept.pop()
+          dropped++
+          continue
+        }
+        kept.push(lines[i])
+      }
+      body = kept.join('\n')
+      // The true start of what remains, so a player's clock does not guess.
+      body = body.replace(/#EXT-X-MEDIA-SEQUENCE:\d+/, `#EXT-X-MEDIA-SEQUENCE:${skip}`)
+      // Every segment actually served begins at skip - keep row.at exact.
+      entry.at = skip * (out.segmentSeconds || 4)
+      this.log('cast:playlist-sliced', { skip, dropped })
+    }
+
+    res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
+    if (req.method === 'HEAD') return res.end()
+    res.end(body)
+  }
+
+  async _serveSegment (req, res, entry, seq, deny) {
+    let session
+    try {
+      session = await this.media.segment({ itemId: entry.itemId, seq, capabilities: entry.caps || CAST_CAPS })
+    } catch (e) {
+      if (e.code === 'BUSY') return deny(503)
+      throw e
+    }
+    if (!session) return deny(404)
+
+    res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
+    if (req.method === 'HEAD') { session.kill(); return res.end() }
+    // The per-segment ffmpeg dies with its reader, same as every generated
+    // path - a receiver seeking away must free the engine slot at the seek.
+    res.on('close', () => session.kill())
+    session.stdout.on('error', () => session.kill())
+    session.stdout.pipe(res)
   }
 
   async _serveDirect (req, res, entry, deny) {
@@ -234,8 +311,11 @@ class CastSessions {
     const start = range ? range.start : 0
     const end = range ? range.end : size - 1
 
+    const container = String(item.media?.container || '').toLowerCase()
     res.writeHead(range ? 206 : 200, {
-      'content-type': 'video/mp4',
+      // Honest about Matroska - a Roku direct-plays it and deserves the
+      // right label; everything else direct is the ISO family.
+      'content-type': ['matroska', 'mkv'].includes(container) ? 'video/x-matroska' : 'video/mp4',
       'content-length': end - start + 1,
       'accept-ranges': 'bytes',
       'cache-control': 'no-store',
@@ -300,13 +380,27 @@ class CastSessions {
     const item = await this.media.getItem(itemId)
     if (!item) throw new Error('no such item')
 
-    const verdict = await this.media.decide({ itemId, capabilities: CAST_CAPS })
+    const caps = capsFor(entityId)
+    const verdict = await this.media.decide({ itemId, capabilities: caps })
     const mode = verdict?.mode
     if (mode !== 'direct' && mode !== 'remux' && mode !== 'transcode') {
       throw new Error(verdict?.reason || 'this film cannot play on that television')
     }
+
+    // HOW THE FILM TRAVELS, the living room's measured lesson (2026-08-17):
+    //
+    //   direct     the raw file, Range honoured, the television seeks itself.
+    //   transcode  HLS - the same playlist and per-segment engine the phone
+    //              rides. A Roku REFUSES an unbounded progressive stream
+    //              ("Full-content response on a range request"), and segments
+    //              also mean revoke bites within one segment, not one film.
+    //   remux      the progressive generated stream. Only the Cast family
+    //              lands here (Roku caps direct-play Matroska), and a
+    //              Chromecast tolerates unseekable progressive MP4.
+    //
     // A direct cast starts at 0 and the television seeks itself; a generated
-    // one starts where the viewer is, because generated bytes cannot seek.
+    // one starts where the viewer is - HLS by slicing the playlist to begin
+    // at the resume segment, progressive by -ss.
     const startAt = mode === 'direct' ? 0 : Math.max(0, Number(at) || 0)
 
     // Replace whatever this device had on this entity, rather than stacking
@@ -320,6 +414,7 @@ class CastSessions {
       itemId,
       entityId,
       mode,
+      caps,
       at: startAt,
       expiresAt: Date.now() + TOKEN_TTL_MS
     })
@@ -332,11 +427,15 @@ class CastSessions {
     set.set(entityId, { token, itemId, mode, at: startAt, startedAt: Date.now(), sawPlaying: false, lastReportAt: 0 })
 
     // castHost(), not loopback: the television fetches this URL ITSELF.
-    const url = `http://${castHost()}:${this.port}/v/${token}`
+    const base = `http://${castHost()}:${this.port}/v/${token}`
+    const url = mode === 'transcode' ? `${base}/index.m3u8` : base
+    const format = mode === 'transcode'
+      ? 'hls'
+      : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
     try {
       // The title rides along for the receiver's own display - a Roku shows
       // it on its player, a Cast device on its loading screen.
-      await this.speakers.play(entityId, url, { title: item.title || null })
+      await this.speakers.play(entityId, url, { title: item.title || null, format })
     } catch (e) {
       // Do not leave a live token behind for a play that never started.
       this.tokens.delete(token)
@@ -510,4 +609,4 @@ class CastSessions {
   }
 }
 
-module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, TOKEN_TTL_MS, castHost, BIND }
+module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, TOKEN_TTL_MS, castHost, BIND }

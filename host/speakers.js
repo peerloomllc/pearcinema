@@ -217,12 +217,14 @@ class Speakers {
   // The entity id names the family well enough to pick first; the other
   // dialect is retried once on refusal, so a Roku hiding behind a renamed
   // entity still plays - just one failed call later.
-  async play (entityId, url, { title = null } = {}) {
+  async play (entityId, url, { title = null, format = 'mp4' } = {}) {
     const rokuShape = {
       entity_id: entityId,
       media_content_id: url,
       media_content_type: 'url',
-      extra: { format: 'mp4', ...(title ? { name: title } : {}) }
+      // The format hint is load-bearing on a Roku: 'mkv' for a direct
+      // Matroska file, 'hls' for a converted stream, 'mp4' otherwise.
+      extra: { format, ...(title ? { name: title } : {}) }
     }
     const castShape = {
       entity_id: entityId,

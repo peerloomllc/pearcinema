@@ -208,7 +208,12 @@ class PearCinemaHost {
         getItem: (id) => this.adapter.get({ id: String(id) }),
         decide: (p) => this.decideFor(p),
         openStream: (p) => this.openStream(p),
-        openRemux: (p) => this.openRemux(p)
+        openRemux: (p) => this.openRemux(p),
+        // The HLS pair, for cast targets that refuse unbounded progressive
+        // streams (a Roku does, measured) - the same playlist and per-segment
+        // engine the phone rides.
+        playlist: (p) => this.hlsPlaylist(p),
+        segment: (p) => this.hlsSegment(p)
       },
       presence: this.host.presence,
       report: (p) => this.reportCastProgress(p),
