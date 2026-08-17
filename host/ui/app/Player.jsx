@@ -307,8 +307,8 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   setBusy(false)
                   setFailed(generated
                     ? (verdict.status === 'convert' || burnSub
-                        ? 'Converting stopped. The film itself is fine - this is the host or the connection rather than the file.'
-                        : 'Repackaging stopped. The film itself is fine - this is the host or the connection rather than the file.')
+                        ? 'Converting stopped. The film itself is fine. This is the host or the connection rather than the file.'
+                        : 'Repackaging stopped. The film itself is fine. This is the host or the connection rather than the file.')
                     : 'The browser stopped without saying why. That is almost always the container or the codec, and the file will play on a phone.')
                 }}
               >
@@ -405,7 +405,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
               says which way pressing it goes. */}
           <button
             class={'icon' + (seen ? ' on' : '')}
-            title={seen ? 'Watched - press to unmark' : 'Mark as watched'}
+            title={seen ? 'Watched. Press to unmark' : 'Mark as watched'}
             aria-label={seen ? 'Mark as unwatched' : 'Mark as watched'}
             aria-pressed={seen}
             onClick={() => markWatched(!seen)}
@@ -452,7 +452,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   ? `Your browser cannot decode ${String(m.videoCodec || '').toUpperCase()} video, so the host converts the picture to H.264 on its own video hardware as it streams.`
                   : verdict.status === 'nosound'
                     ? 'Your browser cannot decode this soundtrack, so it is rebuilt as it streams. The picture is untouched.'
-                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put in one it will - untouched - as they stream.`}
+                    : `Your browser will not open a ${containerName(m.container)} file, so the picture and sound are put, untouched, in one it will as they stream.`}
                 {' '}Nothing is written to disk, which is why jumping to a new point takes a moment.
               </>
             )}

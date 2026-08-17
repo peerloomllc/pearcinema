@@ -73,8 +73,8 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
     <div class={embedded ? '' : 'card'}>
       {!embedded && <h3>Artwork from the internet</h3>}
       <p class='hint'>
-        Most files carry no artwork of their own. With this on, the host asks TMDB - a
-        third-party film database - for posters, which means <b>this host tells TMDB the
+        Most files carry no artwork of their own. With this on, the host asks TMDB, a
+        third-party film database, for posters, which means <b>this host tells TMDB the
         titles it is identifying</b>. Nothing else is sent and artwork found beside your
         files always wins. Nothing is written into your library except by the explicit
         save button below. Off by default.
@@ -93,7 +93,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
       <div class='row artkey'>
         <input
           type='password'
-          placeholder={meta.hasKey ? 'A key is saved - paste to replace it' : 'Paste your TMDB key'}
+          placeholder={meta.hasKey ? 'A key is saved. Paste to replace it' : 'Paste your TMDB key'}
           value={key}
           onInput={e => { setKey(e.currentTarget.value); setTested(null) }}
         />
@@ -145,7 +145,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
 
       {/* THE EXPLICIT ACTION. Everything fetched lives in this host's own data
           folder, which a reinstall or a moved drive loses. This writes it beside
-          the films instead, as the standard files every scanner reads - and it
+          the films instead, as the standard files every scanner reads, and it
           only ever creates, never replaces, so the button is safe to press on a
           library full of hand-made answers. Shown for folder libraries only:
           a Jellyfin library is that server's to manage. */}
@@ -154,7 +154,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
           <p class='hint'>
             The fetched artwork and matches live in this host's own data folder. You can
             save them <b>into the library itself</b>, beside the films, as the standard
-            files Kodi and Jellyfin also read - so they survive a reinstall and travel
+            files Kodi and Jellyfin also read, so they survive a reinstall and travel
             with the drive. Only new files are created; anything already beside your
             films is left exactly as it is.
           </p>
@@ -172,7 +172,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
               {written.error
                 ? written.error
                 : written.readOnly
-                  ? 'Nothing could be written: the library is mounted read-only. On an Umbrel, update the app - newer versions mount the library writable for exactly this.'
+                  ? 'Nothing could be written: the library is mounted read-only. On an Umbrel, update the app. Newer versions mount the library writable for exactly this.'
                   : sentence(written)}
             </p>
           )}
@@ -189,7 +189,7 @@ function sentence (w) {
     ? `Saved ${w.wrote} file${w.wrote === 1 ? '' : 's'} beside your films.`
     : 'Nothing new to save.')
   if (w.skippedExisting > 0) bits.push(`${w.skippedExisting} already had an answer on disk and ${w.skippedExisting === 1 ? 'was' : 'were'} left alone.`)
-  if (w.skippedUncertain > 0) bits.push(`${w.skippedUncertain} uncertain guess${w.skippedUncertain === 1 ? ' was' : 'es were'} held back - confirm them from the pencil on their tiles first.`)
+  if (w.skippedUncertain > 0) bits.push(`${w.skippedUncertain} uncertain guess${w.skippedUncertain === 1 ? ' was' : 'es were'} held back. Confirm them from the pencil on their tiles first.`)
   if (w.failed > 0) bits.push(`${w.failed} could not be written.`)
   return bits.join(' ')
 }

@@ -178,7 +178,7 @@ export default function Pair ({ state, reload, onClose }) {
         {kind === 'owner' && (
           <p class='hint center'>
             Scan this in PearCinema on the phone you want to make an <b>owner</b>. It can
-            then manage this library from the app - see devices, revoke, open a pairing
+            then manage this library from the app: see devices, revoke, open a pairing
             window.
           </p>
         )}
@@ -213,9 +213,9 @@ export default function Pair ({ state, reload, onClose }) {
         <div class='qr' dangerouslySetInnerHTML={{ __html: win.svg || '' }} />
         <div class='qrcap'>
           {win.owner
-            ? 'Owner pairing - this phone gains library management. Valid for 5 minutes.'
+            ? 'Owner pairing. This phone gains library management, valid for 5 minutes.'
             : win.guest
-              ? `Guest pass - access expires ${fmtDur(win.expiresMs)} after this device pairs.`
+              ? `Guest pass. Access expires ${fmtDur(win.expiresMs)} after this device pairs.`
               : 'Valid for 5 minutes. Closes as soon as one device pairs.'}
         </div>
       </div>

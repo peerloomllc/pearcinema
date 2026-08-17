@@ -187,7 +187,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     const res = await api('/api/source/test', cfg())
     setBusy('')
     if (res.error) return notify('That did not work', res.error)
-    notify('Looks good', `Found ${describe(res)}. Nothing has been saved yet - press Save to switch to it.`)
+    notify('Looks good', `Found ${describe(res)}. Nothing has been saved yet. Press Save to switch to it.`)
   }
 
   const save = async () => {
@@ -282,7 +282,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
                 <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}><Close size={15} /></button>
               </div>
             ))}
-            {!roots.length && <div class='rootrow'><span class='hint-inline'>No folders yet - add the one your films are in.</span></div>}
+            {!roots.length && <div class='rootrow'><span class='hint-inline'>No folders yet. Add the one your films are in.</span></div>}
           </div>
           {/* The donor has a free-text path box beside Browse. Ours deliberately
               does not - the typed-path-inside-the-container trap is this panel's
@@ -293,7 +293,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
           </div>
           <p class='hint'>
             Add films and TV as separate folders if they live apart, and say what each
-            folder holds - in a TV folder, an episode whose name does not say which one
+            folder holds. In a TV folder, an episode whose name does not say which one
             it is still goes under its show instead of turning up as a film. On "work it
             out", a folder called Movies or TV Shows is taken at its word.
           </p>
@@ -344,7 +344,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
               const minutes = Number(e.currentTarget.value)
               const res = await api('/api/rescan-interval', { minutes })
               if (res?.error) return notify('Not set', res.error)
-              notify('Auto-rescan', minutes ? `The library rechecks itself every ${minutes >= 60 ? (minutes / 60) + ' hour' + (minutes > 60 ? 's' : '') : minutes + ' minutes'}.` : 'Off - rescans are manual.')
+              notify('Auto-rescan', minutes ? `The library rechecks itself every ${minutes >= 60 ? (minutes / 60) + ' hour' + (minutes > 60 ? 's' : '') : minutes + ' minutes'}.` : 'Off. Rescans are manual.')
               reload()
             }}
           >
@@ -396,7 +396,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       {state.sourceError && (
         <div class='banner bad'>
           <b>The source is not answering.</b> {state.sourceError}
-          <div class='hint'>Paired devices can still reach this host - they just see an empty library until this is fixed.</div>
+          <div class='hint'>Paired devices can still reach this host. They just see an empty library until this is fixed.</div>
         </div>
       )}
       {Body}

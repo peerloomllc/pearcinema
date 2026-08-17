@@ -1170,3 +1170,11 @@ p.error { color: var(--danger); font-size: .85rem }
   .libpick { max-width: 9.5rem }
   .rootrow { flex-wrap: wrap }
 }
+
+/* TITLES CENTER wherever a card, sheet or modal carries one (Tim's copy
+   rules, 2026-08-17). Section labels over grids - the shelf headings, a
+   screen's h2 - stay left: they label content beside them rather than
+   titling a surface. */
+.card > h3 { text-align: center }
+aside.sheet h3, .sheet-head h3 { text-align: center }
+.modal-head h3, .modal h3:first-child { text-align: center }
