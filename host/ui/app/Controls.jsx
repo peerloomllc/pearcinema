@@ -33,6 +33,14 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
   const [subOn, setSubOn] = useState(-1)
+  // DECLARED BEFORE THE EFFECTS THAT READ THEM. The idle effect below lists
+  // `full` in its deps and reaches for `wrap`, and a deps array is evaluated
+  // AT RENDER - referencing a const still in its temporal dead zone threw on
+  // every player mount and took the whole page down with it (Tim,
+  // 2026-08-17, the blank episode page). Second time this trap has bitten
+  // in one day; declarations stay at the top from here on.
+  const [full, setFull] = useState(false)
+  const wrap = useRef(null)
   // FULLSCREEN HIDES THE CONTROLS after a still moment, the way every player
   // does (Tim, 2026-08-17) - any mouse movement or tap brings them back, and
   // an open subtitle menu pins them. The cursor goes with them, via the
@@ -67,8 +75,6 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
     document.addEventListener('pointerdown', close)
     return () => document.removeEventListener('pointerdown', close)
   }, [subMenu])
-  const [full, setFull] = useState(false)
-  const wrap = useRef(null)
 
   const el = () => video.current
 

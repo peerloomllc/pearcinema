@@ -118,12 +118,14 @@ function DownloadsCard ({ remotes, onPlay }) {
       const r = await api('/api/downloads')
       if (!live) return
       setItems(r.items || [])
-      // The poll keeps itself alive only while something is actually moving.
-      if ((r.items || []).some(d => d.downloading)) t = setTimeout(look, 2000)
+      // Fast while something moves, gently otherwise - removing a library
+      // takes its downloads with it server-side, and the card must not keep
+      // showing what is already gone (Tim, 2026-08-17).
+      t = setTimeout(look, (r.items || []).some(d => d.downloading) ? 2000 : 10000)
     }
     look()
     return () => { live = false; clearTimeout(t) }
-  }, [tick])
+  }, [tick, remotes.map(r => r.libraryId).join(',')])
   if (!items?.length) return null
   const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
   return (
@@ -642,9 +644,36 @@ export default function App () {
     return s
   }, [])
 
+  // DEFINED ABOVE THE MOUNT EFFECT AND THE EARLY RETURN, and that placement
+  // is load-bearing: on the very first render the component returns Loading
+  // before the consts below the return exist, yet the mount effect's closure
+  // has already captured their bindings - touching one from that closure is
+  // the temporal dead zone, and it took the whole page down (the third TDZ
+  // of 2026-08-17; everything a top-level effect calls now lives above it).
+  const pickSource = (lib) => {
+    setSource(lib)
+    setRemoteBase(lib ? '/remote/' + lib : '')
+    setPlaying(null)
+    setSearch('')
+    reloadWatch()
+  }
+
   useEffect(() => {
     applyThemePref(loadThemePref())
-    reload().then(s => { if (needsSetup(s) && !setupDismissed()) setWizard(true) })
+    // A machine with a REMOTE library is already a client and skips the
+    // wizard (approved open question 1 of the desktop-client proposal) - and
+    // on a client-only machine the watch surface OPENS on the friend's
+    // library, because "No films yet" over an empty local shelf is the wrong
+    // greeting for a browser that exists to watch somebody else's. The
+    // remote list is asked here directly because reload() fetches it without
+    // awaiting, and both decisions need the answer in hand.
+    reload().then(async s => {
+      const r = await api('/api/remote/list').catch(() => null)
+      const remoteLibs = r?.remotes || []
+      if (s?.source?.kind === 'empty' && remoteLibs.length) pickSource(remoteLibs[0].libraryId)
+      if (!needsSetup(s) || setupDismissed()) return
+      if (!remoteLibs.length) setWizard(true)
+    })
     reloadWatch()
     // The device list changes without us doing anything - a phone pairs, a guest
     // pass expires, somebody comes online. Poll gently rather than leaving a stale
@@ -665,14 +694,6 @@ export default function App () {
   const caps = { ...CAPS, hostTranscode: source ? true : !!state.transcode?.available }
 
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
-
-  const pickSource = (lib) => {
-    setSource(lib)
-    setRemoteBase(lib ? '/remote/' + lib : '')
-    setPlaying(null)
-    setSearch('')
-    reloadWatch()
-  }
 
   // Play a kept copy from the Downloads card: switch to its library so the
   // routes and the shim prefix line up, then open the player on an item built
