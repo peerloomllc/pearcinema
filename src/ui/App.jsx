@@ -17,7 +17,7 @@ import {
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
   ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile,
-  Screencast, Pause
+  Screencast, Pause, Prohibit
 } from '@phosphor-icons/react'
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -692,9 +692,11 @@ export default function App () {
   const [dlRows, setDlRows] = useState(null)
   const [dlRunning, setDlRunning] = useState([])
   const [dlIds, setDlIds] = useState(new Set())
-  // The armed two-tap revoke, the same pattern Leave uses - a WebView's
-  // confirm() is at the shell's mercy.
-  const [arming, setArming] = useState(null)
+  // The device a revoke sheet is open for (Tim, 2026-08-17, replacing the
+  // donor's armed two-tap text swap): confirmation belongs in the app's own
+  // bottomsheet idiom, not in a button that changes its words - a WebView's
+  // confirm() is still at the shell's mercy, so the sheet is ours.
+  const [revoking, setRevoking] = useState(null)
   const [themePref, setThemePref] = useState(loadThemePref())
   const [settingsOpen, setSettingsOpen] = useState(null)
   const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
@@ -1504,9 +1506,13 @@ export default function App () {
                       <div className='t'>{d.label || 'device'}{d.self ? ' (this phone)' : ''}</div>
                       <div className='sub muted sm'>{[d.platform, d.belongsTo ? `belongs to ${d.belongsTo}` : 'unassigned'].filter(Boolean).join(' · ')}</div>
                     </div>
-                    {!d.self && (arming === d.deviceKey
-                      ? <button className='danger' onClick={() => { setArming(null); call('device.revoke', { deviceKey: d.deviceKey }).then(() => { say('Cut off - within the second'); loadYou('manage') }).catch((e) => setErr(e.message)) }}>Really cut off?</button>
-                      : <button className='ghost' onClick={() => setArming(d.deviceKey)}>Revoke</button>)}
+                    {!d.self && (
+                      <button
+                        className='ghost'
+                        aria-label={'Cut off ' + (d.label || 'device')}
+                        onClick={() => setRevoking(d)}
+                      ><Prohibit size={17} /></button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -1846,6 +1852,32 @@ export default function App () {
           onPick={castTo}
           onClose={() => setCastSheet(null)}
         />
+      )}
+
+      {revoking && (
+        <div className='sheetwrap' onClick={() => setRevoking(null)}>
+          <div className='sheet' onClick={(e) => e.stopPropagation()}>
+            <h3>Cut off {revoking.label || 'this device'}?</h3>
+            <p className='muted sm'>
+              {revoking.belongsTo ? `${revoking.belongsTo}'s ` : ''}{revoking.platform || 'device'} loses
+              access within the second - anything it is streaming stops, and anything it put on a TV
+              goes dark. Pairing it again is the only way back in.
+            </p>
+            <div className='acts'>
+              <button
+                className='danger'
+                onClick={() => {
+                  const d = revoking
+                  setRevoking(null)
+                  call('device.revoke', { deviceKey: d.deviceKey })
+                    .then(() => { say('Cut off - within the second'); loadYou('manage') })
+                    .catch((e) => setErr(e.message))
+                }}
+              ><Prohibit size={18} /> Cut off</button>
+              <button className='ghost' onClick={() => setRevoking(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {askTitle && (
