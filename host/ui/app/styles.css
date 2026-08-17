@@ -181,10 +181,13 @@ a { color: var(--accent) }
 /* Narrow: three across stops fitting well before the columns actually collide - the
  * search is squeezed to a stub long before anything overlaps - so the bar wraps into
  * rows and the search takes a line of its own. */
-/* Narrow: the search takes a line of its own rather than squeezing the name off. */
+/* Narrow: the search takes a line of its own rather than squeezing the name off.
+ * `flex: 1 1 100%`, not `width: 100%` - the base rule's `flex: 1` resolves to
+ * flex-basis 0, which overrode the width and left the search as a clipped stub
+ * sharing the icons' row (Tim's phone-width sweep, 2026-08-17). */
 @media (max-width: 720px) {
   .topbar { flex-wrap: wrap; row-gap: .5rem }
-  .searchslot { order: 3; width: 100% }
+  .searchslot { order: 3; flex: 1 1 100% }
   .barright { margin-left: auto }
 }
 
@@ -485,11 +488,23 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .actions { display: flex; gap: .5rem; justify-content: center; margin-top: .9rem; flex-wrap: wrap }
 .actions button { min-width: 7.5rem }
 
-/* On a phone the nav becomes a row of chips above the section. */
+/* On a phone the nav becomes ONE scrollable row of pills above the section -
+ * the wrapped version read as a ragged paragraph of words (Tim's phone-width
+ * sweep, 2026-08-17), and eight sections three-deep spent half the screen
+ * before any settings appeared. */
 @media (max-width: 720px) {
-  .settings { flex-direction: column }
-  .setnav { flex-direction: row; flex-wrap: wrap; position: static; min-width: 0 }
-  .setnav button { text-align: center }
+  .settings { flex-direction: column; min-width: 0 }
+  .setnav {
+    flex-direction: row; flex-wrap: nowrap; position: static; min-width: 0;
+    width: 100%; overflow-x: auto; padding-bottom: .35rem;
+    scrollbar-width: thin;
+  }
+  .setnav button {
+    text-align: center; white-space: nowrap; flex: none;
+    background: var(--card-2); border: 1px solid var(--line); border-radius: 999px;
+  }
+  .setnav button.on { background: var(--card); border-color: var(--line-strong) }
+  .setbody { min-width: 0; width: 100% }
 }
 
 /* ---- modal ---------------------------------------------------------------- */
@@ -1138,3 +1153,20 @@ p.error { color: var(--danger); font-size: .85rem }
   display: inline-flex; align-items: center; justify-content: center;
 }
 .dlline { display: inline-flex; align-items: center; gap: .5rem; margin-left: .6rem; vertical-align: middle; min-width: 12rem }
+
+/* THE PHONE-WIDTH LAYER (Tim's sweep, 2026-08-17): nothing may poke past the
+   viewport. Inputs shrink instead of forcing their value's width, long ids
+   and paths break rather than push, the segmented picker may take two lines,
+   and the player's volume slider yields to the mute button - a phone's
+   volume lives on its own buttons. */
+@media (max-width: 720px) {
+  .content { padding: .9rem .7rem 4rem }
+  .card { padding: 1rem .85rem }
+  .field input, .row input, .fixsearch input { min-width: 0 }
+  .mono, .rootpath { overflow-wrap: anywhere; word-break: break-all }
+  .seg { flex-wrap: wrap; border-radius: 14px }
+  .seg button { flex: 1 1 40% }
+  .controls .vol { display: none }
+  .libpick { max-width: 9.5rem }
+  .rootrow { flex-wrap: wrap }
+}
