@@ -2,6 +2,46 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-17 - THE LIVING ROOM REWROTE THE CAST TRANSPORTS, and revoke learned the Roku's one exit
+Tier: T2 (PR #68's branch, hardware-proven the same day)
+Context: the cast machinery shipped Chromecast-shaped - progressive generated
+MP4, media_content_type 'movie', media_stop for silence - and the first real
+living room held no Chromecast at all: a Samsung TU7000 (no Cast built in,
+the proposal's predicted Samsung case) with a Roku Streaming Stick Plus on
+its HDMI, reached through HA's native Roku integration and the Media
+Assistant channel (782875), because Roku OS 11.5+ removed the built-in
+PlayOnRoku input (ECP 404s on 15985).
+Choice, four deltas, each off a measured refusal on that hardware:
+1. **Converted casts travel as HLS**, the phone's own playlist-and-segment
+   engine behind /v/<token>/index.m3u8. A Roku refuses an unbounded
+   progressive stream with its own words: "Full-content response on a range
+   request". Bonus teeth: the live-grant re-read runs per segment, so a
+   revoked device's bytes die within four seconds of film, not one buffer.
+2. **The playlist is SLICED to start at the resume point** (Media Assistant
+   has no start-position parameter; its time fields are audio-only and
+   disable seek). Segment names keep true indices so positions stay honest.
+   The known cosmetic cost, Tim-observed: the receiver's progress bar counts
+   from the resume point, not the film's true clock. Direct casts are
+   unaffected.
+3. **Per-family capability sets.** A Roku direct-plays Matroska (documented
+   format list), so ROKU_CAPS declares it and most of a real library reaches
+   a Roku with Range and true seek instead of costing the engine a
+   conversion. Video stays h264-only both families: 4K sticks decode HEVC,
+   the Express class does not, and per-model caps wait for a real need.
+   The push speaks two dialects ('video' for Cast, 'url' + extra.format for
+   Roku), picked by entity id, other one retried once on refusal.
+4. **stop() falls back to the Roku remote's Home key.** A Roku media player
+   has NO media_stop in its feature bitmask - HA answers 500 and the room
+   plays out its buffer, the donor's named nightmare. Measured after the
+   fix, wire-revoked from the Pixel's Manage: connection killed, tokens
+   burned and Home sent inside 40 ms; the screen went dark in ~7 s, all of
+   it the Roku's own channel-exit latency. The bytes-cut-within-a-second
+   claim holds; the visible darkness has a receiver-side floor.
+Why it is written down: the next cast target family (DLNA, AirPlay, a real
+Chromecast) should extend capsFor/the play dialects, not re-derive them -
+and nobody should "fix" the sliced playlist's clock without first checking
+Media Assistant still has no start parameter.
+
 ## 2026-08-16 - NO HOST-SIDE STREAM THROTTLE: backpressure already is one, measured
 Tier: T0 (a measurement closing a research item; no code changes)
 Context: repackaging runs far faster than realtime (2001's 2.5 GB remuxed at
