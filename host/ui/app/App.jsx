@@ -138,10 +138,18 @@ function DownloadsCard ({ remotes, onPlay }) {
           <div class='rootrow' key={d.itemId}>
             <span class='rootpath'>
               {d.title || 'Untitled'}
-              {' · '}
               {d.downloading
-                ? `downloading ${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%${d.converting ? ', being converted' : ''}`
-                : `${fmtSize(d.size)} · from ${nameOf(d.lib)}`}
+                ? (
+                  <span class='dlline'>
+                    <span class='meter dlmeter'>
+                      <i style={`width:${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%`} />
+                    </span>
+                    <span class='hint'>
+                      {d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%{d.converting ? ' · being converted' : ''}
+                    </span>
+                  </span>
+                  )
+                : <span class='hint'> · {fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
             </span>
             {d.downloading
               ? <button class='ghost' onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}>Cancel</button>
@@ -807,7 +815,18 @@ export default function App () {
 
       <div class='scroller'>
       <div class='content'>
-        {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} onRemotePaired={(lib) => { setWizard(false); reload().then(() => pickSource(lib)) }} />}
+        {/* FINISHING THE WIZARD LANDS ON THE LIBRARY, always. The hash is
+            cleared too: a leftover #settings/... from before the wizard was
+            steering fresh installs into Settings after pairing (Tim,
+            2026-08-17, dropped onto This host instead of the films). */}
+        {wizard && (
+          <Wizard
+            state={state}
+            reload={reload}
+            onDone={() => { setWizard(false); location.hash = ''; setTab('watch'); reload() }}
+            onRemotePaired={(lib) => { setWizard(false); location.hash = ''; setTab('watch'); reload().then(() => pickSource(lib)) }}
+          />
+        )}
 
         {!wizard && tab === 'watch' && (
           playing

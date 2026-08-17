@@ -33,6 +33,29 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
   const [subOn, setSubOn] = useState(-1)
+  // FULLSCREEN HIDES THE CONTROLS after a still moment, the way every player
+  // does (Tim, 2026-08-17) - any mouse movement or tap brings them back, and
+  // an open subtitle menu pins them. The cursor goes with them, via the
+  // stagewrap rule in the stylesheet.
+  const [idle, setIdle] = useState(false)
+  useEffect(() => {
+    if (!full) { setIdle(false); return }
+    let t = setTimeout(() => setIdle(true), 2500)
+    const poke = () => {
+      setIdle(false)
+      clearTimeout(t)
+      t = setTimeout(() => setIdle(true), 2500)
+    }
+    const target = wrap.current?.closest('.stagewrap') || document
+    target.addEventListener('mousemove', poke)
+    target.addEventListener('pointerdown', poke)
+    return () => {
+      clearTimeout(t)
+      target.removeEventListener('mousemove', poke)
+      target.removeEventListener('pointerdown', poke)
+    }
+  }, [full])
+
   // The subtitle menu closes on a tap anywhere OUTSIDE it (Tim, 2026-08-17) -
   // it used to demand a selection, which is no way to treat a menu.
   const subWrap = useRef(null)
@@ -130,7 +153,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const pct = duration ? Math.min(100, (at / duration) * 100) : 0
 
   return (
-    <div class='controls' ref={wrap}>
+    <div class={'controls' + (full && idle && !subMenu ? ' faded' : '')} ref={wrap}>
       {/* ONE BAR, ALWAYS, whatever the host is doing behind it. */}
       <input
         class='scrub'

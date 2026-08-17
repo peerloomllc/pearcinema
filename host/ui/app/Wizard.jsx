@@ -79,8 +79,8 @@ export default function Wizard ({ state, reload, onDone, onRemotePaired = null }
               </p>
               <div class='confirm-actions'>
                 <button class='ghost' onClick={finish}>Skip</button>
-                <button class='ghost' onClick={() => setFriend(true)}>A friend's server</button>
-                <button onClick={advance}>My server - set it up</button>
+                <button class='ghost' onClick={() => setFriend(true)}>A Friend's</button>
+                <button onClick={advance}>Mine</button>
               </div>
             </>
           )}

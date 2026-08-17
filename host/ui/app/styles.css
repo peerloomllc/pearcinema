@@ -607,12 +607,13 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* CENTERED THROUGHOUT (Tim, 2026-08-17): titles, prose and buttons all sit
    on the middle line, and the button row is symmetric - every button the
-   same width. Inputs stay full-width; centering a text box means centering
-   its caret, which reads as broken. */
-.wizard { max-width: 34rem; margin-left: auto; margin-right: auto }
+   same width, and no label ever wraps. Inputs stay full-width; centering a
+   text box means centering its caret, which reads as broken. Wider than the
+   cards around it, so the prose breathes on a desktop screen. */
+.wizard { max-width: 46rem; margin-left: auto; margin-right: auto }
 .wizard h2, .wizard > .hint, .wizard p.hint { text-align: center }
 .wizard .confirm-actions { justify-content: center }
-.wizard .confirm-actions button { flex: 1 1 0; max-width: 14rem }
+.wizard .confirm-actions button { flex: 1 1 0; max-width: 14rem; white-space: nowrap }
 .steps { display: flex; gap: .3rem; margin-bottom: 1rem }
 .steps i { flex: 1; height: 3px; border-radius: 2px; background: var(--line) }
 .steps i.on { background: var(--accent) }
@@ -626,8 +627,16 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 .stagewrap { background: #000; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line) }
 .stagewrap .stage { border: none; border-radius: 0 }
-.stagewrap:fullscreen { border-radius: 0; display: flex; flex-direction: column; justify-content: center }
+/* NO OUTLINE IN FULLSCREEN (Tim, 2026-08-17) - the card border belongs to the
+   page, and a fullscreen film is not on a page. */
+.stagewrap:fullscreen { border-radius: 0; border: none; display: flex; flex-direction: column; justify-content: center }
 .stagewrap:fullscreen .stage { flex: 1; aspect-ratio: auto }
+/* The controls fade after a still moment in fullscreen, and the cursor goes
+   with them. Pointer events off while faded, so a click on the picture is a
+   click on the picture. */
+.controls { transition: opacity .3s ease }
+.controls.faded { opacity: 0; pointer-events: none }
+.stagewrap:fullscreen:has(.controls.faded) { cursor: none }
 
 .controls { padding: .5rem .7rem .6rem; background: var(--card) }
 .controls .row { gap: .35rem }
@@ -1128,3 +1137,4 @@ p.error { color: var(--danger); font-size: .85rem }
   flex: none; width: 2.2rem; height: 2.2rem; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.dlline { display: inline-flex; align-items: center; gap: .5rem; margin-left: .6rem; vertical-align: middle; min-width: 12rem }
