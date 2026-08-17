@@ -54,10 +54,18 @@ function vendorHost () {
   }
   copyDir(from, path.join(vendorDir, 'host'))
 
+  // The blend's engine lives OUTSIDE host/ - src/merge.js, shared with the
+  // phone's worklet - and host/blend.js requires it as ../src/merge. Vendored
+  // beside host/ so the packaged tree keeps the same shape as the repo.
+  // (Learned from the Docker image crash-looping on the same miss, 2026-08-17.)
+  const srcDir = path.join(vendorDir, 'src')
+  fs.mkdirSync(srcDir, { recursive: true })
+  fs.copyFileSync(path.join(repoRoot, 'src', 'merge.js'), path.join(srcDir, 'merge.js'))
+
   // Sanity: every file the Electron main requires, plus what the host serves at
   // runtime. A miss here is a packaged app that dies on launch with
   // MODULE_NOT_FOUND, which is a far worse place to find out than a failed pack.
-  for (const f of ['host/server.js', 'host/index.js', 'host/ffmpeg-bin.js', 'host/ui/server.js', 'host/ui/dashboard.html']) {
+  for (const f of ['host/server.js', 'host/index.js', 'host/ffmpeg-bin.js', 'host/ui/server.js', 'host/ui/dashboard.html', 'src/merge.js']) {
     if (!fs.existsSync(path.join(vendorDir, f))) {
       console.error(`[prepack] expected ${f} in vendor/ but it is missing`)
       process.exit(1)

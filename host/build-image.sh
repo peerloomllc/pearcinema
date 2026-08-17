@@ -59,9 +59,14 @@ echo "staging build context in $STAGE"
 # image runs `npm ci` itself, and a host's node_modules carries native addons built
 # for the WRONG architecture on a cross-arch build - which fails at runtime, deep
 # inside the hypercore stack, with an error that looks like a code bug.
-mkdir -p "$STAGE/pearcinema" "$STAGE/peerloom-host" "$STAGE/peerloom-client"
+mkdir -p "$STAGE/pearcinema" "$STAGE/pearcinema/src" "$STAGE/peerloom-host" "$STAGE/peerloom-client"
 cp "$REPO/package.json" "$REPO/package-lock.json" "$STAGE/pearcinema/"
 cp -r "$REPO/host" "$STAGE/pearcinema/host"
+# The blend requires ../src/merge - the ONE file host code reaches outside
+# host/ for, shared with the phone's worklet so the two cannot disagree.
+# Learned the hard way: the image built clean and crash-looped at require
+# (2026-08-17, the blend's first container deploy).
+cp "$REPO/src/merge.js" "$STAGE/pearcinema/src/"
 cp "$HOST_PKG/package.json" "$HOST_PKG/package-lock.json" "$STAGE/peerloom-host/"
 cp -r "$HOST_PKG/src" "$STAGE/peerloom-host/src"
 cp "$CLIENT_PKG/package.json" "$CLIENT_PKG/package-lock.json" "$STAGE/peerloom-client/"
