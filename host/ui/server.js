@@ -1409,6 +1409,40 @@ async function startDashboard ({
       // on Umbrel is ${APP_PASSWORD}) must be changed where the platform sets it, or
       // the next container restart silently reverts it and the operator is locked
       // out of a box they thought they had secured.
+      // --- casting to a television (video-deltas §5) ---------------------------
+      //
+      // The operator points the host at their Home Assistant; phones do the
+      // actual casting over the wire. The token is write-only, the donor's
+      // posture: the page learns it is set, never what it is.
+      if (req.method === 'GET' && url.pathname === '/api/cast') {
+        return json(res, 200, host.speakers.publicConfig())
+      }
+      if (req.method === 'POST' && url.pathname === '/api/cast') {
+        const body = await readBody(req)
+        try {
+          return json(res, 200, host.speakers.save(body))
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/cast/test') {
+        try {
+          return json(res, 200, await host.speakers.test())
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      // The media players BY NAME, because a count is not enough to find the
+      // television among the kitchen speakers (Tim, 2026-08-17) - PearTune's
+      // panel lists them and this one does too.
+      if (req.method === 'GET' && url.pathname === '/api/cast/targets') {
+        try {
+          return json(res, 200, { targets: await host.speakers.list() })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+
       // The video engine's cap, from the This host card. Zero is the off
       // switch and reaches decide() as honest refusals, not BUSY errors.
       if (req.method === 'POST' && url.pathname === '/api/transcode-cap') {

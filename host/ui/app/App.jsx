@@ -36,6 +36,7 @@ const SETTINGS_SECTIONS = [
   ['security', 'Security'],
   ['support', 'Support development'],
   ['remotes', 'Remote libraries'],
+  ['casting', 'Casting'],
   ['host', 'This host']
 ]
 
@@ -198,6 +199,132 @@ function RequestsCard ({ remotes }) {
   )
 }
 
+// Casting to a television (video-deltas §5). The host talks to the Home
+// Assistant on THIS machine; paired phones then send films to the TVs it
+// knows about, and revoking a phone darkens whatever it started. The token is
+// write-only - the page learns one is saved, never what it is.
+function CastPanel () {
+  const [cfg, setCfg] = useState(null)
+  const [baseUrl, setBaseUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [test, setTest] = useState(null)
+  // The media players BY NAME. A count alone cannot say which of seven
+  // entities is the television and which are the kitchen speakers (Tim,
+  // 2026-08-17) - so once casting is on, the panel lists what Home Assistant
+  // actually reports, name, id and state.
+  const [targets, setTargets] = useState(null)
+
+  const loadTargets = async () => {
+    const r = await api('/api/cast/targets')
+    setTargets(r?.error ? [] : (r.targets || []))
+  }
+
+  useEffect(() => {
+    let live = true
+    api('/api/cast').then(r => {
+      if (!live || r?.error) return
+      setCfg(r)
+      setBaseUrl(r.baseUrl || '')
+      if (r.enabled && r.tokenSet) loadTargets()
+    })
+    return () => { live = false }
+  }, [])
+
+  const save = async (enabled) => {
+    setBusy(true); setTest(null)
+    const r = await api('/api/cast', { enabled, baseUrl, ...(token ? { token } : {}) })
+    setBusy(false)
+    if (r?.error) return notify('Not saved', r.error)
+    setToken('')
+    setCfg(r)
+    if (r.enabled && r.tokenSet) loadTargets()
+    else setTargets(null)
+    notify('Saved', enabled
+      ? 'Casting is on. Phones paired as owner can now send films to your TVs.'
+      : 'Casting is off.')
+  }
+
+  const runTest = async () => {
+    setBusy(true)
+    const r = await api('/api/cast/test', {})
+    setBusy(false)
+    setTest(r?.error ? { bad: r.error } : { ok: r.targets })
+    if (!r?.error) loadTargets()
+  }
+
+  if (!cfg) return <div class='card'><h3>Casting</h3><p class='hint'>Loading…</p></div>
+
+  return (
+    <div class='card'>
+      <h3>Casting</h3>
+      <p class='hint'>
+        Send films from a phone to a TV - a Chromecast, a Google TV or a
+        television with Cast built in. PearCinema reaches them through the Home
+        Assistant running on this same machine: paste a long-lived access token
+        from your Home Assistant profile page. Only phones paired as owner can
+        cast, and cutting a phone off also stops whatever it put on a TV.
+      </p>
+      <div class='field'>
+        <label>Home Assistant address</label>
+        <input
+          type='text' value={baseUrl} placeholder='http://127.0.0.1:8123'
+          onInput={e => setBaseUrl(e.currentTarget.value)}
+        />
+      </div>
+      <div class='field'>
+        <label>Access token{cfg.tokenSet ? ' (saved - leave empty to keep it)' : ''}</label>
+        <input
+          type='password' value={token}
+          onInput={e => setToken(e.currentTarget.value)}
+        />
+      </div>
+      {cfg.problem && <p class='error'>{cfg.problem}</p>}
+      {test?.bad && <p class='error'>{test.bad}</p>}
+      {test?.ok !== undefined && (
+        <p class='hint'>
+          Connected. Home Assistant knows about {test.ok} media player{test.ok === 1 ? '' : 's'}.
+        </p>
+      )}
+      {targets !== null && (
+        <>
+          <h3 style='margin-top:1rem'>What Home Assistant reports</h3>
+          {targets.length === 0 && <p class='hint'>No media players right now.</p>}
+          {targets.length > 0 && (
+            <div class='rootlist'>
+              {targets.map(t => (
+                <div class='rootrow' key={t.entityId}>
+                  <span class='rootpath'>
+                    {t.name}
+                    <span class='hint'> · {t.entityId} · {t.state}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <p class='hint'>
+            Phones offer all of these when casting. Speakers play a film's sound
+            only, so aim at the television - one that is off usually shows as
+            "off" or "unavailable" here until you turn it on.
+          </p>
+        </>
+      )}
+      <div class='actions'>
+        <button onClick={() => save(true)} disabled={busy || (!cfg.tokenSet && !token.trim())}>
+          {cfg.enabled ? 'Save' : 'Save and turn on'}
+        </button>
+        {cfg.enabled && (
+          <button class='ghost' onClick={() => save(false)} disabled={busy}>Turn off</button>
+        )}
+        {/* Tests what is SAVED, so it only appears once something is. */}
+        {cfg.tokenSet && (
+          <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
   const [sec, setSec] = useState(() => {
     const [t, s] = hashParts()
@@ -256,6 +383,8 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
             <RequestsCard remotes={remotes} />
           </>
         )}
+
+        {sec === 'casting' && <CastPanel />}
 
         {sec === 'security' && (
           <div class='card'>
