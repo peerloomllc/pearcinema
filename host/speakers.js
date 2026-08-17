@@ -208,9 +208,12 @@ class Speakers {
     return this._service('media_player', 'play_media', {
       entity_id: entityId,
       media_content_id: url,
-      // 'movie', because it IS one - and because the Default Media Receiver
-      // uses the type to pick its idle screen and controls.
-      media_content_type: 'movie'
+      // 'video', not 'movie': it is the one type BOTH target families take.
+      // Google Cast passes either through, but the Roku integration only
+      // accepts its own enum (music/video/episode/...) - and a Roku on the
+      // HDMI port is the whole TV story for a Samsung with no Cast built in
+      // (Tim's UN65TU7000F, 2026-08-17, the proposal's predicted case).
+      media_content_type: 'video'
     })
   }
 
