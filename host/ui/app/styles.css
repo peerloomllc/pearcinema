@@ -605,7 +605,14 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 /* ---- wizard --------------------------------------------------------------- */
 
-.wizard { max-width: 34rem }
+/* CENTERED THROUGHOUT (Tim, 2026-08-17): titles, prose and buttons all sit
+   on the middle line, and the button row is symmetric - every button the
+   same width. Inputs stay full-width; centering a text box means centering
+   its caret, which reads as broken. */
+.wizard { max-width: 34rem; margin-left: auto; margin-right: auto }
+.wizard h2, .wizard > .hint, .wizard p.hint { text-align: center }
+.wizard .confirm-actions { justify-content: center }
+.wizard .confirm-actions button { flex: 1 1 0; max-width: 14rem }
 .steps { display: flex; gap: .3rem; margin-bottom: 1rem }
 .steps i { flex: 1; height: 3px; border-radius: 2px; background: var(--line) }
 .steps i.on { background: var(--accent) }
@@ -669,6 +676,10 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   position: absolute; bottom: 130%; right: 0; z-index: 30;
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: var(--shadow); padding: .25rem; min-width: 10rem;
+  /* A real library carries films with a DOZEN subtitle tracks, and the menu
+     grew taller than the player with no way to reach the rest (Tim,
+     2026-08-17). It scrolls now, capped well inside any player height. */
+  max-height: min(46vh, 20rem); overflow-y: auto;
 }
 .submenu .menu button {
   display: block; width: 100%; text-align: left;
@@ -1107,3 +1118,13 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
    search, and a colour for the inline error line phase 1 left unstyled. */
 .askfor { margin-top: .9rem }
 p.error { color: var(--danger); font-size: .85rem }
+
+/* The details sheet's download row (Tim's review, 2026-08-17): words in the
+   hint, one symbol on the button, and progress as a bar beside its percent. */
+.dlrow { display: flex; align-items: center; gap: .6rem }
+.dlrow .hint { flex: 1; margin: .3rem 0 }
+.dlmeter { flex: 1 }
+.dlrow .iconbtn {
+  flex: none; width: 2.2rem; height: 2.2rem; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}

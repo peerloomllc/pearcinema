@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -165,15 +165,20 @@ function RequestsCard ({ remotes }) {
   const [tick, setTick] = useState(0)
   useEffect(() => {
     let live = true
-    ;(async () => {
+    const load = async () => {
       const out = []
       for (const r of remotes) {
         const res = await api(`/remote/${r.libraryId}/api/requests`).catch(() => null)
         for (const q of res?.items || []) out.push({ ...q, lib: r.libraryId, libraryName: r.libraryName })
       }
       if (live) setRows(out)
-    })()
-    return () => { live = false }
+    }
+    load()
+    // An owner answering on their phone should show up here without a page
+    // refresh (Tim, 2026-08-17). A gentle poll while the card is on screen;
+    // real pushes are filed as the proper fix.
+    const t = setInterval(load, 10000)
+    return () => { live = false; clearInterval(t) }
   }, [remotes.map(r => r.libraryId).join(','), tick])
   if (!rows?.length) return null
   return (
@@ -330,6 +335,17 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
     const [t, s] = hashParts()
     return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
   })
+  // The hash can change while Settings is already open - the topbar's
+  // download indicator points at settings/remotes - so follow it live rather
+  // than only reading it at mount.
+  useEffect(() => {
+    const follow = () => {
+      const [t, s] = hashParts()
+      if (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) setSec(s)
+    }
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [])
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
@@ -587,6 +603,8 @@ export default function App () {
   // base and remounts the library - the control plane stays local throughout.
   const [remotes, setRemotes] = useState([])
   const [source, setSource] = useState('')
+  // How many downloads are running, for the topbar indicator.
+  const [dlBusy, setDlBusy] = useState(0)
   // The theme lives up here now rather than inside Settings: it is a light switch, and
   // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
   const [theme, setTheme] = useState(loadThemePref())
@@ -610,6 +628,9 @@ export default function App () {
     const s = await api('/api/state')
     setState(s)
     api('/api/remote/list').then(r => { if (Array.isArray(r?.remotes)) setRemotes(r.remotes) }).catch(() => {})
+    // Whether anything is downloading, for the topbar's indicator (Tim,
+    // 2026-08-17) - rides the same 8s poll the rest of the bar lives on.
+    api('/api/downloads').then(r => setDlBusy((r?.items || []).filter(d => d.downloading).length)).catch(() => {})
     return s
   }, [])
 
@@ -740,6 +761,20 @@ export default function App () {
             the light switch, then the gear. Both are icons because both are things you
             reach for occasionally and neither deserves a word's worth of the bar. */}
         <div class='barright'>
+          {/* SOMETHING IS DOWNLOADING (Tim, 2026-08-17): a bar-level light
+              while any download runs, one click from its progress - the
+              Downloads card under Settings, Remote libraries. */}
+          {dlBusy > 0 && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={dlBusy === 1 ? 'One download running - see its progress' : dlBusy + ' downloads running - see their progress'}
+              title={dlBusy === 1 ? 'One download running' : dlBusy + ' downloads running'}
+              onClick={() => { location.hash = 'settings/remotes'; setTab('settings'); setPlaying(null) }}
+            >
+              <DownloadIcon size={18} />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
           <button
             class={'iconbtn' + (tab === 'who' ? ' on' : '')}
             onClick={() => { setTab('who'); setPlaying(null) }}

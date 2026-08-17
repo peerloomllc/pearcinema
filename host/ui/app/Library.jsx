@@ -175,7 +175,9 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
           )
         : (seen && <span class='seen' title='You have watched this'><Check size={13} /></span>)}
 
-      {left > 0 && <span class='left' title={left + ' still to watch'}>{left}</span>}
+      {/* SAY WHAT THE NUMBER MEANS. A bare count read as "how many episodes
+          are in this season" (Tim, 2026-08-17) - the one word disambiguates. */}
+      {left > 0 && <span class='left' title={left + ' still to watch'}>{left} left</span>}
 
       {/* FIX THE MATCH WHERE THE MISTAKE IS VISIBLE (Tim, 2026-08-14, Plex's shape).
           Fetched artwork is a best guess, and the correction belongs on the tile

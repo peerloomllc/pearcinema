@@ -33,6 +33,17 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
   const [subOn, setSubOn] = useState(-1)
+  // The subtitle menu closes on a tap anywhere OUTSIDE it (Tim, 2026-08-17) -
+  // it used to demand a selection, which is no way to treat a menu.
+  const subWrap = useRef(null)
+  useEffect(() => {
+    if (!subMenu) return
+    const close = (e) => {
+      if (subWrap.current && !subWrap.current.contains(e.target)) setSubMenu(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [subMenu])
   const [full, setFull] = useState(false)
   const wrap = useRef(null)
 
@@ -152,7 +163,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         <div class='spacer' />
 
         {subs.length > 0 && (
-          <div class='submenu'>
+          <div class='submenu' ref={subWrap}>
             <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={19} /></button>
             {subMenu && (
               <div class='menu'>

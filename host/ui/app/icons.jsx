@@ -131,6 +131,14 @@ export function ArtIcon ({ type, size = 34 }) {
   return <Film size={size} />
 }
 
+export const Download = (p) => (
+  <S {...p}><path d='M12 4v10m0 0-4-4m4 4 4-4M5 18.5h14' /></S>
+)
+
+export const Trash = (p) => (
+  <S {...p}><path d='M5 7h14M9.5 7V5h5v2M7 7l1 12.5h8L17 7M10 10.5v6M14 10.5v6' /></S>
+)
+
 export const Pencil = (p) => (
   <S {...p}><path d='M4.5 19.5l.9-3.6L15.9 5.4a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1L8.1 18.6l-3.6.9z' /><path d='M14.5 6.8l2.7 2.7' /></S>
 )
