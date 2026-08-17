@@ -90,6 +90,8 @@ COPY pearcinema/package.json pearcinema/package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY pearcinema/host/ ./host/
+# The blend's engine, shared with the phone - host/blend.js requires ../src/merge.
+COPY pearcinema/src/ ./src/
 
 # Containerized defaults. PEARCINEMA_DATA holds the identity seed and the grant
 # store - losing it means every device must re-pair, and leaking it means somebody
