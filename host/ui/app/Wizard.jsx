@@ -69,8 +69,8 @@ export default function Wizard ({ state, reload, onDone, onRemotePaired = null }
         <>
           <h2>Welcome to PearCinema</h2>
           <p class='hint'>
-            Your own film and TV collection, playable on your phone anywhere, without
-            opening a single port on your router and without an account anywhere.
+            A film and TV collection, yours or a friend's, playable anywhere. No ports
+            opened on your router, and no account anywhere.
           </p>
           {!friend && (
             <>
@@ -79,8 +79,8 @@ export default function Wizard ({ state, reload, onDone, onRemotePaired = null }
               </p>
               <div class='confirm-actions'>
                 <button class='ghost' onClick={finish}>Skip</button>
-                <button class='ghost' onClick={() => setFriend(true)}>A friend's server</button>
-                <button onClick={advance}>My server - set it up</button>
+                <button class='ghost' onClick={() => setFriend(true)}>A Friend's</button>
+                <button onClick={advance}>Mine</button>
               </div>
             </>
           )}

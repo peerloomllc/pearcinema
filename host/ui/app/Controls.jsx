@@ -33,8 +33,48 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const [muted, setMuted] = useState(false)
   const [subMenu, setSubMenu] = useState(false)
   const [subOn, setSubOn] = useState(-1)
+  // DECLARED BEFORE THE EFFECTS THAT READ THEM. The idle effect below lists
+  // `full` in its deps and reaches for `wrap`, and a deps array is evaluated
+  // AT RENDER - referencing a const still in its temporal dead zone threw on
+  // every player mount and took the whole page down with it (Tim,
+  // 2026-08-17, the blank episode page). Second time this trap has bitten
+  // in one day; declarations stay at the top from here on.
   const [full, setFull] = useState(false)
   const wrap = useRef(null)
+  // FULLSCREEN HIDES THE CONTROLS after a still moment, the way every player
+  // does (Tim, 2026-08-17) - any mouse movement or tap brings them back, and
+  // an open subtitle menu pins them. The cursor goes with them, via the
+  // stagewrap rule in the stylesheet.
+  const [idle, setIdle] = useState(false)
+  useEffect(() => {
+    if (!full) { setIdle(false); return }
+    let t = setTimeout(() => setIdle(true), 2500)
+    const poke = () => {
+      setIdle(false)
+      clearTimeout(t)
+      t = setTimeout(() => setIdle(true), 2500)
+    }
+    const target = wrap.current?.closest('.stagewrap') || document
+    target.addEventListener('mousemove', poke)
+    target.addEventListener('pointerdown', poke)
+    return () => {
+      clearTimeout(t)
+      target.removeEventListener('mousemove', poke)
+      target.removeEventListener('pointerdown', poke)
+    }
+  }, [full])
+
+  // The subtitle menu closes on a tap anywhere OUTSIDE it (Tim, 2026-08-17) -
+  // it used to demand a selection, which is no way to treat a menu.
+  const subWrap = useRef(null)
+  useEffect(() => {
+    if (!subMenu) return
+    const close = (e) => {
+      if (subWrap.current && !subWrap.current.contains(e.target)) setSubMenu(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [subMenu])
 
   const el = () => video.current
 
@@ -119,7 +159,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
   const pct = duration ? Math.min(100, (at / duration) * 100) : 0
 
   return (
-    <div class='controls' ref={wrap}>
+    <div class={'controls' + (full && idle && !subMenu ? ' faded' : '')} ref={wrap}>
       {/* ONE BAR, ALWAYS, whatever the host is doing behind it. */}
       <input
         class='scrub'
@@ -152,7 +192,7 @@ export default function Controls ({ video, at, duration, onSeek, busy, subs, liv
         <div class='spacer' />
 
         {subs.length > 0 && (
-          <div class='submenu'>
+          <div class='submenu' ref={subWrap}>
             <button class='iconbtn' onClick={() => setSubMenu(!subMenu)} aria-label='Subtitles'><Captions size={19} /></button>
             {subMenu && (
               <div class='menu'>

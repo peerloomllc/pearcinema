@@ -58,6 +58,17 @@ function capsFromQuery (url) {
 const watch = require('../watch')
 const subtitleRules = require('../subtitles')
 
+// A bounded fan over the wire: the remote rollups ask one episode list per
+// series, and a library of shows should neither go one-at-a-time nor open
+// thirty concurrent requests on somebody else's box.
+async function eachLimit (rows, limit, fn) {
+  const queue = [...rows]
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) await fn(queue.shift())
+  })
+  await Promise.all(workers)
+}
+
 const PAGE_FILE = path.join(__dirname, 'dashboard.html')
 const LOGIN_PAGE = require('./login')
 
@@ -605,6 +616,37 @@ async function startDashboard ({
       // never be reachable to someone the dashboard would refuse.
       const remote = host.remote || null
 
+      // Films kept on THIS machine from those libraries (phase 2). The list is
+      // global - downloads from every remote in one card - and the per-library
+      // start lives under the twin below, so the page's base-prefix rewrite
+      // routes it without knowing anything new.
+      const dls = host.downloads || null
+      if (dls && req.method === 'GET' && url.pathname === '/api/downloads') {
+        return json(res, 200, { items: dls.list() })
+      }
+      if (dls && req.method === 'POST' && url.pathname === '/api/downloads/cancel') {
+        const { itemId } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        return json(res, 200, dls.cancel(String(itemId)))
+      }
+      if (dls && req.method === 'POST' && url.pathname === '/api/downloads/remove') {
+        const { itemId } = await readBody(req)
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        return json(res, 200, dls.remove(String(itemId)))
+      }
+      // The LOCAL twins of the per-library routes answer honestly rather than
+      // 404: the page only asks these of the active library, and the active
+      // library being this box means the question does not apply.
+      if (req.method === 'POST' && url.pathname === '/api/download') {
+        return json(res, 400, { error: 'these films are already on this machine - downloading is for a friend\'s library' })
+      }
+      if (req.method === 'GET' && url.pathname === '/api/requests') {
+        return json(res, 200, { items: [] })
+      }
+      if (req.method === 'POST' && (url.pathname === '/api/request' || url.pathname === '/api/request/remove')) {
+        return json(res, 400, { error: 'asking is for a friend\'s library - this one is yours' })
+      }
+
       if (remote && req.method === 'GET' && url.pathname === '/api/remote/list') {
         return json(res, 200, { remotes: remote.list() })
       }
@@ -620,7 +662,12 @@ async function startDashboard ({
       if (remote && req.method === 'POST' && url.pathname === '/api/remote/remove') {
         const { hostKey } = await readBody(req)
         if (!hostKey) return json(res, 400, { error: 'hostKey required' })
-        return json(res, 200, await remote.remove(String(hostKey)))
+        // Kept copies go with the library - looked up BEFORE the removal
+        // forgets which library the key named.
+        const leaving = remote.list().find((r) => r.hostKey === String(hostKey))
+        const out = await remote.remove(String(hostKey))
+        if (leaving && dls) dls.removeLib(leaving.libraryId)
+        return json(res, 200, out)
       }
 
       const rmatch = remote && /^\/remote\/([a-z0-9]+)(\/.+)$/.exec(url.pathname)
@@ -678,8 +725,10 @@ async function startDashboard ({
         // Watch state, written to the FRIEND's host - it is the authority for its
         // own films, and this machine is just another device of whoever paired it
         // (approved open question 2). The rollup extras the local page computes by
-        // walking its own adapter answer empty here; ticks on shows arrive with
-        // phase 2 if they earn it.
+        // walking its own adapter are computed here by walking the WIRE instead
+        // (phase 2) - same watch.rollup, the episode lists fetched per series.
+        // Up next stays local-only: it needs "recently finished", which the wire
+        // does not say, and the phone lives without it too.
         if (req.method === 'GET' && sub === '/api/watch/state') {
           const [cont, watched] = await Promise.all([
             remote.call(lib, 'resume.list', { limit: 20 }).catch(() => ({ items: [] })),
@@ -700,16 +749,127 @@ async function startDashboard ({
         if (req.method === 'POST' && sub === '/api/watch/watched') {
           const { itemId, watched } = await readBody(req)
           if (!itemId) return json(res, 400, { error: 'itemId required' })
-          return json(res, 200, await remote.call(lib, 'watched.set', { itemId: String(itemId), watched: watched !== false }))
+          const on = watched !== false
+          const id = String(itemId)
+
+          // MARKING A SHOW OR A SEASON MARKS ITS EPISODES, the local route's
+          // rule exactly - the wire's watched.set is per item, so the fan
+          // happens here, bounded the same way the rollups are.
+          const item = await remote.call(lib, 'library.get', { id }).catch(() => null)
+          if (item && (item.type === 'series' || item.type === 'season')) {
+            const eps = (await remote.call(lib, 'library.list', {
+              type: 'episodes',
+              ...(item.type === 'series' ? { seriesId: item.id } : { seasonId: item.id }),
+              limit: 500
+            })).items || []
+            await eachLimit(eps, 8, (e) => remote.call(lib, 'watched.set', { itemId: e.id, watched: on }))
+            return json(res, 200, { ok: true, watched: on, items: eps.length })
+          }
+          return json(res, 200, await remote.call(lib, 'watched.set', { itemId: id, watched: on }))
         }
-        if (req.method === 'GET' && sub === '/api/watch/shows') return json(res, 200, { shows: {} })
-        if (req.method === 'GET' && sub === '/api/watch/seasons') return json(res, 200, {})
+
+        // HOW MUCH OF EACH SHOW IS LEFT, over the wire - one episode list per
+        // series, asked only while the shows list is on screen, the same reason
+        // the local route is separate from /api/watch/state.
+        if (req.method === 'GET' && sub === '/api/watch/shows') {
+          const [w, r, s] = await Promise.all([
+            remote.call(lib, 'watched.list', {}).catch(() => ({ items: [] })),
+            remote.call(lib, 'resume.list', { limit: 200 }).catch(() => ({ items: [] })),
+            remote.call(lib, 'library.list', { type: 'series', limit: 500 }).catch(() => ({ items: [] }))
+          ])
+          const watchedSet = new Set(w.items || [])
+          const resumed = new Set((r.items || []).map((i) => i.id))
+          const shows = {}
+          await eachLimit(s.items || [], 4, async (row) => {
+            const eps = (await remote.call(lib, 'library.list', { type: 'episodes', seriesId: row.id, limit: 500 }).catch(() => ({ items: [] }))).items || []
+            shows[row.id] = watch.rollup(eps, watchedSet, resumed)
+          })
+          return json(res, 200, { shows })
+        }
+        if (req.method === 'GET' && sub === '/api/watch/seasons') {
+          const seriesId = url.searchParams.get('seriesId')
+          if (!seriesId) return json(res, 400, { error: 'seriesId required' })
+          const [w, r, s] = await Promise.all([
+            remote.call(lib, 'watched.list', {}).catch(() => ({ items: [] })),
+            remote.call(lib, 'resume.list', { limit: 200 }).catch(() => ({ items: [] })),
+            remote.call(lib, 'library.list', { type: 'seasons', seriesId, limit: 200 }).catch(() => ({ items: [] }))
+          ])
+          const watchedSet = new Set(w.items || [])
+          const resumed = new Set((r.items || []).map((i) => i.id))
+          const seasons = {}
+          await eachLimit(s.items || [], 4, async (row) => {
+            const eps = (await remote.call(lib, 'library.list', { type: 'episodes', seasonId: row.id, limit: 500 }).catch(() => ({ items: [] }))).items || []
+            seasons[row.id] = watch.rollup(eps, watchedSet, resumed)
+          })
+          return json(res, 200, { seasons })
+        }
+
+        // Keep a film HERE (phase 2). The friend decides converted-or-raw with
+        // the same decide() playback uses; progress and the finished list are
+        // global under /api/downloads above.
+        if (req.method === 'POST' && sub === '/api/download') {
+          if (!dls) return json(res, 501, { error: 'no downloads on this host' })
+          const { itemId, capabilities } = await readBody(req)
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          try {
+            return json(res, 200, await dls.start(lib, String(itemId), capabilities || {}))
+          } catch (e) {
+            return json(res, 400, { error: e.message })
+          }
+        }
+
+        // Asking the friend for what is not there (phase 2) - the phone's
+        // request surface, proxied. Your own asks only; the friend answers on
+        // their own devices.
+        if (req.method === 'GET' && sub === '/api/requests') {
+          return json(res, 200, await remote.call(lib, 'request.list', {}))
+        }
+        if (req.method === 'POST' && sub === '/api/request') {
+          const { kind, name } = await readBody(req)
+          if (!name || !['movie', 'series'].includes(kind)) return json(res, 400, { error: 'kind and name required' })
+          try {
+            return json(res, 200, await remote.call(lib, 'request.add', { kind, name: String(name) }))
+          } catch (e) {
+            return json(res, 400, { error: e.message })
+          }
+        }
+        if (req.method === 'POST' && sub === '/api/request/remove') {
+          const { id } = await readBody(req)
+          if (!id) return json(res, 400, { error: 'id required' })
+          return json(res, 200, await remote.call(lib, 'request.remove', { id: String(id) }))
+        }
 
         // The film itself, Range honoured - the twin of /api/stream, bytes off the
-        // wire instead of the disk.
+        // wire instead of the disk. UNLESS it was downloaded: then the kept file
+        // answers, byte-ranged off this machine's own disk, which is also what
+        // makes a downloaded film play with the friend's box switched off -
+        // nothing below the download check touches the wire.
         if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/stream') {
           const id = url.searchParams.get('id')
           if (!id) return json(res, 400, { error: 'id required' })
+
+          const dl = dls?.row(id)
+          if (dl) {
+            const file = dls.fileFor(id)
+            const size = dl.size
+            const range = req.headers.range ? parseRange(req.headers.range, size) : null
+            if (range?.unsatisfiable) {
+              res.writeHead(416, { 'content-range': `bytes */${size}` })
+              return res.end()
+            }
+            const start = range ? range.start : 0
+            const end = range ? range.end : size - 1
+            res.writeHead(range ? 206 : 200, {
+              'content-type': mimeFor(dl.media?.container),
+              'content-length': end - start + 1,
+              'accept-ranges': 'bytes',
+              'cache-control': 'no-store',
+              ...(range ? { 'content-range': `bytes ${start}-${end}/${size}` } : {})
+            })
+            if (req.method === 'HEAD') return res.end()
+            return fs.createReadStream(file, { start, end }).pipe(res)
+          }
+
           const item = await remote.call(lib, 'library.get', { id: String(id) }).catch(() => null)
           if (!item) return json(res, 404, { error: 'no such item' })
           const size = item.media?.size || null
@@ -799,13 +959,44 @@ async function startDashboard ({
         // has - on a passworded LAN dashboard the self-read would be refused, so
         // the route says so plainly instead.
         if ((req.method === 'GET' || req.method === 'HEAD') && sub === '/api/remux') {
-          if (pwSource !== 'none') {
-            return json(res, 501, { error: 'watching a remote library needs the desktop app (this dashboard is password-bound)' })
-          }
           const id = url.searchParams.get('id')
           if (!id) return json(res, 400, { error: 'id required' })
           const at = Math.max(0, Number(url.searchParams.get('t')) || 0)
           const caps = capsFromQuery(url)
+
+          // A DOWNLOADED film repackages straight off the kept file - still a
+          // stream copy, and with no wire and no loopback self-read the
+          // password gate below does not apply. The verdict runs against what
+          // is IN the file, which for a converted download is the mp4 the
+          // friend's hardware made, not the original on their disk.
+          const dl = dls?.row(id)
+          if (dl) {
+            const verdict = remux.decide(dl.media, caps, { transcode: false })
+            if (verdict.mode !== 'remux') return json(res, 409, { mode: verdict.mode, reason: verdict.reason })
+            let session
+            try {
+              session = host.remuxer.start({ input: dls.fileFor(id), at, audio: verdict.audio || 'copy' })
+            } catch (e) {
+              if (e.code === 'BUSY') return json(res, 503, { error: e.message })
+              throw e
+            }
+            res.writeHead(200, {
+              'content-type': 'video/mp4',
+              'accept-ranges': 'none',
+              'cache-control': 'no-store',
+              'x-pearcinema-mode': 'remux',
+              'x-pearcinema-start': String(session.at),
+              'x-pearcinema-audio': session.audio
+            })
+            if (req.method === 'HEAD') { session.kill(); return res.end() }
+            res.on('close', () => session.kill())
+            session.stdout.on('error', () => session.kill())
+            return session.stdout.pipe(res)
+          }
+
+          if (pwSource !== 'none') {
+            return json(res, 501, { error: 'watching a remote library needs the desktop app (this dashboard is password-bound)' })
+          }
 
           const item = await remote.call(lib, 'library.get', { id: String(id) }).catch(() => null)
           if (!item) return json(res, 404, { error: 'no such item' })

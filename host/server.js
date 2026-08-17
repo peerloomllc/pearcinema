@@ -21,6 +21,7 @@ const transcode = require('./transcode')
 const ffmpegBin = require('./ffmpeg-bin')
 const tmdb = require('./tmdb')
 const remoteLibs = require('./remote')
+const remoteDownloads = require('./remote-downloads')
 const { Speakers } = require('./speakers')
 const castLib = require('./cast')
 const watch = require('./watch')
@@ -227,6 +228,14 @@ class PearCinemaHost {
       dataDir: this.dataDir,
       protocol: PROTOCOL,
       dht: this.host.dht,
+      log
+    })
+
+    // Films kept HERE from those libraries (phase 2 of the same proposal): the
+    // phone's download shape, a directory of plain files beside the data.
+    this.downloads = new remoteDownloads.RemoteDownloads({
+      dataDir: this.dataDir,
+      remote: this.remote,
       log
     })
 
@@ -938,6 +947,7 @@ class PearCinemaHost {
     // small box it is the whole box.
     this.remuxer.killAll()
     this.transcoder.killAll()
+    this.downloads.close()
     // Before the store closes: stopFor() darkens televisions, and a TV left
     // playing a dead URL freezes on the last buffered frame.
     await this.casts.close().catch(() => {})

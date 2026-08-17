@@ -6,12 +6,12 @@
 // this app closes.
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { api, copyText, setRemoteBase } from './api'
+import { api, copyText, setRemoteBase, fmtSize } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -100,6 +100,115 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
       {err && <p class='error'>{err}</p>}
       <div class='actions'>
         <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing...' : 'Pair'}</button>
+      </div>
+    </div>
+  )
+}
+
+// Films kept on this machine from friends' libraries (phase 2). Hidden until
+// there is one - an empty downloads card is a feature announcement, and the
+// place downloads are discovered is the player's details sheet.
+function DownloadsCard ({ remotes, onPlay }) {
+  const [items, setItems] = useState(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    let t = null
+    const look = async () => {
+      const r = await api('/api/downloads')
+      if (!live) return
+      setItems(r.items || [])
+      // Fast while something moves, gently otherwise - removing a library
+      // takes its downloads with it server-side, and the card must not keep
+      // showing what is already gone (Tim, 2026-08-17).
+      t = setTimeout(look, (r.items || []).some(d => d.downloading) ? 2000 : 10000)
+    }
+    look()
+    return () => { live = false; clearTimeout(t) }
+  }, [tick, remotes.map(r => r.libraryId).join(',')])
+  if (!items?.length) return null
+  const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
+  return (
+    <div class='card'>
+      <h3>Downloads</h3>
+      <p class='hint'>
+        Films kept on this machine. They play here even while the library they
+        came from is offline.
+      </p>
+      <div class='rootlist'>
+        {items.map(d => (
+          <div class='rootrow' key={d.itemId}>
+            <span class='rootpath'>
+              {d.title || 'Untitled'}
+              {d.downloading
+                ? (
+                  <span class='dlline'>
+                    <span class='meter dlmeter'>
+                      <i style={`width:${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%`} />
+                    </span>
+                    <span class='hint'>
+                      {d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%{d.converting ? ' · being converted' : ''}
+                    </span>
+                  </span>
+                  )
+                : <span class='hint'> · {fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
+            </span>
+            {d.downloading
+              ? <button class='ghost' onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}>Cancel</button>
+              : (
+                <>
+                  <button onClick={() => onPlay(d)}>Play</button>
+                  <button class='ghost' onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}>Remove</button>
+                </>
+                )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Your open asks, per remote library (phase 2) - made from an empty search on
+// a friend's library, watched and withdrawn here. Hidden until there is one.
+function RequestsCard ({ remotes }) {
+  const [rows, setRows] = useState(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    let live = true
+    const load = async () => {
+      const out = []
+      for (const r of remotes) {
+        const res = await api(`/remote/${r.libraryId}/api/requests`).catch(() => null)
+        for (const q of res?.items || []) out.push({ ...q, lib: r.libraryId, libraryName: r.libraryName })
+      }
+      if (live) setRows(out)
+    }
+    load()
+    // An owner answering on their phone should show up here without a page
+    // refresh (Tim, 2026-08-17). A gentle poll while the card is on screen;
+    // real pushes are filed as the proper fix.
+    const t = setInterval(load, 10000)
+    return () => { live = false; clearInterval(t) }
+  }, [remotes.map(r => r.libraryId).join(','), tick])
+  if (!rows?.length) return null
+  return (
+    <div class='card'>
+      <h3>Your requests</h3>
+      <p class='hint'>
+        What you have asked these libraries for. Ask by searching a friend's
+        library for something it does not have.
+      </p>
+      <div class='rootlist'>
+        {rows.map(q => (
+          <div class='rootrow' key={q.lib + q.id}>
+            <span class='rootpath'>
+              {q.name} · {q.kind === 'series' ? 'show' : 'film'} · {q.status} · {q.libraryName || 'a library'}
+            </span>
+            {q.status === 'pending' && (
+              <button class='ghost' onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}>Withdraw</button>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -231,11 +340,22 @@ function CastPanel () {
   )
 }
 
-function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '' }) {
+function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
   const [sec, setSec] = useState(() => {
     const [t, s] = hashParts()
     return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
   })
+  // The hash can change while Settings is already open - the topbar's
+  // download indicator points at settings/remotes - so follow it live rather
+  // than only reading it at mount.
+  useEffect(() => {
+    const follow = () => {
+      const [t, s] = hashParts()
+      if (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) setSec(s)
+    }
+    window.addEventListener('hashchange', follow)
+    return () => window.removeEventListener('hashchange', follow)
+  }, [])
   const [name, setName] = useState(state.library || '')
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
@@ -282,7 +402,13 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
           </div>
         )}
 
-        {sec === 'remotes' && <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />}
+        {sec === 'remotes' && (
+          <>
+            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />
+            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} />
+            <RequestsCard remotes={remotes} />
+          </>
+        )}
 
         {sec === 'casting' && <CastPanel />}
 
@@ -487,6 +613,8 @@ export default function App () {
   // base and remounts the library - the control plane stays local throughout.
   const [remotes, setRemotes] = useState([])
   const [source, setSource] = useState('')
+  // How many downloads are running, for the topbar indicator.
+  const [dlBusy, setDlBusy] = useState(0)
   // The theme lives up here now rather than inside Settings: it is a light switch, and
   // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
   const [theme, setTheme] = useState(loadThemePref())
@@ -510,12 +638,42 @@ export default function App () {
     const s = await api('/api/state')
     setState(s)
     api('/api/remote/list').then(r => { if (Array.isArray(r?.remotes)) setRemotes(r.remotes) }).catch(() => {})
+    // Whether anything is downloading, for the topbar's indicator (Tim,
+    // 2026-08-17) - rides the same 8s poll the rest of the bar lives on.
+    api('/api/downloads').then(r => setDlBusy((r?.items || []).filter(d => d.downloading).length)).catch(() => {})
     return s
   }, [])
 
+  // DEFINED ABOVE THE MOUNT EFFECT AND THE EARLY RETURN, and that placement
+  // is load-bearing: on the very first render the component returns Loading
+  // before the consts below the return exist, yet the mount effect's closure
+  // has already captured their bindings - touching one from that closure is
+  // the temporal dead zone, and it took the whole page down (the third TDZ
+  // of 2026-08-17; everything a top-level effect calls now lives above it).
+  const pickSource = (lib) => {
+    setSource(lib)
+    setRemoteBase(lib ? '/remote/' + lib : '')
+    setPlaying(null)
+    setSearch('')
+    reloadWatch()
+  }
+
   useEffect(() => {
     applyThemePref(loadThemePref())
-    reload().then(s => { if (needsSetup(s) && !setupDismissed()) setWizard(true) })
+    // A machine with a REMOTE library is already a client and skips the
+    // wizard (approved open question 1 of the desktop-client proposal) - and
+    // on a client-only machine the watch surface OPENS on the friend's
+    // library, because "No films yet" over an empty local shelf is the wrong
+    // greeting for a browser that exists to watch somebody else's. The
+    // remote list is asked here directly because reload() fetches it without
+    // awaiting, and both decisions need the answer in hand.
+    reload().then(async s => {
+      const r = await api('/api/remote/list').catch(() => null)
+      const remoteLibs = r?.remotes || []
+      if (s?.source?.kind === 'empty' && remoteLibs.length) pickSource(remoteLibs[0].libraryId)
+      if (!needsSetup(s) || setupDismissed()) return
+      if (!remoteLibs.length) setWizard(true)
+    })
     reloadWatch()
     // The device list changes without us doing anything - a phone pairs, a guest
     // pass expires, somebody comes online. Poll gently rather than leaving a stale
@@ -537,12 +695,24 @@ export default function App () {
 
   const play = (item, list) => { setQueue(list || []); setPlaying(item) }
 
-  const pickSource = (lib) => {
-    setSource(lib)
-    setRemoteBase(lib ? '/remote/' + lib : '')
-    setPlaying(null)
-    setSearch('')
-    reloadWatch()
+  // Play a kept copy from the Downloads card: switch to its library so the
+  // routes and the shim prefix line up, then open the player on an item built
+  // from the download's own stored facts - which is what lets it open with the
+  // friend's server off, when the library pages themselves cannot load.
+  const playDownload = (row) => {
+    pickSource(row.lib)
+    setTab('watch')
+    setPlaying({
+      id: row.itemId,
+      type: row.type || 'movie',
+      title: row.title || 'Untitled',
+      year: row.year || null,
+      runtime: row.runtime || null,
+      seriesTitle: row.seriesTitle || null,
+      seasonNumber: row.seasonNumber ?? null,
+      episodeNumber: row.episodeNumber ?? null,
+      media: row.media || null
+    })
   }
 
   const online = (state.devices || []).filter(d => d.online && !d.revokedAt).length
@@ -620,6 +790,20 @@ export default function App () {
             the light switch, then the gear. Both are icons because both are things you
             reach for occasionally and neither deserves a word's worth of the bar. */}
         <div class='barright'>
+          {/* SOMETHING IS DOWNLOADING (Tim, 2026-08-17): a bar-level light
+              while any download runs, one click from its progress - the
+              Downloads card under Settings, Remote libraries. */}
+          {dlBusy > 0 && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={dlBusy === 1 ? 'One download running - see its progress' : dlBusy + ' downloads running - see their progress'}
+              title={dlBusy === 1 ? 'One download running' : dlBusy + ' downloads running'}
+              onClick={() => { location.hash = 'settings/remotes'; setTab('settings'); setPlaying(null) }}
+            >
+              <DownloadIcon size={18} />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
           <button
             class={'iconbtn' + (tab === 'who' ? ' on' : '')}
             onClick={() => { setTab('who'); setPlaying(null) }}
@@ -652,7 +836,18 @@ export default function App () {
 
       <div class='scroller'>
       <div class='content'>
-        {wizard && <Wizard state={state} reload={reload} onDone={() => { setWizard(false); reload() }} onRemotePaired={(lib) => { setWizard(false); reload().then(() => pickSource(lib)) }} />}
+        {/* FINISHING THE WIZARD LANDS ON THE LIBRARY, always. The hash is
+            cleared too: a leftover #settings/... from before the wizard was
+            steering fresh installs into Settings after pairing (Tim,
+            2026-08-17, dropped onto This host instead of the films). */}
+        {wizard && (
+          <Wizard
+            state={state}
+            reload={reload}
+            onDone={() => { setWizard(false); location.hash = ''; setTab('watch'); reload() }}
+            onRemotePaired={(lib) => { setWizard(false); location.hash = ''; setTab('watch'); reload().then(() => pickSource(lib)) }}
+          />
+        )}
 
         {!wizard && tab === 'watch' && (
           playing
@@ -661,6 +856,7 @@ export default function App () {
                 item={playing}
                 caps={caps}
                 queue={queue}
+                remote={!!source}
                 watch={watch}
                 onWatchChange={reloadWatch}
                 onPlay={setPlaying}
@@ -676,6 +872,7 @@ export default function App () {
                 key={source}
                 state={state}
                 caps={caps}
+                remote={!!source}
                 search={search}
                 watch={watch}
                 startAt={startAt}
@@ -687,7 +884,7 @@ export default function App () {
         )}
 
         {!wizard && tab === 'who' && <People state={state} reload={reload} />}
-        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} />}
+        {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} onPlayDownload={playDownload} />}
       </div>
 
       </div>
