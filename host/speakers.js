@@ -242,8 +242,27 @@ class Speakers {
     }
   }
 
-  stop (entityId) {
-    return this._service('media_player', 'media_stop', { entity_id: entityId })
+  // STOP HAS TO WORK ON EVERY FAMILY, because revoke rides it. A Roku's media
+  // player has NO media_stop in its feature set (measured: HA answers 500 and
+  // the room plays out its buffer - the exact failure the donor's design
+  // names), but the same integration ships a remote entity, and Home is how a
+  // Roku's film ends. Pause is the last resort: a frozen frame is not dark,
+  // but it is silent and it stops the bytes.
+  async stop (entityId) {
+    try {
+      return await this._service('media_player', 'media_stop', { entity_id: entityId })
+    } catch (e) {
+      this.log('cast:stop-fallback', { entityId, err: e?.message })
+      try {
+        return await this._service('remote', 'send_command', {
+          entity_id: String(entityId).replace(/^media_player\./, 'remote.'),
+          command: 'home'
+        })
+      } catch (e2) {
+        this.log('cast:stop-fallback-failed', { entityId, err: e2?.message })
+        return this._service('media_player', 'media_pause', { entity_id: entityId })
+      }
+    }
   }
 
   pause (entityId) {
