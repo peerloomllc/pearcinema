@@ -17,6 +17,9 @@
 const fs = require('fs')
 const path = require('path')
 
+const { probeFile } = require('./probe')
+const ffmpegBin = require('./ffmpeg-bin')
+
 const EXT = {
   matroska: 'mkv', mkv: 'mkv', mov: 'mp4', mp4: 'mp4', m4v: 'mp4',
   webm: 'webm', avi: 'avi', mpegts: 'ts'
@@ -193,26 +196,42 @@ class RemoteDownloads {
           this.start(lib, itemId, caps).catch((e) => this.log('downloads:failed', { itemId, reason: e.message }))
           return
         }
-        fs.renameSync(part, path.join(this.dir, file))
-        const size = fs.statSync(path.join(this.dir, file)).size
-        this.meta[itemId] = {
-          ...this._baseRow(lib, item),
-          file,
-          size,
-          converted: true,
-          // What is IN the kept file, which is what a play-time verdict needs -
-          // the library's own facts describe the file on the FRIEND's disk.
-          media: {
-            ...item.media,
-            container: 'mp4',
-            videoCodec: 'h264',
-            audioCodec: verdict?.audio && verdict.audio !== 'copy' ? verdict.audio : (item.media?.audioCodec || null),
-            size
-          },
-          savedAt: Date.now()
-        }
-        this._write()
-        this.log('downloads:done', { itemId, size, converted: true })
+        const final = path.join(this.dir, file)
+        fs.renameSync(part, final)
+        const size = fs.statSync(final).size
+        // What is IN the kept file, which is what a play-time verdict needs -
+        // asked OF THE FILE, not guessed from the decide verdict. The guess
+        // shipped first and was wrong on the very first real conversion: the
+        // N100 emitted aac where the verdict implied the original eac3 stayed,
+        // and a wrong audio tag buys a pointless rebuild on every play. The
+        // guess remains only as the fallback for a missing ffprobe.
+        probeFile(final, { ffprobe: ffmpegBin.ffprobe() }).catch(() => null).then((probed) => {
+          this.meta[itemId] = {
+            ...this._baseRow(lib, item),
+            file,
+            size,
+            converted: true,
+            media: probed
+              ? {
+                  container: probed.container || 'mp4',
+                  videoCodec: probed.videoCodec || 'h264',
+                  audioCodec: probed.audioCodec || null,
+                  width: probed.width || item.media?.width || null,
+                  height: probed.height || item.media?.height || null,
+                  size
+                }
+              : {
+                  ...item.media,
+                  container: 'mp4',
+                  videoCodec: 'h264',
+                  audioCodec: verdict?.audio && verdict.audio !== 'copy' ? verdict.audio : (item.media?.audioCodec || null),
+                  size
+                },
+            savedAt: Date.now()
+          }
+          this._write()
+          this.log('downloads:done', { itemId, size, converted: true })
+        })
       })
     }).catch((e) => {
       this.live.delete(itemId)
