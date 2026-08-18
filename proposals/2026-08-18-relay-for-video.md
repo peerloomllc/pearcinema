@@ -59,6 +59,51 @@ That settles the question this proposal was originally unable to answer. The
 remaining decision is not "would a relay work" but "on what terms do we ship
 one".
 
+## Relay to start, direct once punched - already built (Tim's question, 2026-08-18)
+
+Tim asked whether the relay could carry only the initial connection, and once
+the punch finds a working UDP path, whether we could bind to it, remember it and
+drop the relay. **Yes, and hyperdht already does exactly that** - worth writing
+down, because it changes the cost model.
+
+Three things are already true in `node_modules/hyperdht`:
+
+1. **Direct is always tried first.** `relayThroughFor` returns null on the
+   opening attempt; the relay key is only offered after `HOLEPUNCH_ABORTED`, or
+   immediately when the DHT has already established that this NAT can never be
+   punched (`dht.randomized`). A relay is never in the path of a connection that
+   could have been direct.
+2. **The relay keeps a failed connection alive rather than replacing it.**
+   `maybeDestroyEncryptedSocket` (`lib/connect.js:763`) returns early on
+   `if (c.relaySocket) return // waiting for the relay`. That is precisely why a
+   relay-enabled build reaches the library where this one gives up.
+3. **The upgrade Tim describes is implemented, and carefully.** In `c.onsocket`
+   (`lib/connect.js:498`), if a punch succeeds while the stream is already
+   connected through the relay, it calls `rawStream.changeRemote(...)` and then
+   `confirmDirectUpgrade` (`lib/relay-connection.js:20`). That sends a
+   zero-length UDX probe down the direct path, waits until real data actually
+   arrives over it, and only then closes the relay connection. The live stream
+   moves across without dropping, and the relay is not abandoned on the strength
+   of a hopeful assumption.
+
+**What this changes about the bill.** The relay is not paid for by every user,
+only by connections whose punch never lands. Anyone whose punch succeeds late
+pays for a few seconds of relayed traffic and then costs nothing. The arithmetic
+above is a worst case per hard-NAT user, not a per-user cost.
+
+**What it does not fix, which is Tim's own case.** Remembering a port cannot help
+where the punch fails for the reason carrier-grade NAT fails it: the carrier
+hands out a DIFFERENT external port per destination, so the port learned through
+the DHT is not one that would ever have worked, and there is nothing correct to
+remember. His logs show four aborted punches in a row, so those connections would
+stay relayed for their whole life.
+
+One honest gap in this reading: the upgrade fires when a punch SUCCEEDS, and I
+did not find a periodic re-punch while a connection sits relayed. So it rescues
+connections whose punch lands late, not ones where it never lands. Each NEW
+connection does try direct first, and the app now reconnects on app resume and on
+pull-to-refresh, so there are natural retry points.
+
 ## The fork
 
 **A. Say it plainly.** No relay. The store listing, README and onboarding say
