@@ -139,13 +139,12 @@ function capsFor (itemId) {
 // phone keeps, nor steer the download's decide toward a conversion it does
 // not need.
 //
-// The relay ceiling is INHERITED here on purpose - "whenever the bytes are relayed" has
-// to include a download, which is the heaviest thing the relay could ever carry: a whole
-// film at once rather than an hour of it at a time. The cost is that a film downloaded
-// while away from wifi is kept at the relayed quality, since a download is a lasting
-// copy rather than a session. Flagged to Tim 2026-08-18; if he would rather a relayed
-// download be refused outright and told to wait for wifi, that is a product rule and
-// belongs beside the consent gate, not here.
+// The relay ceiling is inherited here and never actually applies, which is deliberate
+// rather than dead code: startDownload REFUSES a relayed download outright (Tim,
+// 2026-08-18) because a download is a lasting copy rather than a session, so nothing
+// reaches this function over a relay. The inheritance stays so that if the refusal is
+// ever relaxed, a relayed download is capped rather than silently uncapped - the safe
+// direction for a rule about somebody else's bandwidth.
 function capsForDownload (itemId) {
   const { burnSubtitleId, tone, ...rest } = capsFor(itemId)
   return rest
@@ -547,6 +546,20 @@ async function startDownload (itemId) {
   // speak that id, and the shim serves a cache hit by id alone.
   const srcId = pickCopyId(itemId)
   const c = await clientForId(srcId)
+
+  // A download over a relay is refused rather than degraded or waved through - the rule
+  // and its wording live in src/relay.js. The check is here rather than in the UI because
+  // every path into a download (the button, a retry, a queued item that resumes on
+  // reconnect) has to hit the same rule, and only the worklet knows how this library's
+  // connection was made.
+  const dl = relay.relayDownloadDecision({ relayed: relayedForId(srcId) })
+  if (dl.action === 'refuse') {
+    log('download:refused-relayed', { itemId, srcId })
+    const e = new Error(dl.message)
+    e.code = 'ERELAYED'
+    throw e
+  }
+
   const item = await c.get({ id: srcId })
   const size = item?.media?.size
   if (!size) throw new Error('this one cannot be downloaded')

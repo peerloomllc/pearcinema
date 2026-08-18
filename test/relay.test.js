@@ -86,6 +86,29 @@ test('a looser choice by the viewer does not survive it', () => {
   assert.equal(relay.capsWithRelayCeiling({ maxKbps: 8000 }, true).maxKbps, 2500)
 })
 
+// --- downloads --------------------------------------------------------------
+
+test('a download over the relay is refused, not quietly degraded', () => {
+  // The copy on the phone is what gets watched on a television months later. Capping it
+  // would mean a moment spent off wifi follows the film around forever at a quality
+  // nobody chose, and that is worse than being told to wait.
+  const { action, message } = relay.relayDownloadDecision({ relayed: true })
+  assert.equal(action, 'refuse')
+  assert.match(message, /wifi/, 'the refusal has to say what to do about it')
+})
+
+test('a download on a direct connection is untouched', () => {
+  assert.equal(relay.relayDownloadDecision({ relayed: false }).action, 'download')
+  assert.equal(relay.relayDownloadDecision({ relayed: false }).message, null)
+})
+
+test('the refusal reads as a whole sentence, not a code', () => {
+  // The worklet throws this string and the phone shows it verbatim, so it is user-facing
+  // copy: a capital letter, a full stop, and no jargon about punches or relays failing.
+  assert.match(relay.RELAY_DOWNLOAD_REFUSAL, /^[A-Z].*\.$/)
+  assert.doesNotMatch(relay.RELAY_DOWNLOAD_REFUSAL, /HOLEPUNCH|kbps|NAT|DHT/)
+})
+
 test('the hour costs what the proposal says it costs', () => {
   // The whole argument for the number, restated as arithmetic so it cannot drift from the
   // table in the proposal: kbps -> GB/hour -> hours on a 500 GB tier.
