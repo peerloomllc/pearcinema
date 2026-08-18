@@ -1111,7 +1111,11 @@ button.danger { color: var(--color-error); border-color: var(--color-border); }
    space-between, so with three children the pencil otherwise drifted with the label's width and
    sat in a different place on every row (Tim, 2026-07-27). */
 .rowacts { display: flex; align-items: center; gap: .15rem; flex: none; margin-left: auto; }
-button.wide { width: 100%; }
+/* Full-width action buttons. Inline-flex so one with an icon centres the pair rather than
+   letting the glyph sit on the text baseline - the same fix scanbtn needed. */
+button.wide {
+  width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+}
 .btnrow { display: flex; gap: .5rem; margin-top: .25rem; }
 .btnrow button { flex: 1; font-size: .875rem; }
 

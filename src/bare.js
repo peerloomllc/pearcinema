@@ -628,7 +628,18 @@ let uiPage = null
 // pinned DOWNLOADS, which the store exempts from the cap by design. The shim
 // serves a cache hit straight off disk with full Range support - which is the
 // entire offline story: no connection needed once a film is here.
-const cache = new AudioCache({ dir: path.join(DATA_DIR, 'films'), cap: 512 * 1024 * 1024, log: (m, d) => log(m, d) })
+// The film cache's ceiling is the person's to set (Settings -> Streaming and downloads),
+// so it is read from settings rather than fixed. 2 GB by default: a film is a thousand
+// times a song, so PearTune's 512 MB would hold about one and evict it on the next play.
+const FILM_CACHE_DEFAULT = 2 * 1024 * 1024 * 1024
+const cache = new AudioCache({
+  dir: path.join(DATA_DIR, 'films'),
+  cap: (() => {
+    const v = Number(readSettings().filmCacheCap)
+    return Number.isFinite(v) && v >= 0 ? v : FILM_CACHE_DEFAULT
+  })(),
+  log: (m, d) => log(m, d)
+})
 
 // POSTERS ARE KEPT (Tim, 2026-08-18, watching a library load over the relay: "so the
 // artwork doesn't have to be downloaded every single time"). It did not have to be built -
@@ -1305,6 +1316,57 @@ const methods = {
       .map(([id, e]) => ({ itemId: id, size: e.size || 0, mime: e.mime || null, ...(dlMeta[id] || {}) }))
     const running = [...downloads.entries()].map(([id, d]) => ({ itemId: id, got: d.got(), size: d.size, approx: !!d.approx }))
     return { items, running }
+  },
+
+  // --- storage (PearTune's shape, ported 2026-08-18 at Tim's ask) -----------
+  //
+  // What this phone is holding and what it is allowed to hold. Films and artwork are
+  // counted separately because they behave differently: films are big, deliberate and
+  // pinned by the person, artwork is small, automatic and only ever a re-download.
+  'storage.stats': async () => ({
+    films: { bytes: cache.totalBytes(), count: cache.count(), cap: cache.cap || 0 },
+    art: { bytes: artStore.totalBytes(), count: artStore.count() }
+  }),
+
+  // The cap is persisted so it survives a restart, and applied immediately - AudioCache
+  // evicts on setCap, so lowering it takes effect now rather than at the next download.
+  'storage.setCap': async ({ bytes }) => {
+    const cap = Math.max(0, Number(bytes) || 0)
+    writeSettings({ ...readSettings(), filmCacheCap: cap })
+    cache.setCap(cap)
+    log('storage:cap', { cap })
+    return { cap, films: { bytes: cache.totalBytes(), count: cache.count() } }
+  },
+
+  // Everything not pinned. A DOWNLOAD is pinned, so this reclaims what playback left
+  // behind without touching a film somebody deliberately keeps for a flight.
+  'storage.clearFilms': async () => {
+    let removed = 0
+    for (const [id, e] of Object.entries(cache.index || {})) {
+      if (e.pinned) continue
+      cache.remove(id)
+      removed++
+    }
+    cache.save()
+    log('storage:cleared-films', { removed })
+    return { removed, films: { bytes: cache.totalBytes(), count: cache.count() } }
+  },
+
+  // Artwork is kept until its library goes, which is predictable and never re-downloads
+  // on a timer. But a source CAN change a film's poster without changing its art id, and
+  // then the old picture would be right forever - so this is the escape hatch. The whole
+  // store rather than one film, because "which poster is wrong" is not something the app
+  // can know. Costs a re-download, not anything anybody chose to keep.
+  'storage.refreshArt': async () => {
+    artStore.clear()
+    // The store is only one of TWO caches in front of a poster: the shim's own map dies
+    // with the process, and the WebView's HTTP cache answers max-age hits without the
+    // request ever reaching the shim. refreshArt bumps the generation in the art path,
+    // which is the only thing that makes the WebView miss - so the UI must take the new
+    // base back or nothing visible happens.
+    const base = shim.refreshArt()
+    log('storage:refreshed-art', {})
+    return { base, art: { bytes: artStore.totalBytes(), count: artStore.count() } }
   },
 
   'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
