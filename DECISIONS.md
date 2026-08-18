@@ -77,8 +77,25 @@ A third was found by reading the consumer rather than the wire: `getState` answe
 `duration` in SECONDS and parses `positionUpdatedAt` as a date. Every consumer would have
 read null - a cast that never reported progress and never resumed where it was left.
 
-STILL NOT DONE: nothing has been PLAYED on the Roku this way. Discovery, identification and
-state are hardware-proven; launch and stop are proven against the stand-in only.
+3. **THE STICK CANNOT PLAY A URL AT ALL.** Attempting the launch answered a bare 404, and
+   `/query/apps` says why: it carries Netflix, Prime, Peacock, Hulu, Disney, Apple TV,
+   Plex, YouTube, HBO Max and a third-party "Media Assistant" - and NEITHER Roku Media
+   Player (2213) nor Play on Roku (15985). ECP cannot play a URL through a channel that is
+   not installed, so a Roku without one is a television this feature cannot use however
+   well it answers everything else.
+   The roster now CHECKS rather than assumes: a Roku with no media channel is not offered,
+   and the log names the fix (`install Roku Media Player`) rather than only the fault,
+   because that is a thing the owner can do in a minute and silence would read as
+   "PearCinema cannot see my television" when it plainly can. `play` refuses with the same
+   sentence rather than 404ing into the void.
+   This is the finding that most justifies Tim holding the merge for hardware: three of
+   these four would have shipped, and this one makes the feature a button that never works
+   on a device that looks perfect from every other angle.
+
+STILL NOT DONE: nothing has been PLAYED on a Roku this way, because the only Roku on the
+network cannot accept one. Discovery, identification, the media-channel check and state are
+all hardware-proven; launch and stop remain proven against the stand-in only, and will stay
+that way until a Roku with Roku Media Player installed is on a network the host can see.
 
 ## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
 Tier: T2 (PR pending). Two things from Tim while using the relayed build.

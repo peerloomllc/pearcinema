@@ -42,9 +42,16 @@ const DISCOVER_MS = 2500
 // or on a network that drops us. Kept short because `getState` runs on a poll.
 const ECP_TIMEOUT_MS = 4000
 
-// The Roku Media Player channel. Launching it with a `u=` parameter is the documented way
-// to play a URL on a Roku without publishing a channel of our own.
-const MEDIA_PLAYER_CHANNEL = '2213'
+// The channels that will play a URL handed to them. Roku Media Player (2213) is the
+// documented one and ships on most boxes; 15985 is the "Play on Roku" receiver the phone
+// app uses, and some firmware carries one and not the other.
+//
+// THIS HAS TO BE CHECKED, NOT ASSUMED. Measured on Tim's Roku Streaming Stick Plus,
+// 2026-08-18: NEITHER is installed - it carries Netflix, Prime, Plex and a third-party
+// "Media Assistant" instead - and `/launch/2213` answers a bare 404. ECP cannot play a URL
+// through a channel that is not there, so a Roku without one is a television we cannot
+// cast to, however well it answers everything else.
+const MEDIA_CHANNELS = ['2213', '15985']
 
 function ecpUrl (host, path) {
   return `http://${host}:8060${path}`
@@ -218,12 +225,32 @@ class RokuSpeakers {
       // neither is still a real ECP device, so it keeps its address as a last resort.
       const name = tag(info, 'user-device-name') || tag(info, 'friendly-device-name')
       const model = tag(info, 'model-name') || tag(info, 'friendly-model-name')
+
+      // Can it play something we hand it? A Roku with no media channel installed answers
+      // every query happily and 404s the launch, so the roster would otherwise be full of
+      // televisions that error the moment somebody presses one.
+      let channel = null
+      try {
+        const apps = await this._ecp(host, '/query/apps')
+        channel = MEDIA_CHANNELS.find((id) => new RegExp(`app id="${id}"`).test(apps)) || null
+      } catch (e) {
+        this.log('roku:apps-failed', { host, err: e.message })
+      }
+      if (!channel) {
+        // Named in the log because the fix is one the OWNER can apply in a minute: install
+        // Roku Media Player from the channel store. Silence here would read as "PearCinema
+        // cannot see my television" when it plainly can.
+        this.log('roku:no-media-channel', { host, name: name || model || host, fix: 'install Roku Media Player' })
+        continue
+      }
+
       identified.push(host)
       this.devices.set(host, {
         host,
         entityId: this.entityIdFor(host),
         name: name || model || `Roku (${host})`,
-        model: model || null
+        model: model || null,
+        channel
       })
     }
 
@@ -297,9 +324,14 @@ class RokuSpeakers {
   async play (entityId, url, { title = null, format = 'mp4' } = {}) {
     const host = this.hostFor(entityId)
     if (!host) throw new Error('not a Roku target')
+    // The channel this device actually has, learned at scan time. A device that reached
+    // the roster has one by construction; a stale id is still worth a clear failure over
+    // a 404 nobody can read.
+    const channel = this.devices.get(host)?.channel
+    if (!channel) throw new Error('that Roku has no media player installed - install Roku Media Player on it')
     const q = new URLSearchParams({ u: url, t: 'v', videoFormat: format === 'mkv' ? 'mkv' : format })
     if (title) q.set('videoName', title)
-    await this._ecp(host, `/launch/${MEDIA_PLAYER_CHANNEL}?${q.toString()}`, { method: 'POST' })
+    await this._ecp(host, `/launch/${channel}?${q.toString()}`, { method: 'POST' })
     this.log('roku:playing', { entityId, format })
     return { ok: true }
   }
@@ -317,4 +349,4 @@ class RokuSpeakers {
   }
 }
 
-module.exports = { RokuSpeakers, discover, ecp, tag, attr, millis, stateFrom, MEDIA_PLAYER_CHANNEL }
+module.exports = { RokuSpeakers, discover, ecp, tag, attr, millis, stateFrom, MEDIA_CHANNELS }
