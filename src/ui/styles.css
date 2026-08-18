@@ -374,13 +374,33 @@ ul.tracks.editing li.editrow { gap: .5rem; background: var(--color-surface-base)
   font-size: .85rem;
 }
 /* A small On/Off pill toggle (download-over-cellular). */
-.toggle {
-  flex: none; min-width: 3.4rem; padding: .4rem .9rem; border-radius: 9999px;
-  font-size: .82rem; font-weight: 600;
-  background: var(--color-surface-input); border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
+/* A real switch: a track with a knob that slides, the control people already know from
+   every settings screen on the phone. It replaced a pill reading On or Off, which said
+   its state in words and made the person read rather than glance (Tim, 2026-08-18). The
+   knob is a child span so only IT moves - animating the track's background as well would
+   make the whole control appear to shift. */
+.switch {
+  flex: none; position: relative; width: 3.1rem; height: 1.75rem; padding: 0;
+  border-radius: 9999px; border: 1px solid var(--color-border);
+  background: var(--color-surface-input);
+  transition: background-color .18s ease, border-color .18s ease;
 }
-.toggle.on { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-text-on-primary); }
+.switch .knob {
+  position: absolute; top: 50%; left: .18rem; transform: translateY(-50%);
+  width: 1.3rem; height: 1.3rem; border-radius: 50%;
+  background: var(--color-text-secondary);
+  transition: transform .18s ease, background-color .18s ease;
+}
+.switch.on { background: var(--color-primary); border-color: var(--color-primary); }
+.switch.on .knob {
+  background: var(--color-text-on-primary);
+  transform: translateY(-50%) translateX(1.3rem);
+}
+/* A finger lands before the state changes, so the press is where the feedback is. */
+.switch:active .knob { width: 1.45rem; }
+@media (prefers-reduced-motion: reduce) {
+  .switch, .switch .knob { transition: none; }
+}
 
 .scanner { position: relative; min-height: 100vh; background: #000; }
 .scanner video { width: 100%; height: 100vh; object-fit: cover; }
