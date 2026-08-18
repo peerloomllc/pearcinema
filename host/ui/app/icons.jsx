@@ -139,6 +139,17 @@ export const Trash = (p) => (
   <S {...p}><path d='M5 7h14M9.5 7V5h5v2M7 7l1 12.5h8L17 7M10 10.5v6M14 10.5v6' /></S>
 )
 
+// Hiding a cast target and offering it again. An eye, and the same eye struck
+// through - the one pairing people read without a caption, which matters
+// because these two replace the words that used to say it.
+export const Eye = (p) => (
+  <S {...p}><path d='M2.5 12S6 5.8 12 5.8 21.5 12 21.5 12 18 18.2 12 18.2 2.5 12 2.5 12z' /><circle cx='12' cy='12' r='3' /></S>
+)
+
+export const EyeOff = (p) => (
+  <S {...p}><path d='M4 4l16 16' /><path d='M9.9 5.9A9.6 9.6 0 0 1 12 5.8c6 0 9.5 6.2 9.5 6.2a17 17 0 0 1-3.3 3.9' /><path d='M6.6 7.9A16.7 16.7 0 0 0 2.5 12S6 18.2 12 18.2a9.7 9.7 0 0 0 3.6-.7' /><path d='M10.6 10.7a3 3 0 0 0 3.9 4' /></S>
+)
+
 export const Pencil = (p) => (
   <S {...p}><path d='M4.5 19.5l.9-3.6L15.9 5.4a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1L8.1 18.6l-3.6.9z' /><path d='M14.5 6.8l2.7 2.7' /></S>
 )
