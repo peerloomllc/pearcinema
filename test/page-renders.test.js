@@ -1172,3 +1172,27 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
   assert.ok(doc.querySelector('.prow .dev'), 'opening them shows what they hold')
   assert.match(text(), /A phone/)
 })
+
+
+test('the casting panel says the one thing about Rokus nobody would guess', async (t) => {
+  // A Roku needs the free Media Assistant channel installed, and that is not discoverable
+  // from anywhere: Roku Media Player, the channel every document points at, opens and then
+  // discards the film (measured on a real stick, 2026-08-18). Without this line a person
+  // with a Roku sees an empty picker and no reason, because the reason lives only in a log
+  // they will never read.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /casting/i.test(b.textContent))
+  if (cast) {
+    cast.dispatchEvent(new win.Event('click', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 60))
+  }
+
+  assert.match(text(), /Media Assistant/, 'the requirement has to be on the screen, not in a log')
+  assert.match(text(), /Rokus need no setup here/, 'and it has to say the discovery half needs nothing')
+})
