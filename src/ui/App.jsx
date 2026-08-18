@@ -126,6 +126,64 @@ function Switch ({ on, onChange, label }) {
   )
 }
 
+// How much of this phone the films may use. Ascending, because a slider's axis has to mean
+// something, and a film is a thousand times a song - PearTune's 512 MB floor would hold
+// about one film and evict it on the next play.
+const FILM_CAPS = [
+  { value: 1024 * 1024 * 1024, label: '1 GB', desc: 'About one film kept at a time' },
+  { value: 2 * 1024 * 1024 * 1024, label: '2 GB' },
+  { value: 5 * 1024 * 1024 * 1024, label: '5 GB' },
+  { value: 10 * 1024 * 1024 * 1024, label: '10 GB' },
+  { value: 0, label: 'No limit', desc: 'Keep every film until you clear it yourself' }
+]
+
+// A discrete slider over an ordered list, ported from PearTune (Tim, 2026-08-18: "we have
+// several sliders for data storage... we should probably copy this").
+//
+// Built on <input type=range> rather than a hand-rolled div: that buys correct touch
+// handling, tap-to-position, keyboard arrows and a real slider role for free, none of
+// which are the interesting part and all of which are easy to get subtly wrong.
+//
+// The value commits on CHANGE (pointer up), not on INPUT. Dragging across four stops would
+// otherwise fire four writes, and each one can trigger an eviction pass - so a drag from
+// No limit down to 1 GB would start deleting films at every stop on the way past.
+function StepSlider ({ options, value, onChange, ariaLabel }) {
+  const at = Math.max(0, options.findIndex((o) => o.value === value))
+  // A local index so the label follows the finger while the committed value has not moved.
+  const [draft, setDraft] = useState(null)
+  const i = draft ?? at
+  const cur = options[i] || options[0]
+  useEffect(() => { setDraft(null) }, [value])
+
+  return (
+    <div className='stepslider'>
+      <input
+        type='range' min={0} max={options.length - 1} step={1} value={i}
+        aria-label={ariaLabel}
+        // The number means nothing to a screen reader; the label is the actual value.
+        aria-valuetext={cur.label}
+        onInput={(e) => {
+          const n = Number(e.currentTarget.value)
+          if (n !== i) haptic('light') // a detent per stop, so a drag feels like steps
+          setDraft(n)
+        }}
+        onChange={(e) => {
+          const n = Number(e.currentTarget.value)
+          setDraft(n)
+          if (options[n] && options[n].value !== value) onChange(options[n].value)
+        }}
+      />
+      <div className='stepslider-ticks' aria-hidden='true'>
+        {options.map((o, n) => <span key={String(o.value)} className={n <= i ? 'on' : ''} />)}
+      </div>
+      <div className='stepslider-read'>
+        <span className='stepslider-name'>{cur.label}</span>
+        {cur.desc && <span className='stepslider-desc'>{cur.desc}</span>}
+      </div>
+    </div>
+  )
+}
+
 function OptionList ({ options, value, onChange }) {
   return (
     <div className='optlist'>
@@ -759,6 +817,9 @@ export default function App () {
   // What the relay has carried for this phone this month, and the nudge once that is a
   // heavy share. A nudge, never a stop: a film in progress is never interrupted.
   const [relayUsage, setRelayUsage] = useState(null)
+  // What this phone is holding: films kept from playback and downloads, and the posters
+  // saved so browsing does not re-fetch them.
+  const [storage, setStorage] = useState(null)
   // The player skins - cosmetic overlays drawn by the shell, PearTune's
   // Winamp-toggle pattern. The 35mm skin's tone is the exception: a phone
   // cannot repaint a native video surface, so a tone rides the capability
@@ -896,6 +957,7 @@ export default function App () {
       // so configuring Home Assistant shows up without a reinstall.
       call('cast.list').then((r) => setCanCast(!!r?.enabled && (r.targets || []).length > 0)).catch(() => {})
       refreshRelay()
+      call('storage.stats').then(setStorage).catch(() => {})
     }
     return s
   }, [])
@@ -2004,7 +2066,76 @@ export default function App () {
             value={dataSaver ? 'saver' : 'auto'}
             onChange={(v) => { setDataSaver(v === 'saver'); call('setSettings', { dataSaver: v === 'saver' }).catch(() => {}) }}
           />
-          <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file. A size cap for them arrives with the offline polish.</p>
+          <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file, whatever is picked above.</p>
+
+          {/* STORAGE, PearTune's shape (Tim, 2026-08-18). Films and artwork are separated
+              because they behave differently: films are big and deliberate, artwork is
+              small and automatic. Clearing films is about space; refreshing artwork is
+              about a poster being wrong, and costs only a re-download. */}
+          <div className='label' style={{ marginTop: '1rem' }}>Keep films on this phone up to</div>
+          <div className='desc'>
+            Films you play are kept for a while so watching one again does not download it twice.
+            A film you downloaded on purpose is never cleared by this.
+          </div>
+          <StepSlider
+            options={FILM_CAPS}
+            value={storage?.films?.cap ?? 2 * 1024 * 1024 * 1024}
+            ariaLabel='Keep films on this phone up to'
+            onChange={(bytes) => {
+              call('storage.setCap', { bytes })
+                .then((r) => setStorage((s) => ({ ...(s || {}), films: { ...(s?.films || {}), ...r.films, cap: r.cap } })))
+                .catch(() => {})
+            }}
+          />
+          <div className='row' style={{ marginTop: '.6rem' }}>
+            <div><div className='label'>Films using</div></div>
+            <span className='val'>
+              {fmtBytes(storage?.films?.bytes || 0)}
+              {storage?.films?.count ? ` · ${storage.films.count} film${storage.films.count === 1 ? '' : 's'}` : ''}
+            </span>
+          </div>
+          <button
+            className='wide' style={{ marginTop: '.4rem' }}
+            disabled={!storage?.films?.count}
+            onClick={() => {
+              call('storage.clearFilms')
+                .then((r) => {
+                  setStorage((s) => ({ ...(s || {}), films: { ...(s?.films || {}), ...r.films } }))
+                  say(r.removed ? 'Cleared what playback left behind' : 'Nothing to clear')
+                })
+                .catch((e) => setErr(e.message))
+            }}
+          ><Trash size={16} weight='bold' /> Clear kept films
+          </button>
+
+          <div className='label' style={{ marginTop: '.9rem' }}>Artwork</div>
+          <div className='desc'>
+            Posters are saved on this phone the first time they load, so browsing does not fetch them
+            again. If a poster looks wrong or out of date, fetch them again.
+          </div>
+          <div className='row'>
+            <div><div className='label'>Artwork using</div></div>
+            <span className='val'>
+              {fmtBytes(storage?.art?.bytes || 0)}
+              {storage?.art?.count ? ` · ${storage.art.count} poster${storage.art.count === 1 ? '' : 's'}` : ''}
+            </span>
+          </div>
+          <button
+            className='wide' style={{ marginTop: '.4rem' }}
+            onClick={() => {
+              call('storage.refreshArt')
+                .then((r) => {
+                  // The new base is what makes the WebView's own cache miss, so taking it
+                  // back is the whole point - without it the old posters keep rendering
+                  // and a refresh looks like it did nothing.
+                  if (r.base) setArtBase(r.base)
+                  setStorage((s) => ({ ...(s || {}), art: r.art }))
+                  say('Posters will be fetched again')
+                })
+                .catch((e) => setErr(e.message))
+            }}
+          ><ArrowsClockwise size={16} weight='bold' /> Refresh artwork
+          </button>
         </Section>
 
         {/* The relay, said plainly. Two things a person deserves to know before this is
