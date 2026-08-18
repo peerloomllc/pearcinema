@@ -12,6 +12,7 @@
     "host": "node host/index.js",
     "test": "node --test --test-concurrency=4 test/*.test.js",
     "build:dashboard": "node scripts/build-dashboard.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
     "verify": "node --test --test-concurrency=4 test/*.test.js && npm run build:dashboard && npm run build:ui",
     "android": "expo run:android",
     "prebuild": "expo prebuild",
