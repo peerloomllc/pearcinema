@@ -175,9 +175,18 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
           )
         : (seen && <span class='seen' title='You have watched this'><Check size={13} /></span>)}
 
-      {/* SAY WHAT THE NUMBER MEANS. A bare count read as "how many episodes
-          are in this season" (Tim, 2026-08-17) - the one word disambiguates. */}
-      {left > 0 && <span class='left' title={left + ' still to watch'}>{left} left</span>}
+      {/* ONLY ONCE SOMETHING IS UNDER WAY. Saying what the number MEANT was
+          not enough (Tim, 2026-08-17: a bare count read as "how many episodes
+          are in this season", and he doubted the badge helped most people).
+          The reason it read that way is that on an untouched show it IS the
+          episode count - "24 left" of 24 - so the word "left" was doing no
+          work and the tile was carrying a number nobody needed.
+
+          Half way through, the same badge is the whole point: "3 left" tells
+          somebody to open it, which is exactly what a tick cannot. So it earns
+          its place where it says something and is gone where it did not. A
+          finished show already says so with a tick, and left is 0 there. */}
+      {started && left > 0 && <span class='left' title={left + ' still to watch'}>{left} left</span>}
 
       {/* FIX THE MATCH WHERE THE MISTAKE IS VISIBLE (Tim, 2026-08-14, Plex's shape).
           Fetched artwork is a best guess, and the correction belongs on the tile

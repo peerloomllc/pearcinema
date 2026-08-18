@@ -541,10 +541,16 @@ test('THE ONE YOU ARE IN THE MIDDLE OF IS MARKED, not just counted', async (t) =
   // The same bar as a half-watched film, meaning the same thing at a different scale:
   // four episodes of ten.
   assert.equal(tile.querySelector('.resumebar i').style.width, '40%')
-  assert.match(tile.textContent, /6/, 'and still says how many are left')
+
+  // HALF WAY THROUGH, THE COUNT IS THE POINT: "6 left" tells somebody to open
+  // it, which is exactly what a tick cannot. This is the case the badge exists
+  // for, and the only one it now appears in.
+  const badge = tile.querySelector('.left')
+  assert.ok(badge, 'a started show says how many are left')
+  assert.match(badge.textContent, /^6 left$/)
 })
 
-test('a show nobody has started is counted but not marked', async (t) => {
+test('a show nobody has started carries no count at all, and no mark', async (t) => {
   const SHOW = {
     type: 'series', id: 'show-1', title: 'The Wire', year: 2002,
     seasonCount: 5, episodeCount: 60, overview: null, genres: [], artId: null
@@ -563,6 +569,11 @@ test('a show nobody has started is counted but not marked', async (t) => {
   assert.equal(tile.classList.contains('started'), false)
   assert.equal(tile.querySelector('.ring'), null, 'and no ring on something nobody has begun')
   assert.equal(tile.querySelector('.resumebar'), null, 'and no bar, because there is nothing to show')
+
+  // AND NO "10 LEFT" (Tim, 2026-08-17). On an untouched show the count IS the
+  // episode count, which is how it came to be read as "how many episodes are in
+  // this season". A number that only restates the thing beside it earns nothing.
+  assert.equal(tile.querySelector('.left'), null, 'nothing to be left of yet')
 })
 
 test('a show with only a part-watched episode in it is STILL the one being watched', async (t) => {
