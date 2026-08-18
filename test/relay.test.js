@@ -148,6 +148,33 @@ test('the refusal reads as a whole sentence, not a code', () => {
 const JUL = new Date(2026, 6, 15)
 const AUG = new Date(2026, 7, 2)
 
+test('a connection is relayed until its stream points somewhere else', () => {
+  // hyperdht points the SAME udx stream at the relay, then repoints it at the peer if a
+  // punch lands late. The address is therefore the only honest answer to "are we still
+  // relayed", and getting this backwards is what made the first meter read 867 MB for a
+  // minute of video.
+  assert.equal(relay.relayStillOn('1.2.3.4:5000', '1.2.3.4:5000'), true)
+  assert.equal(relay.relayStillOn('1.2.3.4:5000', '9.9.9.9:41000'), false, 'a moved stream is a direct one')
+  assert.equal(relay.relayStillOn('1.2.3.4:5000', '1.2.3.4:5001'), false, 'the port counts too')
+})
+
+test('nothing to compare yet is treated as still relayed', () => {
+  // Erring towards relayed keeps the ceiling on and the marker up while the answer is
+  // unknown. The other way round would quietly lift a cap somebody else is paying for.
+  assert.equal(relay.relayStillOn(null, '1.2.3.4:5000'), true)
+  assert.equal(relay.relayStillOn('1.2.3.4:5000', null), true)
+})
+
+test('a total written by an older counter does not survive', () => {
+  // Version 1 kept counting after a connection went direct. A figure wrong by an order of
+  // magnitude is worse than no figure, so it is discarded rather than migrated.
+  const stale = { month: relay.monthKey(JUL), bytes: 867e6, byLibrary: { a: 867e6 } }
+  const fresh = relay.addUsage(stale, { bytes: 1e6, libraryId: 'a', now: JUL })
+  assert.equal(fresh.bytes, 1e6, 'the old total must not be carried forward')
+  assert.equal(fresh.v, relay.USAGE_VERSION)
+  assert.equal(relay.usageWarning(stale, { now: JUL }), null, 'and it can never trigger the nudge')
+})
+
 test('bytes accumulate within a month, per library and in total', () => {
   let u = relay.addUsage(null, { bytes: 1e9, libraryId: 'lib-a', now: JUL })
   u = relay.addUsage(u, { bytes: 5e8, libraryId: 'lib-b', now: JUL })
@@ -168,18 +195,18 @@ test('a new month starts from nothing rather than carrying the old one', () => {
 test('a negative sample is dropped, not subtracted', () => {
   // The counter it comes from lives on a UDX stream, so a reconnect starts a fresh one
   // at zero. Subtracting that would silently erase a month of real usage.
-  const u = relay.addUsage({ month: relay.monthKey(JUL), bytes: 3e9, byLibrary: {} }, { bytes: -2e9, now: JUL })
+  const u = relay.addUsage({ v: relay.USAGE_VERSION, month: relay.monthKey(JUL), bytes: 3e9, byLibrary: {} }, { bytes: -2e9, now: JUL })
   assert.equal(u.bytes, 3e9)
 })
 
 test('no nudge below the threshold, and none at all for a stale month', () => {
-  assert.equal(relay.usageWarning({ month: relay.monthKey(JUL), bytes: 1e9 }, { now: JUL }), null)
-  assert.equal(relay.usageWarning({ month: '2025-01', bytes: 999e9 }, { now: JUL }), null, 'last year is not this month')
+  assert.equal(relay.usageWarning({ v: relay.USAGE_VERSION, month: relay.monthKey(JUL), bytes: 1e9 }, { now: JUL }), null)
+  assert.equal(relay.usageWarning({ v: relay.USAGE_VERSION, month: '2025-01', bytes: 999e9 }, { now: JUL }), null, 'last year is not this month')
   assert.equal(relay.usageWarning(null, { now: JUL }), null)
 })
 
 test('the nudge arrives past the threshold, and reads as a suggestion', () => {
-  const w = relay.usageWarning({ month: relay.monthKey(JUL), bytes: relay.RELAY_WARN_BYTES + 1e9 }, { now: JUL })
+  const w = relay.usageWarning({ v: relay.USAGE_VERSION, month: relay.monthKey(JUL), bytes: relay.RELAY_WARN_BYTES + 1e9 }, { now: JUL })
   assert.ok(w, 'a heavy month has to say something')
   assert.equal(w.gb, 21)
   assert.match(w.message, /wifi/, 'it suggests what to do instead')

@@ -28,6 +28,7 @@ const { Client } = require('@peerloom/client/client')
 const H = require('@peerloom/client/hosts')
 const { createAudioShim } = require('@peerloom/client/shim')
 const { AudioCache } = require('@peerloom/client/cache')
+const { ArtStore } = require('@peerloom/client/art-cache')
 
 const DATA_DIR = Bare.argv[0] || '/tmp/pearcinema'
 const PLATFORM = Bare.argv[1] || 'android'
@@ -110,8 +111,19 @@ function relayConsentFor (libraryId) {
 const RELAY_USAGE_FILE = path.join(DATA_DIR, 'relay-usage.json')
 const relayBytesSeen = new Map() // libraryId -> the last counter reading we folded in
 
+// Where each relayed connection's udx stream pointed when we first sampled it. The moment
+// it points somewhere else, hyperdht has moved this stream onto a direct path and the
+// bytes stop being relayed - see relayStillOn.
+const relayAddr = new Map() // libraryId -> 'host:port' as the relay left it
+
 function readRelayUsage () {
-  try { return JSON.parse(fs.readFileSync(RELAY_USAGE_FILE, 'utf8')) || null } catch { return null }
+  try {
+    const u = JSON.parse(fs.readFileSync(RELAY_USAGE_FILE, 'utf8')) || null
+    // A total written by an older counter is discarded rather than migrated: version 1
+    // kept counting after a connection went direct, so its figure is wrong by an order of
+    // magnitude and showing it would be worse than showing nothing.
+    return u?.v === relay.USAGE_VERSION ? u : null
+  } catch { return null }
 }
 function writeRelayUsage (u) {
   fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -124,17 +136,34 @@ function writeRelayUsage (u) {
 function sampleRelayUsage () {
   let usage = readRelayUsage()
   let changed = false
-  for (const libraryId of relayedLibs) {
+  for (const libraryId of [...relayedLibs]) {
     const slot = hostConns.get(libraryId)
     const raw = slot?.client?.conn?.rawStream
     const now = Number(raw?.bytesReceived)
     if (!Number.isFinite(now)) continue
+
     const before = relayBytesSeen.get(libraryId) || 0
     // A reconnect starts a fresh stream at zero. Treat that as a new baseline rather
     // than as a negative delta, which would erase real usage.
     const delta = now >= before ? now - before : now
     relayBytesSeen.set(libraryId, now)
     if (delta > 0) { usage = relay.addUsage(usage, { bytes: delta, libraryId }); changed = true }
+
+    // Then ask whether this connection is STILL relayed. After the fold, not before: the
+    // bytes since the last sample were mostly relayed even if the punch has just landed,
+    // and a sample every 30s is fine granularity for a monthly figure.
+    const addr = raw.remoteHost ? `${raw.remoteHost}:${raw.remotePort}` : null
+    const first = relayAddr.get(libraryId) || null
+    if (!first && addr) relayAddr.set(libraryId, addr)
+    else if (!relay.relayStillOn(first, addr)) {
+      // The punch landed late and hyperdht moved the live stream across. This connection
+      // is direct now, so the ceiling lifts, the marker goes and nothing more is counted.
+      log('relay:upgraded-to-direct', { libraryId })
+      relayedLibs.delete(libraryId)
+      relayBytesSeen.delete(libraryId)
+      relayAddr.delete(libraryId)
+      emit('relay:changed', { libraryId, relayed: false })
+    }
   }
   if (changed) writeRelayUsage(usage)
   return usage
@@ -305,9 +334,13 @@ async function connectedLib (libraryId) {
       // rather than left over from the previous connection, which would swallow this
       // one's first few hundred megabytes.
       relayBytesSeen.set(libraryId, 0)
+      // And forget where the last connection pointed, or this one would be judged to have
+      // gone direct the moment it is first sampled.
+      relayAddr.delete(libraryId)
     } else {
       relayedLibs.delete(libraryId)
       relayBytesSeen.delete(libraryId)
+      relayAddr.delete(libraryId)
     }
     // Pushes from EVERY connected host flow to the one UI handler, tagged with
     // their library so a shelf can scope its refetch.
@@ -318,6 +351,7 @@ async function connectedLib (libraryId) {
       try { sampleRelayUsage() } catch {}
       relayedLibs.delete(libraryId)
       relayBytesSeen.delete(libraryId)
+      relayAddr.delete(libraryId)
       emit('host:disconnected', { hostKey: row.hostKey, libraryId })
     })
     slot.client = c
@@ -596,6 +630,28 @@ let uiPage = null
 // entire offline story: no connection needed once a film is here.
 const cache = new AudioCache({ dir: path.join(DATA_DIR, 'films'), cap: 512 * 1024 * 1024, log: (m, d) => log(m, d) })
 
+// POSTERS ARE KEPT (Tim, 2026-08-18, watching a library load over the relay: "so the
+// artwork doesn't have to be downloaded every single time"). It did not have to be built -
+// @peerloom/client has carried ArtStore since PearTune's 2026-07-29 work and this app
+// simply never passed one, so every cold start re-fetched every visible poster. The
+// shim's own cache is 120 entries and dies with the process, which is why restarting
+// always looked like a fresh download: it was one.
+//
+// Keyed by art id AND size, because the grid asks for 120, 350 or 500 depending on
+// density - one stored image cannot answer for another size. Tagged with the owning
+// library, which is what makes removing a library able to reclaim its art; art ids are
+// namespaced per library, so without that tag there is no way back from a file on disk to
+// where it came from.
+//
+// A poster is a few kilobytes and never changes, so this is the cheapest bandwidth saving
+// available - and on a relayed connection those are bytes PeerLoom pays for, spent again
+// and again on bytes nobody asked to see twice.
+// 2500 entries rather than the package's 4000 default, because a film poster is bigger
+// than a record sleeve: a 239-film library holding two sizes each is ~500 entries, so this
+// covers several libraries with headroom while the worst case stays around a hundred-odd
+// megabytes. The store is LRU, so the cap is what bounds it, not a sweep anyone has to run.
+const artStore = new ArtStore({ dir: path.join(DATA_DIR, 'art'), maxEntries: 2500 })
+
 const CONTAINER_MIME = {
   matroska: 'video/x-matroska', mkv: 'video/x-matroska', mov: 'video/mp4',
   mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', avi: 'video/x-msvideo', mpegts: 'video/mp2t'
@@ -749,6 +805,10 @@ const shim = createAudioShim({
   hostClient: (lib) => connectedLib(lib),
   libForTrack: (id) => owners.get(String(id)) || null,
   libForCover: (id) => artOwners.get(String(id)) || null,
+  // Where a poster is kept between runs, and how a stored one is attributed when the URL
+  // did not name a library.
+  artStore,
+  artLibrary: (id) => artOwners.get(String(id)) || null,
   streamParams: (id, extra) => ({ itemId: id, ...extra }),
   artParams: (id, size) => ({ artId: id, size }),
   // THE HLS ROUTES: the playlist is fetched from the host and served with its
@@ -962,6 +1022,17 @@ const methods = {
     // the next write. Caught the first time a UI actually called this.
     hostsState = H.removeHost(hostsState, hostKey).file
     writeHosts(hostsState)
+    // Its posters go with it. Art ids are namespaced per library, so a file on disk
+    // cannot say where it came from - the store's own tag is the only way back, which is
+    // exactly why art is tagged when it is written. `untagged` is reported rather than
+    // guessed at: art stored before this shipped has no library and stays until the LRU
+    // reaches it.
+    if (leaving?.libraryId) {
+      try {
+        const { removed, bytes, untagged } = artStore.removeLibrary(leaving.libraryId)
+        log('art:reclaimed', { libraryId: leaving.libraryId, removed, bytes, untagged })
+      } catch (e) { log('art:reclaim-failed', { err: e.message }) }
+    }
     // The removed host's connection dies with its row, and the merged index
     // must stop offering its items.
     closeAllConns()

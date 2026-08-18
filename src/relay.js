@@ -128,11 +128,33 @@ function relayDownloadDecision ({ relayed }) {
 // about a penny a gigabyte, so the thing a cap protects against is a few dollars, and the
 // way it protects against them stops a film mid-scene. So this counts, shows, and nudges.
 //
-// The count is BYTES RECEIVED on a connection we offered the relay for, sampled off the
-// UDX stream rather than tallied per chunk. That over-reports in one direction (a punch
-// that landed late is still counted as relayed, because hyperdht moves the live stream
-// across without telling us) and under-reports nothing, which is the right way round for
-// a number a person is being nudged about.
+// The count is BYTES RECEIVED on the connection's UDX stream, sampled rather than tallied
+// per chunk: one read covers playback, artwork, browse and the HLS segments at once.
+//
+// WHICH BYTES COUNT, and the correction that made this honest. A relayed connection is not
+// a separate socket - hyperdht points the SAME udx stream at the relay's address
+// (`c.rawStream.connect(socket, remoteId, remotePort, remoteHost)` in lib/connect.js), and
+// a late punch repoints it at the peer with `changeRemote`. So counting every byte on a
+// connection that was ever relayed counts the direct ones too: on Tim's phone that read
+// 867 MB against about a minute of relayed video.
+//
+// The remote address is therefore the signal, and `relayStillOn` is the test: while the
+// stream still points where the relay put it, the bytes are relayed; the moment it points
+// somewhere else, the punch landed and this connection is direct - stop counting, lift the
+// ceiling, drop the marker. It is a better answer than "we offered a relay" in every
+// direction that matters.
+function relayStillOn (firstAddr, nowAddr) {
+  if (!firstAddr || !nowAddr) return true // nothing to compare yet: assume the relay
+  return firstAddr === nowAddr
+}
+
+// The counter's shape, bumped when a stored total stops meaning what it says. Version 1
+// counted every byte on a connection that had EVER been relayed, including the ones that
+// flowed after a late punch moved the stream onto a direct path - which on Tim's phone
+// read 867 MB against about a minute of relayed video (2026-08-18). A total that is wrong
+// by an order of magnitude is worse than no total, so a file at an older version is
+// discarded rather than migrated.
+const USAGE_VERSION = 2
 
 // A month's worth for one person before they hear about it. 20 GB is roughly 18 hours of
 // relayed video, and about 4% of the 500 GB tier - a heavy share for one household rather
@@ -155,17 +177,18 @@ function monthKey (now = new Date()) {
 // silently erase a month of real usage.
 function addUsage (usage, { bytes, libraryId = null, now = new Date() } = {}) {
   const month = monthKey(now)
-  const base = usage?.month === month ? usage : { month, bytes: 0, byLibrary: {} }
+  const usable = usage?.v === USAGE_VERSION ? usage : null
+  const base = usable?.month === month ? usable : { month, bytes: 0, byLibrary: {} }
   const add = Number(bytes) > 0 ? Math.round(Number(bytes)) : 0
   const byLibrary = { ...(base.byLibrary || {}) }
   if (libraryId) byLibrary[String(libraryId)] = (byLibrary[String(libraryId)] || 0) + add
-  return { month, bytes: (base.bytes || 0) + add, byLibrary }
+  return { v: USAGE_VERSION, month, bytes: (base.bytes || 0) + add, byLibrary }
 }
 
 // What to tell them, if anything. Returns null when there is nothing worth saying, so a
 // caller cannot accidentally render an empty nudge.
 function usageWarning (usage, { warnBytes = RELAY_WARN_BYTES, now = new Date() } = {}) {
-  if (!usage || usage.month !== monthKey(now)) return null
+  if (!usage || usage.v !== USAGE_VERSION || usage.month !== monthKey(now)) return null
   const bytes = Number(usage.bytes) || 0
   if (bytes < warnBytes) return null
   const gb = Math.round(bytes / 1e9)
@@ -184,6 +207,8 @@ const RELAY_PLAY_REFUSAL =
   'You chose not to play films from this library over a relay. You can change that in Settings, under Connection.'
 
 module.exports = {
+  relayStillOn,
+  USAGE_VERSION,
   RELAY_WARN_BYTES,
   monthKey,
   addUsage,
