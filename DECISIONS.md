@@ -56,8 +56,29 @@ would only prove the file agrees with itself. Discovery is injected instead - SS
 multicast, and a test that shouts on the developer's own network finds their living room
 on a good day and nothing on a bad one. verify green: 579 pass.
 
-NOT DONE: no hardware. Nobody has cast to a real Roku this way yet, and the ECP shapes are
-from Roku's documentation rather than from a device in the room.
+HARDWARE, SAME DAY, and it found two things no test would have. Run against Tim's own
+network from the Umbrel (2026-08-18):
+
+1. **`state="none"`.** A real Roku Streaming Stick Plus sitting on its home screen answers
+   `none`, which is in no documentation I read. The first cut passed unknown states
+   through, so it would have reached the session poll as 'none', never matched the ended
+   test, and left a finished cast on the books forever. Now anything that is not playing,
+   paused or buffering is idle - for this path the only question is whether bytes are
+   flowing.
+2. **A device that answered the search and was not a Roku.** Two devices answered an
+   `ST: roku:ecp` M-SEARCH; the second had nothing listening on 8060 at all. Plenty of SSDP
+   implementations answer every search regardless of target, so the first cut - which
+   listed an unidentifiable device under a name that was just its IP - would have put a
+   printer in the television picker. A device now has to identify itself through
+   /query/device-info to be offered, and the rejection is logged with its reason.
+
+A third was found by reading the consumer rather than the wire: `getState` answered
+`positionMs`/`positionAt`, names of its own, while host/cast.js reads `position` and
+`duration` in SECONDS and parses `positionUpdatedAt` as a date. Every consumer would have
+read null - a cast that never reported progress and never resumed where it was left.
+
+STILL NOT DONE: nothing has been PLAYED on the Roku this way. Discovery, identification and
+state are hardware-proven; launch and stop are proven against the stand-in only.
 
 ## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
 Tier: T2 (PR pending). Two things from Tim while using the relayed build.

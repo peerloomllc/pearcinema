@@ -148,13 +148,21 @@ function discover ({ ms = DISCOVER_MS, log = () => {} } = {}) {
 }
 
 // What HA's `state` vocabulary calls these, because everything downstream already speaks
-// it - host/cast.js reads 'playing' and 'paused' by name.
+// it - host/cast.js reads 'playing', 'paused' and 'idle' BY NAME, and a word it does not
+// know is a cast that never ends.
+//
+// `none` is what a real Roku Streaming Stick Plus answers while it sits on its home
+// screen, found by pointing this at Tim's own device on 2026-08-18. The first cut passed
+// unknown states through unchanged, so 'none' would have reached the session poll as
+// 'none', never matched the ended test, and left a finished cast on the books forever.
+// Hence the default: anything not playing or paused is idle, because for this path the
+// only question is "are the bytes flowing".
 function stateFrom (xml) {
   const s = (attr(xml, 'state') || '').toLowerCase()
   if (s === 'play') return 'playing'
   if (s === 'pause') return 'paused'
-  if (s === 'close' || s === 'stop' || s === '') return 'idle'
-  return s
+  if (s === 'buffer' || s === 'startup') return 'buffering'
+  return 'idle'
 }
 
 // The same surface Speakers exposes, so CastSessions never learns which one it is holding:
@@ -190,18 +198,27 @@ class RokuSpeakers {
     const found = await this._discover({ log: this.log })
     this.lastScan = Date.now()
 
+    // ANSWERING THE SEARCH IS NOT ENOUGH; IT HAS TO IDENTIFY ITSELF. Measured on Tim's own
+    // network, 2026-08-18: two devices answered an `ST: roku:ecp` M-SEARCH and only one was
+    // a Roku. The other had nothing listening on 8060 at all - plenty of SSDP
+    // implementations answer every search regardless of the target, so trusting the answer
+    // would have put a printer in the television picker under a name that was just its IP
+    // address. A device that cannot say what it is does not get offered.
+    const identified = []
     for (const { host } of found) {
-      let name = null
-      let model = null
+      let info = null
       try {
-        const info = await this._ecp(host, '/query/device-info')
-        // user-device-name is what the owner called it; the model is the fallback,
-        // because "Roku Express" beats an IP address in a picker.
-        name = tag(info, 'user-device-name') || tag(info, 'friendly-device-name')
-        model = tag(info, 'model-name') || tag(info, 'friendly-model-name')
+        info = await this._ecp(host, '/query/device-info')
       } catch (e) {
-        this.log('roku:info-failed', { host, err: e.message })
+        this.log('roku:not-a-roku', { host, err: e.message })
+        continue
       }
+      // user-device-name is what the owner called it; the model is the fallback, because
+      // "Roku Streaming Stick Plus" beats an IP address in a picker. A device-info with
+      // neither is still a real ECP device, so it keeps its address as a last resort.
+      const name = tag(info, 'user-device-name') || tag(info, 'friendly-device-name')
+      const model = tag(info, 'model-name') || tag(info, 'friendly-model-name')
+      identified.push(host)
       this.devices.set(host, {
         host,
         entityId: this.entityIdFor(host),
@@ -214,7 +231,7 @@ class RokuSpeakers {
     // roster is "what is here now", and a stale entry ends in an error the person cannot
     // act on.
     for (const host of [...this.devices.keys()]) {
-      if (!found.some((f) => f.host === host)) this.devices.delete(host)
+      if (!identified.includes(host)) this.devices.delete(host)
     }
 
     this.log('roku:scanned', { found: this.devices.size })
@@ -253,14 +270,19 @@ class RokuSpeakers {
       const xml = await this._ecp(host, '/query/media-player')
       const positionMs = millis(tag(xml, 'position'))
       const durationMs = millis(tag(xml, 'duration'))
+      // THE SHAPE IS HOME ASSISTANT'S, not a shape of our own, because host/cast.js reads
+      // these field names directly: `position` and `duration` in SECONDS, and
+      // `positionUpdatedAt` as a parseable date. The first cut answered positionMs and
+      // positionAt, which every consumer would have read as null - a cast that never
+      // reported progress and never resumed where it was left.
       return {
         entityId,
         state: stateFrom(xml),
-        positionMs,
-        durationMs,
-        // The position was true when the device answered. Named the same as the HA path's
-        // stamp because the cast session's drift arithmetic reads it.
-        positionAt: Date.now(),
+        duration: durationMs === null ? null : durationMs / 1000,
+        position: positionMs === null ? null : positionMs / 1000,
+        // ECP answers with the position as of NOW, so the stamp is now. cast.js adds the
+        // elapsed time since while playing, which for a fresh read is nothing.
+        positionUpdatedAt: new Date().toISOString(),
         supportedFeatures: 0
       }
     } catch (e) {

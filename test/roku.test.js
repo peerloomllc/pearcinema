@@ -98,12 +98,22 @@ test('a position is milliseconds, and "we do not know" is not zero', () => {
 })
 
 test('Roku states are translated into the vocabulary the cast path already speaks', () => {
-  // host/cast.js reads 'playing' and 'paused' by name, so a backend that answered Roku's
-  // own words would be silently invisible to every session rule.
+  // host/cast.js reads 'playing', 'paused' and 'idle' BY NAME, so a backend that answered
+  // Roku's own words would be silently invisible to every session rule.
   assert.equal(stateFrom('<player state="play">'), 'playing')
   assert.equal(stateFrom('<player state="pause">'), 'paused')
   assert.equal(stateFrom('<player state="close">'), 'idle')
   assert.equal(stateFrom('<player>'), 'idle')
+})
+
+test('the state a REAL Roku answers at rest is idle, not a word nobody knows', () => {
+  // `none` is what Tim's Roku Streaming Stick Plus actually answered on 2026-08-18, sitting
+  // on its home screen. The first cut passed unknown states through, so this would have
+  // reached the session poll as 'none', never matched the ended test, and left a finished
+  // cast on the books forever. No fixture invented this - a device did.
+  assert.equal(stateFrom('<player state="none" error="false"><plugin id="native-ui" name="Native UI" /></player>'), 'idle')
+  // And anything else unheard-of lands on idle too, for the same reason.
+  assert.equal(stateFrom('<player state="somethingnew">'), 'idle')
 })
 
 // --- the backend against a stand-in Roku ------------------------------------
@@ -127,19 +137,27 @@ test('a Roku with no name of its own falls back to its model, never to an IP', a
   assert.equal(list[0].name, 'Roku Ultra')
 })
 
-test('a Roku that will not answer at all is still listed, by address', async (t) => {
-  // A device that answers SSDP but not the info query is on the network and probably
-  // castable. Dropping it would mean a television the person can see is missing from the
-  // list with no explanation.
-  const roku = await fakeRoku(t)
+test('answering the search is not enough - it has to identify itself', async (t) => {
+  // MEASURED, not guessed. On Tim's network two devices answered an `ST: roku:ecp`
+  // M-SEARCH and only one was a Roku; the other had nothing listening on 8060 at all.
+  // Plenty of SSDP implementations answer every search regardless of the target, so the
+  // first cut - which listed an unidentifiable device under a name that was just its IP -
+  // would have put a printer in the television picker.
   const s = new RokuSpeakers({
     discoverFn: async () => [{ host: '10.0.0.9' }],
-    request: async () => { throw new Error('refused') }
+    request: async () => { throw new Error('ECONNREFUSED') }
   })
+  assert.deepEqual(await s.list(), [], 'a device that cannot say what it is is not offered')
+})
+
+test('a real ECP device with no name of any kind still gets listed', async (t) => {
+  // The rule is "identified", not "named": device-info answered, so it IS a Roku, and an
+  // address is a worse name than a model but a better one than nothing.
+  const roku = await fakeRoku(t, { info: '<device-info><udn>x</udn></device-info>' })
+  const s = speakersFor(t, roku)
   const list = await s.list()
   assert.equal(list.length, 1)
-  assert.match(list[0].name, /10\.0\.0\.9/)
-  assert.ok(roku)
+  assert.match(list[0].name, /10\.0\.0\.7/)
 })
 
 test('it declares NO seek, which is the truth rather than a shortcut', async (t) => {
@@ -183,16 +201,31 @@ test('STOP IS HOME, because revoke rides it', async (t) => {
   assert.equal(stop.method, 'POST')
 })
 
-test('state comes back as position, duration and a stamp', async (t) => {
+test('state comes back in HOME ASSISTANT\'s shape, because that is what reads it', async (t) => {
+  // host/cast.js reads `position` and `duration` in SECONDS and parses `positionUpdatedAt`
+  // as a date. The first cut answered positionMs and positionAt - names of its own - which
+  // every consumer would have read as null: a cast that never reported progress and never
+  // resumed where it was left. Found by reading the consumer, not by running this.
   const roku = await fakeRoku(t)
   const s = speakersFor(t, roku)
   await s.list()
 
   const state = await s.getState('roku:10.0.0.7')
   assert.equal(state.state, 'playing')
-  assert.equal(state.positionMs, 63000)
-  assert.equal(state.durationMs, 5820000)
-  assert.ok(state.positionAt > 0, 'the cast session needs to know WHEN that position was true')
+  assert.equal(state.position, 63, 'seconds, not milliseconds')
+  assert.equal(state.duration, 5820)
+  assert.ok(Number.isFinite(Date.parse(state.positionUpdatedAt)), 'the stamp has to parse as a date')
+})
+
+test('no position information is null, and never a confident zero', async (t) => {
+  const roku = await fakeRoku(t, { media: '<player state="none" error="false"><plugin id="native-ui"/></player>' })
+  const s = speakersFor(t, roku)
+  await s.list()
+
+  const state = await s.getState('roku:10.0.0.7')
+  assert.equal(state.state, 'idle')
+  assert.equal(state.position, null, 'position 0 is the start of a film; unknown is not')
+  assert.equal(state.duration, null)
 })
 
 test('a television that has gone is dropped from the roster, not left as a dead button', async (t) => {
