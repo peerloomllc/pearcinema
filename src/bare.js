@@ -1018,6 +1018,10 @@ const methods = {
     const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
     return c.request('cast.resume', { entityId: args.entityId })
   },
+  'cast.seek': async (args) => {
+    const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
+    return c.request('cast.seek', { entityId: args.entityId, deltaMs: args.deltaMs })
+  },
   'cast.state': async (args) => {
     const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
     return c.request('cast.state', { entityId: args.entityId })

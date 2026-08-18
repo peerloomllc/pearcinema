@@ -29,7 +29,7 @@ const { notifyOwners } = require('@peerloom/host')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke', 'cast.play', 'cast.stop', 'cast.pause', 'cast.resume']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke', 'cast.play', 'cast.stop', 'cast.pause', 'cast.resume', 'cast.seek']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -522,6 +522,21 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!ctx.params.entityId) throw ctx.badParams('entityId required')
       await casts.speakers.resume(String(ctx.params.entityId))
       return { ok: true }
+    },
+
+    // Skip about while a television is playing. The DEVICE is the connection's
+    // own, never a parameter, for the same reason cast.play's is: a phone can
+    // only ever drive the cast it started.
+    'cast.seek': async (ctx) => {
+      const casts = cast ? cast() : null
+      if (!casts) throw ctx.notFound('casting unavailable')
+      if (!ctx.isOwner) throw ctx.forbidden('owner only')
+      if (!ctx.params.entityId) throw ctx.badParams('entityId required')
+      const deltaMs = Number(ctx.params.deltaMs)
+      if (!Number.isFinite(deltaMs) || deltaMs === 0) throw ctx.badParams('deltaMs required')
+      return await casts.seek({
+        deviceKey: ctx.deviceKey, entityId: String(ctx.params.entityId), deltaMs
+      })
     },
 
     // Read-only, so not in MUTATING - but still owner-gated, because what a
