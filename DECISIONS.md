@@ -2,6 +2,46 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-17 - REQUESTS ARRIVE RATHER THAN BEING ASKED FOR, and the dashboard grew a live channel
+Tier: T2 (PR pending)
+Context: asking a friend for a film worked in both directions, but nothing
+travelled on its own. The operator's Manage list learned of a new ask only on
+view load, because `request.add` wrote to the store and pushed nothing at all -
+while the vendored `@peerloom/host` had already fixed exactly this bug class on
+its side (its `notifyOwners` header names the three callers that must agree: a
+new ask, a withdrawn one, a resolved one) and PearCinema called none of them.
+The asker's side was worse than it looked: `request:resolved` DID push, and the
+desktop's own client wired no `onPush`, so every answer a friend sent this
+machine was dropped on the floor. A 10s poll on the requests card had been
+standing in since #67, filed at the time as "real pushes are the proper fix".
+Choice:
+1. **The host pushes all three**, via the package's own `notifyOwners`, so who
+   counts as an operator is the grant store's answer rather than a second
+   opinion. Awaited rather than fired and forgotten: it reads the grant store,
+   and an ask is not really filed until the operators have been told. A push
+   failure still cannot fail the ask.
+2. **A LOCAL twin, `events`**, because the operator's own browser is not a
+   paired device and hears nothing from any P2P push - and it is the surface
+   most likely to be open when an ask lands.
+3. **Server-sent events, not a websocket**, for the browser. The traffic is
+   one-way and tiny, EventSource reconnects by itself (which is what a host
+   restart needs), and it rides the cookie the page already carries because
+   every route past the auth gate is authenticated. One shared source per page.
+4. **The 10s poll becomes a 60s backstop rather than going away.** One seam the
+   channel genuinely cannot cover: a withdrawal made on this person's OTHER
+   device is pushed to the library's OWNERS, not back to them, so nothing tells
+   this card. Minutes-stale beats wrong.
+Cost, found by the test that hung for six minutes: `server.close()` waits for
+open connections and a held-open event stream never ends, so a restart with one
+dashboard tab open would have waited forever. The close path now hangs the live
+channels up by hand. A second trap, guarded: `EventSource` does not exist in
+JSDOM, and the subscribe call runs inside an effect - an effect that throws
+blanks the whole page, and the page test never opened the settings section that
+mounts the card, so the suite would not have caught it. Missing EventSource is
+now a no-op subscription.
+Verified: 508 tests, plus a real-Chrome check that the settings section renders,
+the browser holds the channel open and a host event lands in the page.
+
 ## 2026-08-17 - THE LIVING ROOM REWROTE THE CAST TRANSPORTS, and revoke learned the Roku's one exit
 Tier: T2 (PR #68's branch, hardware-proven the same day)
 Context: the cast machinery shipped Chromecast-shaped - progressive generated

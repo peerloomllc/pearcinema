@@ -16,6 +16,7 @@
 
 const items = require('./items')
 const watch = require('./watch')
+const { notifyOwners } = require('@peerloom/host')
 
 // Methods that mutate, refused for a readonly grant at the package's chokepoint
 // rather than inside a handler - so a new mutating method cannot ship without a
@@ -52,7 +53,10 @@ function requireScope (ctx, type) {
 // `state` is the per-person store from @peerloom/host. Null in a cut that has none -
 // the handlers below then answer empty rather than throwing, so a host built without
 // it still serves a library.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null }) {
+// `events` is the LOCAL twin of the pushes below. notifyOwners reaches paired
+// devices over P2P; the operator's own dashboard is not one of them, and it was
+// the surface most likely to be open when an ask arrives.
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null, events = () => {} }) {
   return {
     // --- the library ------------------------------------------------------
 
@@ -382,7 +386,17 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!state) throw ctx.notFound('no user state on this host')
       const { kind, name } = ctx.params
       if (!['movie', 'series'].includes(kind)) throw ctx.badParams('bad kind')
-      return { request: await state.addRequest(ctx.owner, { kind, name }) }
+      const request = await state.addRequest(ctx.owner, { kind, name })
+      // An operator watching Manage should see the ask arrive, not find it on
+      // the next load. A second person asking the same thing folds into the one
+      // row and bumps its count, which is still news - push either way.
+      const created = { id: request.id, name: request.name || null, kind: request.kind, count: request.count || 1 }
+      // Awaited, not fired and forgotten: it reads the grant store to find the
+      // owners, and the ask is not really filed until they have been told. The
+      // catch keeps a push failure from failing the ask itself.
+      await notifyOwners(ctx.presence, grants, 'request:created', created).catch(() => {})
+      events('request:created', created)
+      return { request }
     },
 
     'request.list': async (ctx) => {
@@ -396,6 +410,10 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // Only your own ask - the id is not a capability.
       if (!row || row.requester !== ctx.owner) throw ctx.notFound('no such request')
       await state.deleteRequest(row.id)
+      // The other half of the same rule: an ask that leaves should leave the
+      // operator's screen too, or they act on something already withdrawn.
+      await notifyOwners(ctx.presence, grants, 'request:removed', { id: row.id }).catch(() => {})
+      events('request:removed', { id: row.id })
       return { ok: true }
     },
 
@@ -420,6 +438,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (ctx.presence && row.requester) {
         ctx.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
       }
+      events('request:resolved', { id: row.id, title: row.title || null, status })
       return { request: row }
     },
 

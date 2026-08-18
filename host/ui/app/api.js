@@ -33,6 +33,45 @@ export async function api (path, body) {
   return res.json().catch(() => ({}))
 }
 
+// --- news that arrives on its own ------------------------------------------
+//
+// One EventSource for the whole page, shared by every card that wants it - a
+// second one would be a second held-open connection for the same frames. It is
+// opened on the first subscriber and never closed: the page IS the session, and
+// EventSource reconnects by itself when the host restarts, which is exactly the
+// moment a card most wants to hear from it.
+//
+// ALWAYS about THIS box, so it is deliberately not run through withBase(): the
+// live channel carries what reached this machine, including the answers a paired
+// library sent it.
+let source = null
+const live = new Map() // kind -> Set<fn>
+
+export function onLive (kinds, fn) {
+  // Anywhere without EventSource - a test DOM, an ancient browser - gets a
+  // no-op rather than a throw. This runs inside an effect, and an effect that
+  // throws takes the whole page down with it, which is a poor trade for a card
+  // that has its own load and its own backstop.
+  if (typeof EventSource === 'undefined') return () => {}
+  const list = Array.isArray(kinds) ? kinds : [kinds]
+  for (const k of list) {
+    if (!live.has(k)) live.set(k, new Set())
+    live.get(k).add(fn)
+  }
+  if (!source) {
+    source = new EventSource('/api/events')
+    source.onmessage = (e) => {
+      let m = null
+      try { m = JSON.parse(e.data) } catch { return }
+      // A handler that throws must not take the other subscribers down with it.
+      for (const g of live.get(m?.kind) || []) { try { g(m.data || null) } catch {} }
+    }
+    // No onerror handler on purpose: the default is to reconnect, and a manual
+    // close here would turn a host restart into a page that never updates again.
+  }
+  return () => { for (const k of list) live.get(k)?.delete(fn) }
+}
+
 // The host is served over plain http (an Umbrel LAN address, a laptop on the same
 // wifi). navigator.clipboard only exists on a SECURE origin, so a copy button would
 // silently do nothing there. Fall back to the old execCommand path.

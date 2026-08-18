@@ -281,6 +281,43 @@ async function startDashboard ({
   // previous window can never be handed out for a new one.
   let openQr = null
 
+  // --- the live channel ----------------------------------------------------
+  //
+  // Requests are the first thing on this page that has to ARRIVE rather than be
+  // asked for: an ask reaches the operator, an answer reaches the asker, and
+  // neither side should have to reopen a card to find out. The phone already had
+  // this over its own connection; the browser had a 10s poll standing in.
+  //
+  // Server-sent events rather than a websocket, because the traffic is one-way
+  // and tiny, EventSource reconnects on its own, and it rides the same cookie the
+  // rest of the page already carries - every route below this point is past the
+  // auth gate. Best-effort throughout: a browser that misses a frame still has
+  // the card's own load, and a write to a dead socket is not news.
+  const liveClients = new Set()
+  function live (kind, data = null) {
+    if (liveClients.size === 0) return 0
+    const frame = `data: ${JSON.stringify({ kind, data })}\n\n`
+    let n = 0
+    for (const res of liveClients) {
+      try { res.write(frame); n++ } catch {}
+    }
+    return n
+  }
+
+  // Asks and answers reaching THIS host over P2P - a phone asking for a film,
+  // or this host's owner answering one. host/server.js hands them over.
+  host.onevent = (kind, data) => live(kind, data)
+
+  // The same news from a library this machine is paired WITH, where this machine
+  // is the asker and the answer arrives from the friend's host. Without this the
+  // client dropped every push it was sent.
+  if (host.remote) {
+    host.remote.onpush = (libraryId, m) => {
+      if (!m || !m.kind) return
+      live(m.kind, { ...(m.data || {}), libraryId })
+    }
+  }
+
   // The person this browser is watching as, as an ownerId the state store accepts.
   //
   // LAZY, and that matters: a host nobody has ever watched anything on holds no
@@ -324,6 +361,29 @@ async function startDashboard ({
         const body = Buffer.from(html)
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': body.length })
         return req.method === 'HEAD' ? res.end() : res.end(body)
+      }
+
+      // --- the live channel ---------------------------------------------------
+      // Held open for the life of the tab. The comment heartbeat is what keeps a
+      // silent night from looking like a dead socket to anything in between, and
+      // the close handler is not optional: without it every reload leaks a
+      // response object that later writes throw into.
+      if (req.method === 'GET' && url.pathname === '/api/events') {
+        res.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-store',
+          connection: 'keep-alive',
+          // Nothing here is proxied today, but a buffering proxy would hold the
+          // whole point of this route in a buffer.
+          'x-accel-buffering': 'no'
+        })
+        res.write(': open\n\n')
+        liveClients.add(res)
+        const beat = setInterval(() => { try { res.write(': beat\n\n') } catch {} }, 25000)
+        const drop = () => { clearInterval(beat); liveClients.delete(res) }
+        req.on('close', drop)
+        res.on('close', drop)
+        return
       }
 
       // --- what the whole dashboard runs on -----------------------------------
@@ -1934,7 +1994,14 @@ async function startDashboard ({
     port: server.address().port,
     url: `http://${bind === '0.0.0.0' ? 'localhost' : bind}:${server.address().port}`,
     auth,
-    close: () => new Promise(resolve => server.close(resolve))
+    // The live channels have to be hung up BY HAND. server.close() waits for
+    // open connections to end, and a held-open event stream never does - so a
+    // restart with one dashboard tab open would wait forever.
+    close: () => new Promise(resolve => {
+      for (const res of liveClients) { try { res.end() } catch {} }
+      liveClients.clear()
+      server.close(resolve)
+    })
   }
 }
 

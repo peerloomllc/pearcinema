@@ -67,6 +67,11 @@ class PearCinemaHost {
     // 1,500 of 2,986" instead of showing an empty grid that looks like a bug.
     this.scanning = null
 
+    // Set by the dashboard when it starts: news worth putting on an open page the
+    // moment it happens, rather than on its next load. Null while nothing is
+    // listening, which is the normal state of a host with no browser open.
+    this.onevent = null
+
     // The repackaging engine. Concurrency-capped, because remux is I/O bound rather
     // than CPU bound but three films at once on a Pi-class box is still three films
     // at once, and an unbounded count of child processes is how a host stops being a
@@ -134,6 +139,10 @@ class PearCinemaHost {
           getLibraryName: () => this.libraryName,
           getSourceError: () => this.sourceError,
           grants: this.host.grants,
+          // The dashboard's live channel, when one is listening. notifyOwners
+          // reaches paired DEVICES; this reaches the operator's own browser,
+          // which is not one and is usually the thing that is open.
+          events: (kind, data) => { try { this.onevent?.(kind, data) } catch {} },
           // The per-person store, built by the package on its own Hyperbee. Safe to
           // read here for the same reason `grants` is: `media` is a FUNCTION the
           // package calls once the host exists, not an object built alongside it.
