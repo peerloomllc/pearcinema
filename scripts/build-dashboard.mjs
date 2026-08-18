@@ -46,13 +46,26 @@ const js = readFileSync(TMP_JS, 'utf8').replace(/<\/script>/g, '<\\/script>')
 const css = existsSync(TMP_CSS) ? readFileSync(TMP_CSS, 'utf8') : ''
 if (!css) console.warn('WARNING: no CSS emitted - is styles.css still imported from main.jsx?')
 
+// THE TAB'S ICON IS THE APP'S ICON, read from the one drawing rather than
+// written out again here. It used to be a hand-typed blue play triangle left
+// over from the donor, which is how a browser tab ends up advertising a
+// different app than the one in it. Inlined as a data URI because the dashboard
+// is a single self-contained page with nowhere to serve a second file from.
+const favicon = 'data:image/svg+xml,' + encodeURIComponent(
+  readFileSync('assets/icon.svg', 'utf8')
+    .replace(/<!--.*?-->/gs, '')
+    .replace(/<title>.*?<\/title>/gs, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+)
+
 const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PearCinema</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230e0f13'/%3E%3Cpath d='M12 9.5v13l10-6.5z' fill='%236ea8fe'/%3E%3C/svg%3E">
+  <link rel="icon" href="${favicon}">
   <!-- Height and a fallback background only. Do NOT set colours here: #root has id
        specificity and would override the theme tokens, which is exactly how a
        themed page ends up stranded on one theme's background. -->
