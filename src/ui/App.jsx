@@ -17,7 +17,7 @@ import {
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
   ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile,
-  Screencast, Pause, Prohibit, Rewind, FastForward
+  Screencast, Pause, Prohibit, Rewind, FastForward, Broadcast
 } from '@phosphor-icons/react'
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -675,6 +675,13 @@ export default function App () {
   const [cols, setCols] = useState(2)
   const [showRecent, setShowRecent] = useState(true)
   const [dataSaver, setDataSaver] = useState(false)
+  // The relay: on unless the person turns it off, and their own relay key if they run
+  // one. Off means pure peer-to-peer, including the case where that means a network
+  // which cannot punch simply will not connect - which is the honest trade, said plainly
+  // in the Connection section rather than buried.
+  const [useRelay, setUseRelay] = useState(true)
+  const [ownRelayKey, setOwnRelayKey] = useState('')
+  const [relayKeySaved, setRelayKeySaved] = useState(true)
   // The player skins - cosmetic overlays drawn by the shell, PearTune's
   // Winamp-toggle pattern. The 35mm skin's tone is the exception: a phone
   // cannot repaint a native video surface, so a tone rides the capability
@@ -1030,6 +1037,10 @@ export default function App () {
       if (typeof s?.dataSaver === 'boolean') setDataSaver(s.dataSaver)
       if (['off', 'film', 'mst3k'].includes(s?.playerSkin)) setPlayerSkin(s.playerSkin)
       if (['off', 'bw', 'sepia'].includes(s?.playerTone)) setPlayerTone(s.playerTone)
+      // Absent means on: a phone that has never opened Settings should still be able to
+      // reach its library from a network that cannot punch.
+      if (typeof s?.useRelay === 'boolean') setUseRelay(s.useRelay)
+      if (typeof s?.ownRelayKey === 'string') setOwnRelayKey(s.ownRelayKey)
     }).catch(() => {})
   }, [])
 
@@ -1837,6 +1848,56 @@ export default function App () {
             onChange={(v) => { setDataSaver(v === 'saver'); call('setSettings', { dataSaver: v === 'saver' }).catch(() => {}) }}
           />
           <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file. A size cap for them arrives with the offline polish.</p>
+        </Section>
+
+        {/* The relay, said plainly. Two things a person deserves to know before this is
+            on: their films may pass through a PeerLoom server on the way, and turning it
+            off can mean not connecting at all from some networks. Both are here rather
+            than in a privacy page nobody opens. */}
+        <Section id='connection' title='Connection' Icon={Broadcast} open={settingsOpen === 'connection'} onToggle={toggleSection}>
+          <div className='row'>
+            <div>
+              <div className='label'>Connect through a relay when needed</div>
+              <div className='desc'>
+                Some networks, mobile data especially, will not let two devices talk directly. A relay
+                is a middleman that passes the film along when that happens. It cannot see what you are
+                watching. Films that arrive this way are capped near 2.5 Mbps to keep the relay affordable.
+              </div>
+            </div>
+            <button
+              className={'toggle' + (useRelay ? ' on' : '')} role='switch' aria-checked={useRelay}
+              aria-label='Connect through a relay when needed'
+              onClick={() => { setUseRelay(!useRelay); call('setSettings', { useRelay: !useRelay }).catch(() => {}) }}
+            />
+          </div>
+          {!useRelay && (
+            <p className='desc' style={{ marginTop: '.6rem' }}>
+              With this off, nothing ever leaves your own network. On a connection that cannot reach your
+              library directly, that means it will not open at all.
+            </p>
+          )}
+          <div className='label' style={{ marginTop: '.9rem' }}>Your own relay</div>
+          <div className='desc'>
+            If you run your own relay, paste its key here and yours is used instead of ours. Leave it empty
+            unless you know you have one.
+          </div>
+          <input
+            className='profile-name' style={{ marginTop: '.5rem' }} value={ownRelayKey}
+            placeholder='Relay key (optional)' maxLength={64} aria-label='Your own relay key'
+            onInput={(e) => { setOwnRelayKey(e.currentTarget.value); setRelayKeySaved(false) }}
+          />
+          {!relayKeySaved && (
+            <button
+              className='profile-save'
+              onClick={async () => {
+                await call('setSettings', { ownRelayKey: ownRelayKey.trim() }).catch(() => {})
+                setRelayKeySaved(true)
+                haptic('success')
+                say(ownRelayKey.trim() ? 'Your relay will be used from the next connection' : 'Back to the PeerLoom relay')
+              }}
+            >Save
+            </button>
+          )}
         </Section>
 
         <Section id='appearance' title='Appearance' Icon={Palette} open={settingsOpen === 'appearance'} onToggle={toggleSection}>

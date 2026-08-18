@@ -2,6 +2,72 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - THE RELAY, PHASE 1: direct first, and a ceiling on anything relayed
+Tier: T3 (proposal `proposals/2026-08-18-relay-for-video.md`, approved by Tim - PR #92 merged).
+Context: a phone off wifi could not reach its library AT ALL on Google Fi. Not a
+minority case argued from principle any more - measured on Tim's own Pixel, four
+`HOLEPUNCH_ABORTED` in a row, with PearTune working on the same phone in the same
+minute because its relay is baked in. `CLAUDE.md` says "no relay, by design"; this
+reverses that, which is what makes it T3.
+
+WHERE THE GATE LIVES, and why it is not where PearTune put it. PearTune joins a
+Hyperswarm, which applies `force || dht.randomized` itself and calls the app's
+policy with `force: true` only after it has seen a punch abort. PearCinema's client
+dials `dht.connect` directly, and hyperdht's own `selectRelay` calls a resolver with
+NO arguments - so a policy handed to hyperdht could never see `force`, and passing a
+key unconditionally is worse than it sounds: hyperdht opens the relay leg DURING the
+handshake (`lib/connect.js`, the `payload.relayThrough || c.relayThrough` branch),
+not after the punch gives up. Every connection that never needed a relay would have
+had one in its path.
+
+So the escalation went into `@peerloom/client` (PR #5 there), riding the retry loop
+that already existed: attempt 1 direct, `HOLEPUNCH_ABORTED` escalates the attempts
+after it, a double-randomized NAT escalates from the first dial. `PEER_NOT_FOUND`
+deliberately does not - nothing was found to punch to, and a relay cannot introduce
+us to a peer the DHT has no record of.
+
+THE GATE IS THE CLIENT'S, NOT THE APP'S. It is applied before the injected policy is
+consulted, so an app can decline (a toggle, a missing key) but cannot opt IN to
+relaying a dial that has not earned one. `src/relay.js` repeats the same test anyway,
+because that function is what a person reads to answer "when does my film cross
+someone else's server", and an answer that depends on a caller elsewhere is not an
+answer.
+
+THE CEILING IS NOT A PREFERENCE. 2500 kbps whenever the bytes are relayed, applied in
+`capsFor` after everything else, because the person choosing the quality is not the
+person paying for the transfer. It takes a MIN, so Data Saver at a stricter number
+survives and the relay can never raise a ceiling someone set for themselves. The
+number is the same `DATA_SAVER_KBPS` on purpose: one lever, one seam, one path to
+verify - and since any ceiling under a typical 8 Mbps film forces a re-encode anyway,
+a higher number would have bought a better picture at the same host CPU rather than a
+cheaper one.
+
+RELAYED IS "OFFERED", AND THAT IS THE HONEST WORD. The phone's own
+`dht.stats.relaying` reads 0 while it is actually relaying and hyperdht keeps the real
+flag private, so `relayOffered` is what can be known. It over-reports: a dial that
+escalated may still have punched through, and hyperdht would have moved the live
+stream to the direct path without telling us. Over-reporting is the right direction
+for a flag that gates a ceiling and, later, a consent prompt. It is per library,
+cleared on disconnect, and reset per `connect()` so a phone back on wifi is not
+labelled relayed for the rest of its life.
+
+DOWNLOADS INHERIT THE CEILING, which is a consequence worth stating rather than
+burying: `capsForDownload` derives from `capsFor`, so a film downloaded while relayed
+is KEPT at the relayed quality. "Whenever the bytes are relayed" has to include the
+heaviest case there is - a whole film at once - but a download is a lasting copy
+rather than a session. Flagged to Tim; refusing a relayed download outright is a
+product rule and would belong beside the consent gate.
+
+NOT IN THIS PHASE: the per-library consent prompt before relayed play, the visible
+marker while relayed, byte metrics and the warning threshold. Phase 1 is "the phone
+reaches its library, throttled and detected".
+
+TEST: `test/relay.test.js` (+13) pins every branch of the policy, the ceiling's min,
+and the arithmetic itself (2500 kbps -> 1.125 GB/hour -> ~444 hours on the 500 GB
+tier) so the number cannot drift from the proposal's table. `@peerloom/client` gains
+`test/relay-escalation.test.js` (+10) against a fake DHT that records what each dial
+carried. Suites: pearcinema 537 pass, peerloom-client 179 pass.
+
 ## 2026-08-17 - REQUESTS ARRIVE RATHER THAN BEING ASKED FOR, and the dashboard grew a live channel
 Tier: T2 (PR pending)
 Context: asking a friend for a film worked in both directions, but nothing
