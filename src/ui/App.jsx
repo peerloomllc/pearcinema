@@ -656,6 +656,12 @@ export default function App () {
   // a library without a trip to Settings.
   const [libMenuOpen, setLibMenuOpen] = useState(false)
   const [mergedTick, setMergedTick] = useState(0)
+  // Pull to refresh. Declared with the rest of the screen's state rather than
+  // beside its handlers, because those sit below the Loading and Onboarding
+  // early returns and a hook cannot.
+  const [pull, setPull] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const pullStartY = useRef(null)
   const [items, setItems] = useState(null)
   const [cursor, setCursor] = useState(null)
   const [series, setSeries] = useState(null)
@@ -1304,8 +1310,81 @@ export default function App () {
   const libTitle = mergedOn ? (filterName || 'All libraries') : (state.active.libraryName || 'Library')
   const canSwitch = mergedOn && state.hosts.length >= 2
 
+  // PULL TO REFRESH, by hand: this is a WebView, so there is no RefreshControl
+  // to borrow. The donor's shape, and its two hard-won details - only arm when
+  // the page is ALREADY at the top, or the gesture fights every upward scroll
+  // in a long grid; and damp the pull by half, because 1:1 feels like the page
+  // has come unstuck.
+  //
+  // It is worth more here than it was in the donor. A library is a machine in
+  // someone's house: it gets turned off, rebooted, carried to another room, and
+  // Android drops the link whenever this app sits in the background. The host
+  // pushes nothing when its own library changes either - somebody drops a film
+  // on the drive and the shelf would go on showing yesterday's until the app
+  // was killed. This is the gesture people already reach for, and it covers
+  // both: reconnect, then re-read.
+  const PULL_TRIGGER = 60
+
+  const refreshLibrary = async () => {
+    setErr('')
+    // The connection first. Every read below rides connected(), which redials a
+    // dropped link on demand - so a reload here is what turns "cannot reach the
+    // host" back into a shelf, which is the reason somebody pulled.
+    await reload().catch(() => {})
+    // In merged mode the blend is a built index, not a live query: rebuilding it
+    // is what folds in a library that has come back since launch.
+    if (mergedOn) await call('merged.refresh').catch(() => {})
+    // Bumping the tick re-runs the grid and the recent shelf, which both watch
+    // it - one lever rather than four reloads that could disagree.
+    setMergedTick((t) => t + 1)
+  }
+
+  const onPullStart = (e) => {
+    pullStartY.current = window.scrollY <= 0 && !refreshing ? e.touches[0].clientY : null
+  }
+  const onPullMove = (e) => {
+    if (pullStartY.current == null) return
+    const dy = e.touches[0].clientY - pullStartY.current
+    if (dy > 0) setPull(Math.min(90, dy * 0.5))
+  }
+  const onPullEnd = async () => {
+    if (pullStartY.current == null) return
+    const reached = pull >= PULL_TRIGGER
+    pullStartY.current = null
+    setPull(0)
+    if (!reached) return
+    haptic('light')
+    setRefreshing(true)
+    try { await refreshLibrary() } finally { setRefreshing(false) }
+  }
+
+  const ptr = refreshing ? 44 : pull
+
   const libraryScreen = (
-    <div className='app'>
+    <div
+      className='app'
+      onTouchStart={onPullStart}
+      onTouchMove={onPullMove}
+      onTouchEnd={onPullEnd}
+      onTouchCancel={onPullEnd}
+    >
+      <div className='ptr' style={{ height: ptr }}>
+        {ptr > 0 && (
+          <ArrowsClockwise
+            size={18}
+            className={refreshing ? 'spin' : ''}
+            // During the PULL the icon turns with the gesture. Once REFRESHING
+            // the inline transform is dropped so `.spin` owns it: an inline
+            // transform becomes the animation's implicit start, so the spin
+            // would sweep from wherever the pull left it and snap back every
+            // cycle. That was a real, visible hitch in the donor.
+            style={{
+              opacity: Math.min(1, ptr / PULL_TRIGGER),
+              ...(refreshing ? {} : { transform: `rotate(${ptr * 3}deg)` })
+            }}
+          />
+        )}
+      </div>
       <header>
         {/* The title IS the library menu: the blend, one library, or Add a
             library - with a single library it is just the Add row, so a solo
