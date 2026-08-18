@@ -2,6 +2,58 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - THE RELAY, PHASES 2 AND 3: consent, the marker, and a meter that never stops a film
+Tier: T3 (same proposal, PRs #95 and #96).
+
+CONSENT IS ASKED ONCE, PER LIBRARY, AND A NO IS STICKY. `relayVideoDecision` returns
+what to DO rather than a boolean, because "cannot play" has two shapes: one asks the
+person, the other is a standing no they already gave. A deny that kept re-asking
+would not be a decision the person made, it would be a dialog they cannot escape -
+so it refuses with a sentence pointing at Settings, where it is reversible.
+
+IT GATES THE FILM ONLY, and that is a disclosed trade rather than a silent one.
+Browse, search, artwork and watch-state keep crossing unprompted: they are kilobytes
+against a film's gigabytes, and gating them would mean a hard-NAT user opens a
+library to an empty screen and a dialog - the prompt problem moved one step later
+instead of solved. The Connection section says films may pass through a relay BEFORE
+the prompt can ever appear. Do not route artwork or metadata through the gate without
+changing that copy too.
+
+THE GATE RETURNS NO URL. `stream.url` answers `{ needsRelayConsent, libraryId,
+libraryName }` and nothing else, so a caller that ignored the flag cannot play the
+film anyway. The three call sites that run with the native player already up (next
+episode, subtitle burn-in, the lying-chip retry) cannot show a sheet under a native
+surface, so they say so plainly rather than asking invisibly.
+
+THE METER READS UDX RATHER THAN COUNTING CHUNKS. `conn.rawStream.bytesReceived` on
+each relayed connection covers playback, artwork, browse and HLS segments in one
+property read, and no hot path grows a counter. Sampled every 30s (unref'd) and again
+on close, because a film ending is when the largest unfolded delta exists.
+
+Two traps live where the delta is computed, and both would have been silent:
+a reconnect starts a FRESH udx stream at zero, so a lower reading is a new baseline
+rather than a negative delta - subtracting it would erase a month of real usage; and
+the baseline is set to zero explicitly when a relayed connection lands, or the
+previous connection's reading would swallow the new one's first few hundred MB.
+
+The count over-reports and never under-reports: a punch that lands late keeps being
+counted as relayed, because hyperdht moves the live stream to the direct path without
+telling us. That is the right direction for a number somebody is nudged about.
+
+NUDGE AT 20 GB A MONTH, and never a stop. About 18 hours of relayed video and ~4% of
+the shared 500 GB tier: heavy for one household, unreachable by normal watching. At
+$0.01/GiB a cap would spend the end of somebody's film to save a few dollars. The
+threshold is phone-side so it can move without redeploying the relay, and the month
+follows the phone's own calendar rather than UTC, because people read "this month"
+off their own.
+
+TEST: `test/relay.test.js` 21 -> 28 -> the consent branches, both refusal strings read
+as whole sentences with no jargon, accumulation and month rollover, negatives dropped,
+the nudge's wording and its threshold justified as hours AND as a share of the tier.
+verify green: 552 pass. VERIFIED on the Pixel_9 emulator that an md5-gated install
+boots, loads the worklet and renders (read over CDP, not screenshotted) - the emulator
+is on the home network, so it can only prove the app is not broken, never the relay.
+
 ## 2026-08-18 - A DOWNLOAD IS NEVER RELAYED
 Tier: T2 (a product rule inside the approved relay work, Tim 2026-08-18).
 Context: phase 1 shipped with downloads INHERITING the relay ceiling, because
