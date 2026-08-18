@@ -63,6 +63,31 @@ function writeSettings (s) {
 const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' })
 
 const caps = require('./capabilities')
+const relay = require('./relay')
+
+// The relay policy, handed to every Client we build. The client owns the gate - direct
+// first, a key only after a punch has actually failed - and asks this for the key.
+// Read fresh on each dial rather than captured at boot, so turning the toggle off in
+// Settings takes effect on the next reconnect instead of the next app launch.
+function relayPolicy ({ force, randomized }) {
+  const s = readSettings()
+  return relay.relayThroughFor({
+    force,
+    randomized,
+    useRelay: s.useRelay !== false,
+    ownKeyZ: s.ownRelayKey || null
+  })
+}
+
+// Which libraries we OFFERED the relay for, on the connection we currently hold. Offered,
+// not used - see relayOffered in @peerloom/client. Cleared on disconnect, so a library
+// that reconnects on wifi stops being labelled and stops being throttled.
+const relayedLibs = new Set()
+
+function relayedForId (id) {
+  const lib = owners.get(String(id)) || H.activeHost(hostsState)?.libraryId || null
+  return lib ? relayedLibs.has(lib) : false
+}
 
 // WHAT THIS DEVICE DECLARES IT CAN PLAY. Starts as the conservative static
 // floor; the shell probes the device's REAL decoder list (MediaCodecList lives
@@ -102,13 +127,25 @@ function capsFor (itemId) {
     out = { ...out, tone: settings.playerTone }
   }
   const burn = burnSub.get(itemId)
-  return burn ? { ...out, burnSubtitleId: burn } : out
+  out = burn ? { ...out, burnSubtitleId: burn } : out
+  // The relay ceiling goes on LAST and is not a preference: the person choosing the
+  // quality is not the person paying for the transfer. Data Saver already on means the
+  // stricter of the two wins, never the looser.
+  return relay.capsWithRelayCeiling(out, relayedForId(itemId))
 }
 
 // Downloads describe the device without the viewing session: a subtitle choice
 // or a skin's tone made in the player must not bake itself into the copy the
 // phone keeps, nor steer the download's decide toward a conversion it does
 // not need.
+//
+// The relay ceiling is INHERITED here on purpose - "whenever the bytes are relayed" has
+// to include a download, which is the heaviest thing the relay could ever carry: a whole
+// film at once rather than an hour of it at a time. The cost is that a film downloaded
+// while away from wifi is kept at the relayed quality, since a download is a lasting
+// copy rather than a session. Flagged to Tim 2026-08-18; if he would rather a relayed
+// download be refused outright and told to wait for wifi, that is a product rule and
+// belongs beside the consent gate, not here.
 function capsForDownload (itemId) {
   const { burnSubtitleId, tone, ...rest } = capsFor(itemId)
   return rest
@@ -197,14 +234,22 @@ async function connectedLib (libraryId) {
 
   slot.connecting = (async () => {
     if (slot.client) { try { await slot.client.close() } catch {} }
-    const c = new Client({ protocol, keyPair, log: (m, d) => log(m, d) })
+    const c = new Client({ protocol, keyPair, log: (m, d) => log(m, d), relayThrough: relayPolicy })
     await c.connect({ hostKey: z32.decode(row.hostKey), libraryId: row.libraryId })
+    // Recorded per library the moment the dial lands, because everything that has to
+    // behave differently on a relayed link - the ceiling, the marker, the byte count -
+    // asks by library rather than by connection.
+    if (c.relayOffered) relayedLibs.add(libraryId)
+    else relayedLibs.delete(libraryId)
     // Pushes from EVERY connected host flow to the one UI handler, tagged with
     // their library so a shelf can scope its refetch.
     c.onPush = (m) => emit('host:push', { ...(m && typeof m === 'object' ? m : { value: m }), libraryId })
-    c.conn.once('close', () => emit('host:disconnected', { hostKey: row.hostKey, libraryId }))
+    c.conn.once('close', () => {
+      relayedLibs.delete(libraryId)
+      emit('host:disconnected', { hostKey: row.hostKey, libraryId })
+    })
     slot.client = c
-    emit('host:connected', { hostKey: row.hostKey, libraryId, libraryName: row.libraryName })
+    emit('host:connected', { hostKey: row.hostKey, libraryId, libraryName: row.libraryName, relayed: !!c.relayOffered })
     // A host coming online that the merged index has not heard from yet is
     // catalog we are not showing - rebuild (debounced, and a no-op single-host).
     if (mergedOn() && !contributedLibs.has(libraryId)) buildSoon('host-online')
