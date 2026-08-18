@@ -6,7 +6,7 @@
 // this app closes.
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
-import { api, copyText, setRemoteBase, fmtSize } from './api'
+import { api, copyText, setRemoteBase, fmtSize, onLive } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
@@ -184,11 +184,16 @@ function RequestsCard ({ remotes }) {
       if (live) setRows(out)
     }
     load()
-    // An owner answering on their phone should show up here without a page
-    // refresh (Tim, 2026-08-17). A gentle poll while the card is on screen;
-    // real pushes are filed as the proper fix.
-    const t = setInterval(load, 10000)
-    return () => { live = false; clearInterval(t) }
+    // An owner answering on their phone shows up here without a page refresh
+    // (Tim, 2026-08-17). The answer now ARRIVES - the friend's host pushes it to
+    // this machine and the live channel carries it into the page.
+    const off = onLive(['request:resolved', 'request:created', 'request:removed'], load)
+    // A slow backstop for the seam the channel cannot cover: a withdrawal made
+    // on this person's OTHER device is pushed to the library's owners, not to
+    // them, so nothing tells this card. Minutes-stale beats wrong, and this is a
+    // sixth of the poll it replaces.
+    const t = setInterval(load, 60000)
+    return () => { live = false; off(); clearInterval(t) }
   }, [remotes.map(r => r.libraryId).join(','), tick])
   if (!rows?.length) return null
   return (

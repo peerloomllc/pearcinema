@@ -287,3 +287,99 @@ test('requests and the rollups travel the wire', { timeout: 120000 }, async (t) 
   assert.match(local.error, /already on this machine/)
   assert.equal((await (await get('/api/requests')).json()).items.length, 0)
 })
+
+// --- news that arrives on its own -------------------------------------------
+//
+// The dashboard had a 10s poll standing in for pushes on the requests card, and
+// the client underneath it wired no onPush at all - so an answer from a friend
+// reached this machine and was dropped. These two cover the channel that
+// replaced it: the route that carries news to an open page, and the plumbing
+// that gets a friend's push onto it.
+
+// Reads server-sent events off a held-open response. Returns { next, stop }:
+// `next` resolves with the first frame whose kind matches, so a test says what
+// it is waiting for rather than counting frames it did not ask about.
+async function listen (base, path = '/api/events') {
+  const ctrl = new AbortController()
+  const res = await fetch(base + path, { signal: ctrl.signal })
+  assert.equal(res.status, 200)
+  assert.match(res.headers.get('content-type'), /text\/event-stream/)
+
+  const frames = []
+  const waiters = []
+  const pump = (async () => {
+    let buf = ''
+    const dec = new TextDecoder()
+    for await (const chunk of res.body) {
+      buf += dec.decode(chunk, { stream: true })
+      const parts = buf.split('\n\n')
+      buf = parts.pop()
+      for (const p of parts) {
+        const line = p.split('\n').find((l) => l.startsWith('data: '))
+        if (!line) continue // a heartbeat comment, which is not news
+        const m = JSON.parse(line.slice(6))
+        frames.push(m)
+        for (const w of waiters.splice(0)) w(m)
+      }
+    }
+  })().catch(() => {})
+
+  return {
+    async next (kind, ms = 15000) {
+      const found = frames.find((f) => f.kind === kind)
+      if (found) return found
+      return await Promise.race([
+        new Promise((resolve) => {
+          const check = (m) => { if (m.kind === kind) resolve(m); else waiters.push(check) }
+          waiters.push(check)
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('no ' + kind + ' frame in ' + ms + 'ms')), ms).unref())
+      ])
+    },
+    stop () { ctrl.abort(); return pump }
+  }
+}
+
+test('the live channel carries this host s own news to an open page', { timeout: 120000 }, async (t) => {
+  const { desktop, base } = await rig(t)
+  const ev = await listen(base)
+  t.after(() => ev.stop())
+
+  // What host/methods.js calls when a phone asks THIS box for something. The
+  // dashboard is not a paired device, so this hook is the only thing that tells
+  // it - which is exactly why an operator's own browser saw nothing.
+  assert.equal(typeof desktop.onevent, 'function')
+  desktop.onevent('request:created', { id: 'r1', name: 'Solaris', kind: 'movie', count: 1 })
+
+  const m = await ev.next('request:created')
+  assert.deepEqual(m.data, { id: 'r1', name: 'Solaris', kind: 'movie', count: 1 })
+})
+
+test('a friend s answer reaches this machine s page instead of the floor', { timeout: 120000 }, async (t) => {
+  const { friend, base, post } = await rig(t)
+
+  const link = friend.startPairing()
+  const paired = await post('/api/remote/pair', { link })
+  const lib = paired.libraryId
+
+  const asked = await post(`/remote/${lib}/api/request`, { kind: 'movie', name: 'The General' })
+  assert.ok(asked.request?.id)
+
+  // Listen only AFTER the ask, so the frame under test cannot be an echo of it.
+  const ev = await listen(base)
+  t.after(() => ev.stop())
+
+  // The friend's owner answers. Whoever asked hears about it wherever they are
+  // signed in - and this machine is one of those places.
+  const row = (await friend.userState.listRequests())[0]
+  assert.ok(row.requester, 'the ask carries who made it')
+  friend.host.presence.notifyOwner(row.requester, 'request:resolved', {
+    id: row.id, title: 'The General', status: 'declined'
+  })
+
+  const m = await ev.next('request:resolved')
+  assert.equal(m.data.status, 'declined')
+  assert.equal(m.data.title, 'The General')
+  // Tagged with which library answered, since a page may be paired with several.
+  assert.equal(m.data.libraryId, lib)
+})

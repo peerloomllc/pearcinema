@@ -47,6 +47,10 @@ class RemoteLibraries {
     this.conns = new Map() // libraryId -> { client, connecting }
     this.onchange = null // set by the wiring; fired after any list change
     this.onconnect = null // set by the wiring; fired when a member comes (back) online
+    // set by the wiring; every push a paired library sends this machine. The
+    // phone has always wired this (src/bare.js); here it went nowhere, so an
+    // answer to one of our asks arrived and was dropped on the floor.
+    this.onpush = null
   }
 
   _loadIdentity () {
@@ -139,6 +143,9 @@ class RemoteLibraries {
     slot.connecting = (async () => {
       if (slot.client) { try { await slot.client.close() } catch {} }
       const c = this._newClient()
+      // Set BEFORE connect, so a push that arrives on the first breath is not
+      // the one that gets lost.
+      c.onPush = (m) => { try { this.onpush?.(row.libraryId, m) } catch {} }
       await c.connect({ hostKey: z32.decode(row.hostKey), libraryId: row.libraryId })
       slot.client = c
       this.log('remote:connected', { library: row.libraryName })

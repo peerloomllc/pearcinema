@@ -834,6 +834,12 @@ export default function App () {
             : `Your request${m.data.title ? ' for ' + m.data.title : ''} was declined`)
           if (u.tab === 'you' && u.youView === 'requests') loadYouRef.current?.('requests')
         }
+        if (m?.kind === 'request:created' || m?.kind === 'request:removed') {
+          // The operator's side of the same conversation. Only an owner is sent
+          // these, and only the Manage list shows them, so refresh it in place
+          // rather than announcing an ask over whatever is on screen.
+          if (u.tab === 'you' && u.youView === 'manage') loadYouRef.current?.('manage')
+        }
         if (m?.kind === 'cast:ended' && m.data) {
           // The TV ran out of film. Only this phone's own cast clears the bar -
           // the host pushes to the device that started it.
