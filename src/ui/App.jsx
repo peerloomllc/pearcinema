@@ -1542,8 +1542,8 @@ export default function App () {
           <Broadcast size={15} weight='fill' />
           <span>
             {relayLibs.filter((l) => l.relayed).length > 1
-              ? 'Some of your libraries are coming through a relay. Films play at a lower quality.'
-              : `${relayLibs.find((l) => l.relayed)?.libraryName || 'This library'} is coming through a relay. Films play at a lower quality.`}
+              ? 'Some of your libraries are coming through a relay, so films are capped near 2.5 Mbps.'
+              : `${relayLibs.find((l) => l.relayed)?.libraryName || 'This library'} is coming through a relay, so films are capped near 2.5 Mbps.`}
             {relayUsage?.warning && ' ' + relayUsage.warning.message}
           </span>
         </div>
@@ -1907,6 +1907,20 @@ export default function App () {
 
         <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
           <div className='label'>Streaming quality</div>
+          {/* THE OVERRIDE HAS TO BE SAID HERE (Tim, 2026-08-18, watching a relayed film
+              with Full quality still selected). The cap is forced in the worklet and this
+              control is the person's PREFERENCE, which is why the dot does not move - but
+              a screen that shows Full quality while the film is capped reads as a broken
+              cap rather than as a working one. So the section says which is in force. */}
+          {relayLibs.some((l) => l.relayed) && (
+            <div className='relaybar' style={{ marginBottom: '.6rem' }}>
+              <Broadcast size={15} weight='fill' />
+              <span>
+                Capped near 2.5 Mbps right now, whichever of these is picked, because a library is
+                coming through a relay. Your choice below comes back the moment it connects directly.
+              </span>
+            </div>
+          )}
           <OptionList
             options={[
               { value: 'auto', label: 'Full quality', desc: 'The file as it is; your box converts only when this phone cannot play it' },

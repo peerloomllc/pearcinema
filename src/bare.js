@@ -860,6 +860,12 @@ const methods = {
   'relay.status': async () => ({
     useRelay: readSettings().useRelay !== false,
     ownRelayKey: readSettings().ownRelayKey || '',
+    // The ceiling IN FORCE for the active library right now, so the phone can be ASKED
+    // what it is doing rather than have it inferred from a settings screen that shows a
+    // preference the relay overrides. Deliberately routed through the same capsFor an
+    // actual stream goes through - a separate calculation here could agree with the
+    // screen and disagree with the film. 0 means no ceiling at all.
+    maxKbps: Number(capsFor('_status').maxKbps) || 0,
     // Sampled on the way out so the figure a person reads is current rather than up to
     // half a minute stale, which matters most while they are watching something.
     usage: (() => {
@@ -1315,7 +1321,12 @@ const methods = {
         log('stream:device-refused', { itemId, videoCodec: bad })
       }
     }
-    const verdict = await c.request('media.decide', { itemId, capabilities: capsFor(itemId) }).catch(() => null)
+    // Logged at the moment it is DECIDED, not asserted from settings: this is the line a
+    // field report needs to answer "was the film actually capped", and the phone's own
+    // Settings screen cannot answer it because the ceiling is forced past a preference.
+    const sending = capsFor(itemId)
+    if (sending.maxKbps) log('stream:capped', { itemId, maxKbps: sending.maxKbps, relayed: relayedForId(itemId), dataSaver: !!readSettings().dataSaver })
+    const verdict = await c.request('media.decide', { itemId, capabilities: sending }).catch(() => null)
     if (verdict?.mode === 'transcode') {
       return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: 'transcode' }
     }
