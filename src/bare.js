@@ -84,9 +84,32 @@ function relayPolicy ({ force, randomized }) {
 // that reconnects on wifi stops being labelled and stops being throttled.
 const relayedLibs = new Set()
 
+function libraryForId (id) {
+  return owners.get(String(id)) || H.activeHost(hostsState)?.libraryId || null
+}
+
 function relayedForId (id) {
-  const lib = owners.get(String(id)) || H.activeHost(hostsState)?.libraryId || null
+  const lib = libraryForId(id)
   return lib ? relayedLibs.has(lib) : false
+}
+
+// The person's standing answer per library: 'ask' (never answered), 'allow' or 'deny'.
+// Kept in settings beside the toggle, because it is a preference about this phone rather
+// than anything the host knows or should know.
+function relayConsentFor (libraryId) {
+  const all = readSettings().relayConsent || {}
+  const v = all[String(libraryId)]
+  return ['allow', 'deny'].includes(v) ? v : 'ask'
+}
+
+function setRelayConsent (libraryId, decision) {
+  const s = readSettings()
+  const all = { ...(s.relayConsent || {}) }
+  if (decision === 'ask') delete all[String(libraryId)]
+  else all[String(libraryId)] = decision === 'allow' ? 'allow' : 'deny'
+  writeSettings({ ...s, relayConsent: all })
+  log('relay:consent', { libraryId, decision })
+  return all
 }
 
 // WHAT THIS DEVICE DECLARES IT CAN PLAY. Starts as the conservative static
@@ -776,6 +799,25 @@ const methods = {
     return next
   },
 
+  // The answer to the relay prompt, remembered per library. 'ask' clears it back to
+  // never-answered, which is how a sticky deny gets reversed.
+  'relay.consent.set': async ({ libraryId, decision }) => ({
+    consent: setRelayConsent(libraryId, decision)
+  }),
+
+  // Which libraries this phone is currently talking to through a relay, for the marker
+  // and for the settings rows that reverse a deny. `relayed` is OFFERED, the honest word.
+  'relay.status': async () => ({
+    useRelay: readSettings().useRelay !== false,
+    ownRelayKey: readSettings().ownRelayKey || '',
+    libraries: hostsState.hosts.map((h) => ({
+      libraryId: h.libraryId,
+      libraryName: h.libraryName || null,
+      relayed: relayedLibs.has(h.libraryId),
+      consent: relayConsentFor(h.libraryId)
+    }))
+  }),
+
   // Everything the UI needs to draw its first screen, in one call.
   'app.state': async () => {
     const active = H.activeHost(hostsState)
@@ -1185,6 +1227,28 @@ const methods = {
     if (burnSubtitleId) burnSub.set(itemId, String(burnSubtitleId))
     else burnSub.delete(itemId)
     const c = await clientForId(itemId)
+
+    // THE CONSENT GATE, and it sits here rather than in the UI for the same reason the
+    // download refusal does: every way into playback comes through stream.url, and only
+    // the worklet knows how this library's connection was made. Browsing got the person
+    // this far unprompted by design - kilobytes cross the relay freely, a film asks once.
+    const lib = libraryForId(itemId)
+    const verdictRelay = relay.relayVideoDecision({
+      relayed: relayedForId(itemId),
+      consent: relayConsentFor(lib)
+    })
+    if (verdictRelay === 'refuse') throw new Error(relay.RELAY_PLAY_REFUSAL)
+    if (verdictRelay === 'ask') {
+      // No url comes back with this: a caller that ignored the flag would otherwise play
+      // the film anyway, which is the whole thing the gate exists to prevent.
+      log('relay:consent-needed', { itemId, libraryId: lib })
+      return {
+        needsRelayConsent: true,
+        libraryId: lib,
+        libraryName: hostRow(lib)?.libraryName || null
+      }
+    }
+
     if (deviceRefusedVideo) {
       const item = await c.get({ id: itemId }).catch(() => null)
       const bad = item?.media?.videoCodec
