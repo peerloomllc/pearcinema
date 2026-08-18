@@ -1,7 +1,10 @@
 # Relay for video, or an honest caveat
 
-**Status**: PROPOSED 2026-08-18. Awaiting Tim's decision between the options in
-"The fork" below. Nothing is built.
+**Status**: PROPOSED 2026-08-18. **Option B chosen by Tim on 2026-08-18**, with
+C alongside it, and the three open terms settled the same day: a forced
+**2500 kbps** ceiling while relayed, relayed **casting allowed**, and **no hard
+data cap - metrics plus a warning**. Nothing is built; merging this PR is the
+approval.
 
 **Goal**: Decide whether PearCinema ships a relay so a phone off wifi can reach
 its library at all, and if so, on what terms.
@@ -123,16 +126,26 @@ VPS. Worth having regardless of A or B.
 These are not exclusive. The recommendation below is B **and** C, with A's
 honesty applied to whatever B cannot reach.
 
+**Chosen 2026-08-18: B, with C alongside it.** Tim's own phone is the case B
+exists for, and C costs a settings field. A's honesty still applies to the
+~0%-punch users the relay cannot afford to carry indefinitely.
+
 ## The arithmetic, which is the whole argument
 
-Per hour of relayed video, at a 500 GB/month tier:
+The relay is PearTune's deployed box: DigitalOcean's **$4 Basic tier, 500 GB of
+transfer a month, overage $0.01/GiB** (peartune `DECISIONS.md`, 2026-07-28
+correction). DO bills outbound only, so a relayed film is billed once - the
+relay receives from the host for free and sends to the phone for money - and the
+table below is the bill rather than half of it.
 
-| Bitrate | Per hour | Hours/month the tier buys, across ALL users |
-| --- | --- | --- |
-| 8 Mbps (a typical direct-play film) | 3.6 GB | 139 |
-| 4 Mbps | 1.8 GB | 278 |
-| **2.5 Mbps (today's Data Saver ceiling)** | **1.125 GB** | **444** |
-| 1.5 Mbps | 0.675 GB | 740 |
+Per hour of relayed video:
+
+| Bitrate | Per hour | Hours/month the tier buys, across ALL users | Cost per hour past the tier |
+| --- | --- | --- | --- |
+| 8 Mbps (a typical direct-play film) | 3.6 GB | 139 | ~$0.034 |
+| 4 Mbps | 1.8 GB | 278 | ~$0.017 |
+| **2.5 Mbps (chosen - today's Data Saver ceiling)** | **1.125 GB** | **444** | **~$0.011** |
+| 1.5 Mbps | 0.675 GB | 740 | ~$0.006 |
 
 444 hours a month is about 15 hours a day of relayed video for the entire user
 base. That is comfortable for a handful of households and gone by the ninth day
@@ -140,7 +153,15 @@ if a hundred people each watch half an hour off-LAN. The throttle is not a nice
 touch; it is the only thing that makes a relay affordable at all, and even
 throttled the tier is a headcount limit rather than a solved problem.
 
-Two consequences worth stating before choosing B:
+Overage is worth stating precisely, because it changes the SHAPE of the risk
+rather than its size. At a penny a gigabyte, running over is a trickle, not a
+cliff: a month at double the tier is about $5 on top of the $4. The reason to
+throttle is therefore the phone's experience and the home machine's CPU first,
+and the bill second. It is also why a hard per-person cap is hard to justify
+(open question 4, answered below) - the thing it protects against costs dollars,
+and the way it protects against them stops a film mid-scene.
+
+Two consequences worth stating, both of which survive choosing B:
 
 - **Relayed video must be converted, not direct-played.** A 2.5 Mbps ceiling on
   a 12 Mbps original means the host re-encodes. That is CPU on somebody's home
@@ -151,17 +172,30 @@ Two consequences worth stating before choosing B:
   different sentence from "nothing leaves your network", and the app currently
   gets to say the second one.
 
-## Scope, if B is chosen
+## Scope (B, chosen 2026-08-18)
 
 **Changes:**
 
 1. `protocol/relay.js` in this repo, adapted from PearTune's: `RELAY_PUBLIC_KEY`
    baked, `relayThroughFor` unchanged (direct-first: null on the first attempt,
    the key only after `HOLEPUNCH_ABORTED` or on a double-randomized NAT).
-2. **A forced ceiling while relayed.** `capsFor` already carries `maxKbps` for
-   Data Saver; relayed connections get the same lever applied automatically and
-   unconditionally, not as a preference. Design point to settle: whether the
-   ceiling is the existing 2500 kbps or lower (Open question 3).
+2. **A forced ceiling while relayed: 2500 kbps** (settled 2026-08-18).
+   `capsFor` in `src/bare.js` already carries `maxKbps` for Data Saver, set to
+   the same `DATA_SAVER_KBPS = 2500`; relayed connections get that lever applied
+   automatically and unconditionally, not as a preference, and it wins over a
+   Data Saver toggle that is off. Reusing one constant and one seam is most of
+   the reason for the number: `capsFor` already rides the capability declaration
+   through decide, the playlist and every segment, so there is one path to build
+   and one to verify rather than a second parallel ceiling.
+
+   Two notes that follow from picking 2500 rather than something higher:
+   - **It forces a re-encode, but so would any ceiling.** A typical film is
+     8 Mbps or more, so 4000 would transcode just as surely as 2500 does. The
+     home machine's CPU cost is the same either way, which removes the usual
+     argument for a higher number.
+   - **The ceiling is a cap, not a target.** A film already under 2500 kbps
+     relays untouched - `capBitrate` takes the min, so a low-bitrate source is
+     not re-encoded UP to the ceiling.
 3. **Detection, honestly labelled.** PearTune records that it OFFERED the relay
    at the `relayThrough` call site, because the phone's own `dht.stats.relaying`
    reads 0 while actually relaying and hyperdht keeps the real flag private. So
@@ -173,12 +207,44 @@ Two consequences worth stating before choosing B:
    not less.
 5. **A visible marker while relayed**, so nobody is surprised: the cast bar and
    player already have room for one line.
-6. **Metrics.** Bytes relayed per session and per month, counted on the phone,
-   plus the relay's own totals. Tim asked for this explicitly, and without it
-   the tier is a surprise rather than a budget.
+6. **Metrics, and a warning rather than a wall** (settled 2026-08-18). Bytes
+   relayed per session and per month, counted on the phone, plus the relay's own
+   totals. No hard per-person cap: instead the person can see their own month to
+   date, and crosses a threshold into a plainly worded warning that they are a
+   heavy share of a shared allowance. A film in progress is never cut off. The
+   threshold is a phone-side constant so it can move without a release of the
+   relay, and the wording is a nudge, not an accusation.
+7. **Relayed casting stays on** (settled 2026-08-18), and costs the relay almost
+   nothing - see below. No new work beyond letting the existing cast path run
+   over a relayed connection and counting its bytes like any other.
 
 **Not changing:** the wire protocol, pairing, grants, revoke. A relayed
 connection is the same connection over a different path.
+
+### Casting over the relay, and a correction to what this proposal first assumed
+
+Open question 5 asked whether relayed casting makes sense, and suggested
+refusing it because "a TV pulling a relayed stream is the heaviest case there
+is". **That premise is wrong for this app**, and the code says so:
+
+- `cast.play` in `src/bare.js` sends a COMMAND to the host. The phone does not
+  carry the film to the television.
+- The host mints the URL the television fetches:
+  `` `http://${castHost()}:${this.port}/v/${token}` `` (`host/cast.js:431`),
+  where `castHost()` picks the host's own non-internal IPv4 (`host/cast.js:109`).
+  The television is one Home Assistant discovered on the host's network, so it
+  pulls the film from the host over the LAN.
+
+So a phone on cell that starts a film on the television at home puts only the
+command, the cast list and the position polling across the relay - kilobytes
+against the gigabytes it does not carry. Relayed casting is the CHEAPEST thing
+the relay does, not the most expensive, and refusing it would have given up the
+best-value feature the relay buys.
+
+Two things that do not change: the 2500 kbps ceiling does not apply to a cast
+(the bytes are not relayed, so throttling them would degrade a stream for no
+saving), and **revoke must still stop the television** - the third inherited
+rule in `CLAUDE.md`, unchanged by the path the command arrived on.
 
 ## Compat
 
@@ -201,6 +267,13 @@ upgrade cannot silently start relaying.
 5. Consent: a fresh library asks once before relayed play, remembers, and the
    sticky deny is reversible in that library's settings.
 6. Byte counting agrees with the relay's own view, within reason.
+7. The ceiling is forced, not preferred: relayed play caps at 2500 kbps with
+   Data Saver OFF, and a source already below 2500 kbps is not re-encoded up.
+8. Casting from off-LAN: a phone on cell starts a film on a television at home,
+   and the relay's byte count for that session stays in the kilobytes - the
+   claim in "Casting over the relay" measured rather than asserted.
+9. The warning fires at the threshold and never interrupts: a session that
+   crosses it keeps playing to the end of the film.
 
 ## Rollback
 
@@ -220,11 +293,22 @@ started. The expectations are the part that does not roll back.
    concluding anything about the product. This is now about how WIDESPREAD the
    need is - and therefore about the bill - rather than about whether the relay
    works.
-3. **What ceiling?** 2500 kbps matches Data Saver and looks acceptable on a
-   phone. Lower stretches the tier and looks worse on a tablet. This is a
-   product call, not a technical one.
-4. **A per-user monthly cap?** A hard stop protects the tier from one heavy
-   user, and is a miserable thing to hit mid-film. Suggested: no cap in v1, but
-   ship the metrics first so the decision is made on numbers.
-5. **Does relayed casting make sense at all?** A TV pulling a relayed stream is
-   the heaviest case there is. Suggested: refuse it in v1 and say why.
+3. ~~**What ceiling?**~~ **ANSWERED 2026-08-18: 2500 kbps**, forced whenever the
+   bytes are relayed. It matches the existing `DATA_SAVER_KBPS`, so one lever
+   and one seam cover it; it costs 1.125 GB an hour, about 444 hours a month on
+   the tier and about a penny an hour past it; and since any ceiling below a
+   typical 8 Mbps film forces a re-encode anyway, a higher number would have
+   bought a better picture at the same CPU rather than a cheaper one. A device-
+   aware ceiling (higher on a tablet) was considered and rejected as two paths
+   to verify for a small saving.
+4. ~~**A per-user monthly cap?**~~ **ANSWERED 2026-08-18: no hard cap, but warn
+   the person.** They can see their own month to date and get a plainly worded
+   nudge past a threshold; a film in progress is never stopped. At $0.01/GiB the
+   thing a cap protects against is a few dollars, and the protection would cost
+   somebody the end of a film. Revisit once the metrics have a month of real
+   numbers behind them.
+5. ~~**Does relayed casting make sense at all?**~~ **ANSWERED 2026-08-18: yes,
+   allow it - and the question rested on a wrong premise.** The host casts and
+   the television pulls from the host's own LAN address, so the relay carries a
+   command rather than a film. See "Casting over the relay" above for the code
+   that establishes it.
