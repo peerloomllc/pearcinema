@@ -12,7 +12,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const http = require('http')
 
-const { RokuSpeakers, tag, attr, millis, stateFrom, MEDIA_CHANNELS } = require('../host/roku')
+const { RokuSpeakers, tag, attr, millis, stateFrom, MEDIA_CHANNELS, MEDIA_CHANNEL_NAME } = require('../host/roku')
 const { CastTargets, isDiscovered } = require('../host/cast-targets')
 
 // The shapes a Roku really answers with, trimmed to the fields that are read.
@@ -36,8 +36,10 @@ const PLAYING = `<?xml version="1.0" encoding="UTF-8" ?>
 // A stand-in Roku: the two queries answered for real, and every command recorded.
 // A Roku's installed-channel list. The real one from Tim's stick is the interesting case
 // and gets its own constant below.
-const APPS_WITH_PLAYER = '<apps><app id="12">Netflix</app><app id="2213" type="appl">Roku Media Player</app></apps>'
-const APPS_NO_PLAYER = '<apps><app id="12">Netflix</app><app id="13535">Plex</app><app id="782875">Media Assistant</app></apps>'
+const APPS_WITH_PLAYER = '<apps><app id="12">Netflix</app><app id="782875" type="appl">Media Assistant</app></apps>'
+// The list Tim's stick really answered before anything was installed - note that it
+// carries Roku Media Player's absence AND, later, its uselessness.
+const APPS_NO_PLAYER = '<apps><app id="12">Netflix</app><app id="13535">Plex</app><app id="2213">Roku Media Player</app></apps>'
 
 async function fakeRoku (t, { info = DEVICE_INFO, media = PLAYING, apps = APPS_WITH_PLAYER } = {}) {
   const seen = []
@@ -192,7 +194,7 @@ test('play launches the media player channel with the url and the format', async
 
   await s.play('roku:10.0.0.7', 'http://10.0.0.2:8752/v/tok123', { title: 'Nosferatu', format: 'mkv' })
 
-  const launch = roku.seen.find((r) => r.url.startsWith('/launch/2213'))
+  const launch = roku.seen.find((r) => r.url.startsWith('/launch/782875'))
   assert.ok(launch, 'it has to launch the media player channel')
   assert.equal(launch.method, 'POST')
   const q = new URLSearchParams(launch.url.split('?')[1])
@@ -257,12 +259,13 @@ test('a television that has gone is dropped from the roster, not left as a dead 
   assert.equal(list[0].entityId, 'roku:10.0.0.7')
 })
 
-test('a Roku with no media channel is not offered at all', async (t) => {
-  // MEASURED on Tim's Roku Streaming Stick Plus, 2026-08-18: it carries Netflix, Prime,
-  // Plex and a third-party "Media Assistant", and NEITHER Roku Media Player nor Play on
-  // Roku. ECP cannot play a URL through a channel that is not there - `/launch/2213`
-  // answers a bare 404 - so the first cut would have listed a television that errors the
-  // instant somebody presses it.
+test('ROKU MEDIA PLAYER IS NOT ENOUGH - only Media Assistant actually plays', async (t) => {
+  // The most expensive finding of the day, and every step of it contradicted the docs.
+  // On Tim's stick: Roku Media Player was absent, then installed, then accepted the launch
+  // with a 200 under EVERY documented parameter form and never fetched a byte. Watching a
+  // working Home Assistant cast named the real channel - Media Assistant, 782875, which is
+  // what HA's own Roku docs tell people to install. A device with RMP and not MA must
+  // therefore NOT be offered: it would be a television that does nothing when pressed.
   const roku = await fakeRoku(t, { apps: APPS_NO_PLAYER })
   const logs = []
   const s = new RokuSpeakers({
@@ -274,14 +277,14 @@ test('a Roku with no media channel is not offered at all', async (t) => {
   assert.deepEqual(await s.list(), [])
   const said = logs.find(([m]) => m === 'roku:no-media-channel')
   assert.ok(said, 'and it has to say so, because the owner can fix this in a minute')
-  assert.match(said[1].fix, /Roku Media Player/, 'the log names the fix, not just the fault')
+  assert.match(said[1].fix, /Media Assistant/, 'the log names the fix, not just the fault')
 })
 
 test('play refuses clearly rather than 404ing into the void', async (t) => {
   const roku = await fakeRoku(t, { apps: APPS_NO_PLAYER })
   const s = new RokuSpeakers({ discoverFn: async () => [{ host: '10.0.0.7' }], request: roku.request })
   await s.list()
-  await assert.rejects(() => s.play('roku:10.0.0.7', 'http://x/v/t', {}), /Roku Media Player/)
+  await assert.rejects(() => s.play('roku:10.0.0.7', 'http://x/v/t', {}), /Media Assistant/)
 })
 
 // --- the router -------------------------------------------------------------

@@ -92,10 +92,29 @@ read null - a cast that never reported progress and never resumed where it was l
    these four would have shipped, and this one makes the feature a button that never works
    on a device that looks perfect from every other angle.
 
-STILL NOT DONE: nothing has been PLAYED on a Roku this way, because the only Roku on the
-network cannot accept one. Discovery, identification, the media-channel check and state are
-all hardware-proven; launch and stop remain proven against the stand-in only, and will stay
-that way until a Roku with Roku Media Player installed is on a network the host can see.
+4. **ROKU MEDIA PLAYER DOES NOT PLAY URLS, AND THE DOCUMENTATION IS WRONG ABOUT THAT.**
+   This took four rounds and is the finding worth the whole exercise. `/launch/2213` 404'd
+   because RMP was not installed. Tim installed it. Then EVERY documented parameter form -
+   `t=v&u=`, `contentID=`, raw url, double-encoded url, with and without `videoFormat` -
+   answered 200, opened the channel on the television, and never fetched a byte. Roku
+   Media Player 5.5.19 accepts the launch and discards the URL. `/launch/15985` and
+   `/input/15985` (Play on Roku) 404 and cannot be installed - it is not a store channel.
+   Remote install is refused outright (401) on this firmware, so even the store page has
+   to be opened by hand.
+   THE ANSWER CAME FROM WATCHING A WORKING CAST. Tim's Home Assistant casts to this exact
+   Roku fine, so the path existed; polling `/query/active-app` while he cast from the app
+   named it in one line: the channel that plays is **782875, "Media Assistant"** - a
+   third-party channel, and exactly what Home Assistant's own Roku documentation tells
+   people to install. Handed the same `t=v&u=` parameters it fetched the file immediately.
+   So `MEDIA_CHANNELS` is Media Assistant and nothing else. RMP is deliberately excluded:
+   a device carrying RMP and not MA would be offered as a television and then do nothing
+   at all when pressed, which is worse than not being offered.
+
+END TO END, ON THE REAL DEVICE (2026-08-18, the shipping code, not a probe): discovery
+found the Roku and rejected the impostor; launch fetched the file from the host's server;
+`getState` reported `playing` with the position advancing 0.04 -> 3.1 -> 6.2 seconds
+against a duration of 38.8; stop returned it to idle. Every claim this backend makes is now
+hardware-proven.
 
 ## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
 Tier: T2 (PR pending). Two things from Tim while using the relayed build.

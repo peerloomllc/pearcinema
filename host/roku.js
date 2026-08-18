@@ -42,16 +42,27 @@ const DISCOVER_MS = 2500
 // or on a network that drops us. Kept short because `getState` runs on a poll.
 const ECP_TIMEOUT_MS = 4000
 
-// The channels that will play a URL handed to them. Roku Media Player (2213) is the
-// documented one and ships on most boxes; 15985 is the "Play on Roku" receiver the phone
-// app uses, and some firmware carries one and not the other.
+// WHICH CHANNEL ACTUALLY PLAYS A URL, measured rather than read. This took four rounds on
+// Tim's Roku Streaming Stick Plus (firmware 14.10.5) on 2026-08-18, and every step of it
+// contradicted the documentation:
 //
-// THIS HAS TO BE CHECKED, NOT ASSUMED. Measured on Tim's Roku Streaming Stick Plus,
-// 2026-08-18: NEITHER is installed - it carries Netflix, Prime, Plex and a third-party
-// "Media Assistant" instead - and `/launch/2213` answers a bare 404. ECP cannot play a URL
-// through a channel that is not there, so a Roku without one is a television we cannot
-// cast to, however well it answers everything else.
-const MEDIA_CHANNELS = ['2213', '15985']
+//   - `/launch/2213` (Roku Media Player, the documented answer): 404 - not installed.
+//   - Installed it, then tried every documented parameter form - `t=v&u=`, `contentID=`,
+//     raw url, double-encoded url, with and without videoFormat. Every one answered 200,
+//     the channel OPENED on the television, and it never fetched a single byte. Roku
+//     Media Player 5.5.19 accepts the launch and discards the URL.
+//   - `/launch/15985` and `/input/15985` (Play on Roku): 404, and it cannot be installed -
+//     it is not a store channel.
+//   - Watching a WORKING cast through Home Assistant answered it: the channel that plays
+//     is `782875`, a third-party one called **Media Assistant**, which is exactly what
+//     Home Assistant's own Roku documentation tells people to install. Handed the same
+//     `t=v&u=` parameters, it fetched the file immediately and reported `state="play"`.
+//
+// So this list is Media Assistant and nothing else. Roku Media Player is deliberately NOT
+// in it: a device that has RMP and not MA would be offered as a television and then do
+// nothing at all when pressed, which is worse than not offering it.
+const MEDIA_CHANNELS = ['782875']
+const MEDIA_CHANNEL_NAME = 'Media Assistant'
 
 function ecpUrl (host, path) {
   return `http://${host}:8060${path}`
@@ -240,7 +251,7 @@ class RokuSpeakers {
         // Named in the log because the fix is one the OWNER can apply in a minute: install
         // Roku Media Player from the channel store. Silence here would read as "PearCinema
         // cannot see my television" when it plainly can.
-        this.log('roku:no-media-channel', { host, name: name || model || host, fix: 'install Roku Media Player' })
+        this.log('roku:no-media-channel', { host, name: name || model || host, fix: `install ${MEDIA_CHANNEL_NAME}` })
         continue
       }
 
@@ -328,7 +339,7 @@ class RokuSpeakers {
     // the roster has one by construction; a stale id is still worth a clear failure over
     // a 404 nobody can read.
     const channel = this.devices.get(host)?.channel
-    if (!channel) throw new Error('that Roku has no media player installed - install Roku Media Player on it')
+    if (!channel) throw new Error(`that Roku cannot be handed a film - install ${MEDIA_CHANNEL_NAME} on it`)
     const q = new URLSearchParams({ u: url, t: 'v', videoFormat: format === 'mkv' ? 'mkv' : format })
     if (title) q.set('videoName', title)
     await this._ecp(host, `/launch/${channel}?${q.toString()}`, { method: 'POST' })
@@ -349,4 +360,4 @@ class RokuSpeakers {
   }
 }
 
-module.exports = { RokuSpeakers, discover, ecp, tag, attr, millis, stateFrom, MEDIA_CHANNELS }
+module.exports = { RokuSpeakers, discover, ecp, tag, attr, millis, stateFrom, MEDIA_CHANNELS, MEDIA_CHANNEL_NAME }
