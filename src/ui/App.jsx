@@ -734,6 +734,11 @@ export default function App () {
   // the bar at the bottom needs to say and where to send stop.
   const [castSheet, setCastSheet] = useState(null)
   const [casting, setCasting] = useState(null)
+  // Whether there is a television to offer at all - the player's cast button
+  // rides on this, and a button that opens an empty picker is worse than none.
+  // Declared up here with the rest of the cast state on purpose: reload() and
+  // play() both touch it, and both sit above where it would otherwise land.
+  const [canCast, setCanCast] = useState(false)
   const castingRef = useRef(null)
   castingRef.current = casting
   const [pairLink, setPairLink] = useState('')
@@ -747,6 +752,10 @@ export default function App () {
   // owns which episode that intent lands on.
   const navRef = useRef(null)
   const playRef = useRef(null)
+  // The player's cast button reaches the picker through this, the same shape as
+  // playRef: the handler is wired on mount and openCast is declared hundreds of
+  // lines below it, so a direct reference would be both stale and a TDZ risk.
+  const castRef = useRef(null)
   const uiRef = useRef({})
   const toastTimer = useRef(null)
 
@@ -772,6 +781,11 @@ export default function App () {
       // Seed the running list so the navbar's download light is truthful after
       // a WebView reload mid-download; events alone only cover this page-load.
       call('download.list').then((r) => setDlRunning(r.running || [])).catch(() => {})
+      // Is there a television to offer at all? Asked once here rather than as
+      // the player opens, because that path deliberately does nothing that
+      // could delay first frames. Refreshed whenever the picker actually runs,
+      // so configuring Home Assistant shows up without a reinstall.
+      call('cast.list').then((r) => setCanCast(!!r?.enabled && (r.targets || []).length > 0)).catch(() => {})
     }
     return s
   }, [])
@@ -849,6 +863,15 @@ export default function App () {
             say('The TV finished playing')
           }
         }
+      }),
+      // The player handed the film to a television. The shell has already closed
+      // itself and written the resume; what is left is the picker, opened on the
+      // film that was playing and carrying the minute it reached.
+      on('player:cast', async (d) => {
+        if (!d?.itemId) return
+        const item = await call('library.get', { id: d.itemId }).catch(() => null)
+        if (!item) return setErr('That film could not be found to send to a TV')
+        castRef.current?.(item, { atMs: Number(d.positionMs) || 0 })
       }),
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
@@ -1077,7 +1100,7 @@ export default function App () {
   // --- actions --------------------------------------------------------------
 
   const play = async (item, url, startMs) => {
-    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs, skin: playerSkin }) } catch (e) { setErr(e.message); return }
+    try { await call('shell.play', { itemId: item.id, url, title: item.title, startMs, skin: playerSkin, canCast }) } catch (e) { setErr(e.message); return }
     // Episode neighbours arrive AFTER playback starts, so the lookup never
     // delays first frames. Offline or on a film the catch leaves the buttons
     // off, which is the honest answer in both cases.
@@ -1130,10 +1153,14 @@ export default function App () {
 
   // --- casting (video-deltas §5) --------------------------------------------
 
-  const openCast = async (item) => {
-    setCastSheet({ item, targets: null, enabled: false })
+  // atMs is the LIVE position when this came from the player's own cast button,
+  // and null when it came from the long-press sheet - where the stored resume is
+  // the right answer and is read at pick time instead.
+  const openCast = async (item, { atMs = null } = {}) => {
+    setCastSheet({ item, targets: null, enabled: false, atMs })
     try {
       const r = await call('cast.list', { itemId: item.id })
+      setCanCast(!!r?.enabled && (r.targets || []).length > 0)
       setCastSheet((s) => (s && s.item.id === item.id
         ? { ...s, targets: r?.targets || [], enabled: !!r?.enabled }
         : s))
@@ -1142,14 +1169,23 @@ export default function App () {
       setErr(e.message)
     }
   }
+  castRef.current = openCast
 
   const castTo = async (item, t) => {
     try {
-      // The TV starts where this person is, the same resume the phone offers -
-      // a generated stream begins there outright, a direct one lets the TV
-      // seek itself.
-      const prior = await call('resume.get', { itemId: item.id }).catch(() => null)
-      const at = prior?.resume?.positionMs > 0 ? Math.floor(prior.resume.positionMs / 1000) : 0
+      // The TV starts where this person is - a generated stream begins there
+      // outright, a direct one lets the TV seek itself.
+      //
+      // A cast STARTED FROM THE PLAYER carries its own minute, and that beats
+      // the stored resume: the phone writes resume on a 15s tick and at close,
+      // so reading the store here would quietly rewind the film by up to a
+      // quarter of a minute at the exact moment somebody is watching it move
+      // from their hand to the wall.
+      let at = castSheet?.atMs > 0 ? Math.floor(castSheet.atMs / 1000) : 0
+      if (!at) {
+        const prior = await call('resume.get', { itemId: item.id }).catch(() => null)
+        at = prior?.resume?.positionMs > 0 ? Math.floor(prior.resume.positionMs / 1000) : 0
+      }
       await call('cast.play', { entityId: t.entityId, libraryId: t.libraryId, itemId: item.id, at })
       setCastSheet(null)
       setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, paused: false })

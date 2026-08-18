@@ -85,7 +85,7 @@ export default function App () {
   // film runs, pointed at the same loopback shim URL, and the UI keeps OWNING the
   // watch-state writes - the shell only reports positions, so there is exactly one
   // copy of the resume rules.
-  const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number, skin?: string } | null>(null)
+  const [playing, setPlaying] = useState<{ itemId: string, url: string, title: string, startMs?: number, skin?: string, canCast?: boolean } | null>(null)
   // Previous/Next episode availability, set by the UI (shell.navSet) once it
   // has asked the host what sits on either side. The buttons only hand an
   // intent back to the UI - which episode that intent lands on is its call.
@@ -447,6 +447,23 @@ export default function App () {
     feedWebView(`window.__pearEvent && window.__pearEvent('player:nav', ${payload})`)
   }
 
+  // Hand the film to a television from inside the player. The whole point is
+  // that it carries the MINUTE: deciding to cast forty minutes in should not
+  // mean starting the film again. The picker itself lives in the web UI, which
+  // is what knows the televisions, so this closes the player and hands over -
+  // and stopPlayback's own player:closed is what writes the resume, so the
+  // position is safe even if the picker is then dismissed.
+  const castFromPlayer = () => {
+    const p = playingRef.current
+    if (!p) return
+    try { player.pause() } catch {}
+    const payload = JSON.stringify({
+      itemId: p.itemId, title: p.title || '', positionMs: Math.round(lastPos.current * 1000)
+    })
+    feedWebView(`window.__pearEvent && window.__pearEvent('player:cast', ${payload})`)
+    stopPlayback()
+  }
+
   // The overlay's clock: the active cue, looked up from the player's own time a
   // few times a second. Only ticks while an external track is showing.
   useEffect(() => {
@@ -530,7 +547,7 @@ export default function App () {
     // A handful of methods are the SHELL's, not the worklet's.
     if (msg.method === 'shell.exit') { BackHandler.exitApp(); return }
     if (msg.method === 'shell.play') {
-      const { itemId, url, title, startMs, burnedSubtitleId } = msg.args || {}
+      const { itemId, url, title, startMs, burnedSubtitleId, canCast } = msg.args || {}
       // The skin rides fresh plays explicitly; retries, burn restarts and
       // episode hops inherit the one already worn.
       const skin = msg.args?.skin ?? playingRef.current?.skin ?? 'off'
@@ -538,7 +555,11 @@ export default function App () {
       // them. The same item replayed (the lying-chip transcode retry) keeps
       // its buttons - the neighbours have not changed.
       if (itemId !== playingRef.current?.itemId) setNav(null)
-      setPlaying({ itemId, url, title: title || '', startMs, skin })
+      // canCast rides the play rather than being asked for here: only the web UI
+      // knows whether this device holds owner scope and whether the library it is
+      // watching has a television configured at all. A button that opens an empty
+      // picker is worse than no button.
+      setPlaying({ itemId, url, title: title || '', startMs, skin, canCast: !!canCast })
       // A new film starts with no subtitles chosen and a fresh track list -
       // unless this play IS the burned restart, whose choice survives it.
       setSubTracks([]); setSubPicker(false); setCueText('')
@@ -756,6 +777,11 @@ export default function App () {
                     <MaterialIcons name='arrow-back' size={26} color='#efe9df' />
                   </Pressable>
                   <Text style={styles.title} numberOfLines={1}>{playing.title}</Text>
+                  {playing.canCast && (
+                    <Pressable onPress={castFromPlayer} style={styles.ctlBtn} hitSlop={8} accessibilityLabel='Play this on a television'>
+                      <MaterialIcons name='cast' size={26} color='#efe9df' />
+                    </Pressable>
+                  )}
                   <Pressable onPress={() => { poke(); setSubPicker(true) }} style={styles.ctlBtn} hitSlop={8}>
                     <MaterialIcons name='closed-caption' size={26} color={activeSub ? '#e2a13d' : '#efe9df'} />
                   </Pressable>
