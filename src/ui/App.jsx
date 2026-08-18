@@ -278,26 +278,29 @@ function NavBar ({ active, onTab, saved = 0, busy = 0 }) {
 // poster - never a hole. The grid still appears the instant the titles do: waiting for
 // every poster before showing anything would trade a scruffy library for a blank screen,
 // which on a big library over a relay is minutes of nothing.
-function Cover ({ src, title }) {
+function Cover ({ src, title, onArt = null }) {
   const [loaded, setLoaded] = useState(false)
   useEffect(() => { setLoaded(false) }, [src])
+  // `onArt` fires on SETTLED, not on success: a tile with no artwork at all, or one whose
+  // poster fails, has finished as far as a screen waiting on it is concerned.
+  useEffect(() => { if (onArt && !src) onArt() }, [src])
   return (
     <div className='cover ph'>
       <span className='blank'>{(title || '?').slice(0, 2)}</span>
       {src && (
         <img
           src={src} loading='lazy' alt='' className={'poster' + (loaded ? ' in' : '')}
-          onLoad={() => setLoaded(true)}
+          onLoad={() => { setLoaded(true); if (onArt) onArt() }}
           // A poster that 404s or dies mid-transfer leaves the initials showing rather
           // than a broken-image glyph.
-          onError={() => setLoaded(false)}
+          onError={() => { setLoaded(false); if (onArt) onArt() }}
         />
       )}
     </div>
   )
 }
 
-function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false }) {
+function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onArt = null }) {
   const press = usePress(() => onOpen(item), () => onLong(item))
   if (list) {
     // The donor's list row: same .album, flexed sideways by .grid.aslist. The
@@ -305,7 +308,7 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false }) {
     const swallow = { onPointerDown: (e) => e.stopPropagation(), onPointerUp: (e) => e.stopPropagation() }
     return (
       <div className='album' {...press}>
-        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=120` : null} title={item.title} />
+        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=120` : null} title={item.title} onArt={onArt} />
         <div className='meta'>
           <div className='t'>{item.title}</div>
           <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
@@ -334,7 +337,7 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false }) {
         </button>
       )}
       <div {...press}>
-        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=350` : null} title={item.title} />
+        <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=350` : null} title={item.title} onArt={onArt} />
         <div className='t'>{item.title}</div>
         <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
       </div>
@@ -342,14 +345,31 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false }) {
   )
 }
 
-function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2 }) {
+// HOW MANY POSTERS COUNT AS "the first screenful", and how long they get.
+//
+// Tim, 2026-08-18: the shelf should not appear half-drawn while artwork is still crossing
+// a relay. It also must not become a blank screen for minutes, which waiting for a whole
+// library would be - so the wait is only for what a person can actually see, and it is
+// capped by a timer that always fires.
+//
+// Six is two columns by three rows, which is about what a phone shows before a scroll.
+// The timeout is the load-bearing half: one poster that 404s, or a host that stalls on
+// the fourth of six, must never hold the library hostage. It ends the wait and the rest
+// fade in behind the placeholders as they arrive.
+const FIRST_SCREENFUL = 6
+const ART_WAIT_MS = 6000
+
+function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2, onArtReady = null }) {
   const list = cols === 'list'
   return (
     <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
-      {items.map((i) => (
+      {items.map((i, idx) => (
         <Tile
           key={i.id} item={i} artBase={artBase} list={list}
           saved={savedSet?.has(i.id)} onOpen={onOpen} onLong={onLong} onSave={onSave}
+          // Only the tiles being waited on report back - a 200-film library must not
+          // fire two hundred state updates as it scrolls.
+          onArt={onArtReady && idx < FIRST_SCREENFUL ? onArtReady : null}
         />
       ))}
     </div>
@@ -706,6 +726,13 @@ export default function App () {
   const pullStartY = useRef(null)
   const [items, setItems] = useState(null)
   const [cursor, setCursor] = useState(null)
+  // Waiting on the first screenful of artwork before revealing the shelf (Tim,
+  // 2026-08-18). Counted rather than timed: `artSeen` climbs as the first few posters
+  // settle, and `artWaitOver` is the timer that guarantees the wait ends whatever the
+  // network does. Both reset when the person moves to a different shelf, not when more
+  // pages of the SAME shelf arrive - a "More" press must not hide what is on screen.
+  const [artSeen, setArtSeen] = useState(0)
+  const [artWaitOver, setArtWaitOver] = useState(false)
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
   const [query, setQuery] = useState('')
@@ -1445,6 +1472,22 @@ export default function App () {
 
   const ptr = refreshing ? 44 : pull
 
+  // Which shelf is on screen. A change here is a NEW wait; another page of the same
+  // shelf is not.
+  const shelfKey = `${root}|${mergedFilter}|${series?.id || ''}|${season?.id || ''}|${results ? 'q' : ''}`
+  useEffect(() => {
+    setArtSeen(0)
+    setArtWaitOver(false)
+    const t = setTimeout(() => setArtWaitOver(true), ART_WAIT_MS)
+    return () => clearTimeout(t)
+  }, [shelfKey])
+
+  // Reveal when the first screenful has settled, or when the timer says enough. Episodes
+  // in a season are a text list with no posters to wait for, so they never wait.
+  const artTarget = Math.min(FIRST_SCREENFUL, (results || items || []).length)
+  const waitingArt = !season && artTarget > 0 && !artWaitOver && artSeen < artTarget
+  const noteArt = useCallback(() => setArtSeen((n) => n + 1), [])
+
   const libraryScreen = (
     <div
       className='app'
@@ -1570,7 +1613,13 @@ export default function App () {
         </div>
       )}
 
-      {items == null && !results && <Loading connecting={!linkUp} />}
+      {(items == null && !results) || waitingArt ? <Loading connecting={!linkUp} /> : null}
+
+      {/* Rendered but held back while the first screenful of artwork settles: hidden with
+          opacity rather than display, or the browser would never start the very image
+          loads being waited on. Pointer events go too, so nothing can be tapped through
+          the spinner. */}
+      <div className={waitingArt ? 'artwait' : ''}>
 
       {!series && !results && root === 'movies' && showRecent && recentRows.length > 0 && (
         <div className='shelf'>
@@ -1591,7 +1640,7 @@ export default function App () {
 
       {items != null && (results
         ? (results.length
-            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} />
+            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} onArtReady={noteArt} />
             : <p className='muted center-p'>Nothing matches "{query}".</p>)
         : season
           ? (
@@ -1605,7 +1654,7 @@ export default function App () {
               ))}
             </ul>
             )
-          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} />)}
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} onArtReady={noteArt} />)}
 
       {!results && cursor && (
         <button
@@ -1613,6 +1662,7 @@ export default function App () {
           onClick={() => fetchList(season ? { type: 'episodes', seasonId: season.id, limit: 200, cursor } : series ? { type: 'seasons', seriesId: series.id, limit: 100, cursor } : { type: root, limit: 100, cursor, sort: sortField || 'title', order: sortOrder }, true)}
         >More</button>
       )}
+      </div>
     </div>
   )
 

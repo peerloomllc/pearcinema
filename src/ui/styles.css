@@ -125,6 +125,11 @@ input {
   margin: .75rem 0; font-size: .9rem; text-align: left;
 }
 
+/* Held back while the first screenful of posters settles. Opacity rather than display,
+   because a hidden element never starts the image loads being waited on - and pointer
+   events off, so nothing is tapped through the spinner. */
+.artwait { opacity: 0; pointer-events: none; }
+
 /* The month's relay total: the number someone opens this section to find, so it is read
    at a glance instead of hunted for inside a sentence (Tim, 2026-08-18). */
 .usagefig {
