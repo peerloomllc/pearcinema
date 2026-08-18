@@ -2,6 +2,63 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - A ROKU IS FOUND, NOT CONFIGURED: casting without Home Assistant
+Tier: T2 (proposal `proposals/2026-08-18-cast-to-nearby-televisions.md` feature A, Tim
+picked the Roku half). PR pending.
+
+Context: Tim asked whether the phone could cast to a television the host has never met,
+and named a second case in the same breath - a library owner who does not run Home
+Assistant. The first draft of the proposal had folded them together and made the cheap one
+look expensive. They are different features: the phone-serves-a-nearby-TV case (B) inverts
+the topology and permanently weakens revoke; THIS one changes nothing about the topology
+at all. The host still finds, commands, mints its own URL, serves the film and stops the
+device. Every inherited invariant survives untouched.
+
+WHY ROKU BEFORE CHROMECAST. ECP is plain HTTP on 8060 and SSDP is plain UDP - no TLS, no
+protobuf, no dependency. The Cast protocol needs both, and `castv2`, the usable library,
+was last published in 2022. Taking on an unmaintained dependency in the path of a feature
+is a thing to do deliberately, not as a first step.
+
+THE ENTITY ID IS `roku:<host>`, and that is load-bearing rather than cosmetic: everything
+downstream already branches on /roku/i - `capsFor` in host/cast.js hands a Roku the
+Matroska-capable list, and speakers.play picks the Roku payload shape first. A television
+found this way therefore lands in exactly the paths the living room already measured for
+one found through HA.
+
+A ROUTER, NOT A MERGE INSIDE SPEAKERS. `host/cast-targets.js` routes by id and merges the
+two rosters; Home Assistant is CONFIGURATION (a url, a token, an operator) and discovery is
+whatever is on the wire this minute, so an HA outage cannot take the found televisions with
+it and a network with no multicast cannot break a configured one. Each half's failure costs
+only its own half. A television that is both configured AND discovered is deduped to the
+configured entry, which is the one an operator can hide and rename.
+
+THREE THINGS THAT WOULD HAVE BEEN WRONG QUIETLY:
+- `stateFrom` translates Roku's 'play'/'pause' into 'playing'/'paused'. host/cast.js reads
+  those by name, so a backend answering Roku's own words would be invisible to every
+  session rule while looking like it worked.
+- A position of 0 is a real position, so an unreadable one is null. Otherwise a film that
+  has not reported yet looks like it rewound.
+- STOP IS HOME. ECP has no media stop; Home exits the channel and ends the bytes. This is
+  the same key the HA path falls back to after media_stop 500s on a Roku - this backend
+  just starts there. Revoke rides it, which is why it is the first thing the test pins.
+
+Discovery is best-effort by construction (a sleeping device does not answer) and the first
+`list()` waits ~2.5s for it while later ones answer from the roster and refresh behind. The
+alternative - never waiting - means the cast button is missing on the one screen where
+somebody is looking for it.
+
+The old "Home Assistant is not configured" error is reworded: it sent an owner who has none
+off to install software they do not need.
+
+TEST: `test/roku.test.js` (+15) against a REAL http server answering real ECP shapes,
+because everything here is a matter of getting somebody else's protocol right and a mock
+would only prove the file agrees with itself. Discovery is injected instead - SSDP is
+multicast, and a test that shouts on the developer's own network finds their living room
+on a good day and nothing on a bad one. verify green: 579 pass.
+
+NOT DONE: no hardware. Nobody has cast to a real Roku this way yet, and the ECP shapes are
+from Roku's documentation rather than from a device in the room.
+
 ## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
 Tier: T2 (PR pending). Two things from Tim while using the relayed build.
 
