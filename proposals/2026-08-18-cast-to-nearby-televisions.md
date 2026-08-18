@@ -8,10 +8,61 @@ Assistant but are on the same network as the phone?"
 direction the film travels, which is where the whole cost sits - and it costs a security
 invariant that today is free.
 
+**CORRECTED 2026-08-18, same day.** Tim named a second case this was quietly folding into
+the first: **a library owner who does not run Home Assistant at all.** That is a
+completely different feature with a completely different price, and lumping the two
+together made the cheap one look expensive. See "Two questions, not one" immediately
+below. The recommendation at the bottom changed as a result.
+
 **Tier**: **T3 if built as described.** It makes the phone serve film bytes on the LAN,
 which is a new listening surface on a device that today listens to nothing, and it moves
 the enforcement point for revoke off the host and onto the phone. Neither is a rollback
 you can do quietly.
+
+## Two questions, not one
+
+| | who finds the TV | who serves the film | revoke still works | cost |
+| --- | --- | --- | --- | --- |
+| **A. No Home Assistant** | the HOST, itself | the host, as today | **yes, unchanged** | moderate |
+| **B. A TV only the phone can see** | the phone | the PHONE | weakened, permanently | large |
+
+They feel like one question - "cast to a television that is not in the list" - and they
+are not. **A is a dependency problem: casting works, but only for people who already run
+Home Assistant.** B is a topology problem, and it is the one the rest of this document
+costs.
+
+### A. The host casts without Home Assistant
+
+Today `host/speakers.js` is Home Assistant's REST API and nothing else, so a library owner
+with a Chromecast in the living room and no HA has no casting at all - not because
+anything technical is missing, but because a fairly involved piece of home-automation
+software is in the way. That is a real gate: HA is a reasonable thing for a NAS owner to
+run and an unreasonable thing to require.
+
+**Nothing about the topology changes.** The host still discovers, still commands, still
+mints its own LAN URL, still serves the film itself, and still stops the television on
+revoke. Every invariant in `CLAUDE.md` survives untouched, because the host stays the one
+holding both halves.
+
+What it needs is a second backend behind the interface `speakers.js` already defines
+(`enabled`, list, `play`, `stop`, `getState`, `canSeek`) - and unlike the phone, **the
+host is Node**, where UDP and TLS are ordinary:
+
+- **Discovery**: mDNS for `_googlecast._tcp`, and SSDP for Roku. `bonjour-service` is MIT
+  and actively maintained (last published 2026-07-28).
+- **Control**: the Cast protocol is TLS + protobuf. `castv2` is MIT but last published in
+  2022, which is the risk to weigh - it is a stable protocol and a small surface, but an
+  unmaintained dependency in the path of a feature is a thing to accept knowingly rather
+  than by omission. Roku's ECP needs no library at all: it is plain HTTP on port 8060.
+- **Serving**: already built. `host/cast.js` mints `/v/<token>`, tracks position, reports
+  progress and stops the device on revoke, all of it independent of how the command got
+  there.
+
+The honest catch: discovery is per-network, so a host that cannot see the television on
+its own LAN still cannot cast to it - which is correct, and is exactly the boundary that
+makes B a separate feature.
+
+**This is the half worth building**, and it is worth building before anyone asks for B.
 
 ## What casting is today, and why the question comes up
 
@@ -132,6 +183,15 @@ value per unit of work:
 
 ## Recommendation
 
+**Build A. Do not build B yet, and do not promise it.**
+
+A removes a dependency that gates an existing feature behind somebody else's home
+automation stack, changes no topology, weakens no invariant, and reuses the serving,
+tokening, position-reporting and revoke machinery that already ships. The work is a
+discovery module and a control module behind an interface that already exists.
+
+As for B:
+
 **Do not build it yet, and do not promise it.** The relay work just made the current
 casting story unusually good - starting a film on the television at home while you are
 out costs the relay kilobytes - and this feature is that story's opposite in every
@@ -144,10 +204,14 @@ Chromecast.
 
 ## Open questions
 
-1. **Is the wanted case a hotel, or a friend's house?** They differ: a hotel television is
-   a one-off with a captive portal in the way, a friend's living room is somewhere the
-   person returns to and might reasonably be given their own grant instead - which is the
-   existing feature rather than this one.
+1. ~~**Is the wanted case a hotel, or a friend's house?**~~ **ANSWERED 2026-08-18: a
+   friend's house, AND a library owner who does not run Home Assistant.** The second half
+   is feature A above and does not need any of B - it is the case this document was
+   originally blind to.
+   The friend's house half is still worth stating plainly: somewhere a person RETURNS to
+   is usually better answered by giving that friend their own grant, which already works
+   and costs nothing new. Their television then talks to the library directly, on the
+   host's terms, with revoke intact. B is for the television nobody is coming back to.
 2. **Would a downloaded film casting count?** It is the one case with no bandwidth
    argument against it: the film is already on the phone. It is also the case where revoke
    has the least purchase, since nothing has to be fetched for playback to continue.
