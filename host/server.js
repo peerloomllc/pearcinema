@@ -24,6 +24,8 @@ const remoteLibs = require('./remote')
 const remoteDownloads = require('./remote-downloads')
 const blendLib = require('./blend')
 const { Speakers } = require('./speakers')
+const { RokuSpeakers } = require('./roku')
+const { CastTargets } = require('./cast-targets')
 const castLib = require('./cast')
 const watch = require('./watch')
 const sidecars = require('./sidecars')
@@ -211,7 +213,14 @@ class PearCinemaHost {
     // Casting to a television (video-deltas §5): PearTune's HA client trimmed
     // to video, and the session machinery with the video deltas. Disabled and
     // binding nothing until the operator configures Home Assistant.
-    this.speakers = new Speakers({ dataDir: this.dataDir, log })
+    // TWO WAYS TO FIND A TELEVISION, one interface (proposal
+    // 2026-08-18-cast-to-nearby-televisions, feature A). Home Assistant when the operator
+    // configured it, and Rokus found on the host's own network when they answer - so an
+    // owner who does not run HA is no longer locked out of casting entirely. The topology
+    // is unchanged either way: the host finds, commands, serves and stops.
+    this.ha = new Speakers({ dataDir: this.dataDir, log })
+    this.roku = new RokuSpeakers({ log })
+    this.speakers = new CastTargets({ configured: this.ha, discovered: this.roku, log })
     this.casts = new castLib.CastSessions({
       speakers: this.speakers,
       grants: this.host.grants,

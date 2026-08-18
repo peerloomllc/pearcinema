@@ -2,6 +2,120 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - A ROKU IS FOUND, NOT CONFIGURED: casting without Home Assistant
+Tier: T2 (proposal `proposals/2026-08-18-cast-to-nearby-televisions.md` feature A, Tim
+picked the Roku half). PR pending.
+
+Context: Tim asked whether the phone could cast to a television the host has never met,
+and named a second case in the same breath - a library owner who does not run Home
+Assistant. The first draft of the proposal had folded them together and made the cheap one
+look expensive. They are different features: the phone-serves-a-nearby-TV case (B) inverts
+the topology and permanently weakens revoke; THIS one changes nothing about the topology
+at all. The host still finds, commands, mints its own URL, serves the film and stops the
+device. Every inherited invariant survives untouched.
+
+WHY ROKU BEFORE CHROMECAST. ECP is plain HTTP on 8060 and SSDP is plain UDP - no TLS, no
+protobuf, no dependency. The Cast protocol needs both, and `castv2`, the usable library,
+was last published in 2022. Taking on an unmaintained dependency in the path of a feature
+is a thing to do deliberately, not as a first step.
+
+THE ENTITY ID IS `roku:<host>`, and that is load-bearing rather than cosmetic: everything
+downstream already branches on /roku/i - `capsFor` in host/cast.js hands a Roku the
+Matroska-capable list, and speakers.play picks the Roku payload shape first. A television
+found this way therefore lands in exactly the paths the living room already measured for
+one found through HA.
+
+A ROUTER, NOT A MERGE INSIDE SPEAKERS. `host/cast-targets.js` routes by id and merges the
+two rosters; Home Assistant is CONFIGURATION (a url, a token, an operator) and discovery is
+whatever is on the wire this minute, so an HA outage cannot take the found televisions with
+it and a network with no multicast cannot break a configured one. Each half's failure costs
+only its own half. A television that is both configured AND discovered is deduped to the
+configured entry, which is the one an operator can hide and rename.
+
+THREE THINGS THAT WOULD HAVE BEEN WRONG QUIETLY:
+- `stateFrom` translates Roku's 'play'/'pause' into 'playing'/'paused'. host/cast.js reads
+  those by name, so a backend answering Roku's own words would be invisible to every
+  session rule while looking like it worked.
+- A position of 0 is a real position, so an unreadable one is null. Otherwise a film that
+  has not reported yet looks like it rewound.
+- STOP IS HOME. ECP has no media stop; Home exits the channel and ends the bytes. This is
+  the same key the HA path falls back to after media_stop 500s on a Roku - this backend
+  just starts there. Revoke rides it, which is why it is the first thing the test pins.
+
+Discovery is best-effort by construction (a sleeping device does not answer) and the first
+`list()` waits ~2.5s for it while later ones answer from the roster and refresh behind. The
+alternative - never waiting - means the cast button is missing on the one screen where
+somebody is looking for it.
+
+The old "Home Assistant is not configured" error is reworded: it sent an owner who has none
+off to install software they do not need.
+
+TEST: `test/roku.test.js` (+15) against a REAL http server answering real ECP shapes,
+because everything here is a matter of getting somebody else's protocol right and a mock
+would only prove the file agrees with itself. Discovery is injected instead - SSDP is
+multicast, and a test that shouts on the developer's own network finds their living room
+on a good day and nothing on a bad one. verify green: 579 pass.
+
+HARDWARE, SAME DAY, and it found two things no test would have. Run against Tim's own
+network from the Umbrel (2026-08-18):
+
+1. **`state="none"`.** A real Roku Streaming Stick Plus sitting on its home screen answers
+   `none`, which is in no documentation I read. The first cut passed unknown states
+   through, so it would have reached the session poll as 'none', never matched the ended
+   test, and left a finished cast on the books forever. Now anything that is not playing,
+   paused or buffering is idle - for this path the only question is whether bytes are
+   flowing.
+2. **A device that answered the search and was not a Roku.** Two devices answered an
+   `ST: roku:ecp` M-SEARCH; the second had nothing listening on 8060 at all. Plenty of SSDP
+   implementations answer every search regardless of target, so the first cut - which
+   listed an unidentifiable device under a name that was just its IP - would have put a
+   printer in the television picker. A device now has to identify itself through
+   /query/device-info to be offered, and the rejection is logged with its reason.
+
+A third was found by reading the consumer rather than the wire: `getState` answered
+`positionMs`/`positionAt`, names of its own, while host/cast.js reads `position` and
+`duration` in SECONDS and parses `positionUpdatedAt` as a date. Every consumer would have
+read null - a cast that never reported progress and never resumed where it was left.
+
+3. **THE STICK CANNOT PLAY A URL AT ALL.** Attempting the launch answered a bare 404, and
+   `/query/apps` says why: it carries Netflix, Prime, Peacock, Hulu, Disney, Apple TV,
+   Plex, YouTube, HBO Max and a third-party "Media Assistant" - and NEITHER Roku Media
+   Player (2213) nor Play on Roku (15985). ECP cannot play a URL through a channel that is
+   not installed, so a Roku without one is a television this feature cannot use however
+   well it answers everything else.
+   The roster now CHECKS rather than assumes: a Roku with no media channel is not offered,
+   and the log names the fix (`install Roku Media Player`) rather than only the fault,
+   because that is a thing the owner can do in a minute and silence would read as
+   "PearCinema cannot see my television" when it plainly can. `play` refuses with the same
+   sentence rather than 404ing into the void.
+   This is the finding that most justifies Tim holding the merge for hardware: three of
+   these four would have shipped, and this one makes the feature a button that never works
+   on a device that looks perfect from every other angle.
+
+4. **ROKU MEDIA PLAYER DOES NOT PLAY URLS, AND THE DOCUMENTATION IS WRONG ABOUT THAT.**
+   This took four rounds and is the finding worth the whole exercise. `/launch/2213` 404'd
+   because RMP was not installed. Tim installed it. Then EVERY documented parameter form -
+   `t=v&u=`, `contentID=`, raw url, double-encoded url, with and without `videoFormat` -
+   answered 200, opened the channel on the television, and never fetched a byte. Roku
+   Media Player 5.5.19 accepts the launch and discards the URL. `/launch/15985` and
+   `/input/15985` (Play on Roku) 404 and cannot be installed - it is not a store channel.
+   Remote install is refused outright (401) on this firmware, so even the store page has
+   to be opened by hand.
+   THE ANSWER CAME FROM WATCHING A WORKING CAST. Tim's Home Assistant casts to this exact
+   Roku fine, so the path existed; polling `/query/active-app` while he cast from the app
+   named it in one line: the channel that plays is **782875, "Media Assistant"** - a
+   third-party channel, and exactly what Home Assistant's own Roku documentation tells
+   people to install. Handed the same `t=v&u=` parameters it fetched the file immediately.
+   So `MEDIA_CHANNELS` is Media Assistant and nothing else. RMP is deliberately excluded:
+   a device carrying RMP and not MA would be offered as a television and then do nothing
+   at all when pressed, which is worse than not being offered.
+
+END TO END, ON THE REAL DEVICE (2026-08-18, the shipping code, not a probe): discovery
+found the Roku and rejected the impostor; launch fetched the file from the host's server;
+`getState` reported `playing` with the position advancing 0.04 -> 3.1 -> 6.2 seconds
+against a duration of 38.8; stop returned it to idle. Every claim this backend makes is now
+hardware-proven.
+
 ## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
 Tier: T2 (PR pending). Two things from Tim while using the relayed build.
 

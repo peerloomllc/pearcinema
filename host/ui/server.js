@@ -1772,19 +1772,19 @@ async function startDashboard ({
       // actual casting over the wire. The token is write-only, the donor's
       // posture: the page learns it is set, never what it is.
       if (req.method === 'GET' && url.pathname === '/api/cast') {
-        return json(res, 200, host.speakers.publicConfig())
+        return json(res, 200, host.ha.publicConfig())
       }
       if (req.method === 'POST' && url.pathname === '/api/cast') {
         const body = await readBody(req)
         try {
-          return json(res, 200, host.speakers.save(body))
+          return json(res, 200, host.ha.save(body))
         } catch (e) {
           return json(res, 400, { error: e.message })
         }
       }
       if (req.method === 'POST' && url.pathname === '/api/cast/test') {
         try {
-          return json(res, 200, await host.speakers.test())
+          return json(res, 200, await host.ha.test())
         } catch (e) {
           return json(res, 400, { error: e.message })
         }

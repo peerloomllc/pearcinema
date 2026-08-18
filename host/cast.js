@@ -375,7 +375,9 @@ class CastSessions {
   // refusal throws BEFORE Home Assistant is told anything, so a film that
   // cannot reach this television fails on the phone, not as a black screen.
   async play ({ deviceKey, itemId, entityId, at = 0 }) {
-    if (!this.speakers.enabled) throw new Error('Home Assistant is not configured')
+    // Reworded 2026-08-18: casting no longer requires Home Assistant, so naming it here
+    // sent an owner who has none off to configure software they do not need.
+    if (!this.speakers.enabled) throw new Error('no way to reach a television from this library')
     await this.start()
 
     const item = await this.media.getItem(itemId)
