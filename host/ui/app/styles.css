@@ -268,6 +268,22 @@ button.iconbtn {
   padding: .25rem .4rem; line-height: 1;
 }
 button.iconbtn:hover { color: var(--fg) }
+/* A destructive icon says so on approach rather than only in its tooltip -
+ * losing the word "Remove" must not also lose the warning it carried. */
+button.iconbtn.danger:hover { color: var(--danger) }
+button.iconbtn:disabled { opacity: .45 }
+/* Inside a list row these are the whole control, so they get a real target
+ * rather than the topbar's tight padding. 34px square clears the 24px that a
+ * finger on a phone-width dashboard needs, and keeps the rows their old height. */
+.rootrow .iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; padding: 0; flex: none; border-radius: 7px;
+}
+.rootrow .iconbtn:hover { background: var(--card) }
+/* Losing the words must not flatten the hierarchy with them: playing a film is
+ * why the row exists, deleting it is not, and as plain icons they weighed the
+ * same. Colour carries what the filled button used to. */
+.rootrow .iconbtn.primary { color: var(--accent) }
 
 /* The search is a PILL, not a box inside one. Its input picks up the ordinary field
  * styling below unless it says otherwise - same specificity, and the general rule comes

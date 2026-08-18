@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -86,7 +86,10 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
               <button onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
                 {source === r.libraryId ? 'Watching' : 'Watch'}
               </button>
-              <button class='ghost' onClick={() => remove(r)}>Remove</button>
+              <button
+                class='iconbtn danger' onClick={() => remove(r)}
+                aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
+              ><Trash size={17} /></button>
             </div>
           ))}
         </div>
@@ -154,11 +157,21 @@ function DownloadsCard ({ remotes, onPlay }) {
                 : <span class='hint'> · {fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
             </span>
             {d.downloading
-              ? <button class='ghost' onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}>Cancel</button>
+              ? (
+                <button
+                  class='iconbtn' aria-label={`Stop downloading ${d.title || 'this'}`} title='Stop downloading'
+                  onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}
+                ><Close size={17} /></button>
+                )
               : (
                 <>
-                  <button onClick={() => onPlay(d)}>Play</button>
-                  <button class='ghost' onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}>Remove</button>
+                  <button class='iconbtn primary' aria-label={`Play ${d.title || 'this'}`} title='Play' onClick={() => onPlay(d)}>
+                    <Play size={18} />
+                  </button>
+                  <button
+                    class='iconbtn danger' aria-label={`Delete ${d.title || 'this'} from this machine`} title='Delete from this machine'
+                    onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}
+                  ><Trash size={17} /></button>
                 </>
                 )}
           </div>
@@ -210,7 +223,10 @@ function RequestsCard ({ remotes }) {
               {q.name} · {q.kind === 'series' ? 'show' : 'film'} · {q.status} · {q.libraryName || 'a library'}
             </span>
             {q.status === 'pending' && (
-              <button class='ghost' onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}>Withdraw</button>
+              <button
+                class='iconbtn danger' aria-label={`Withdraw your request for ${q.name}`} title='Withdraw'
+                onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}
+              ><Trash size={17} /></button>
             )}
           </div>
         ))}
@@ -336,11 +352,13 @@ function CastPanel () {
                     </span>
                   </span>
                   <button
-                    class='ghost'
+                    class='iconbtn'
                     disabled={busy}
                     onClick={() => toggleHidden(t.entityId)}
+                    aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
+                    title={t.hidden ? 'Offer this one' : 'Hide'}
                   >
-                    {t.hidden ? 'Offer this one' : 'Hide'}
+                    {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </div>
               ))}
