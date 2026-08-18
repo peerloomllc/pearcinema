@@ -311,10 +311,25 @@ function CastPanel () {
       <h3>Casting</h3>
       <p class='hint'>
         Send films from a phone to a TV: a Chromecast, a Google TV or a
-        television with Cast built in. PearCinema reaches them through the Home
-        Assistant running on this same machine: paste a long-lived access token
-        from your Home Assistant profile page. Only phones paired as owner can
-        cast, and cutting a phone off also stops whatever it put on a TV.
+        television with Cast built in. Only phones paired as owner can cast, and
+        cutting a phone off also stops whatever it put on a TV.
+      </p>
+      {/* ROKUS ARE FOUND WITHOUT ANY OF THIS, and the one thing they need is a thing
+          nobody would guess. Measured on a real stick 2026-08-18: Roku Media Player - the
+          channel every document points at - opens and then discards the film. Media
+          Assistant is what actually plays it, which is also what Home Assistant asks its
+          own Roku users to install. Without this line a person sees an empty picker and no
+          reason, because the reason only exists in a log they will never read. */}
+      <p class='hint'>
+        <strong>Rokus need no setup here</strong> - this machine finds them on its own
+        network. They do need the free <strong>Media Assistant</strong> channel installed
+        on the Roku itself: it is the only channel that will play a film handed to it, and
+        a Roku without it is skipped rather than offered as a TV that does nothing.
+      </p>
+      <p class='hint'>
+        Everything else - a Chromecast, a Google TV, a television with Cast built in -
+        comes through the Home Assistant running on this same machine: paste a long-lived
+        access token from your Home Assistant profile page.
       </p>
       <div class='field'>
         <label>Home Assistant address</label>
@@ -339,7 +354,7 @@ function CastPanel () {
       )}
       {targets !== null && (
         <>
-          <h3 style='margin-top:1rem'>What Home Assistant reports</h3>
+          <h3 style='margin-top:1rem'>Televisions this machine can reach</h3>
           {targets.length === 0 && <p class='hint'>No media players right now.</p>}
           {targets.length > 0 && (
             <div class='rootlist'>
@@ -349,6 +364,7 @@ function CastPanel () {
                     {t.name}
                     <span class='hint'>
                       {' · '}{t.deviceClass || 'kind not stated'} · {t.entityId} · {t.state}
+                      {t.via === 'roku' ? ' · found on the network' : ''}
                     </span>
                   </span>
                   <button
