@@ -32,6 +32,18 @@ const FIELDS = ['enabled', 'baseUrl', 'token', 'hidden']
 const CLASS_RANK = { tv: 0, receiver: 1, speaker: 3 }
 const UNCLASSED_RANK = 2
 
+// Home Assistant's MediaPlayerEntityFeature.SEEK, bit 1 of supported_features.
+// Named rather than written as a bare `& 2` at the call site, because the only
+// thing worse than a magic number is a magic number about somebody else's
+// enum. The living room supplied the reason this matters: a Roku's media_player
+// does not declare SEEK, the same way it does not declare media_stop
+// (DECISIONS 2026-08-17), and asking anyway is a 500 rather than a no.
+const FEATURE_SEEK = 2
+
+function canSeek (supportedFeatures) {
+  return (Number(supportedFeatures) & FEATURE_SEEK) === FEATURE_SEEK
+}
+
 function rankOf (t) {
   const r = CLASS_RANK[String(t.deviceClass || '').toLowerCase()]
   return r === undefined ? UNCLASSED_RANK : r
@@ -237,8 +249,22 @@ class Speakers {
       // HA reports position AS OF this stamp, not live - a Cast device updates
       // it on state changes, so "where is the film now" is position plus the
       // time since, while playing. The caller does that arithmetic.
-      positionUpdatedAt: s.attributes?.media_position_updated_at ?? null
+      positionUpdatedAt: s.attributes?.media_position_updated_at ?? null,
+      // Read HERE rather than remembered from the roster: the bitmask is
+      // DYNAMIC on Cast devices (the warning on list() above), so whether this
+      // television can be told to jump is a question about now, not about when
+      // the cast started.
+      supportedFeatures: Number(s.attributes?.supported_features || 0)
     }
+  }
+
+  // Tell the television to jump, in seconds from the start of what it is
+  // playing. Only meaningful for a stream the TV seeks itself - a generated one
+  // begins its own clock at zero and is re-cast instead.
+  seek (entityId, positionSeconds) {
+    return this._service('media_player', 'media_seek', {
+      entity_id: entityId, seek_position: Math.max(0, Math.round(positionSeconds))
+    })
   }
 
   _service (domain, service, data) {
@@ -315,4 +341,4 @@ class Speakers {
   }
 }
 
-module.exports = { Speakers, isLoopbackUrl, requireLoopback, DEFAULT_BASE_URL, CAST_CONFIG_FILE: FILE }
+module.exports = { Speakers, isLoopbackUrl, requireLoopback, canSeek, FEATURE_SEEK, DEFAULT_BASE_URL, CAST_CONFIG_FILE: FILE }

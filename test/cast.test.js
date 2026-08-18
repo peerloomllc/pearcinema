@@ -52,6 +52,7 @@ function fakeSpeakers () {
     async stop (entityId) { this.calls.push(['stop', entityId]) },
     async pause (entityId) { this.calls.push(['pause', entityId]) },
     async resume (entityId) { this.calls.push(['resume', entityId]) },
+    async seek (entityId, pos) { this.calls.push(['seek', entityId, pos]) },
     async getState (entityId) { return this.states.get(entityId) || null }
   }
 }
@@ -310,4 +311,94 @@ test('the host wires the package silence hook to the television', async (t) => {
   const silenced = await host.host._silenceFor('some-device-key')
   assert.equal(silenced, 1)
   assert.ok(speakers.calls.some(c => c[0] === 'stop' && c[1] === 'media_player.tv'))
+})
+
+// --- skipping about from the phone, as the remote ---------------------------
+//
+// The two transports skip by entirely different means, and the sharp edge is
+// that play() pins a DIRECT cast's start to zero - so re-casting a direct
+// stream to skip would restart the film from the beginning. These pin down
+// which mechanism each mode uses, and that a television which cannot seek is
+// told so rather than silently rewound.
+
+const TV = 'media_player.tv'
+const SEEKABLE = 2 // HA's MediaPlayerEntityFeature.SEEK
+
+test('a direct cast skips by telling the television to seek, not by starting again', async (t) => {
+  const { casts, speakers } = await build()
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV })
+  const playsBefore = speakers.calls.filter(c => c[0] === 'play').length
+
+  speakers.states.set(TV, { state: 'playing', position: 600, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 })
+
+  assert.equal(out.restarted, false, 'a direct stream is never re-minted to skip')
+  assert.deepEqual(speakers.calls.filter(c => c[0] === 'seek'), [['seek', TV, 630]])
+  assert.equal(speakers.calls.filter(c => c[0] === 'play').length, playsBefore, 'no second play')
+  assert.equal(out.positionMs, 630000)
+})
+
+test('a television that cannot seek is told so, rather than restarted from zero', async (t) => {
+  const { casts, speakers } = await build()
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV })
+  const playsBefore = speakers.calls.filter(c => c[0] === 'play').length
+
+  // A Roku's media_player declares no SEEK, the same way it declares no
+  // media_stop. Re-casting here would be the WORST outcome: play() pins a
+  // direct cast to zero, so an attempt to nudge forward would restart the film.
+  speakers.states.set(TV, { state: 'playing', position: 600, duration: 7200, positionUpdatedAt: null, supportedFeatures: 0 })
+  await assert.rejects(
+    casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 }),
+    /cannot skip/
+  )
+  assert.equal(speakers.calls.filter(c => c[0] === 'seek').length, 0)
+  assert.equal(speakers.calls.filter(c => c[0] === 'play').length, playsBefore, 'the film was not restarted')
+})
+
+test('a converted cast skips by starting the stream again at the new point', async (t) => {
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 100 })
+
+  // A generated stream's own clock starts at zero wherever it began, so the
+  // television reporting 20s means 120s of film - and a 30s skip lands at 150.
+  speakers.states.set(TV, { state: 'playing', position: 20, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 })
+
+  assert.equal(out.restarted, true)
+  assert.equal(out.positionMs, 150000)
+  assert.equal(speakers.calls.filter(c => c[0] === 'seek').length, 0, 'a generated stream is not seeked in place')
+  const row = casts.active(DEVICE)[0]
+  assert.equal(row.at, 150, 'the new offset is what makes the reported position honest')
+  assert.equal(casts.tokens.size, 1, 'the old token went with the old stream')
+})
+
+test('skipping back past the start lands at the start rather than failing', async (t) => {
+  const { casts, speakers } = await build()
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV })
+  speakers.states.set(TV, { state: 'playing', position: 5, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: -30000 })
+  assert.equal(out.positionMs, 0)
+  assert.deepEqual(speakers.calls.filter(c => c[0] === 'seek'), [['seek', TV, 0]])
+})
+
+test('skipping forward stops short of the ending, so a nudge cannot mark a film watched', async (t) => {
+  const { casts, speakers } = await build()
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV })
+  speakers.states.set(TV, { state: 'playing', position: 7195, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 })
+  assert.equal(out.positionMs, 7192000, 'clamped to eight seconds short of the end')
+})
+
+test('skipping a television that is playing nothing of ours is refused', async (t) => {
+  const { casts } = await build()
+  t.after(() => casts.close())
+  await assert.rejects(
+    casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 }),
+    /nothing is playing/
+  )
 })

@@ -17,7 +17,7 @@ import {
   QrCode, Trash, ArrowsLeftRight, SignOut, ShareNetwork, GithubLogo,
   Lightning, Coffee, EnvelopeOpen, CaretRight, SlidersHorizontal,
   ArrowUp, ArrowDown, Palette, Key, Copy, CurrencyBtc, Code, LockKey, DeviceMobile,
-  Screencast, Pause, Prohibit
+  Screencast, Pause, Prohibit, Rewind, FastForward
 } from '@phosphor-icons/react'
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
@@ -203,6 +203,12 @@ function Section ({ id, title, Icon, open, onToggle, children }) {
     </div>
   )
 }
+
+// How far a skip on the cast bar moves. Thirty rather than the player's ten:
+// a converted cast skips by re-minting the stream, so a jump costs a real
+// pause, and ten seconds is a poor trade for one. Ten is right in the phone's
+// own player, where it is free.
+const SKIP_MS = 30000
 
 const TABS = [
   { key: 'library', label: 'Library', Icon: FilmStrip },
@@ -1206,6 +1212,34 @@ export default function App () {
     } catch (e) { setErr(e.message) }
   }
 
+  // Skipping is asked for as a DIRECTION, not a destination: the host is the
+  // one that knows where the film is, and it is the only place that gets a
+  // generated stream's offset right. A phone computing an absolute position
+  // from whatever it last heard would land the film somewhere nobody chose.
+  //
+  // A converted stream is re-minted at the new point, so there is a real pause
+  // before picture returns; the button locks while that happens rather than
+  // letting an impatient second tap skip twice from a position that has not
+  // settled.
+  const castSkip = async (deltaMs) => {
+    const c = casting
+    if (!c || c.seeking) return
+    setCasting({ ...c, seeking: true })
+    try {
+      const r = await call('cast.seek', { entityId: c.entityId, libraryId: c.libraryId, deltaMs })
+      setCasting((s) => (s && s.entityId === c.entityId ? { ...s, seeking: false, paused: false } : s))
+      if (r?.restarted) say(deltaMs > 0 ? 'Skipped forward' : 'Skipped back')
+      haptic()
+    } catch (e) {
+      // A television that cannot be told to jump says so once, and then stops
+      // offering - a button that always fails is worse than no button. A Roku
+      // playing a file direct is the case this exists for.
+      const cannot = /cannot skip/i.test(e.message || '')
+      setCasting((s) => (s && s.entityId === c.entityId ? { ...s, seeking: false, noSkip: cannot || s.noSkip } : s))
+      setErr(cannot ? 'This TV cannot skip while playing this film' : e.message)
+    }
+  }
+
   const stopCast = async () => {
     const c = casting
     if (!c) return
@@ -1871,10 +1905,22 @@ export default function App () {
               <div className='t'>{casting.title}</div>
               <div className='sub muted sm'>on {casting.name}</div>
             </div>
-            <button aria-label={casting.paused ? 'Resume the TV' : 'Pause the TV'} onClick={toggleCastPause}>
-              {casting.paused ? <Play size={20} /> : <Pause size={20} />}
-            </button>
-            <button aria-label='Stop the TV' onClick={stopCast}><X size={20} /></button>
+            <div className='acts'>
+              {!casting.noSkip && (
+                <button aria-label='Back thirty seconds' disabled={casting.seeking} onClick={() => castSkip(-SKIP_MS)}>
+                  <Rewind size={19} />
+                </button>
+              )}
+              <button aria-label={casting.paused ? 'Resume the TV' : 'Pause the TV'} onClick={toggleCastPause}>
+                {casting.paused ? <Play size={20} /> : <Pause size={20} />}
+              </button>
+              {!casting.noSkip && (
+                <button aria-label='Forward thirty seconds' disabled={casting.seeking} onClick={() => castSkip(SKIP_MS)}>
+                  <FastForward size={19} />
+                </button>
+              )}
+              <button aria-label='Stop the TV' onClick={stopCast}><X size={20} /></button>
+            </div>
           </div>
         )}
         <NavBar

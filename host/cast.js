@@ -44,6 +44,7 @@ const os = require('os')
 
 const { decide } = require('@peerloom/host')
 const { SCOPE } = require('@peerloom/host/constants')
+const { canSeek } = require('./speakers')
 
 // A cast token outlives one film by a margin, not by a season: four hours
 // covers any feature plus a long pause, and a longer tail is a bigger window
@@ -503,6 +504,58 @@ class CastSessions {
   // look at that device again while its film kept playing.
   deviceKeys () {
     return [...this.byDevice.keys()]
+  }
+
+  // --- skipping about, from the phone acting as the remote -----------------
+  //
+  // RELATIVE, not absolute, and deliberately so: the host already knows where
+  // the film is (it polls for exactly that, and _positionMs is the only place
+  // that gets a generated stream's offset right). A phone sending "back thirty
+  // seconds" cannot disagree with it; a phone sending an absolute position it
+  // worked out from a stale poll can, and would land the film somewhere nobody
+  // asked for.
+  //
+  // The two transports skip by entirely different means:
+  //
+  //   direct     the television is playing a file and seeking is its own job,
+  //              so ask Home Assistant to seek it. Some televisions cannot -
+  //              a Roku's media_player does not declare SEEK - and the honest
+  //              answer there is to say so, because the alternative is a
+  //              re-cast that would restart a direct stream from the very
+  //              beginning (play() pins a direct cast's `at` to 0).
+  //   generated  the stream's own clock starts wherever it began, so skipping
+  //              means minting it again at the new offset. That is play(),
+  //              which already slices an HLS playlist to a start point.
+  async seek ({ deviceKey, entityId, deltaMs }) {
+    const row = this.byDevice.get(deviceKey)?.get(entityId)
+    if (!row) throw new Error('nothing is playing on that television')
+
+    const state = await this.speakers.getState(entityId)
+    if (!state) throw new Error('that television is not answering')
+
+    const nowMs = this._positionMs(row, state)
+    if (nowMs === null) throw new Error('that television does not say where it is')
+
+    const durationMs = state.duration ? Math.round(Number(state.duration) * 1000) : 0
+    // Clamped so a skip near either end is a no-op rather than an error. The
+    // eight seconds off the end keep a forward skip from tipping the film into
+    // its own ending, which the poll would then report as watched.
+    const ceiling = durationMs > 8000 ? durationMs - 8000 : null
+    let targetMs = Math.max(0, nowMs + Number(deltaMs || 0))
+    if (ceiling !== null) targetMs = Math.min(targetMs, ceiling)
+
+    if (row.mode === 'direct') {
+      if (!canSeek(state.supportedFeatures)) {
+        throw new Error('this television cannot skip while playing this film')
+      }
+      await this.speakers.seek(entityId, targetMs / 1000)
+      return { ok: true, mode: row.mode, positionMs: targetMs, restarted: false }
+    }
+
+    // A generated stream is re-minted at the new offset. play() replaces this
+    // device's token for this entity, so nothing is left holding the old one.
+    await this.play({ deviceKey, itemId: row.itemId, entityId, at: Math.floor(targetMs / 1000) })
+    return { ok: true, mode: row.mode, positionMs: targetMs, restarted: true }
   }
 
   // Which entities a device currently has playing, so a phone reopening the

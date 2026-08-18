@@ -1544,8 +1544,14 @@ label.flabel { display: block; margin-top: .6rem; }
   font-weight: 600; font-size: .92rem;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Four controls and a title on a phone-width bar: the buttons group with their
+ * own tighter gap so the film's name keeps room to be read, which is what tells
+ * you WHICH cast you are about to skip. */
+.castbar .acts { flex: none; display: flex; align-items: center; gap: .1rem; }
 .castbar button {
   flex: none; display: flex; align-items: center; justify-content: center;
-  width: 2.4rem; height: 2.4rem; padding: 0; border-radius: 50%;
+  width: 2.3rem; height: 2.3rem; padding: 0; border-radius: 50%;
   background: none; border: none; color: inherit;
 }
+/* Locked while a converted stream is being minted again at the new point. */
+.castbar button:disabled { opacity: .4; }
