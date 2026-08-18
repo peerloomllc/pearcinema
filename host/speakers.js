@@ -22,7 +22,20 @@ const VERSION = 1
 // Same posture as the source config: a secret is never sent to the browser,
 // and an empty field on save means "leave it alone" rather than "clear it".
 const SECRETS = ['token']
-const FIELDS = ['enabled', 'baseUrl', 'token']
+const FIELDS = ['enabled', 'baseUrl', 'token', 'hidden']
+
+// Casting a FILM wants a screen. HA's device_class is the only honest signal
+// about which of a house's media players has one, and most of them do not set
+// it - so an unclassified entity ranks BETWEEN the screens and the speakers
+// rather than being treated as either. Ranked, never filtered: the only thing
+// that removes an entity from the phone's picker is the operator saying so.
+const CLASS_RANK = { tv: 0, receiver: 1, speaker: 3 }
+const UNCLASSED_RANK = 2
+
+function rankOf (t) {
+  const r = CLASS_RANK[String(t.deviceClass || '').toLowerCase()]
+  return r === undefined ? UNCLASSED_RANK : r
+}
 
 const DEFAULT_BASE_URL = 'http://127.0.0.1:8123'
 
@@ -66,6 +79,13 @@ function pick (cfg) {
   if (out.baseUrl != null) out.baseUrl = String(out.baseUrl).trim().replace(/\/+$/, '')
   if (out.token != null) out.token = String(out.token).trim()
   if (out.enabled != null) out.enabled = !!out.enabled
+  // An array of entity ids, deduped and cleaned. Anything that is not an array
+  // is dropped rather than coerced, so a malformed save cannot empty the list
+  // by accident - absent already means "leave it alone".
+  if (out.hidden != null) {
+    if (!Array.isArray(out.hidden)) delete out.hidden
+    else out.hidden = [...new Set(out.hidden.map(x => String(x).trim()).filter(Boolean))].sort()
+  }
   return out
 }
 
@@ -90,7 +110,7 @@ class Speakers {
   }
 
   _blank () {
-    return { version: VERSION, enabled: false, baseUrl: DEFAULT_BASE_URL, token: '' }
+    return { version: VERSION, enabled: false, baseUrl: DEFAULT_BASE_URL, token: '', hidden: [] }
   }
 
   // What the dashboard is allowed to see. The token becomes a boolean - enough
@@ -102,6 +122,7 @@ class Speakers {
       enabled: c.enabled,
       baseUrl: c.baseUrl,
       tokenSet: !!c.token,
+      hidden: [...(c.hidden || [])],
       problem: c.enabled ? requireLoopback(c.baseUrl) : null
     }
   }
@@ -177,9 +198,29 @@ class Speakers {
         entityId: s.entity_id,
         name: s.attributes?.friendly_name || s.entity_id.slice('media_player.'.length),
         state: s.state,
-        supportedFeatures: Number(s.attributes?.supported_features || 0)
+        supportedFeatures: Number(s.attributes?.supported_features || 0),
+        // HA's own word for what the thing IS: 'tv', 'speaker', 'receiver', or
+        // nothing at all. Kept rather than discarded so a picker for FILMS can
+        // put the screens first. Never used to hide anything on its own - a
+        // great many entities declare no class (the Voice PEs among them), and
+        // a missing class must not mean a missing television.
+        deviceClass: s.attributes?.device_class || null,
+        hidden: this.isHidden(s.entity_id)
       }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      // Screens first, then everything unclassified, then the things that can
+      // only make a noise. Alphabetical within each band, so the order is still
+      // predictable once the bands are.
+      .sort((a, b) => rankOf(a) - rankOf(b) || a.name.localeCompare(b.name))
+  }
+
+  // Entities the operator has pruned from the roster. Kept as a Set answer
+  // rather than an array scan because list() asks it once per entity.
+  isHidden (entityId) {
+    if (!this._hiddenSet || this._hiddenFor !== this.config.hidden) {
+      this._hiddenFor = this.config.hidden
+      this._hiddenSet = new Set(this.config.hidden || [])
+    }
+    return this._hiddenSet.has(entityId)
   }
 
   async getState (entityId) {
