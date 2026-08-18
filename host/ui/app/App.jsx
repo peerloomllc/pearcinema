@@ -265,6 +265,21 @@ function CastPanel () {
       : 'Casting is off.')
   }
 
+  // Hiding is saved on the spot rather than behind the Save button: it reads as
+  // a switch on a row, and a switch that needs a second press somewhere else to
+  // mean anything is a switch people get wrong. The roster reloads afterwards so
+  // the row's own label is the saved truth rather than a local guess.
+  const toggleHidden = async (entityId) => {
+    const now = new Set(cfg?.hidden || [])
+    now.has(entityId) ? now.delete(entityId) : now.add(entityId)
+    setBusy(true)
+    const r = await api('/api/cast', { hidden: [...now] })
+    setBusy(false)
+    if (r?.error) return notify('Not saved', r.error)
+    setCfg(r)
+    loadTargets()
+  }
+
   const runTest = async () => {
     setBusy(true)
     const r = await api('/api/cast/test', {})
@@ -316,16 +331,26 @@ function CastPanel () {
                 <div class='rootrow' key={t.entityId}>
                   <span class='rootpath'>
                     {t.name}
-                    <span class='hint'> · {t.entityId} · {t.state}</span>
+                    <span class='hint'>
+                      {' · '}{t.deviceClass || 'kind not stated'} · {t.entityId} · {t.state}
+                    </span>
                   </span>
+                  <button
+                    class='ghost'
+                    disabled={busy}
+                    onClick={() => toggleHidden(t.entityId)}
+                  >
+                    {t.hidden ? 'Offer this one' : 'Hide'}
+                  </button>
                 </div>
               ))}
             </div>
           )}
           <p class='hint'>
-            Phones offer all of these when casting. Speakers play a film's sound
-            only, so aim at the television. One that is off usually shows as
-            "off" or "unavailable" here until you turn it on.
+            Phones offer these when casting, televisions first. A speaker plays a
+            film's sound and nothing else, so hide the ones you will never send a
+            film to and they stop appearing on the phone. One that is off usually
+            shows as "off" or "unavailable" here until you turn it on.
           </p>
         </>
       )}

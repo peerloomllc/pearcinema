@@ -470,8 +470,11 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return {
         enabled: true,
         // `unavailable` means HA cannot reach the device, so offering it is
-        // offering a button that does nothing.
-        targets: targets.filter(t => t.state !== 'unavailable'),
+        // offering a button that does nothing. `hidden` is the operator's own
+        // pruning, done in the dashboard's Casting panel - a house has far more
+        // media players than televisions, and the picker is for the ones a film
+        // can actually appear on.
+        targets: targets.filter(t => t.state !== 'unavailable' && !t.hidden),
         active: casts.active(ctx.deviceKey)
       }
     },
