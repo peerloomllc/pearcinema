@@ -2,6 +2,48 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - POSTERS ARE KEPT, and the relay meter was counting direct bytes
+Tier: T2 (PR pending). Two things from Tim while using the relayed build.
+
+ARTWORK NOW PERSISTS, and it did not have to be built. `@peerloom/client` has carried
+`ArtStore` since PearTune's 2026-07-29 work - keyed by art id AND size, tagged with the
+owning library, LRU-capped - and this app simply never passed one to the shim. The
+shim's own cache is 120 entries and dies with the process, which is why every cold
+start re-fetched every visible poster, and why restarting always looked like a fresh
+download: it was one. Over a relay those are bytes PeerLoom pays for, spent again and
+again on bytes that never change.
+Wired at 2500 entries rather than the package's 4000: a film poster is bigger than a
+record sleeve, a 239-film library holding two sizes each is ~500 entries, so this covers
+several libraries while the worst case stays around a hundred-odd megabytes. Removing a
+library reclaims its art via `removeLibrary`, which is only possible BECAUSE the store
+tags each entry - art ids are namespaced per library, so a file on disk cannot otherwise
+say where it came from.
+
+THE METER WAS WRONG, and the correction is worth more than the fix. Tim's phone read
+867 MB against about a minute of relayed video. The mistake was in what "relayed" meant
+to the counter: I read `conn.rawStream.bytesReceived` on any connection we had OFFERED a
+relay for, and kept reading it for the connection's whole life.
+
+A relayed connection is NOT a separate socket. hyperdht points the SAME udx stream at the
+relay's address (`c.rawStream.connect(socket, remoteId, remotePort, remoteHost)`,
+lib/connect.js:825) and a late punch repoints it at the peer with `changeRemote`. So a
+connection that started relayed and then went direct kept counting every direct byte,
+which is most of them - and any wifi traffic on that same live connection too.
+
+The remote ADDRESS is the honest signal, and `relayStillOn` is the whole test: while the
+stream still points where the relay put it the bytes are relayed; the moment it points
+elsewhere the punch landed, so the count stops, the ceiling lifts and the marker goes.
+That is strictly better than the "we offered it" flag this shipped with this morning -
+which the phase-1 entry above described as erring towards over-reporting, without
+appreciating that the over-report could be 800x.
+
+The stored total is DISCARDED rather than migrated, via a version stamp on the file. A
+figure wrong by that much is worse than no figure.
+
+TEST: `test/relay.test.js` +3 - the address comparison including the port, "nothing to
+compare yet" erring towards relayed (the other way would quietly lift a cap somebody else
+pays for), and an old file never surviving into either the total or the nudge. Suite 555.
+
 ## 2026-08-18 - THE RELAY, PHASES 2 AND 3: consent, the marker, and a meter that never stops a film
 Tier: T3 (same proposal, PRs #95 and #96).
 

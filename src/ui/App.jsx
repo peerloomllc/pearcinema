@@ -908,6 +908,10 @@ export default function App () {
       on('merged:changed', () => setMergedTick((t) => t + 1)),
       on('host:connected', () => { setLinkUp(true); refreshRelay() }),
       on('host:disconnected', () => { setLinkUp(false); refreshRelay() }),
+      // A punch that landed late moved a live connection off the relay. The marker and
+      // the ceiling notice have to go with it, or the app keeps claiming a relay that is
+      // no longer in the path.
+      on('relay:changed', () => refreshRelay()),
       on('download:progress', (d) => {
         setDlRunning((rows) => {
           const rest = rows.filter((r) => r.itemId !== d.itemId)
