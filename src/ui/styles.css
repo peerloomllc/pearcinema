@@ -125,6 +125,13 @@ input {
   margin: .75rem 0; font-size: .9rem; text-align: left;
 }
 
+/* The month's relay total: the number someone opens this section to find, so it is read
+   at a glance instead of hunted for inside a sentence (Tim, 2026-08-18). */
+.usagefig {
+  font-size: 1.35rem; font-weight: 700; color: var(--color-text-primary);
+  margin: .15rem 0 .25rem;
+}
+
 /* The relay marker. A statement of fact rather than a problem, so it borrows the
    accent rather than the error colour: nothing is wrong, the film is just taking the
    long way round and looking softer for it. Sits above the shelf, one line, and only
@@ -1477,6 +1484,15 @@ label.flabel { display: block; margin-top: .6rem; }
 .track .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis }
 
 .cover { aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; background: var(--color-surface); display: grid; place-items: center }
+.cover { position: relative; overflow: hidden; }
+/* The poster lies OVER its own initials and fades in once decoded, so a tile whose
+   artwork is still crossing a slow link reads as a placeholder rather than a hole
+   (Tim, 2026-08-18). Absolute, or the image would push the initials out of the box. */
+.cover img.poster {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;
+  opacity: 0; transition: opacity .22s ease;
+}
+.cover img.poster.in { opacity: 1; }
 .cover img { width: 100%; height: 100%; object-fit: cover; display: block }
 .cover .blank { color: var(--color-text-muted); font-weight: 700; font-size: 1.3rem; text-transform: uppercase }
 .album .t { font-size: .82rem; line-height: 1.25; margin-top: .35rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical }
