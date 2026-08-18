@@ -402,3 +402,43 @@ test('skipping a television that is playing nothing of ours is refused', async (
     /nothing is playing/
   )
 })
+
+// --- where the film has got to, for the phone acting as remote --------------
+//
+// Asking the television is not enough, and these pin down why: a generated
+// stream's clock starts at zero wherever the film began, and an HLS playlist
+// sliced to a resume point reports the length of what is LEFT. Both would put
+// the wrong minute on the remote.
+
+test('the remote is told the film s clock, not the television s', async (t) => {
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska' })
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 1800 })
+
+  // The television is twenty seconds into a stream that itself began half an
+  // hour into the film, which is 1820s of film - not 20.
+  speakers.states.set(TV, { state: 'playing', position: 20, duration: 3900, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const w = await casts.where({ deviceKey: DEVICE, entityId: TV })
+
+  assert.equal(w.positionMs, 1820000)
+  // And the duration is the FILM's, off the item, not the 3900s of stream the
+  // television can see - otherwise a resumed film would look shorter than it is.
+  assert.equal(w.durationMs, 5700000)
+  assert.equal(w.mode, 'transcode')
+})
+
+test('a direct cast reports the television s own clock unchanged', async (t) => {
+  const { casts, speakers } = await build()
+  t.after(() => casts.close())
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV })
+  speakers.states.set(TV, { state: 'playing', position: 640, duration: 5700, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const w = await casts.where({ deviceKey: DEVICE, entityId: TV })
+  assert.equal(w.positionMs, 640000, 'a direct cast starts at zero, so there is no offset to add')
+  assert.equal(w.durationMs, 5700000)
+})
+
+test('asking where a television is that this device is not casting to answers nothing', async (t) => {
+  const { casts } = await build()
+  t.after(() => casts.close())
+  assert.equal(await casts.where({ deviceKey: DEVICE, entityId: TV }), null)
+})

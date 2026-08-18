@@ -558,6 +558,31 @@ class CastSessions {
     return { ok: true, mode: row.mode, positionMs: targetMs, restarted: true }
   }
 
+  // Where the film is, for a phone acting as the remote.
+  //
+  // NOT the same as asking the television, which is why this exists. A
+  // generated stream's own clock starts at zero wherever the film began, so a
+  // Roku forty minutes in reports forty minutes MINUS the start offset - and an
+  // HLS playlist sliced to a resume point reports the length of what is left
+  // rather than the length of the film. Both corrections live here: the
+  // position is the row's offset plus the television's clock, and the duration
+  // comes from the ITEM, which is the only thing that knows how long the film
+  // actually is.
+  async where ({ deviceKey, entityId }) {
+    const row = this.byDevice.get(deviceKey)?.get(entityId)
+    if (!row) return null
+    const state = await this.speakers.getState(entityId).catch(() => null)
+    if (!state) return null
+    const item = await this.media.getItem(row.itemId).catch(() => null)
+    return {
+      itemId: row.itemId,
+      mode: row.mode,
+      state: state.state,
+      positionMs: this._positionMs(row, state),
+      durationMs: item?.runtime ? Math.round(Number(item.runtime) * 1000) : null
+    }
+  }
+
   // Which entities a device currently has playing, so a phone reopening the
   // app can re-attach to a cast it started.
   active (deviceKey) {
