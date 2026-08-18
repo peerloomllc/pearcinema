@@ -105,6 +105,27 @@ async function compressToAvatarB64 (dataUrl, size = 256) {
   return c.toDataURL('image/jpeg', 0.82).split(',')[1]
 }
 
+// A real switch: a track the knob slides across, rather than a pill reading On or Off.
+// One component so every setting flips the same way and feels the same doing it.
+//
+// The haptic is HERE rather than left to the app-wide click handler, which fires the same
+// light tap on every button in the app. A switch is a state change rather than a
+// navigation, so it gets the heavier impact - and it fires on the way in, before the
+// re-render, so the tap lands with the knob's movement rather than after it.
+function Switch ({ on, onChange, label }) {
+  return (
+    <button
+      className={'switch' + (on ? ' on' : '')}
+      role='switch'
+      aria-checked={on}
+      aria-label={label}
+      onClick={() => { haptic('medium'); onChange(!on) }}
+    >
+      <span className='knob' />
+    </button>
+  )
+}
+
 function OptionList ({ options, value, onChange }) {
   return (
     <div className='optlist'>
@@ -1904,10 +1925,10 @@ export default function App () {
                 watching. Films that arrive this way are capped near 2.5 Mbps to keep the relay affordable.
               </div>
             </div>
-            <button
-              className={'toggle' + (useRelay ? ' on' : '')} role='switch' aria-checked={useRelay}
-              aria-label='Connect through a relay when needed'
-              onClick={() => { setUseRelay(!useRelay); call('setSettings', { useRelay: !useRelay }).catch(() => {}) }}
+            <Switch
+              on={useRelay}
+              label='Connect through a relay when needed'
+              onChange={(next) => { setUseRelay(next); call('setSettings', { useRelay: next }).catch(() => {}) }}
             />
           </div>
           {!useRelay && (
@@ -1984,10 +2005,11 @@ export default function App () {
               <div className='label'>Recently added row</div>
               <div className='desc'>The row of newest films above your library.</div>
             </div>
-            <button
-              className={'toggle' + (showRecent ? ' on' : '')} role='switch' aria-checked={showRecent}
-              onClick={() => setDisplay({ showRecent: !showRecent })}
-            >{showRecent ? 'On' : 'Off'}</button>
+            <Switch
+              on={showRecent}
+              label='Recently added row'
+              onChange={(next) => setDisplay({ showRecent: next })}
+            />
           </div>
 
           <div className='label' style={{ marginTop: '.7rem' }}>Player skin</div>
