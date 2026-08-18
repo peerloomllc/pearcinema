@@ -81,6 +81,30 @@ function capsWithRelayCeiling (caps, relayed) {
   return { ...caps, maxKbps: already ? Math.min(already, RELAY_MAX_KBPS) : RELAY_MAX_KBPS }
 }
 
+// CONSENT, before a film crosses somebody else's server (proposal §4, PearTune's audio
+// shape). Per library, `ask` by default. Returns what to DO rather than a boolean,
+// because "cannot play" has two very different shapes: one asks the person, the other is
+// a standing no they already gave.
+//
+//   'play'   - stream it
+//   'ask'    - prompt once, then remember
+//   'refuse' - a sticky deny. Do not prompt again; that library's settings row is where
+//              it gets reversed
+//
+// THIS GATES THE FILM ONLY. Browsing, search, artwork and watch-state cross the relay
+// with no prompt - they are kilobytes against a film's gigabytes, and gating them would
+// mean someone on a hard-NAT network opens a library to an empty screen and a dialog,
+// which moves the problem one step later rather than solving it. That is a DISCLOSED
+// trade: the Connection section says films may pass through a relay, and it says it
+// before this prompt ever appears. Do not route artwork or metadata through here without
+// changing that copy too.
+function relayVideoDecision ({ relayed, consent }) {
+  if (!relayed) return 'play'
+  if (consent === 'allow') return 'play'
+  if (consent === 'deny') return 'refuse'
+  return 'ask'
+}
+
 // A DOWNLOAD IS NEVER RELAYED (Tim, 2026-08-18, settling what the proposal left open).
 //
 // Playback over a relay is capped and that is the end of it: the session ends and nothing
@@ -98,7 +122,14 @@ function relayDownloadDecision ({ relayed }) {
   return relayed ? { action: 'refuse', message: RELAY_DOWNLOAD_REFUSAL } : { action: 'download', message: null }
 }
 
+// The standing no, in the words the person sees. Their own earlier answer, so it points
+// at where to change it rather than apologising.
+const RELAY_PLAY_REFUSAL =
+  'You chose not to play films from this library over a relay. You can change that in Settings, under Connection.'
+
 module.exports = {
+  relayVideoDecision,
+  RELAY_PLAY_REFUSAL,
   RELAY_DOWNLOAD_REFUSAL,
   relayDownloadDecision,
   RELAY_PUBLIC_KEY,

@@ -86,6 +86,40 @@ test('a looser choice by the viewer does not survive it', () => {
   assert.equal(relay.capsWithRelayCeiling({ maxKbps: 8000 }, true).maxKbps, 2500)
 })
 
+// --- consent ----------------------------------------------------------------
+
+test('a direct connection is never asked about', () => {
+  // The prompt is about a relay, so a library reached directly must never produce one -
+  // including for someone who once said no to relaying that same library.
+  for (const consent of ['ask', 'allow', 'deny', undefined]) {
+    assert.equal(relay.relayVideoDecision({ relayed: false, consent }), 'play')
+  }
+})
+
+test('a relayed film asks once when nothing has been said', () => {
+  assert.equal(relay.relayVideoDecision({ relayed: true, consent: 'ask' }), 'ask')
+  assert.equal(relay.relayVideoDecision({ relayed: true, consent: undefined }), 'ask', 'never answered means ask')
+})
+
+test('an answer is remembered in both directions', () => {
+  assert.equal(relay.relayVideoDecision({ relayed: true, consent: 'allow' }), 'play')
+  assert.equal(relay.relayVideoDecision({ relayed: true, consent: 'deny' }), 'refuse')
+})
+
+test('a no is sticky rather than a question asked again every time', () => {
+  // The difference between 'refuse' and 'ask' IS the feature: a standing no that keeps
+  // reappearing is not a decision the person made, it is a dialog they cannot escape.
+  assert.notEqual(relay.relayVideoDecision({ relayed: true, consent: 'deny' }), 'ask')
+  assert.match(relay.RELAY_PLAY_REFUSAL, /Settings/, 'and it has to say where to change it')
+})
+
+test('the refusals read as whole sentences a person could have written', () => {
+  for (const msg of [relay.RELAY_PLAY_REFUSAL, relay.RELAY_DOWNLOAD_REFUSAL]) {
+    assert.match(msg, /^[A-Z].*\.$/)
+    assert.doesNotMatch(msg, /HOLEPUNCH|kbps|NAT|DHT|relayThrough/)
+  }
+})
+
 // --- downloads --------------------------------------------------------------
 
 test('a download over the relay is refused, not quietly degraded', () => {

@@ -125,6 +125,19 @@ input {
   margin: .75rem 0; font-size: .9rem; text-align: left;
 }
 
+/* The relay marker. A statement of fact rather than a problem, so it borrows the
+   accent rather than the error colour: nothing is wrong, the film is just taking the
+   long way round and looking softer for it. Sits above the shelf, one line, and only
+   while it is true. */
+.relaybar {
+  display: flex; align-items: center; gap: .5rem;
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  color: var(--color-text-secondary); padding: .55rem .8rem; border-radius: 10px;
+  margin: .5rem 0; font-size: .82rem; text-align: left; line-height: 1.35;
+}
+.relaybar svg { flex: 0 0 auto; color: var(--color-accent); }
+
 /* A failure the user has to READ: an icon to catch the eye, a plain-language line,
    what to do about it, and - for a real bug - the technical text one tap away with
    a way to send it. Softer than the old red bar on purpose: this reports a problem,

@@ -682,6 +682,11 @@ export default function App () {
   const [useRelay, setUseRelay] = useState(true)
   const [ownRelayKey, setOwnRelayKey] = useState('')
   const [relayKeySaved, setRelayKeySaved] = useState(true)
+  // The one-time question before a film crosses a relay, and the libraries currently
+  // reaching us that way. `relayAsk` holds the film that is waiting on the answer, so a
+  // Yes plays it rather than making the person press the poster twice.
+  const [relayAsk, setRelayAsk] = useState(null)
+  const [relayLibs, setRelayLibs] = useState([])
   // The player skins - cosmetic overlays drawn by the shell, PearTune's
   // Winamp-toggle pattern. The 35mm skin's tone is the exception: a phone
   // cannot repaint a native video surface, so a tone rides the capability
@@ -787,6 +792,13 @@ export default function App () {
     toastTimer.current = setTimeout(() => setToast(''), 2600)
   }
 
+  // Which libraries are reaching us through a relay right now, and what each was told
+  // about it. Asked rather than pushed: the answer changes only when a connection is
+  // made or lost, and both of those already call this.
+  const refreshRelay = useCallback(() => {
+    call('relay.status').then((r) => setRelayLibs(r?.libraries || [])).catch(() => {})
+  }, [])
+
   const reload = useCallback(async () => {
     const s = await call('app.state')
     setState(s)
@@ -808,6 +820,7 @@ export default function App () {
       // could delay first frames. Refreshed whenever the picker actually runs,
       // so configuring Home Assistant shows up without a reinstall.
       call('cast.list').then((r) => setCanCast(!!r?.enabled && (r.targets || []).length > 0)).catch(() => {})
+      refreshRelay()
     }
     return s
   }, [])
@@ -818,8 +831,8 @@ export default function App () {
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
       on('merged:changed', () => setMergedTick((t) => t + 1)),
-      on('host:connected', () => setLinkUp(true)),
-      on('host:disconnected', () => setLinkUp(false)),
+      on('host:connected', () => { setLinkUp(true); refreshRelay() }),
+      on('host:disconnected', () => { setLinkUp(false); refreshRelay() }),
       on('download:progress', (d) => {
         setDlRunning((rows) => {
           const rest = rows.filter((r) => r.itemId !== d.itemId)
@@ -914,10 +927,16 @@ export default function App () {
         // The episode being left keeps its place, same contract as closing.
         if (d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
         try {
-          const [{ url }, prior] = await Promise.all([
+          const [next, prior] = await Promise.all([
             call('stream.url', { itemId: target.id }),
             call('resume.get', { itemId: target.id }).catch(() => null)
           ])
+          // A prompt cannot be answered from under the native player, so the next
+          // episode simply does not roll. In practice the first film in this library
+          // already answered it - this is the case where the link dropped to a relay
+          // mid-session, and the honest move is to stop rather than to ask invisibly.
+          if (next?.needsRelayConsent) return setErr('The next one needs your say-so first. Close the player and press play on it.')
+          const url = next.url
           // No resume OFFER here: the native player covers the screen, so a
           // sheet under it would be an invisible question. A part-watched
           // episode just resumes; scrubbing back is one gesture.
@@ -930,10 +949,12 @@ export default function App () {
       on('player:burn', async (d) => {
         if (!d?.itemId) return
         try {
-          const { url } = await call('stream.url', {
+          const burnt = await call('stream.url', {
             itemId: d.itemId,
             ...(d.subtitleId ? { burnSubtitleId: d.subtitleId } : {})
           })
+          if (burnt?.needsRelayConsent) return setErr('Subtitles need a fresh stream, and this library has not been cleared for the relay yet.')
+          const url = burnt.url
           await call('shell.play', {
             itemId: d.itemId,
             url,
@@ -951,8 +972,10 @@ export default function App () {
         }
         retried.current.add(d.itemId)
         try {
-          const { url, mode } = await call('stream.url', { itemId: d.itemId, deviceRefusedVideo: true })
-          if (mode === 'transcode') await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
+          const retry = await call('stream.url', { itemId: d.itemId, deviceRefusedVideo: true })
+          const { url, mode } = retry
+          if (retry?.needsRelayConsent) setErr('This one needs converting, and this library has not been cleared for the relay yet.')
+          else if (mode === 'transcode') await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
           else setErr('This one failed to play on this device, and the host cannot convert it.')
         } catch (e) { setErr(e.message) }
       })
@@ -1143,13 +1166,16 @@ export default function App () {
     if (i.type === 'series') { setTab('library'); return setSeries(i) }
     if (i.type === 'season') { setTab('library'); return setSeason(i) }
     try {
-      const [{ url }, prior] = await Promise.all([
+      const [res, prior] = await Promise.all([
         call('stream.url', { itemId: i.id }),
         call('resume.get', { itemId: i.id }).catch(() => null)
       ])
+      // The film is reachable only through a relay and this library has never been
+      // asked. No url came back, deliberately, so there is nothing to play by accident.
+      if (res?.needsRelayConsent) return setRelayAsk({ item: i, ...res })
       const startMs = prior?.resume?.positionMs > 0 ? prior.resume.positionMs : 0
-      if (startMs > 0) return setResumeOffer({ item: i, url, positionMs: startMs })
-      await play(i, url, 0)
+      if (startMs > 0) return setResumeOffer({ item: i, url: res.url, positionMs: startMs })
+      await play(i, res.url, 0)
     } catch (e) { setErr(e.message) }
   }
 
@@ -1480,6 +1506,20 @@ export default function App () {
       )}
 
       {err && <div className='error'>{err}</div>}
+
+      {/* The marker. Nobody should discover after the fact that their films took the
+          long way round, and the quality drop is a fact worth explaining before it is
+          noticed rather than after. One line, and only while it is true. */}
+      {relayLibs.some((l) => l.relayed) && (
+        <div className='relaybar'>
+          <Broadcast size={15} weight='fill' />
+          <span>
+            {relayLibs.filter((l) => l.relayed).length > 1
+              ? 'Some of your libraries are coming through a relay. Films play at a lower quality.'
+              : `${relayLibs.find((l) => l.relayed)?.libraryName || 'This library'} is coming through a relay. Films play at a lower quality.`}
+          </span>
+        </div>
+      )}
 
       {items == null && !results && <Loading connecting={!linkUp} />}
 
@@ -1886,6 +1926,34 @@ export default function App () {
             placeholder='Relay key (optional)' maxLength={64} aria-label='Your own relay key'
             onInput={(e) => { setOwnRelayKey(e.currentTarget.value); setRelayKeySaved(false) }}
           />
+          {relayLibs.length > 0 && (
+            <>
+              <div className='label' style={{ marginTop: '.9rem' }}>Your libraries</div>
+              {relayLibs.map((l) => (
+                <div className='row' key={l.libraryId}>
+                  <div>
+                    <div className='label'>{l.libraryName || 'A library'}</div>
+                    <div className='desc'>
+                      {l.relayed ? 'Coming through a relay right now. ' : 'Connected directly. '}
+                      {l.consent === 'allow' && 'Films may use the relay.'}
+                      {l.consent === 'deny' && 'You said no to films over the relay.'}
+                      {l.consent === 'ask' && 'You will be asked once, the first time a film needs it.'}
+                    </div>
+                  </div>
+                  {l.consent !== 'ask' && (
+                    <button
+                      className='ghost'
+                      onClick={async () => {
+                        await call('relay.consent.set', { libraryId: l.libraryId, decision: 'ask' }).catch(() => {})
+                        refreshRelay()
+                        say('You will be asked again next time')
+                      }}
+                    >Ask again</button>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
           {!relayKeySaved && (
             <button
               className='profile-save'
@@ -2164,6 +2232,45 @@ export default function App () {
                 }}
               ><Prohibit size={18} /> Cut off</button>
               <button className='ghost' onClick={() => setRevoking(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Asked ONCE per library, before a film crosses a relay. Not a warning dialog:
+          browsing already came this way and nobody was asked, because it was kilobytes.
+          A film is the first thing worth stopping for, and the answer is remembered. */}
+      {relayAsk && (
+        <div className='sheetwrap' onClick={() => setRelayAsk(null)}>
+          <div className='sheet' onClick={(e) => e.stopPropagation()}>
+            <h3>Play over a relay?</h3>
+            <p className='muted sm'>
+              This network will not let your phone reach {relayAsk.libraryName || 'this library'} directly, so
+              the film would come by way of a relay - a middleman that passes it along without being able to
+              see what you are watching. It arrives at a lower quality to keep the relay affordable.
+              {' '}Answered once, and remembered for this library.
+            </p>
+            <div className='acts'>
+              <button
+                onClick={async () => {
+                  const ask = relayAsk
+                  setRelayAsk(null)
+                  try {
+                    await call('relay.consent.set', { libraryId: ask.libraryId, decision: 'allow' })
+                    const res = await call('stream.url', { itemId: ask.item.id })
+                    if (res?.url) await play(ask.item, res.url, 0)
+                  } catch (e) { setErr(e.message) }
+                }}
+              ><Play size={18} weight='fill' /> Play it</button>
+              <button
+                className='ghost'
+                onClick={async () => {
+                  const ask = relayAsk
+                  setRelayAsk(null)
+                  await call('relay.consent.set', { libraryId: ask.libraryId, decision: 'deny' }).catch(() => {})
+                  say('Films from this library will not use a relay')
+                }}
+              >Not over a relay</button>
             </div>
           </div>
         </div>
