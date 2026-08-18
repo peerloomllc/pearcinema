@@ -81,7 +81,26 @@ function capsWithRelayCeiling (caps, relayed) {
   return { ...caps, maxKbps: already ? Math.min(already, RELAY_MAX_KBPS) : RELAY_MAX_KBPS }
 }
 
+// A DOWNLOAD IS NEVER RELAYED (Tim, 2026-08-18, settling what the proposal left open).
+//
+// Playback over a relay is capped and that is the end of it: the session ends and nothing
+// is kept. A download does not end - the copy on the phone is what gets watched on a
+// television months later, so a moment spent off wifi would follow the film around
+// forever at a quality nobody chose. It is also the heaviest thing the relay could carry,
+// a whole film at once rather than an hour of it at a time.
+//
+// Returns what to DO rather than a boolean, and carries the sentence a person sees, so
+// the reason and the wording cannot drift apart across the two paths that show it.
+const RELAY_DOWNLOAD_REFUSAL =
+  'This one needs wifi. You are connected through a relay right now, and a downloaded film should be the full-quality copy.'
+
+function relayDownloadDecision ({ relayed }) {
+  return relayed ? { action: 'refuse', message: RELAY_DOWNLOAD_REFUSAL } : { action: 'download', message: null }
+}
+
 module.exports = {
+  RELAY_DOWNLOAD_REFUSAL,
+  relayDownloadDecision,
   RELAY_PUBLIC_KEY,
   RELAY_PUBLIC_KEY_Z,
   RELAY_MAX_KBPS,

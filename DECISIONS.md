@@ -2,6 +2,35 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-18 - A DOWNLOAD IS NEVER RELAYED
+Tier: T2 (a product rule inside the approved relay work, Tim 2026-08-18).
+Context: phase 1 shipped with downloads INHERITING the relay ceiling, because
+`capsForDownload` derives from `capsFor` and "whenever the bytes are relayed" has to
+include the heaviest case there is. Flagged at the time rather than buried, because a
+download is not a session: the copy on the phone is what gets watched on a television
+months later, so a moment spent off wifi would follow the film around forever at a
+quality nobody chose - and nobody would know why.
+
+Choice: refuse it, rather than cap it or wave it through. Uncapped was the other
+serious option and it is the one case where a hard limit would genuinely be missed -
+a single film is 8-15 GB, roughly a fiftieth of the monthly tier for one download.
+Refusing costs the relay nothing and leaves no bad copy behind.
+
+The check sits in `startDownload`, not in the UI, because every path into a download
+- the button, a retry, an item that resumes on reconnect - has to hit the same rule,
+and only the worklet knows how that library's connection was made. The rule and its
+wording live in `src/relay.js` as `relayDownloadDecision`, returning an action and the
+sentence a person sees, so the reason and the copy cannot drift apart.
+
+`capsForDownload` keeps inheriting the ceiling even though nothing can now reach it
+over a relay. If the refusal is ever relaxed, a relayed download is capped rather than
+silently uncapped, which is the safe direction for a rule about somebody else's
+bandwidth.
+
+TEST: `test/relay.test.js` +3 - the refusal, the untouched direct case, and that the
+message reads as a whole sentence with no jargon in it (it is thrown by the worklet and
+shown verbatim by the phone).
+
 ## 2026-08-18 - THE RELAY, PHASE 1: direct first, and a ceiling on anything relayed
 Tier: T3 (proposal `proposals/2026-08-18-relay-for-video.md`, approved by Tim - PR #92 merged).
 Context: a phone off wifi could not reach its library AT ALL on Google Fi. Not a
