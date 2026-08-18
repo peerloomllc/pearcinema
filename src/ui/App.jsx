@@ -268,10 +268,31 @@ function NavBar ({ active, onTab, saved = 0, busy = 0 }) {
   )
 }
 
+// A poster that is still arriving must not look like a poster that is missing, and
+// neither may look like a bug (Tim, 2026-08-18, watching a library load over a relay:
+// "a bunch of empty posters with the badges"). Artwork crosses the relay one file at a
+// time, so on a slow link every tile was an empty box with a badge floating on it.
+//
+// So the initials are ALWAYS drawn, and the image fades in on top once it has actually
+// decoded. A tile therefore starts as a deliberate-looking placeholder and becomes a
+// poster - never a hole. The grid still appears the instant the titles do: waiting for
+// every poster before showing anything would trade a scruffy library for a blank screen,
+// which on a big library over a relay is minutes of nothing.
 function Cover ({ src, title }) {
+  const [loaded, setLoaded] = useState(false)
+  useEffect(() => { setLoaded(false) }, [src])
   return (
-    <div className='cover'>
-      {src ? <img src={src} loading='lazy' alt='' /> : <span className='blank'>{(title || '?').slice(0, 2)}</span>}
+    <div className='cover ph'>
+      <span className='blank'>{(title || '?').slice(0, 2)}</span>
+      {src && (
+        <img
+          src={src} loading='lazy' alt='' className={'poster' + (loaded ? ' in' : '')}
+          onLoad={() => setLoaded(true)}
+          // A poster that 404s or dies mid-transfer leaves the initials showing rather
+          // than a broken-image glyph.
+          onError={() => setLoaded(false)}
+        />
+      )}
     </div>
   )
 }
@@ -1971,10 +1992,16 @@ export default function App () {
           {relayUsage && (
             <>
               <div className='label' style={{ marginTop: '.9rem' }}>This month through the relay</div>
-              <div className='desc'>
+              {/* The figure is the thing being looked FOR, so it is read at a glance
+                  rather than found inside a paragraph (Tim, 2026-08-18). */}
+              <div className='usagefig'>
                 {relayUsage.bytes > 0
-                  ? `About ${relayUsage.bytes >= 1e9 ? (relayUsage.bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(relayUsage.bytes / 1e6)) + ' MB'} so far. `
-                  : 'Nothing yet. '}
+                  ? (relayUsage.bytes >= 1e9
+                      ? (relayUsage.bytes / 1e9).toFixed(1) + ' GB'
+                      : Math.max(1, Math.round(relayUsage.bytes / 1e6)) + ' MB')
+                  : 'Nothing yet'}
+              </div>
+              <div className='desc'>
                 The relay is shared with everyone using PearCinema, so this counts towards the same
                 monthly allowance they use. Nothing is ever cut off part way through a film.
               </div>
