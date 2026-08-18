@@ -143,6 +143,65 @@ test('the refusal reads as a whole sentence, not a code', () => {
   assert.doesNotMatch(relay.RELAY_DOWNLOAD_REFUSAL, /HOLEPUNCH|kbps|NAT|DHT/)
 })
 
+// --- the meter and the nudge ------------------------------------------------
+
+const JUL = new Date(2026, 6, 15)
+const AUG = new Date(2026, 7, 2)
+
+test('bytes accumulate within a month, per library and in total', () => {
+  let u = relay.addUsage(null, { bytes: 1e9, libraryId: 'lib-a', now: JUL })
+  u = relay.addUsage(u, { bytes: 5e8, libraryId: 'lib-b', now: JUL })
+  u = relay.addUsage(u, { bytes: 5e8, libraryId: 'lib-a', now: JUL })
+  assert.equal(u.bytes, 2e9)
+  assert.deepEqual(u.byLibrary, { 'lib-a': 1.5e9, 'lib-b': 5e8 })
+  assert.equal(u.month, '2026-07')
+})
+
+test('a new month starts from nothing rather than carrying the old one', () => {
+  const july = relay.addUsage(null, { bytes: 40e9, libraryId: 'lib-a', now: JUL })
+  const august = relay.addUsage(july, { bytes: 1e9, libraryId: 'lib-a', now: AUG })
+  assert.equal(august.month, '2026-08')
+  assert.equal(august.bytes, 1e9, 'July must not follow the person into August')
+  assert.deepEqual(august.byLibrary, { 'lib-a': 1e9 })
+})
+
+test('a negative sample is dropped, not subtracted', () => {
+  // The counter it comes from lives on a UDX stream, so a reconnect starts a fresh one
+  // at zero. Subtracting that would silently erase a month of real usage.
+  const u = relay.addUsage({ month: relay.monthKey(JUL), bytes: 3e9, byLibrary: {} }, { bytes: -2e9, now: JUL })
+  assert.equal(u.bytes, 3e9)
+})
+
+test('no nudge below the threshold, and none at all for a stale month', () => {
+  assert.equal(relay.usageWarning({ month: relay.monthKey(JUL), bytes: 1e9 }, { now: JUL }), null)
+  assert.equal(relay.usageWarning({ month: '2025-01', bytes: 999e9 }, { now: JUL }), null, 'last year is not this month')
+  assert.equal(relay.usageWarning(null, { now: JUL }), null)
+})
+
+test('the nudge arrives past the threshold, and reads as a suggestion', () => {
+  const w = relay.usageWarning({ month: relay.monthKey(JUL), bytes: relay.RELAY_WARN_BYTES + 1e9 }, { now: JUL })
+  assert.ok(w, 'a heavy month has to say something')
+  assert.equal(w.gb, 21)
+  assert.match(w.message, /wifi/, 'it suggests what to do instead')
+  assert.doesNotMatch(w.message, /stop|blocked|cut off|limit/i, 'and it never threatens to stop anything')
+})
+
+test('the threshold is a share of the tier, not a number pulled out of the air', () => {
+  // 20 GB is about 18 hours of relayed video and about 4% of the 500 GB tier: heavy for
+  // one household, and nothing a normal month of watching would reach.
+  assert.equal(relay.RELAY_WARN_BYTES, 20e9)
+  const hours = relay.RELAY_WARN_BYTES / ((relay.RELAY_MAX_KBPS * 3600) / 8 / 1e6 * 1e9)
+  assert.ok(hours > 15 && hours < 20, `${hours} hours of relayed video before a word is said`)
+  assert.ok(relay.RELAY_WARN_BYTES < 500e9 * 0.05, 'and well under a tenth of the shared tier')
+})
+
+test('the month key follows the phone rather than UTC', () => {
+  // People read "this month" off their own calendar. A UTC month would roll over at a
+  // strange hour of the evening for anyone west of London.
+  assert.equal(relay.monthKey(new Date(2026, 0, 31, 23, 30)), '2026-01')
+  assert.equal(relay.monthKey(new Date(2026, 11, 1, 0, 5)), '2026-12')
+})
+
 test('the hour costs what the proposal says it costs', () => {
   // The whole argument for the number, restated as arithmetic so it cannot drift from the
   // table in the proposal: kbps -> GB/hour -> hours on a 500 GB tier.

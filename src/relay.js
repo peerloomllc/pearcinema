@@ -122,12 +122,72 @@ function relayDownloadDecision ({ relayed }) {
   return relayed ? { action: 'refuse', message: RELAY_DOWNLOAD_REFUSAL } : { action: 'download', message: null }
 }
 
+// --- what it is costing, and the nudge -------------------------------------
+//
+// Tim's call, 2026-08-18: metrics and a warning, no hard cap. Going over the tier costs
+// about a penny a gigabyte, so the thing a cap protects against is a few dollars, and the
+// way it protects against them stops a film mid-scene. So this counts, shows, and nudges.
+//
+// The count is BYTES RECEIVED on a connection we offered the relay for, sampled off the
+// UDX stream rather than tallied per chunk. That over-reports in one direction (a punch
+// that landed late is still counted as relayed, because hyperdht moves the live stream
+// across without telling us) and under-reports nothing, which is the right way round for
+// a number a person is being nudged about.
+
+// A month's worth for one person before they hear about it. 20 GB is roughly 18 hours of
+// relayed video, and about 4% of the 500 GB tier - a heavy share for one household rather
+// than a limit anybody bumps into by watching normally. Phone-side, so it can move
+// without redeploying the relay.
+const RELAY_WARN_BYTES = 20 * 1000 * 1000 * 1000
+
+// Which month a moment belongs to, in the phone's own timezone: a person reads "this
+// month" off their own calendar, not UTC's.
+function monthKey (now = new Date()) {
+  const d = now instanceof Date ? now : new Date(now)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+// Fold a sample into the running total, rolling over on a new month. Pure: the caller
+// does the reading and the writing, so the rollover is testable without waiting for one.
+//
+// A NEGATIVE delta is dropped rather than subtracted. The counter it comes from lives on
+// a UDX stream, so a reconnect starts a fresh one at zero - counting that as -3 GB would
+// silently erase a month of real usage.
+function addUsage (usage, { bytes, libraryId = null, now = new Date() } = {}) {
+  const month = monthKey(now)
+  const base = usage?.month === month ? usage : { month, bytes: 0, byLibrary: {} }
+  const add = Number(bytes) > 0 ? Math.round(Number(bytes)) : 0
+  const byLibrary = { ...(base.byLibrary || {}) }
+  if (libraryId) byLibrary[String(libraryId)] = (byLibrary[String(libraryId)] || 0) + add
+  return { month, bytes: (base.bytes || 0) + add, byLibrary }
+}
+
+// What to tell them, if anything. Returns null when there is nothing worth saying, so a
+// caller cannot accidentally render an empty nudge.
+function usageWarning (usage, { warnBytes = RELAY_WARN_BYTES, now = new Date() } = {}) {
+  if (!usage || usage.month !== monthKey(now)) return null
+  const bytes = Number(usage.bytes) || 0
+  if (bytes < warnBytes) return null
+  const gb = Math.round(bytes / 1e9)
+  return {
+    bytes,
+    gb,
+    // Said as a fact and a suggestion, not an accusation, and it never asks them to stop
+    // watching - the relay is shared, so the ask is to use wifi where wifi exists.
+    message: `You have watched about ${gb} GB through the relay this month. It is shared with everyone else using PearCinema, so wifi is kinder to it where you have it.`
+  }
+}
+
 // The standing no, in the words the person sees. Their own earlier answer, so it points
 // at where to change it rather than apologising.
 const RELAY_PLAY_REFUSAL =
   'You chose not to play films from this library over a relay. You can change that in Settings, under Connection.'
 
 module.exports = {
+  RELAY_WARN_BYTES,
+  monthKey,
+  addUsage,
+  usageWarning,
   relayVideoDecision,
   RELAY_PLAY_REFUSAL,
   RELAY_DOWNLOAD_REFUSAL,

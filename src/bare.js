@@ -102,6 +102,44 @@ function relayConsentFor (libraryId) {
   return ['allow', 'deny'].includes(v) ? v : 'ask'
 }
 
+// --- what the relay is carrying, counted on the phone ------------------------
+//
+// Sampled off each relayed connection's UDX byte counter rather than tallied per chunk:
+// one read covers playback, artwork, browse and the HLS segments at once, and no hot path
+// grows a counter. The last reading per library is kept so only the DELTA is added.
+const RELAY_USAGE_FILE = path.join(DATA_DIR, 'relay-usage.json')
+const relayBytesSeen = new Map() // libraryId -> the last counter reading we folded in
+
+function readRelayUsage () {
+  try { return JSON.parse(fs.readFileSync(RELAY_USAGE_FILE, 'utf8')) || null } catch { return null }
+}
+function writeRelayUsage (u) {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(RELAY_USAGE_FILE, JSON.stringify(u))
+}
+
+// Read every relayed connection's counter and fold in what is new. Called on a timer
+// while the app runs, and once more as a connection closes so its last stretch is not
+// lost - a film ending is exactly when the largest unfolded delta exists.
+function sampleRelayUsage () {
+  let usage = readRelayUsage()
+  let changed = false
+  for (const libraryId of relayedLibs) {
+    const slot = hostConns.get(libraryId)
+    const raw = slot?.client?.conn?.rawStream
+    const now = Number(raw?.bytesReceived)
+    if (!Number.isFinite(now)) continue
+    const before = relayBytesSeen.get(libraryId) || 0
+    // A reconnect starts a fresh stream at zero. Treat that as a new baseline rather
+    // than as a negative delta, which would erase real usage.
+    const delta = now >= before ? now - before : now
+    relayBytesSeen.set(libraryId, now)
+    if (delta > 0) { usage = relay.addUsage(usage, { bytes: delta, libraryId }); changed = true }
+  }
+  if (changed) writeRelayUsage(usage)
+  return usage
+}
+
 function setRelayConsent (libraryId, decision) {
   const s = readSettings()
   const all = { ...(s.relayConsent || {}) }
@@ -261,13 +299,25 @@ async function connectedLib (libraryId) {
     // Recorded per library the moment the dial lands, because everything that has to
     // behave differently on a relayed link - the ceiling, the marker, the byte count -
     // asks by library rather than by connection.
-    if (c.relayOffered) relayedLibs.add(libraryId)
-    else relayedLibs.delete(libraryId)
+    if (c.relayOffered) {
+      relayedLibs.add(libraryId)
+      // A fresh UDX stream counts from zero, so the baseline is zero. Set explicitly
+      // rather than left over from the previous connection, which would swallow this
+      // one's first few hundred megabytes.
+      relayBytesSeen.set(libraryId, 0)
+    } else {
+      relayedLibs.delete(libraryId)
+      relayBytesSeen.delete(libraryId)
+    }
     // Pushes from EVERY connected host flow to the one UI handler, tagged with
     // their library so a shelf can scope its refetch.
     c.onPush = (m) => emit('host:push', { ...(m && typeof m === 'object' ? m : { value: m }), libraryId })
     c.conn.once('close', () => {
+      // Fold in this connection's last stretch BEFORE forgetting it was relayed - a film
+      // ending is exactly when the biggest uncounted delta exists.
+      try { sampleRelayUsage() } catch {}
       relayedLibs.delete(libraryId)
+      relayBytesSeen.delete(libraryId)
       emit('host:disconnected', { hostKey: row.hostKey, libraryId })
     })
     slot.client = c
@@ -810,6 +860,14 @@ const methods = {
   'relay.status': async () => ({
     useRelay: readSettings().useRelay !== false,
     ownRelayKey: readSettings().ownRelayKey || '',
+    // Sampled on the way out so the figure a person reads is current rather than up to
+    // half a minute stale, which matters most while they are watching something.
+    usage: (() => {
+      const u = relayedLibs.size ? sampleRelayUsage() : readRelayUsage()
+      const month = relay.monthKey()
+      const cur = u?.month === month ? u : { month, bytes: 0, byLibrary: {} }
+      return { month: cur.month, bytes: cur.bytes || 0, warning: relay.usageWarning(cur) }
+    })(),
     libraries: hostsState.hosts.map((h) => ({
       libraryId: h.libraryId,
       libraryName: h.libraryName || null,
@@ -1314,6 +1372,15 @@ shim.listen().then((port) => {
 // The blend refreshes itself at boot: the cold cache above painted instantly,
 // this fetches what changed overnight. A single-host install no-ops.
 buildSoon('boot')
+
+// The relay meter. Half a minute is fine granularity for a monthly figure and costs a
+// property read per relayed connection - the loop does nothing at all when none are.
+// Unref'd: a counter must never be the reason a phone stays awake.
+const relayMeter = setInterval(() => {
+  if (relayedLibs.size === 0) return
+  try { sampleRelayUsage() } catch (e) { log('relay:usage-failed', { err: e.message }) }
+}, 30000)
+if (relayMeter.unref) relayMeter.unref()
 
 log('worklet:loaded', { platform: PLATFORM })
 emit('ready', {})

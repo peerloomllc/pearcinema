@@ -708,6 +708,9 @@ export default function App () {
   // Yes plays it rather than making the person press the poster twice.
   const [relayAsk, setRelayAsk] = useState(null)
   const [relayLibs, setRelayLibs] = useState([])
+  // What the relay has carried for this phone this month, and the nudge once that is a
+  // heavy share. A nudge, never a stop: a film in progress is never interrupted.
+  const [relayUsage, setRelayUsage] = useState(null)
   // The player skins - cosmetic overlays drawn by the shell, PearTune's
   // Winamp-toggle pattern. The 35mm skin's tone is the exception: a phone
   // cannot repaint a native video surface, so a tone rides the capability
@@ -817,7 +820,10 @@ export default function App () {
   // about it. Asked rather than pushed: the answer changes only when a connection is
   // made or lost, and both of those already call this.
   const refreshRelay = useCallback(() => {
-    call('relay.status').then((r) => setRelayLibs(r?.libraries || [])).catch(() => {})
+    call('relay.status').then((r) => {
+      setRelayLibs(r?.libraries || [])
+      setRelayUsage(r?.usage || null)
+    }).catch(() => {})
   }, [])
 
   const reload = useCallback(async () => {
@@ -1538,6 +1544,7 @@ export default function App () {
             {relayLibs.filter((l) => l.relayed).length > 1
               ? 'Some of your libraries are coming through a relay. Films play at a lower quality.'
               : `${relayLibs.find((l) => l.relayed)?.libraryName || 'This library'} is coming through a relay. Films play at a lower quality.`}
+            {relayUsage?.warning && ' ' + relayUsage.warning.message}
           </span>
         </div>
       )}
@@ -1947,6 +1954,18 @@ export default function App () {
             placeholder='Relay key (optional)' maxLength={64} aria-label='Your own relay key'
             onInput={(e) => { setOwnRelayKey(e.currentTarget.value); setRelayKeySaved(false) }}
           />
+          {relayUsage && (
+            <>
+              <div className='label' style={{ marginTop: '.9rem' }}>This month through the relay</div>
+              <div className='desc'>
+                {relayUsage.bytes > 0
+                  ? `About ${relayUsage.bytes >= 1e9 ? (relayUsage.bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(relayUsage.bytes / 1e6)) + ' MB'} so far. `
+                  : 'Nothing yet. '}
+                The relay is shared with everyone using PearCinema, so this counts towards the same
+                monthly allowance they use. Nothing is ever cut off part way through a film.
+              </div>
+            </>
+          )}
           {relayLibs.length > 0 && (
             <>
               <div className='label' style={{ marginTop: '.9rem' }}>Your libraries</div>
