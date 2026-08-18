@@ -745,6 +745,9 @@ export default function App () {
   // Declared up here with the rest of the cast state on purpose: reload() and
   // play() both touch it, and both sit above where it would otherwise land.
   const [canCast, setCanCast] = useState(false)
+  // Where the film on the television has got to. Null until the first answer,
+  // and the bar simply says less until then rather than showing a made-up zero.
+  const [castAt, setCastAt] = useState(null)
   const castingRef = useRef(null)
   castingRef.current = casting
   const [pairLink, setPairLink] = useState('')
@@ -1211,6 +1214,35 @@ export default function App () {
       setCasting({ ...c, paused: !c.paused })
     } catch (e) { setErr(e.message) }
   }
+
+  // Where the film is, while this phone is the remote. Asked of the host every
+  // few seconds rather than tracked locally: the television is the thing
+  // actually playing, somebody may pause it with its own remote, and a clock
+  // this phone ran itself would drift away from the room.
+  //
+  // Only while a cast is live AND the app is in front - a bar nobody is looking
+  // at should not keep a link busy. The interval is deliberately slower than
+  // the host's own 2s poll of Home Assistant: this is a readout, not a
+  // stopwatch, and every tick is a round trip over the wire.
+  useEffect(() => {
+    const c = casting
+    setCastAt(null) // a different television, or none, is not where the last one was
+    if (!c) return
+    let live = true
+    const read = async () => {
+      if (!live || document.hidden) return
+      try {
+        const r = await call('cast.state', { entityId: c.entityId, libraryId: c.libraryId })
+        if (!live || r?.positionMs == null) return
+        setCastAt({ positionMs: r.positionMs, durationMs: r.durationMs || null })
+      } catch { /* a television that stops answering just stops updating */ }
+    }
+    read()
+    const t = setInterval(read, 5000)
+    const wake = () => { if (!document.hidden) read() }
+    document.addEventListener('visibilitychange', wake)
+    return () => { live = false; clearInterval(t); document.removeEventListener('visibilitychange', wake) }
+  }, [casting?.entityId, casting?.libraryId])
 
   // Skipping is asked for as a DIRECTION, not a destination: the host is the
   // one that knows where the film is, and it is the only place that gets a
@@ -1903,7 +1935,13 @@ export default function App () {
             <Screencast size={20} />
             <div className='meta'>
               <div className='t'>{casting.title}</div>
-              <div className='sub muted sm'>on {casting.name}</div>
+              {/* The television's name gives way, the minute does not: a long
+                  name must not push the one changing number off the bar, and
+                  the total is left to the progress line rather than said twice. */}
+              <div className='sub muted sm'>
+                <span className='where'>on {casting.name}</span>
+                {castAt && <span className='at'> · {fmtClock(castAt.positionMs)}</span>}
+              </div>
             </div>
             <div className='acts'>
               {!casting.noSkip && (
@@ -1921,6 +1959,13 @@ export default function App () {
               )}
               <button aria-label='Stop the TV' onClick={stopCast}><X size={20} /></button>
             </div>
+            {/* The same fact as the numbers, in the form you can read without
+                reading - it sits on the bar's own bottom edge. */}
+            {castAt?.durationMs > 0 && (
+              <div className='castprog' aria-hidden='true'>
+                <i style={{ width: `${Math.max(0, Math.min(100, (castAt.positionMs / castAt.durationMs) * 100))}%` }} />
+              </div>
+            )}
           </div>
         )}
         <NavBar

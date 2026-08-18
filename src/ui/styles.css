@@ -1547,7 +1547,18 @@ label.flabel { display: block; margin-top: .6rem; }
 /* Four controls and a title on a phone-width bar: the buttons group with their
  * own tighter gap so the film's name keeps room to be read, which is what tells
  * you WHICH cast you are about to skip. */
+.castbar { position: relative; }
+.castbar .sub { display: flex; min-width: 0; }
+.castbar .sub .where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.castbar .sub .at { flex: none; white-space: pre; }
 .castbar .acts { flex: none; display: flex; align-items: center; gap: .1rem; }
+/* On the bar's own bottom edge, so it reads as this bar's progress rather than
+   as a divider between the bar and the tabs below it. */
+.castprog {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--color-track);
+}
+.castprog i { display: block; height: 100%; background: var(--color-primary); }
 .castbar button {
   flex: none; display: flex; align-items: center; justify-content: center;
   width: 2.3rem; height: 2.3rem; padding: 0; border-radius: 50%;

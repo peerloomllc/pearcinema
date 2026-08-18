@@ -546,7 +546,13 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!casts) throw ctx.notFound('casting unavailable')
       if (!ctx.isOwner) throw ctx.forbidden('owner only')
       if (!ctx.params.entityId) throw ctx.badParams('entityId required')
-      return await casts.speakers.getState(String(ctx.params.entityId)) || { state: 'unknown' }
+      const entityId = String(ctx.params.entityId)
+      // The corrected view first, when this device has a cast running there -
+      // a television's own clock is wrong about a generated stream, and the
+      // remote showing the wrong minute is worse than showing none.
+      const mine = await casts.where({ deviceKey: ctx.deviceKey, entityId })
+      if (mine) return mine
+      return await casts.speakers.getState(entityId) || { state: 'unknown' }
     },
 
     'device.list': async (ctx) => {
