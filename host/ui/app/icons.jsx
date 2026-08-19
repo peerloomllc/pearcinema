@@ -217,3 +217,9 @@ export const Home = (p) => (
   <S {...p}><path d='M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5H9V20H5a1 1 0 0 1-1-1z' /></S>
 )
 
+// A circle with a gap, spun by CSS. The phone's connecting screen uses the same shape
+// (src/ui: ArrowsClockwise under .spin), and a dashboard that is waiting for the same
+// kind of answer should not say so a different way.
+export const Spinner = (p) => (
+  <S {...p}><path d='M12 3.5a8.5 8.5 0 1 0 8.5 8.5' /></S>
+)

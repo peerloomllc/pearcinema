@@ -1692,3 +1692,44 @@ test('an empty list still offers both ways to fix itself', async (t) => {
   // And the setup story is two clauses, not the four-line paragraph it was.
   assert.match(text(), /None yet\. Your server finds televisions on its own network, and a Roku also needs the free Media Assistant channel installed on it\./)
 })
+
+test('WAITING LOOKS THE SAME AS IT DOES ON THE PHONE', async (t) => {
+  // The phone answers a slow question with one spinning circle and a word, centred.
+  // The dashboard answered the same question with a left-aligned "Looking…" in muted
+  // type, which reads as a label rather than as something in progress (Tim, 2026-08-19,
+  // with a screenshot).
+  const opened = await open(STATE, { '/api/cast/targets': new Promise(() => {}) })
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Televisions')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const wait = doc.querySelector('.setbody .waiting')
+  assert.ok(wait, 'a centred wait, not a muted label')
+  assert.ok(wait.querySelector('svg.spin'), 'and it is turning')
+  assert.match(wait.textContent, /Looking for televisions/)
+})
+
+test('a notification is centred all the way through', async (t) => {
+  // Title and button were centred and the message between them was not, so a one-line
+  // answer sat off to the left under a centred heading (Tim, 2026-08-19, screenshot).
+  const { doc, win, dom } = await openCasting(t, {
+    '/api/cast/rescan': { targets: [], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+
+  const look = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Look again')
+  look.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const alert = doc.querySelector(".modal[role='alertdialog']")
+  assert.ok(alert, 'the answer arrives as a notification')
+  const body = alert.querySelector('p')
+  assert.ok(body, 'with a message between the heading and the button')
+  assert.equal(dom.window.getComputedStyle(body).textAlign, 'center')
+})

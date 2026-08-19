@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Spinner } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -392,7 +392,12 @@ function CastPanel () {
     <>
       <div class='setpage'><span class='setpagename'>Televisions</span></div>
 
-      {targets === null && <p class='hint'>Looking…</p>}
+      {targets === null && (
+        <div class='waiting'>
+          <Spinner size={34} class='spin' />
+          <span>Looking for televisions…</span>
+        </div>
+      )}
 
       {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
           block left on any Settings page - for a situation most people are never in.

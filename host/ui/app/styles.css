@@ -1316,3 +1316,20 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 .setrow .rowname.good { color: var(--good) }
 .setrow .rowname.warn { color: var(--warn) }
 .setrow .rowname.dim { color: var(--muted) }
+
+/* WAITING LOOKS THE SAME EVERYWHERE. The phone answers a slow question with one
+ * spinning circle and a word, centred (src/ui .loadwall); the dashboard used to answer
+ * the same question with a left-aligned "Looking…" in muted type, which reads as a
+ * label rather than as something in progress (Tim, 2026-08-19, with a screenshot). */
+.waiting {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: .55rem; padding: 2.4rem 1rem; color: var(--muted);
+}
+.waiting .spin { animation: pc-spin 1s linear infinite }
+@keyframes pc-spin { to { transform: rotate(360deg) } }
+
+/* A NOTIFICATION IS CENTRED THROUGHOUT. Its title and its button already were, and the
+ * message between them was not - so a one-line answer sat off to the left under a
+ * centred heading and above a centred button (Tim, 2026-08-19, with a screenshot).
+ * Only the alert shape: a real dialog's body is a form and belongs left. */
+.modal[role='alertdialog'] > p { text-align: center }
