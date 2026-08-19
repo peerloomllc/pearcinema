@@ -463,3 +463,61 @@ test('the phone boot style paints no #root either', async () => {
     assert.doesNotMatch(rule, /background/, 'a background on #root strands the page on one theme: ' + rule)
   }
 })
+
+test('CASTING PUTS A REMOTE ON THE LOCK SCREEN, and its buttons reach the television', async (t) => {
+  // Tim, 2026-08-19: answering a message while a film played on the TV meant unlocking,
+  // finding the app and waiting for it to come back before the room could be paused.
+  // The shell draws the remote; this asserts the two halves that make it work - the app
+  // says what is playing, and a button pressed out there lands on the right television.
+  const h = await open({
+    'library.get': LIBRARY[0],
+    'cast.list': { enabled: true, targets: [{ entityId: 'tv-1', libraryId: 'lib-1', name: 'Living Room' }], active: [] },
+    'cast.play': { ok: true },
+    'cast.pause': { ok: true },
+    'cast.resume': { ok: true },
+    'cast.seek': { ok: true },
+    'cast.stop': { ok: true },
+    'cast.state': { positionMs: 61000, durationMs: 9180000 }
+  })
+  t.after(() => h.dom.window.close())
+
+  // The player's own cast button is the shortest way in: it hands the film back to the
+  // UI, which opens the picker on it.
+  h.win.__pearEvent('player:cast', { itemId: 'metropolis', title: 'Metropolis', positionMs: 0 })
+  await h.settle(160)
+
+  const target = h.button(/Living Room/)
+  assert.ok(target, 'the picker offers the television')
+  h.click(target)
+  await h.settle(200)
+
+  assert.equal(h.called('cast.play').length, 1, 'the television was told to play')
+
+  const shown = h.called('shell.castRemote').filter((c) => c.args?.show)
+  assert.ok(shown.length >= 1, 'the shell was asked to draw a remote')
+  const last = shown[shown.length - 1].args
+  assert.equal(last.title, 'Metropolis')
+  assert.equal(last.subtitle, 'on Living Room')
+  assert.match(last.artUrl || '', /art-metro/, 'with the poster, so the lock screen is not a grey box')
+  assert.equal(last.paused, false)
+
+  // A press out there is answered here, and explicitly: Pause pauses. A toggle would
+  // pause a film that was already playing whenever the two sides disagreed.
+  h.win.__pearEvent('cast:control', { action: 'pause' })
+  await h.settle(140)
+  assert.equal(h.called('cast.pause').length, 1)
+  assert.equal(h.called('cast.resume').length, 0)
+
+  h.win.__pearEvent('cast:control', { action: 'back' })
+  await h.settle(140)
+  assert.equal(h.called('cast.seek').length, 1, 'and back thirty seconds is a skip on the host')
+  assert.ok(h.called('cast.seek')[0].args.deltaMs < 0)
+
+  // Stopping takes the remote down with it - a notification whose buttons answer to
+  // nothing is worse than no notification.
+  h.win.__pearEvent('cast:control', { action: 'stop' })
+  await h.settle(160)
+  assert.equal(h.called('cast.stop').length, 1)
+  const hidden = h.called('shell.castRemote').filter((c) => c.args?.show === false)
+  assert.ok(hidden.length >= 1, 'the remote was taken down')
+})

@@ -27,6 +27,7 @@ import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
+import * as CastRemote from '../modules/cast-remote'
 
 const bundle = require('../assets/bare-universal.bundle')
 
@@ -306,6 +307,18 @@ export default function App () {
     Linking.getInitialURL().then(forward).catch(() => {})
     const sub = Linking.addEventListener('url', (e) => forward(e.url))
     return () => sub.remove()
+  }, [])
+
+  // A BUTTON PRESSED ON THE LOCK SCREEN LANDS IN THE WEB UI, because that is what
+  // knows which television, which library and where the film had got to. The shell
+  // draws the remote and carries the press; it decides nothing.
+  useEffect(() => {
+    const off = CastRemote.onAction((e) => {
+      feedWebView(`window.__pearEvent && window.__pearEvent('cast:control', ${JSON.stringify(e)})`)
+    })
+    // Nothing is playing on this phone, so a remote left behind after the app goes
+    // is a notification whose buttons answer to nobody.
+    return () => { off(); CastRemote.hide() }
   }, [])
 
   // Android back: a running film closes first; then the UI unwinds its own
@@ -606,6 +619,30 @@ export default function App () {
           else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
         } catch (e: any) { console.log('[shell] haptic failed: ' + e?.message) }
       })()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    // THE PHONE AS A REMOTE, on the lock screen. Nothing is playing here - the film
+    // is on a television - so this is not expo-video's now-playing notification but a
+    // media session of our own, published while a cast is live and cancelled with it.
+    // The web UI owns the cast; the shell only draws the remote and hands the buttons
+    // back (Tim, 2026-08-19: answering a message meant unlocking, opening the app and
+    // waiting for it to come back before the room could be paused).
+    if (msg.method === 'shell.castRemote') {
+      const a = msg.args || {}
+      if (a.show) {
+        CastRemote.show({
+          title: a.title || 'Playing',
+          subtitle: a.subtitle || '',
+          artUrl: a.artUrl || null,
+          paused: !!a.paused,
+          canSkip: a.canSkip !== false,
+          positionMs: Number(a.positionMs) || 0,
+          durationMs: Number(a.durationMs) || 0
+        })
+      } else {
+        CastRemote.hide()
+      }
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }

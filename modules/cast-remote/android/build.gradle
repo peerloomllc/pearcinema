@@ -1,0 +1,29 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.castremote'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(project(':expo-modules-core').projectDir.absolutePath, 'ExpoModulesCorePlugin.gradle')
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace 'expo.modules.castremote'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+dependencies {
+  // MediaSessionCompat and NotificationCompat.MediaStyle. The media widget on the
+  // lock screen is not a notification style we can draw ourselves - the system draws
+  // it, from a session token.
+  implementation 'androidx.media:media:1.7.0'
+}

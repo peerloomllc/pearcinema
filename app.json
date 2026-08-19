@@ -13,7 +13,8 @@
       "permissions": [
         "CAMERA",
         "INTERNET",
-        "WAKE_LOCK"
+        "WAKE_LOCK",
+        "POST_NOTIFICATIONS"
       ],
       "intentFilters": [
         {

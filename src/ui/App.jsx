@@ -1461,7 +1461,7 @@ export default function App () {
       }
       await call('cast.play', { entityId: t.entityId, libraryId: t.libraryId, itemId: item.id, at })
       setCastSheet(null)
-      setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, paused: false })
+      setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, artId: item.artId || null, paused: false })
       haptic('success')
       say(`Playing on ${t.name}`)
     } catch (e) {
@@ -1470,14 +1470,19 @@ export default function App () {
     }
   }
 
-  const toggleCastPause = async () => {
-    const c = casting
-    if (!c) return
+  // ASKED FOR AS A STATE, not as a toggle. The button in the app knows what it is
+  // looking at; a lock-screen Play does not - it is a play button, and answering it by
+  // flipping whatever we last believed would pause a film that was already playing.
+  const setCastPaused = async (want) => {
+    const c = castingRef.current
+    if (!c || !!c.paused === !!want) return
     try {
-      await call(c.paused ? 'cast.resume' : 'cast.pause', { entityId: c.entityId, libraryId: c.libraryId })
-      setCasting({ ...c, paused: !c.paused })
+      await call(want ? 'cast.pause' : 'cast.resume', { entityId: c.entityId, libraryId: c.libraryId })
+      setCasting((s2) => (s2 && s2.entityId === c.entityId ? { ...s2, paused: !!want } : s2))
     } catch (e) { setErr(e.message) }
   }
+
+  const toggleCastPause = () => setCastPaused(!castingRef.current?.paused)
 
   // Where the film is, while this phone is the remote. Asked of the host every
   // few seconds rather than tracked locally: the television is the thing
@@ -1535,6 +1540,49 @@ export default function App () {
       setErr(cannot ? 'This TV cannot skip while playing this film' : e.message)
     }
   }
+
+  // THE REMOTE ON THE LOCK SCREEN. The bar inside the app is unchanged; this is the
+  // same three controls where somebody can actually reach them, because answering a
+  // message meant unlocking, finding the app and waiting for it to come back before
+  // the room could be paused (Tim, 2026-08-19).
+  //
+  // Pushed on every change rather than on a timer: the notification's own scrubber
+  // advances itself between updates, so this only has to say what changed - a pause,
+  // a skip, a different film - and the five-second readout it rides on is the one this
+  // screen was already doing.
+  useEffect(() => {
+    const c = casting
+    if (!c) {
+      call('shell.castRemote', { show: false }).catch(() => {})
+      return
+    }
+    call('shell.castRemote', {
+      show: true,
+      title: c.title || 'Playing',
+      subtitle: 'on ' + (c.name || 'the television'),
+      artUrl: c.artId && artBase ? `${artBase}${encodeURIComponent(c.artId)}?s=350` : null,
+      paused: !!c.paused,
+      // A television that cannot skip does not get buttons that pretend it can - the
+      // same honesty the in-app bar already keeps.
+      canSkip: !c.noSkip,
+      positionMs: castAt?.positionMs || 0,
+      durationMs: castAt?.durationMs || 0
+    }).catch(() => {})
+  }, [casting?.entityId, casting?.title, casting?.artId, casting?.paused, casting?.noSkip, castAt?.positionMs, castAt?.durationMs, artBase])
+
+  // And the presses come back. The shell decides nothing: it draws the remote and
+  // carries the button, and this is what knows which television and which library.
+  useEffect(() => on('cast:control', (d) => {
+    const what = d?.action
+    if (what === 'stop') stopCast()
+    else if (what === 'play') setCastPaused(false)
+    else if (what === 'pause') setCastPaused(true)
+    else if (what === 'forward') castSkip(SKIP_MS)
+    else if (what === 'back') castSkip(-SKIP_MS)
+    // 'seek' is never sent: the session does not advertise seek-to, because the host
+    // takes a DIRECTION and not a destination, and a scrubber that lands the film
+    // somewhere nobody chose is worse than a scrubber that does not move.
+  }), [casting?.entityId, casting?.paused, casting?.seeking])
 
   const stopCast = async () => {
     const c = casting
