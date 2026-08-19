@@ -1168,7 +1168,10 @@ p.error { color: var(--danger); font-size: .85rem }
   flex: none; width: 2.2rem; height: 2.2rem; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.dlline { display: inline-flex; align-items: center; gap: .5rem; margin-left: .6rem; vertical-align: middle; min-width: 12rem }
+/* The progress line sits UNDER the film's name now rather than beside it, because a
+   download is a row like any other on this page - so it no longer needs the left
+   margin that held it off a title on the same line. */
+.dlline { display: flex; align-items: center; gap: .5rem; min-width: 12rem }
 
 /* THE PHONE-WIDTH LAYER (Tim's sweep, 2026-08-17): nothing may poke past the
    viewport. Inputs shrink instead of forcing their value's width, long ids

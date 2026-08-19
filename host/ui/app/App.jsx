@@ -92,37 +92,55 @@ function RemotePanel ({ remotes, reload, onSource, source, embedded = false }) {
   return (
     <div class={embedded ? '' : 'card'}>
       {!embedded && <h3>Remote libraries</h3>}
-      <p class='hint'>
-        Watch a library that lives on somebody else's server. On their dashboard,
-        open a pairing window and send you the link under the code. Paste it here.
-        They can cut this machine off any time, and your spot in a film is kept on
-        their server like any other device's.
-      </p>
+
+      {/* SAID ONLY WHERE IT IS ANY USE. With libraries on the list, the rows are the
+          explanation; without any, this is the whole page. */}
+      {remotes.length === 0 && (
+        <p class='hint'>
+          Watch a library on somebody else's server. Ask them to open a pairing window
+          on their dashboard and send you the link under the code.
+        </p>
+      )}
+
       {remotes.length > 0 && (
-        <div class='rootlist'>
+        <div class='setrows'>
           {remotes.map(r => (
-            <div class='rootrow' key={r.hostKey}>
-              <span class='rootpath'>{r.libraryName || 'Library'}{r.online ? '' : ' (offline)'}</span>
-              <button onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
-                {source === r.libraryId ? 'Watching' : 'Watch'}
-              </button>
-              <button
-                class='iconbtn danger' onClick={() => remove(r)}
-                aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
-              ><Trash size={17} /></button>
+            <div class='setrow' key={r.hostKey}>
+              <span class='rowmain'>
+                {/* Online or not is the row's whole condition, so the name carries it -
+                    and the line below says it in words. */}
+                <span class={'rowname ' + (r.online ? 'good' : 'warn')}>{r.libraryName || 'Library'}</span>
+                <span class='rowsub'>
+                  {r.online ? 'Online' : 'Offline'}
+                  {source === r.libraryId ? ' · being watched' : ''}
+                </span>
+              </span>
+              <span class='rowctl'>
+                <button class='ghost' onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
+                  {source === r.libraryId ? 'Stop watching' : 'Watch'}
+                </button>
+                <button
+                  class='iconbtn danger' onClick={() => remove(r)}
+                  aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
+                ><Trash size={17} /></button>
+              </span>
             </div>
           ))}
         </div>
       )}
-      <div class='field'>
-        <input
-          type='text' value={link} placeholder='pear://pearcinema/pair?...'
-          onInput={e => setLink(e.currentTarget.value)}
-        />
-      </div>
-      {err && <p class='error'>{err}</p>}
-      <div class='actions'>
-        <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing...' : 'Pair'}</button>
+
+      <div class='rowopen'>
+        <div class='field'>
+          <label>Pairing link</label>
+          <input
+            type='text' value={link} placeholder='pear://pearcinema/pair?...'
+            onInput={e => setLink(e.currentTarget.value)}
+          />
+        </div>
+        {err && <p class='error'>{err}</p>}
+        <div class='actions'>
+          <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing…' : 'Pair'}</button>
+        </div>
       </div>
     </div>
   )
@@ -154,46 +172,45 @@ function DownloadsCard ({ remotes, onPlay, embedded = false }) {
   return (
     <div class={embedded ? '' : 'card'}>
       {!embedded && <h3>Downloads</h3>}
-      <p class='hint'>
-        Films kept on this machine. They play here even while the library they
-        came from is offline.
-      </p>
-      <div class='rootlist'>
+      <p class='hint'>These play here even while the library they came from is offline.</p>
+      <div class='setrows'>
         {items.map(d => (
-          <div class='rootrow' key={d.itemId}>
-            <span class='rootpath'>
-              {d.title || 'Untitled'}
+          <div class='setrow' key={d.itemId}>
+            <span class='rowmain'>
+              <span class='rowname'>{d.title || 'Untitled'}</span>
               {d.downloading
                 ? (
-                  <span class='dlline'>
+                  <span class='rowsub dlline'>
                     <span class='meter dlmeter'>
                       <i style={`width:${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%`} />
                     </span>
-                    <span class='hint'>
+                    <span>
                       {d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%{d.converting ? ' · being converted' : ''}
                     </span>
                   </span>
                   )
-                : <span class='hint'> · {fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
+                : <span class='rowsub'>{fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
             </span>
-            {d.downloading
-              ? (
-                <button
-                  class='iconbtn' aria-label={`Stop downloading ${d.title || 'this'}`} title='Stop downloading'
-                  onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}
-                ><Close size={17} /></button>
-                )
-              : (
-                <>
-                  <button class='iconbtn primary' aria-label={`Play ${d.title || 'this'}`} title='Play' onClick={() => onPlay(d)}>
-                    <Play size={18} />
-                  </button>
+            <span class='rowctl'>
+              {d.downloading
+                ? (
                   <button
-                    class='iconbtn danger' aria-label={`Delete ${d.title || 'this'} from this machine`} title='Delete from this machine'
-                    onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}
-                  ><Trash size={17} /></button>
-                </>
-                )}
+                    class='iconbtn' aria-label={`Stop downloading ${d.title || 'this'}`} title='Stop downloading'
+                    onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}
+                  ><Close size={17} /></button>
+                  )
+                : (
+                  <>
+                    <button class='iconbtn primary' aria-label={`Play ${d.title || 'this'}`} title='Play' onClick={() => onPlay(d)}>
+                      <Play size={18} />
+                    </button>
+                    <button
+                      class='iconbtn danger' aria-label={`Delete ${d.title || 'this'} from this machine`} title='Delete from this machine'
+                      onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}
+                    ><Trash size={17} /></button>
+                  </>
+                  )}
+            </span>
           </div>
         ))}
       </div>
@@ -232,22 +249,26 @@ function RequestsCard ({ remotes, embedded = false }) {
   return (
     <div class={embedded ? '' : 'card'}>
       {!embedded && <h3>Your requests</h3>}
-      <p class='hint'>
-        What you have asked these libraries for. Ask by searching a friend's
-        library for something it does not have.
-      </p>
-      <div class='rootlist'>
+      <p class='hint'>Ask by searching a friend's library for something it does not have.</p>
+      <div class='setrows'>
         {rows.map(q => (
-          <div class='rootrow' key={q.lib + q.id}>
-            <span class='rootpath'>
-              {q.name} · {q.kind === 'series' ? 'show' : 'film'} · {q.status} · {q.libraryName || 'a library'}
+          <div class='setrow' key={q.lib + q.id}>
+            <span class='rowmain'>
+              {/* Answered is green, refused is amber, still waiting is neither - and
+                  the word is right there either way. */}
+              <span class={'rowname ' + (q.status === 'granted' ? 'good' : q.status === 'refused' ? 'warn' : '')}>{q.name}</span>
+              <span class='rowsub'>
+                {q.status} · {q.kind === 'series' ? 'show' : 'film'} · {q.libraryName || 'a library'}
+              </span>
             </span>
-            {q.status === 'pending' && (
-              <button
-                class='iconbtn danger' aria-label={`Withdraw your request for ${q.name}`} title='Withdraw'
-                onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}
-              ><Trash size={17} /></button>
-            )}
+            <span class='rowctl'>
+              {q.status === 'pending' && (
+                <button
+                  class='iconbtn danger' aria-label={`Withdraw your request for ${q.name}`} title='Withdraw'
+                  onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}
+                ><Trash size={17} /></button>
+              )}
+            </span>
           </div>
         ))}
       </div>

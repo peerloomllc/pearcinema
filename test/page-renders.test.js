@@ -1733,3 +1733,52 @@ test('a notification is centred all the way through', async (t) => {
   assert.ok(body, 'with a message between the heading and the button')
   assert.equal(dom.window.getComputedStyle(body).textAlign, 'center')
 })
+
+test('SHARING IS ROWS TOO, and a library says whether it is answering', async (t) => {
+  // The three panels used `.rootpath` for things that are names rather than paths -
+  // monospace, one line, ellipsised - which is right for a folder on disk and wrong
+  // for "Ben's Cinema". Same fault Televisions had (Tim, 2026-08-19).
+  const { dom, doc, win } = await open(STATE, {
+    '/api/remote/list': {
+      remotes: [
+        { hostKey: 'k1', libraryId: 'lib-1', libraryName: "Ben's Cinema", online: true },
+        { hostKey: 'k2', libraryId: 'lib-2', libraryName: 'The Loft', online: false }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+
+  const names = [...doc.querySelectorAll('.setrow .rowname')]
+  assert.ok(names.length >= 2)
+  const ben = names.find(n => /Ben's Cinema/.test(n.textContent))
+  const loft = names.find(n => /The Loft/.test(n.textContent))
+  assert.ok(ben.className.includes('good'), 'online reads as online')
+  assert.ok(loft.className.includes('warn'), 'and offline does not')
+  // Colour is never the only carrier.
+  assert.match(ben.parentElement.textContent, /Online/)
+  assert.match(loft.parentElement.textContent, /Offline/)
+
+  // The four-line paragraph is gone while there is anything to look at.
+  assert.doesNotMatch(doc.getElementById('root').textContent, /open a pairing window on their dashboard/)
+})
+
+test('the pairing explanation appears only when there is nothing else to read', async (t) => {
+  const { dom, doc, win, text } = await open(STATE, { '/api/remote/list': { remotes: [] } })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+
+  assert.match(text(), /Ask them to open a pairing window on their dashboard/)
+})
