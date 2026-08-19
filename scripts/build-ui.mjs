@@ -43,7 +43,12 @@ const html = `<!doctype html>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>PearCinema</title>
-  <style>html,body,#root{height:100%;margin:0;background:#0f0d0a}</style>
+  <!-- Height, and a first-paint background on HTML only. Never on #root: an id
+       selector beats every rule in the stylesheet below, so painting it strands the
+       whole app on one theme's ground - which is exactly what light mode looked like
+       on the dashboard until 2026-08-19. The colour follows the system preference,
+       and only until the app sets data-theme a few milliseconds later. -->
+  <style>html,body,#root{height:100%;margin:0}html{background:#17140f}@media (prefers-color-scheme:light){html{background:#faf6ee}}</style>
   <style>${css}</style>
 </head>
 <body>

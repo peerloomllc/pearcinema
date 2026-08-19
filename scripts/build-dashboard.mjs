@@ -66,10 +66,17 @@ const html = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PearCinema</title>
   <link rel="icon" href="${favicon}">
-  <!-- Height and a fallback background only. Do NOT set colours here: #root has id
-       specificity and would override the theme tokens, which is exactly how a
-       themed page ends up stranded on one theme's background. -->
-  <style>html,body,#root{height:100%;margin:0;background:#0e0f13}</style>
+  <!-- Height and a first-paint background, and NOTHING on #root. The comment that
+       used to sit here said exactly this, and the line under it painted #root
+       anyway - an id selector, so no stylesheet below could reach it, and the whole
+       page under the header stayed on a dark ground in light mode with dark text on
+       it (Tim, 2026-08-19: "light mode isn't rendering properly").
+
+       The colour here is only for the moment between this file parsing and the app
+       setting data-theme, so it follows the SYSTEM preference. The stylesheet below
+       paints html from the tokens a few bytes later, and the app corrects it to the
+       saved preference immediately after that. -->
+  <style>html,body,#root{height:100%;margin:0}html{background:#0c0a07}@media (prefers-color-scheme:light){html{background:#faf6ee}}</style>
   <style>${css}</style>
 </head>
 <body>

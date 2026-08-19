@@ -450,3 +450,16 @@ test('A BUTTON INSIDE A ROW IS NOT THE ROW', async (t) => {
   await settle(200)
   assert.ok(called('stream.url').length > 0, 'the rest of the row is still the row')
 })
+
+test('the phone boot style paints no #root either', async () => {
+  // Same fault, same shape, one file over: `background:#0f0d0a` on `#root` in the boot
+  // style. It never showed on the phone because the app is dark by default - it would
+  // have shown the day anybody chose light (2026-08-19).
+  // The FIRST style block is the boot one; the app's own stylesheet follows it and is
+  // free to paint #root from a token, which is the correct way to do it.
+  const boot = PAGE.slice(PAGE.indexOf('<style>') + 7, PAGE.indexOf('</style>'))
+  for (const rule of boot.match(/[^{}]*\{[^{}]*\}/g) || []) {
+    if (!/#root/.test(rule.split('{')[0])) continue
+    assert.doesNotMatch(rule, /background/, 'a background on #root strands the page on one theme: ' + rule)
+  }
+})
