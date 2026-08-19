@@ -412,16 +412,10 @@ function MissingArtwork ({ onClose, onLookAgain }) {
           )
         : (
           <>
-            {items === null && <p class='hint'>Reading the list…</p>}
-            {items !== null && left.length === 0 && (
-              <p class='hint'>
-                {items.length === 0
-                  ? 'Nothing is missing artwork any more.'
-                  : 'That is all of them done.'}
-              </p>
-            )}
+            {items === null && <p class='hint center'>Reading the list…</p>}
+            {items !== null && left.length === 0 && <p class='hint center'>All done.</p>}
             {left.length > 0 && (
-              <p class='hint'>
+              <p class='hint center'>
                 TMDB found nothing for these. Usually the file is not named what the film
                 is called, so picking one and searching by its real name is what fixes it.
               </p>

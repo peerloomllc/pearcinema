@@ -1695,6 +1695,33 @@ test('a merged page names itself once and labels what it holds', async (t) => {
   assert.doesNotMatch(text(), /Auto-rescan/, 'it is a row with a name now, not a label beside a box')
 })
 
+test('A SCAN IN PROGRESS IS SAID IN THE LINE AND ON THE BAR, not in the button', async (t) => {
+  // Tim pressed Rescan on the real library and watched a button read "Rescanning…" for
+  // several minutes with nothing else on the page saying anything (2026-08-19). A word
+  // that changes inside a button also makes that button wider than every other one,
+  // which is the ragged right edge the whole page shape exists to stop.
+  const { doc, win, dom, text } = await open({ ...STATE, scanning: { done: 412, total: 2986, startedAt: 1 } })
+  t.after(() => dom.window.close())
+
+  // On the bar, from anywhere in the app - not only on the page that started it.
+  const light = [...doc.querySelectorAll('.barright button')].find(b => /Reading the library/.test(b.getAttribute('aria-label') || ''))
+  assert.ok(light, 'the top bar says something is happening')
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const row = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Rescan')
+  assert.ok(row.className.includes('warn'))
+  assert.match(row.parentElement.textContent, /Reading the library, 412 of 2,?986\./)
+  assert.ok(row.parentElement.querySelector('.meter'), 'and how far through')
+
+  const btn = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Rescan/.test(b.textContent))
+  assert.equal(btn.textContent.trim(), 'Rescan now', 'the button is a button, not a status line')
+  assert.equal(btn.disabled, true)
+  assert.doesNotMatch(text(), /Rescanning…/)
+})
+
 test('the source editor is behind one button, and the news is not', async (t) => {
   const { doc, win, dom, text } = await open({ ...STATE, sourceError: 'the drive is not mounted' })
   t.after(() => dom.window.close())
@@ -1772,6 +1799,26 @@ test('the titles that found nothing are shown, and fixed in the same window', as
   assert.equal(doc.querySelectorAll('.overlay').length, 1)
   assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'K05')
   assert.ok(doc.querySelector('.candgrid .cand'), 'candidates to pick from')
+})
+
+test('an empty list of missing titles says two words, in the middle', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, { '/api/metadata/missing': { items: [] } })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const show = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Show them')
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // "That is all of them done" was awkward (Tim, 2026-08-19), and prose in a window is
+  // centred like everything else in one.
+  const line = doc.querySelector('.overlay p.hint')
+  assert.equal(line.textContent.trim(), 'All done.')
+  assert.ok(line.className.includes('center'))
+  void text
 })
 
 test('artwork with no key says so, refuses to be turned on, and hides its form', async (t) => {

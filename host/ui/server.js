@@ -1796,15 +1796,13 @@ async function startDashboard ({
         return json(res, 200, { rails: out })
       }
 
+      // STARTED, NOT FINISHED. A full rescan of the real library is minutes of ffprobe,
+      // and awaiting it here held the request open for all of them while `scanning`
+      // stayed null because this went around `host._scan` instead of through it. The
+      // answer is immediate now and the progress is on /api/state, which every surface
+      // already reads.
       if (req.method === 'POST' && url.pathname === '/api/source/rescan') {
-        try {
-          const n = await host.adapter.scan({ force: true })
-          host.sourceError = null
-          return json(res, 200, { ok: true, items: n, ...(await host.adapter.stats().catch(() => ({}))) })
-        } catch (e) {
-          host.sourceError = e.message
-          return json(res, 400, { error: e.message })
-        }
+        return json(res, 200, host.rescan())
       }
 
       // WHAT IS ALREADY ON THIS BOX. Servers and folders together, because the

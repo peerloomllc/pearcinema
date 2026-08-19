@@ -529,13 +529,6 @@ function CastPanel () {
     <>
       <div class='setpage'><span class='setpagename'>Televisions</span></div>
 
-      {targets === null && (
-        <div class='waiting'>
-          <Spinner size={34} class='spin' />
-          <span>Looking for televisions…</span>
-        </div>
-      )}
-
       {/* THE ROUTES COME FIRST (Tim, 2026-08-19). They are the settings on this page -
           the televisions themselves are the RESULT of them - and a result reads better
           under the thing that produced it. Which is also why the list now carries a
@@ -615,6 +608,15 @@ function CastPanel () {
 
       <div class='setgroup'>Your televisions</div>
 
+      {/* THE WAIT BELONGS TO THE LIST, so it waits where the list will be (Tim,
+          2026-08-19). Above the routes it read as the whole page loading. */}
+      {targets === null && (
+        <div class='waiting'>
+          <Spinner size={34} class='spin' />
+          <span>Looking for televisions…</span>
+        </div>
+      )}
+
       {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
           block left on any Settings page - for a situation most people are never in.
           The Media Assistant fact stays because nobody could guess it; the rest of the
@@ -684,6 +686,15 @@ function CastPanel () {
   )
 }
 
+// WHAT A RUNNING SCAN SAYS, in one clause, in two places: the Rescan row and the top
+// bar's light. The total is discovered as the walk goes, so it is 0 for the first
+// moments of a scan and the sentence has to work without it.
+function scanLine (s) {
+  if (!s) return ''
+  if (!s.total) return 'Reading the library now.'
+  return `Reading the library, ${s.done} of ${s.total}.`
+}
+
 // THE COLLECTION, in one page. Source, Artwork and Library were three nav items for
 // one subject, and two of them held a single control each.
 //
@@ -722,13 +733,15 @@ function LibraryPanel ({ state, reload }) {
     notify('Renamed', 'Every paired phone relabels straight away.')
   }
 
+  // It answers at once now and the work carries on behind it, so there is nothing to
+  // wait for here - the row below says what is happening, and so does the top bar from
+  // wherever you are in the app.
   const rescan = async () => {
     setBusy(true)
     const res = await api('/api/source/rescan', {})
     setBusy(false)
     if (res.error) return notify('Rescan failed', res.error)
-    await reload()
-    notify('Rescanned', `Found ${describeSource(res)}.`)
+    reload()
   }
 
   // WHERE THE FILMS ARE, in one line: what kind of place it is, and what was found in
@@ -807,15 +820,24 @@ function LibraryPanel ({ state, reload }) {
         {!empty && (
           <div class='setrow'>
             <span class='rowmain'>
-              <span class='rowname'>Rescan</span>
+              <span class={'rowname ' + (state.scanning ? 'warn' : '')}>Rescan</span>
+              {/* THE STATE IS IN THE LINE, NOT IN THE BUTTON (Tim, 2026-08-19). A button
+                  whose word changes to "Rescanning…" grows wider than every other button
+                  on the page, and it was the only thing saying anything at all - so a
+                  scan that takes minutes looked identical to one that had wedged. */}
               <span class='rowsub'>
-                {state.scanning ? 'Reading the library now.' : 'Looks for films added or removed.'}
+                {state.scanning
+                  ? scanLine(state.scanning)
+                  : 'Looks for films added or removed.'}
+                {state.scanning?.total > 0 && (
+                  <span class='meter' style='margin-left:.5rem'>
+                    <i style={`width:${Math.round((state.scanning.done / state.scanning.total) * 100)}%`} />
+                  </span>
+                )}
               </span>
             </span>
             <span class='rowctl'>
-              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>
-                {busy ? 'Rescanning…' : 'Rescan now'}
-              </button>
+              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>Rescan now</button>
             </span>
           </div>
         )}
@@ -1325,6 +1347,15 @@ export default function App () {
     return () => clearInterval(t)
   }, [])
 
+  // AND FASTER WHILE SOMETHING IS COUNTING. Eight seconds is right for a roster that
+  // changes when somebody pairs; it is wrong for a progress bar, which reads as stuck
+  // between ticks. Only while a scan runs, and it stops the moment it ends.
+  useEffect(() => {
+    if (!state?.scanning) return
+    const t = setInterval(reload, 2000)
+    return () => clearInterval(t)
+  }, [!!state?.scanning])
+
   if (!state) return <div class='empty'>Loading…</div>
 
   // What this browser can decode PLUS one fact about the host: whether its hardware
@@ -1445,6 +1476,23 @@ export default function App () {
               onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
             >
               <DownloadIcon size={18} />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
+
+          {/* THE LIBRARY IS BEING READ (Tim, 2026-08-19), the same shape the downloads
+              light uses. A rescan of the real library is minutes of work that used to
+              show as a button stuck on "Rescanning…" on one page - so it is a light on
+              the bar from anywhere in the app, and pressing it goes to the row that
+              says how far through it is. */}
+          {state.scanning && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={'Reading the library. ' + scanLine(state.scanning)}
+              title={scanLine(state.scanning)}
+              onClick={() => { location.hash = 'settings/library'; setTab('settings'); setPlaying(null) }}
+            >
+              <Spinner size={18} class='spin' />
               <span class='dot' aria-hidden='true' />
             </button>
           )}

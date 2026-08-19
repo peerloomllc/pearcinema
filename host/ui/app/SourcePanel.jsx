@@ -131,45 +131,54 @@ function Detected ({ onFolders, onServer }) {
     return () => { live = false }
   }, [])
 
-  if (!found) return <p class='hint'>Looking for films on this machine…</p>
+  if (!found) return <p class='hint center'>Looking for films on this machine…</p>
 
   const servers = found.servers || []
   const folders = found.folders || []
   if (!servers.length && !folders.length) return null
 
+  // THE SAME ROWS THE REST OF SETTINGS USES (Tim, 2026-08-19, asking for the whole
+  // window to be reviewed against the Ledger rules). This was a heading and a bespoke
+  // `.dev` row - a second heading inside a window that already has a title bar, over a
+  // shape that exists nowhere else.
   return (
-    <div style='margin-bottom:1rem'>
-      <h3>Already on this machine</h3>
-
-      {folders.map(f => (
-        <div class='dev' key={f.at}>
-          <span class='ic'><Drive size={18} /></span>
-          <div class='who'>
-            <b>{f.label}</b>
-            {/* The detector matched these folders BY NAME, so it already knows which
-                is films and which is television. Showing that here is what makes
-                "Use these" a one-click typed library rather than a path list. */}
-            {f.roots.map(r => (
-              <div class='mono' key={r.path}>{r.path} <span class='chip'>{TYPE_LABEL[r.type] || TYPE_LABEL.auto}</span></div>
-            ))}
+    <>
+      <div class='setgroup'>Already on this machine</div>
+      <div class='setrows'>
+        {folders.map(f => (
+          <div class='setrow' key={f.at}>
+            <span class='rowmain'>
+              <span class='rowname'><Drive size={15} /> {f.label}</span>
+              {/* The detector matched these folders BY NAME, so it already knows which
+                  is films and which is television. Showing that here is what makes
+                  "Use these" a one-click typed library rather than a path list. */}
+              {f.roots.map(r => (
+                <span class='rowsub' key={r.path}>
+                  {r.path} · {(TYPE_LABEL[r.type] || TYPE_LABEL.auto).toLowerCase()}
+                </span>
+              ))}
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={() => onFolders(f.roots)}>Use these</button>
+            </span>
           </div>
-          <button class='small' onClick={() => onFolders(f.roots)}>Use these</button>
-        </div>
-      ))}
+        ))}
 
-      {servers.map(sv => (
-        <div class='dev' key={sv.url}>
-          <span class='ic'>{sv.usable ? <Server size={18} /> : <Blocked size={18} />}</span>
-          <div class='who'>
-            <b>{sv.name}</b>
-            <div>{sv.usable ? sv.url : sv.reason}</div>
+        {servers.map(sv => (
+          <div class='setrow' key={sv.url}>
+            <span class='rowmain'>
+              <span class={'rowname ' + (sv.usable ? '' : 'dim')}>
+                {sv.usable ? <Server size={15} /> : <Blocked size={15} />} {sv.name}
+              </span>
+              <span class='rowsub'>{sv.usable ? sv.url : sv.reason}</span>
+            </span>
+            <span class='rowctl'>
+              {sv.usable && <button class='ghost' onClick={() => onServer(sv)}>Use this</button>}
+            </span>
           </div>
-          {sv.usable
-            ? <button class='small' onClick={() => onServer(sv)}>Use this</button>
-            : <span class='chip'>not readable</span>}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
@@ -234,7 +243,9 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
     setBusy('')
     if (res.error) return notify('Rescan failed', res.error)
     await reload()
-    notify('Rescanned', `Found ${describe(res)}.`)
+    // It STARTS the scan and answers - a full read of a real library is minutes - so
+    // this cannot claim a result it does not have yet.
+    notify('Rescanning', 'The library is being read. Progress is on the Library settings page.')
   }
 
   const removeRoot = async (r) => {
@@ -292,7 +303,10 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
 
       {kind === 'folder' && (
         <>
-          <label class='srclabel'>Folders <span class='hint-inline'>- paths inside the PearCinema container</span></label>
+          {/* The parenthetical is not decoration: it is why the path here does not look
+              like the path on the box. It is one clause now rather than a line of
+              container vocabulary. */}
+          <label class='srclabel'>Folders <span class='hint-inline'>- as this app sees them</span></label>
           <div class='rootlist'>
             {roots.map(r => (
               <div class='rootrow' key={r.path}>
@@ -323,11 +337,14 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
           <div class='pickrow'>
             <button class='ghost' onClick={() => setPicking(true)}>Add a folder…</button>
           </div>
+          {/* ONE CLAUSE, and only the half nobody could work out. Three of the four
+              sentences here explained the control sitting directly above them: "work it
+              out" already says what it worked out, in the chooser itself. What it cannot
+              say is what saying so BUYS you, which is the episode that would otherwise
+              have turned up as a film. */}
           <p class='hint'>
-            Add films and TV as separate folders if they live apart, and say what each
-            folder holds. In a TV folder, an episode whose name does not say which one
-            it is still goes under its show instead of turning up as a film. On "work it
-            out", a folder called Movies or TV Shows is taken at its word.
+            Saying what a folder holds is what keeps a hand-named episode under its show
+            instead of in with the films.
           </p>
         </>
       )}
@@ -355,8 +372,11 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
         </>
       )}
 
-      {/* Equal-width buttons filling the row, the donor's action bar. */}
-      <div class={'srcactions' + (ownsRescan ? '' : ' two')}>
+      {/* THE ACTION ROW EVERY OTHER PAGE HAS: centred, and each button the same 7.5rem
+          minimum. It was two filled buttons stretched to half the width each, which is
+          a shape that exists nowhere else in Settings and reads as a form footer from a
+          different app. */}
+      <div class='actions'>
         <button class='ghost' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Checking…' : 'Test'}</button>
         <button onClick={save} disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
         {ownsRescan && (

@@ -1119,10 +1119,10 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 .pickrow { display: flex; margin-bottom: 4px }
 .pickrow button { flex: 1 1 0 }
 
-/* Equal-width buttons filling the row - the donor's action bar. */
-.srcactions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px }
-.srcactions.two { grid-template-columns: repeat(2, 1fr) }
-.srcactions button { width: 100% }
+/* `.srcactions` - a grid of buttons stretched to fill the row - is gone. The source
+ * editor uses `.actions`, the centred row with one minimum width that every other
+ * form in Settings uses (Tim, 2026-08-19, asking for the window to be reviewed against
+ * the Ledger rules). One shape, not two. */
 
 .autoscan {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1196,7 +1196,16 @@ p.error { color: var(--danger); font-size: .85rem }
    titling a surface. */
 .card > h3 { text-align: center }
 aside.sheet h3, .sheet-head h3 { text-align: center }
+/* A WINDOW'S TITLE SITS IN THE MIDDLE OF IT, like every page title in Settings (Tim,
+ * 2026-08-19). `text-align` alone never did it: the heading is a flex child beside a
+ * close button, so it was only ever as wide as its own words. It takes the whole row
+ * now, with the button's width added back on the other side so the words land in the
+ * true middle rather than half a button to the left. */
 .modal-head h3, .modal h3:first-child { text-align: center }
+.modal-head h3 { flex: 1; padding-left: 1.8rem }
+/* And prose in a window is centred with it. Field labels are not prose and stay where
+ * a form puts them, on the left above their input. */
+.modal p.hint { text-align: center }
 
 /* The televisions page uses `.setrow` throughout now - the same shape every Settings
    page uses - so the bespoke row and footer styles it grew before there was one are
