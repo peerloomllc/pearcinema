@@ -596,11 +596,25 @@ async function writeToCopies (id, fn) {
 // reachable ones. Returns the copy's own id - the caller streams THAT. When
 // the pick diverges from the asked-for id, resume still records against the
 // asked-for id; a cross-host position merge is phase 2.
+// LIBRARIES THAT ARE CONNECTED AND STILL CANNOT SERVE A FILM, because the disk their
+// films live on has gone. Kept here rather than asked for, because pickCopyId below is
+// synchronous and runs on the way into every playback.
+//
+// Refreshed by library.sources, which the shelf asks on every load. Stale in exactly
+// one direction that matters and it is the safe one: a library that has come BACK is
+// briefly still avoided, which costs a copy pick and nothing else.
+let lostSources = new Set()
+
 function pickCopyId (itemId) {
   if (!mergedOn() || !mergedIndex) return String(itemId)
   const entity = mergedEntityFor(itemId)
   if (!entity || entity.copies.length < 2) return String(itemId)
-  const live = connectedLibs()
+  // CONNECTED IS NOT THE SAME AS ABLE. A host whose drive has been unplugged answers
+  // every request cheerfully and cannot read a single film, so preferring it because
+  // it is online picks the one copy that will never play - which is exactly what
+  // happened to Tim's Arrival on the Pixel, while the TCL played it only because a
+  // download short-circuits above this (2026-08-19).
+  const live = new Set([...connectedLibs()].filter((l) => !lostSources.has(l)))
   const prefer = libraryFilter() === '_all' ? null : libraryFilter()
   const pick = merge.bestCopy(entity, live.size ? live : null, prefer, copyRank())
   if (pick && pick.id && pick.id !== String(itemId)) {
@@ -1056,6 +1070,43 @@ const methods = {
   // the host's. More than one: served from the merged index (proposal
   // 2026-08-16), which speaks the same vocabulary - the UI cannot tell.
   'library.stats': async () => (await connected()).stats(),
+
+  // WHICH LIBRARIES CANNOT REACH THEIR OWN FILMS, asked of every connected host
+  // rather than only the active one.
+  //
+  // `library.stats` answers for the ACTIVE host, and that is the wrong question the
+  // moment a phone has more than one library: the merged shelf shows films from all
+  // of them, so the host that lost its drive is very often not the one being asked.
+  // Found on Tim's Pixel 2026-08-19 - the dashboard said the drive was gone, the
+  // phone said nothing, and the same build on the TCL showed the message correctly
+  // because there the affected library happened to be the active one.
+  //
+  // Named, because "a library cannot reach its films" is not useful when you have
+  // three and the shelf is showing all of them at once.
+  'library.sources': async () => {
+    const out = []
+    const lost = new Set()
+    for (const libraryId of connectedLibs()) {
+      try {
+        const stats = await (await connectedLib(libraryId)).stats()
+        if (!stats?.sourceError) continue
+        lost.add(libraryId)
+        out.push({
+          libraryId,
+          libraryName: hostRow(libraryId)?.libraryName || 'A library',
+          sourceError: stats.sourceError
+        })
+      } catch {
+        // A host that will not answer at all is a DIFFERENT fault, and one the app
+        // already shows as a library that is offline. Saying its drive is missing
+        // would be inventing a reason.
+      }
+    }
+    // The copy picker reads this on the way into every playback, so the answer is
+    // recorded rather than only reported.
+    lostSources = lost
+    return { items: out }
+  },
   'library.list': async (args) => {
     if (!mergedOn() || !mergedIndex) return (await connected()).list(args)
     const type = String(args.type || 'movies')

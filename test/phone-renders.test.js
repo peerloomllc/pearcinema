@@ -283,3 +283,127 @@ test('the relay switch reflects the setting and writes it back', async (t) => {
   const wrote = h.called('setSettings').filter((c) => 'useRelay' in (c.args || {}))
   assert.equal(wrote.at(-1).args.useRelay, false, 'and the worklet was told, not just the screen')
 })
+
+test('A LIBRARY THAT CANNOT REACH ITS FILMS SAYS SO, rather than looking empty', async (t) => {
+  // The two are identical from the phone's side, and the wrong one is the default: an
+  // empty shelf reads as "there is nothing in this library", which is a lie about
+  // somebody's films. The host has always answered this on library.stats and nothing
+  // here ever asked, so when Tim's Umbrel lost its drive on 2026-08-19 the phone said
+  // nothing at all.
+  const { text, dom } = await open({
+    'library.sources': {
+      items: [{
+        libraryId: 'lib-a',
+        libraryName: 'The Cinema',
+        sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?'
+      }]
+    },
+    'library.list': { items: [], cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /cannot reach its films/)
+  assert.match(text(), /Is the drive still mounted/)
+})
+
+test('IT ASKS EVERY LIBRARY, not just the active one', async (t) => {
+  // The bug that made this read as working on one phone and silent on another, on the
+  // same build. library.stats answers for the ACTIVE host, and a merged shelf shows
+  // films from all of them - so the host that lost its drive is very often not the one
+  // being asked (Tim's Pixel, 2026-08-19).
+  const { text, dom, called } = await open({
+    'library.sources': {
+      items: [
+        { libraryId: 'lib-b', libraryName: 'The Study', sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?' },
+        { libraryId: 'lib-c', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  assert.equal(called('library.sources').length > 0, true, 'it asks the question at all')
+  // NAMED, ALWAYS. "This library cannot reach its films" is no use on a merged shelf
+  // showing three of them at once, and naming it is never worse on a single one
+  // (Tim, 2026-08-19, with All libraries selected).
+  assert.match(text(), /The Study cannot reach its films/)
+  assert.match(text(), /The Loft cannot reach its films/)
+  assert.doesNotMatch(text(), /This library cannot reach/)
+})
+
+test('ONLY THE FILMS THAT CANNOT BE REACHED GO DIM', async (t) => {
+  // A merged shelf mixes libraries. Greying the whole grid would be a lie about the
+  // ones that still have their disks, and they are perfectly playable.
+  const { dom, doc } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [
+        { id: 'a', type: 'movie', title: 'Metropolis', year: 1927, runtime: 9180, libraryId: 'lib-gone' },
+        { id: 'b', type: 'movie', title: 'Nosferatu', year: 1922, runtime: 5820, libraryId: 'lib-here' }
+      ],
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tiles = [...doc.querySelectorAll('.album')]
+  const dim = tiles.filter((el) => el.className.includes('unreachable'))
+  assert.equal(dim.length, 1, 'one library is out, not the shelf')
+  assert.match(dim[0].textContent, /Metropolis/)
+})
+
+test('A FILM IN TWO LIBRARIES IS NOT LOST WHEN ONE OF THEM IS', async (t) => {
+  // The merged primary is chosen for completeness, not for being reachable - so the
+  // copy that wins can be the one on the library that has gone, while another library
+  // has had it all along. Tim's Arrival, greyed out on the TCL with a perfectly good
+  // second copy behind it (2026-08-19).
+  const { dom, doc } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [
+        {
+          id: 'arrival-gone',
+          type: 'movie',
+          title: 'Arrival',
+          year: 2016,
+          runtime: 6960,
+          libraryId: 'lib-gone',
+          copies: [
+            { libraryId: 'lib-gone', id: 'arrival-gone' },
+            { libraryId: 'lib-here', id: 'arrival-here' }
+          ]
+        }
+      ],
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tiles = [...doc.querySelectorAll('.album')]
+  assert.equal(tiles.length, 1)
+  assert.equal(tiles[0].className.includes('unreachable'), false, 'the other library still has it')
+})
+
+test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
+  // Keeping the tile pressable was right for downloads and wrong for everything else.
+  // On the TCL, 2001 had watch state, so the tap offered to resume it - and Resume
+  // opened a player that could never start (Tim, 2026-08-19). Asking "carry on from
+  // 41 minutes?" about a film that cannot start is worse than refusing plainly.
+  const { dom, doc, press, tile, settle, called, text } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [{ id: '2001', type: 'movie', title: '2001 A Space Odyssey', year: 1968, runtime: 8880, libraryId: 'lib-gone' }],
+      cursor: null
+    },
+    'resume.get': { resume: { positionMs: 2460000 } }
+  })
+  t.after(() => dom.window.close())
+
+  press(tile(/2001/))
+  await settle(120)
+
+  assert.equal(called('resume.get').length, 0, 'it never asks where the film was left')
+  assert.equal(called('stream.url').length, 0, 'and never asks for a stream it cannot have')
+  assert.match(text(), /The Loft cannot reach this film/)
+  assert.match(text(), /not downloaded to this phone/)
+  void doc
+})
