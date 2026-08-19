@@ -1284,3 +1284,104 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
   await new Promise(r => setTimeout(r, 40))
   assert.ok(doc.querySelector('input[type=password]'), 'and it opens')
 })
+
+// --- This host: the first page rebuilt in the Settings row shape --------------
+//
+// Two nav items and three cards became one page and five rows (Tim, 2026-08-19: the
+// Settings pages are busy and not aesthetically pleasing). What is pinned here is the
+// consolidation - because a page that moves and takes its links with it is worse than
+// a page that was ugly - and the rule that a rare action keeps its words.
+
+async function openHost (t, state = STATE, section = 'host') {
+  const opened = await open(state)
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // Through the HASH, because that is how a bookmark or an in-app link arrives, and
+  // the moved section is only interesting when it arrives that way.
+  win.location.hash = 'settings/' + section
+  win.dispatchEvent(new win.Event('hashchange'))
+  await new Promise(r => setTimeout(r, 80))
+  return opened
+}
+
+test('SECURITY MOVED INTO THIS HOST, and the old link still lands there', async (t) => {
+  // Security was one password field with a nav item of its own. It is whose password
+  // it is, so it lives here now - but a bookmark or an in-app link to the old address
+  // must not fall silently back to Source, which is what an unknown section did.
+  const { doc, text } = await openHost(t, STATE, 'security')
+
+  assert.match(text(), /This host/)
+  assert.match(text(), /Password/)
+  assert.match(text(), /Video engine/, 'and the engine came along, because it is this machine\'s hardware')
+
+  // The nav is one item shorter, and Security is not in it.
+  const nav = doc.querySelector('.setnav')
+  const labels = [...nav.querySelectorAll('button')].map(b => b.textContent.trim())
+  assert.equal(labels.includes('Security'), false)
+  assert.ok(labels.includes('This host'))
+})
+
+test('one setting per row, and the explanation is a sub-line rather than a paragraph', async (t) => {
+  const { doc, text } = await openHost(t)
+
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.deepEqual(rows, ['Address', 'Password', 'Signed-in browsers', 'Video engine', 'First-time setup'])
+
+  // The address is on the page with the fact that makes it safe to show.
+  assert.match(text(), /hostkey/)
+  assert.match(text(), /only pairing creates/)
+})
+
+test('ICONS WHERE A WORD IS NOISE, WORDS WHERE AN ICON IS A GUESS', async (t) => {
+  const { doc } = await openHost(t)
+
+  // Copying an address is an icon, and it still says what it is to a screen reader.
+  const copy = doc.querySelector('.setrow .iconbtn')
+  assert.ok(copy, 'the address is copied with an icon')
+  assert.match(copy.getAttribute('aria-label'), /Copy this library's address/)
+  assert.equal(copy.textContent.trim(), '', 'no word beside it')
+
+  // A rare or irreversible action keeps its words. A pictogram for "sign every other
+  // browser out" is a thing somebody has to interpret correctly the first time.
+  const words = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(words.includes('Sign out everywhere else'))
+  assert.ok(words.includes('Run again'))
+})
+
+test('the engine row is a reading of the setting until it is an edit of it', async (t) => {
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const { doc, win, text } = await openHost(t, state)
+
+  assert.match(text(), /managed about 10 in testing/)
+  const num = doc.querySelector('.setrow input[type=number]')
+  assert.equal(num.value, '4')
+  // No Save while nothing has changed - a button that does nothing is noise on every
+  // row it sits in.
+  const saves = () => [...doc.querySelectorAll('.setrow .rowctl button')].filter(b => /Save/.test(b.textContent))
+  assert.equal(saves().length, 0)
+
+  num.value = '6'
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(saves().length, 1, 'and it appears the moment the number differs')
+})
+
+test('a password this host does not own cannot be changed from here', async (t) => {
+  // One set by the platform would be quietly put back on the next restart, so offering
+  // to change it would be offering something that does not work.
+  const platform = { ...STATE, auth: { enabled: true, passwordSource: 'explicit' } }
+  const { doc, text } = await openHost(t, platform)
+
+  assert.match(text(), /Set by the platform that installed PearCinema/)
+  const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
+  assert.equal(change, undefined, 'and there is no button offering to')
+})

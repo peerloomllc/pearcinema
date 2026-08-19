@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Copy, Refresh } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -33,12 +33,17 @@ const SETTINGS_SECTIONS = [
   ['source', 'Source'],
   ['artwork', 'Artwork'],
   ['library', 'Library'],
-  ['security', 'Security'],
   ['support', 'Support development'],
   ['remotes', 'Remote libraries'],
   ['casting', 'Casting'],
   ['host', 'This host']
 ]
+
+// PAGES THAT WENT SOMEWHERE ELSE. Eight sections is being consolidated to five (Tim,
+// 2026-08-19), and a section that moves must not turn every link and bookmark to it
+// into a silent fall back to Source. Security was one password field with a nav item
+// of its own; it lives on This host now, which is whose password it is.
+const MOVED_SECTIONS = { security: 'host' }
 
 // The hash names the page - #settings/source opens Settings on Source - so a
 // section is linkable, refreshable and reachable by anything that can only
@@ -477,39 +482,30 @@ function CastPanel () {
 }
 
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
-  const [sec, setSec] = useState(() => {
-    const [t, s] = hashParts()
-    return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
-  })
+  const resolveSection = (t, s) => {
+    if (t !== 'settings') return null
+    if (SETTINGS_SECTIONS.some(([id]) => id === s)) return s
+    return MOVED_SECTIONS[s] || null
+  }
+  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || 'source')
   // The hash can change while Settings is already open - the topbar's
   // download indicator points at settings/remotes - so follow it live rather
   // than only reading it at mount.
   useEffect(() => {
     const follow = () => {
-      const [t, s] = hashParts()
-      if (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) setSec(s)
+      const next = resolveSection(...hashParts())
+      if (next) setSec(next)
     }
     window.addEventListener('hashchange', follow)
     return () => window.removeEventListener('hashchange', follow)
   }, [])
   const [name, setName] = useState(state.library || '')
-  const [cur, setCur] = useState('')
-  const [next, setNext] = useState('')
-
-  const src = state.auth?.passwordSource
 
   const saveName = async () => {
     const res = await api('/api/library', { name })
     if (res.error) return notify('Not renamed', res.error)
     await reload()
     notify('Renamed', 'Every paired phone relabels straight away.')
-  }
-
-  const savePassword = async () => {
-    const res = await api('/api/password', { current: cur, next })
-    if (res.error) return notify('Not changed', res.error)
-    setCur(''); setNext('')
-    notify('Changed', 'You are still logged in here. Other browsers will need the new one.')
   }
 
   return (
@@ -548,77 +544,193 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
 
         {sec === 'casting' && <CastPanel />}
 
-        {sec === 'security' && (
-          <div class='card'>
-            <h3>This page's password</h3>
-            {!state.auth?.enabled && (
-              <p class='hint'>
-                There is no password, because this page is only reachable from the machine it
-                runs on. If it is ever opened to the network it will refuse to start without one.
-              </p>
-            )}
-            {src === 'explicit' && (
-              <p class='hint'>
-                This password comes from the platform that installed PearCinema. On Umbrel it is
-                the app password shown next to PearCinema in your app list. Change it there, or a
-                restart would quietly put it back.
-              </p>
-            )}
-            {(src === 'generated' || src === 'file') && (
-              <>
-                <div class='field'>
-                  <label>The current one</label>
-                  <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
-                </div>
-                <div class='field'>
-                  <label>A new one (at least 8 characters)</label>
-                  <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
-                </div>
-              </>
-            )}
-            <div class='actions'>
-              {(src === 'generated' || src === 'file') && (
-                <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
-              )}
-              <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Log out</button>
-              {state.auth?.enabled && (
-                <button class='ghost' onClick={async () => {
-                  const res = await api('/api/logout-everywhere', {})
-                  if (res?.error) return notify('Not done', res.error)
-                  notify('Done', res.others === 0
-                    ? 'No other browser was logged in.'
-                    : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} logged out. This one stays.`)
-                }}>Log out everywhere else</button>
-              )}
+        {sec === 'support' && <SupportPanel />}
+
+        {sec === 'host' && <HostPanel state={state} reload={reload} />}
+
+      </div>
+    </div>
+  )
+}
+
+// THIS HOST, the first page rebuilt in the shape the rest of Settings is moving to
+// (Tim, 2026-08-19: the Settings pages are busy and not aesthetically pleasing).
+//
+// It was two nav items and three cards: This host, Security, and the video engine.
+// They are one page and five rows now, because they are all answers to the same
+// question - what is this machine, and what is it allowed to do.
+//
+// THREE RULES THIS PAGE IS THE PILOT FOR:
+//
+//   ONE SETTING PER ROW. What it is on the left, the control on the right, and a
+//   sub-line only where the control genuinely needs one. What this replaces is a card
+//   per setting with two or three paragraphs above the control, so a page you already
+//   understood still made you read it.
+//
+//   ICONS WHERE A WORD IS NOISE, WORDS WHERE AN ICON IS A GUESS. Copying an address is
+//   an icon. "Log out everywhere else" is not, and neither is "Run again" - a rare or
+//   irreversible action should never be a pictogram somebody has to interpret.
+//
+//   THE CARD'S OWN ACTION ROW STAYS CENTERED (Tim's call, 2026-08-15). A control that
+//   belongs to one row sits in that row, which is a different thing.
+function HostPanel ({ state, reload }) {
+  const [cur, setCur] = useState('')
+  const [next, setNext] = useState('')
+  const [pwOpen, setPwOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const t = state.transcode || {}
+  const c = state.transcodeCap || {}
+  const [cap, setCap] = useState(String(c.cap ?? 4))
+
+  const src = state.auth?.passwordSource
+  // Only a password this host owns can be changed from here. One set by the platform
+  // would be quietly put back on the next restart, which is worse than not offering it.
+  const ownPassword = src === 'generated' || src === 'file'
+
+  const copyKey = async () => {
+    if (await copyText(state.hostKey)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+  }
+
+  const savePassword = async () => {
+    const res = await api('/api/password', { current: cur, next })
+    if (res.error) return notify('Not changed', res.error)
+    setCur(''); setNext(''); setPwOpen(false)
+    notify('Changed', 'You are still signed in here. Other browsers will need the new one.')
+  }
+
+  const saveCap = async () => {
+    setBusy(true)
+    const res = await api('/api/transcode-cap', { cap: Number(cap) })
+    setBusy(false)
+    if (res?.error) return notify('Not saved', res.error)
+    notify('Saved', Number(cap) === 0
+      ? 'Conversions are off. Films stream as they are, and anything a device cannot play is refused honestly.'
+      : `Up to ${cap} conversions will run at once. Running ones finish as they were.`)
+    reload()
+  }
+
+  const passwordSub = !state.auth?.enabled
+    ? 'None, because this page is only reachable from the machine it runs on.'
+    : src === 'explicit'
+      ? 'Set by the platform that installed PearCinema. On Umbrel it is the app password beside PearCinema in your app list.'
+      : 'Other browsers will need the new one. This one stays signed in.'
+
+  const engineSub = t.available
+    ? `Films converted at once when a device cannot play them as they are. 0 turns conversions off. This hardware managed about ${c.measured || 10} in testing.`
+    : `Conversions are off: ${t.reason || 'the hardware probe did not pass'}.`
+
+  return (
+    <div class='card'>
+      <h3>This host</h3>
+      <div class='setrows'>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Address</span>
+            <span class='rowsub'>
+              Not a secret, and not enough on its own. A device also needs a grant, which
+              only pairing creates.
+            </span>
+            <span class='rowvalue'>{state.hostKey}</span>
+          </span>
+          <span class='rowctl'>
+            <button
+              class='iconbtn' onClick={copyKey}
+              title={copied ? 'Copied' : 'Copy'}
+              aria-label="Copy this library's address"
+            >
+              <Copy size={17} />
+            </button>
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Password</span>
+            <span class='rowsub'>{passwordSub}</span>
+          </span>
+          {ownPassword && (
+            <span class='rowctl'>
+              <button class='ghost' onClick={() => setPwOpen(!pwOpen)}>{pwOpen ? 'Cancel' : 'Change'}</button>
+            </span>
+          )}
+        </div>
+
+        {pwOpen && ownPassword && (
+          <div class='rowopen'>
+            <div class='field'>
+              <label>The current one</label>
+              <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
             </div>
-            {state.auth?.enabled && (
-              <p class='hint'>
-                A browser stays logged in for a week. Log out everywhere else is for the
-                laptop you handed back. Every other browser is out at once, and this one stays.
-              </p>
-            )}
+            <div class='field'>
+              <label>A new one (at least 8 characters)</label>
+              <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
+            </div>
+            <div class='actions'>
+              <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
+            </div>
           </div>
         )}
 
-        {sec === 'support' && <SupportPanel />}
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Signed-in browsers</span>
+            <span class='rowsub'>
+              {state.auth?.enabled
+                ? 'A browser stays signed in for a week. Sign the others out for the laptop you handed back - this one stays.'
+                : 'Nothing to sign out of while this page has no password.'}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Sign out</button>
+            {state.auth?.enabled && (
+              <button class='ghost' onClick={async () => {
+                const res = await api('/api/logout-everywhere', {})
+                if (res?.error) return notify('Not done', res.error)
+                notify('Done', res.others === 0
+                  ? 'No other browser was signed in.'
+                  : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} signed out. This one stays.`)
+              }}>Sign out everywhere else</button>
+            )}
+          </span>
+        </div>
 
-        {sec === 'host' && (
-          <>
-            <div class='card'>
-              <h3>This host</h3>
-              <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
-              <p class='hint'>
-                That is this library's address on the network PearCinema uses. It is not a
-                secret, and it is not enough on its own to get in. A device also needs a
-                grant, which only pairing creates.
-              </p>
-              <div class='actions'>
-                <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
-              </div>
-            </div>
-            <TranscodeCap state={state} reload={reload} />
-          </>
-        )}
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Video engine</span>
+            <span class='rowsub'>{engineSub}</span>
+          </span>
+          {t.available && (
+            <span class='rowctl'>
+              <input
+                type='number' min='0' max='16' step='1' value={cap}
+                aria-label='How many films this host will convert at once'
+                onInput={e => setCap(e.currentTarget.value)}
+              />
+              {/* Appears only when the number has actually changed, so the row is a
+                  reading of the setting until it is an edit of it. */}
+              {String(c.cap) !== String(cap) && cap !== '' && (
+                <button onClick={saveCap} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+              )}
+            </span>
+          )}
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>First-time setup</span>
+            <span class='rowsub'>Walks through the source, pairing and artwork again. Nothing already set is undone.</span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run again</button>
+          </span>
+        </div>
+
       </div>
     </div>
   )
@@ -682,56 +794,6 @@ function SupportPanel () {
 // sharing, which is why this is a field and not just an env var. Zero is the
 // off switch: conversions stop being OFFERED (honest refusals), not merely
 // refused at the door as busy.
-function TranscodeCap ({ state, reload }) {
-  const t = state.transcode || {}
-  const c = state.transcodeCap || {}
-  const [cap, setCap] = useState(String(c.cap ?? 4))
-  const [busy, setBusy] = useState(false)
-
-  const save = async () => {
-    setBusy(true)
-    const res = await api('/api/transcode-cap', { cap: Number(cap) })
-    setBusy(false)
-    if (res?.error) return notify('Not saved', res.error)
-    notify('Saved', Number(cap) === 0
-      ? 'Conversions are off. Files stream as they are, and anything a device cannot play is refused honestly.'
-      : `Up to ${cap} conversions will run at once. Running ones finish as they were.`)
-    reload()
-  }
-
-  return (
-    <div class='card'>
-      <h3>The video engine</h3>
-      <p class='hint'>
-        {t.available
-          ? 'This box converts films on its video hardware when a device cannot play them as they are.'
-          : `Conversions are not available: ${t.reason || 'the hardware probe did not pass'}.`}
-      </p>
-      {t.available && (
-        <>
-          <div class='field'>
-            <label>How many films it will convert at once</label>
-            <input
-              type='number' min='0' max='16' step='1' value={cap}
-              style='max-width:6rem'
-              onInput={e => setCap(e.currentTarget.value)}
-            />
-          </div>
-          <p class='hint'>
-            The measured ceiling on this class of hardware is about {c.measured || 10} at
-            once; the default of 4 leaves headroom for whatever else shares the engine.
-            0 turns conversions off entirely.
-          </p>
-          <div class='actions'>
-            <button onClick={save} disabled={busy || String(c.cap) === String(cap) || cap === ''}>
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 export default function App () {
   const [state, setState] = useState(null)

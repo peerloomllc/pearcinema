@@ -1208,3 +1208,45 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
   margin-top: .7rem; padding-top: .75rem; border-top: 1px solid var(--line);
 }
 .tvfoot .grow { flex: 1 1 auto; margin: 0 }
+
+/* SETTINGS ROWS.
+ *
+ * One setting per row: what it is on the left, the control on the right, and a
+ * sub-line only where the control genuinely needs one. The shape the Settings pages
+ * are moving to (Tim, 2026-08-19: they are busy and not aesthetically pleasing).
+ *
+ * What it replaces is a card per setting, each with a heading and two or three
+ * paragraphs of prose above the control - so a page you already understood still made
+ * you read it, and nothing on it looked more important than anything else.
+ *
+ * The card's OWN action row stays centered (.actions, Tim's call 2026-08-15). A
+ * control that belongs to one row sits in that row, which is a different thing and
+ * not a quiet reversal of it.
+ */
+.setrows { display: flex; flex-direction: column }
+.setrow {
+  display: flex; align-items: flex-start; gap: 1rem;
+  padding: .8rem 0; border-bottom: 1px solid var(--line);
+}
+.setrow:last-child { border-bottom: none }
+.setrow:first-child { padding-top: .2rem }
+.setrow .rowmain { flex: 1 1 0; min-width: 0 }
+.setrow .rowname { font-size: .92rem; line-height: 1.3 }
+.setrow .rowsub { color: var(--muted); font-size: .8rem; line-height: 1.4; margin-top: .15rem }
+/* The control side. Shrinks before the label does, and wraps under it on a phone. */
+.setrow .rowctl { flex: 0 0 auto; display: flex; align-items: center; gap: .4rem }
+.setrow .rowctl input[type=number] { width: 4.5rem }
+.setrow .rowctl button { min-width: 0 }
+/* A value too long to sit beside its label - a host key, an address - takes the line
+   under it and keeps the copy button up beside the name. */
+.setrow .rowvalue {
+  font-family: var(--mono, monospace); font-size: .78rem; line-height: 1.5;
+  color: var(--muted); overflow-wrap: anywhere; margin-top: .3rem;
+}
+/* What a row opens: a form that was not worth showing until asked for. */
+.rowopen { padding: .2rem 0 .6rem; border-bottom: 1px solid var(--line) }
+
+@media (max-width: 560px) {
+  .setrow { flex-wrap: wrap }
+  .setrow .rowctl { width: 100%; justify-content: flex-end }
+}
