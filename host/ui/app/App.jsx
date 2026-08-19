@@ -33,16 +33,21 @@ const CAPS = probeCapabilities()
 // about rather than by which file the code lives in:
 //
 //   Library      the collection - its name, where the films are, artwork
-//   Televisions  was Casting
+//   Casting      televisions and speakers, and how they are found
 //   Sharing      was Remote libraries - libraries, downloads, requests
 //   This host    this machine - password, sessions, the video engine
 //   Support      unchanged
 //
 // Source, Artwork and Library were three nav items for one subject, and two of them
 // held a single control each.
+// CASTING, NOT TELEVISIONS (Tim, 2026-08-19, asking to change it back). The page was
+// rebuilt around televisions and took their name with it, but it also lists the
+// speakers Home Assistant knows about - and calling a speaker a television is simply
+// wrong. Casting is the one word that covers everything on the page and it is the verb
+// people use for the action.
 const SETTINGS_SECTIONS = [
   ['library', 'Library'],
-  ['televisions', 'Televisions'],
+  ['casting', 'Casting'],
   ['sharing', 'Sharing'],
   ['host', 'This host'],
   ['support', 'Support development']
@@ -56,7 +61,7 @@ const MOVED_SECTIONS = {
   security: 'host',
   source: 'library',
   artwork: 'library',
-  casting: 'televisions',
+  televisions: 'casting',
   remotes: 'sharing'
 }
 
@@ -527,7 +532,7 @@ function CastPanel () {
 
   return (
     <>
-      <div class='setpage'><span class='setpagename'>Televisions</span></div>
+      <div class='setpage'><span class='setpagename'>Casting</span></div>
 
       {/* THE ROUTES COME FIRST (Tim, 2026-08-19). They are the settings on this page -
           the televisions themselves are the RESULT of them - and a result reads better
@@ -606,7 +611,9 @@ function CastPanel () {
         </div>
       )}
 
-      <div class='setgroup'>Your televisions</div>
+      {/* WHERE YOU CAN CAST, not "your televisions": the same list holds the speakers
+          Home Assistant knows about, and one of those is not a television. */}
+      <div class='setgroup'>Where you can cast</div>
 
       {/* THE WAIT BELONGS TO THE LIST, so it waits where the list will be (Tim,
           2026-08-19). Above the routes it read as the whole page loading. */}
@@ -923,7 +930,7 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
           </>
         )}
 
-        {sec === 'televisions' && <CastPanel />}
+        {sec === 'casting' && <CastPanel />}
 
         {sec === 'support' && <SupportPanel />}
 
@@ -1164,6 +1171,12 @@ function HostPanel ({ state, reload }) {
 function SupportPanel () {
   const [rails, setRails] = useState(null)
   const [tab, setTab] = useState('ln')
+  // DECLARED, WHICH IT WAS NOT. `copied` and `setCopied` were used and never created,
+  // so this page threw "copied is not defined" the moment the rails arrived and took
+  // the whole app down with it - the same shape as the three temporal-dead-zone
+  // crashes of 2026-08-17, and invisible to every test in the suite because they all
+  // assert on text and this page had none of its own (found 2026-08-19, rebuilding it).
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -1176,10 +1189,14 @@ function SupportPanel () {
     if (rail && await copyText(rail.value)) { setCopied(true); setTimeout(() => setCopied(false), 1500) }
   }
 
+  // NO CARD AROUND A PAGE, which is the one Ledger rule this page still broke: it
+  // named itself inside a box, so the title sat in a container the other four pages do
+  // not have. What it does NOT become is a list of rows - it is a QR code somebody
+  // points a phone at, and rows are for settings.
   return (
-    <div class='card'>
+    <>
       <div class='setpage'><span class='setpagename'>Support development</span></div>
-      <p class='hint' style='text-align:center'>
+      <p class='hint center'>
         No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
         helps keep it free, and it is entirely optional.
       </p>
@@ -1188,22 +1205,29 @@ function SupportPanel () {
         <button class={tab === 'onchain' ? 'on' : ''} onClick={() => { setTab('onchain'); setCopied(false) }}>On-chain</button>
         <button class={tab === 'usd' ? 'on' : ''} onClick={() => { setTab('usd'); setCopied(false) }}>USD</button>
       </div>
-      {rail
-        ? (
-          <>
-            <div class='donate-qr' dangerouslySetInnerHTML={{ __html: rail.svg }} />
-            <div class='donate-cap'>{rail.caption}</div>
-            <div class='donate-addr'>{rail.value}</div>
-            <div class='actions'>
-              <button class='ghost' onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
-              {tab === 'usd' && (
-                <button onClick={() => window.open(rail.value, '_blank', 'noopener')}>Open ↗</button>
-              )}
-            </div>
-          </>
-          )
-        : <p class='hint' style='text-align:center'>Loading…</p>}
-    </div>
+      {rails === null && (
+        <div class='waiting'>
+          <Spinner size={34} class='spin' />
+          <span>Loading…</span>
+        </div>
+      )}
+      {rails && !rail && <p class='hint center'>That one is not set up on this host.</p>}
+      {rail && (
+        <>
+          <div class='donate-qr' dangerouslySetInnerHTML={{ __html: rail.svg }} />
+          <div class='donate-cap'>{rail.caption}</div>
+          <div class='donate-addr'>{rail.value}</div>
+          {/* One word per button and both the same width, like every other action row.
+              "Open ↗" was an arrow doing nothing a word was not already doing. */}
+          <div class='actions'>
+            <button class='ghost' onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+            {tab === 'usd' && (
+              <button onClick={() => window.open(rail.value, '_blank', 'noopener')}>Open</button>
+            )}
+          </div>
+        </>
+      )}
+    </>
   )
 }
 
