@@ -1385,3 +1385,45 @@ test('a password this host does not own cannot be changed from here', async (t) 
   const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
   assert.equal(change, undefined, 'and there is no button offering to')
 })
+
+test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a sentence', async (t) => {
+  // The type scale was the disease, not the borders: nine sizes lived between .74 and
+  // 1.05rem, so a heading, a setting's name and a line explaining it all read at the
+  // same importance, and a box around each one was the compensation. Four steps with
+  // real gaps replace them, and the boxes come off.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const { doc } = await openHost(t, state)
+
+  const title = doc.querySelector('.setbody .setpage')
+  assert.ok(title, 'the page names itself once, at the top')
+  assert.match(title.textContent, /This host/)
+
+  // The chip vocabulary already existed and Settings never used it, so every page
+  // stated its condition in a paragraph instead.
+  const chip = title.querySelector('.chip')
+  assert.ok(chip, 'and its condition is a chip')
+  assert.match(chip.textContent, /converts 4 at once/)
+  assert.ok(chip.className.includes('good'))
+
+  // Rows are grouped by what they are about rather than by which card they came from.
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Reaching it', 'What it may do'])
+
+  // And the box is gone: the settings are on the page, not inside a panel on it.
+  assert.equal(doc.querySelector('.setbody .card'), null, 'no card around a page of rows')
+})
+
+test('a host that cannot convert says so in the chip, not in a paragraph', async (t) => {
+  const state = { ...STATE, transcode: { available: false, reason: 'no /dev/dri on this machine' } }
+  const { doc, text } = await openHost(t, state)
+
+  const chip = doc.querySelector('.setpage .chip')
+  assert.match(chip.textContent, /no conversions/)
+  assert.equal(chip.className.includes('good'), false, 'and it does not claim to be fine')
+  // The reason is still available where somebody would look for it.
+  assert.match(text(), /no \/dev\/dri on this machine/)
+})

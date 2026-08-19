@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #e6b24e; } a:hover { color: #f2c778; }
+  </style>
+</helmet>
+
+<div style="width: 900px; height: 700px; background: #0c0a07; color: #f3ede1; background-image: radial-gradient(1200px 600px at 50% -12%, rgba(230, 178, 78, .09) 0%, transparent 60%); padding: 26px 28px; display: flex; flex-direction: column; gap: 18px;">
+
+  <div style="display: flex; align-items: baseline; gap: 10px;">
+    <span style="font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem;">PearCinema</span>
+    <span style="color: #a2947d; font-size: .85rem;">Settings</span>
+  </div>
+
+  <div style="display: flex; gap: 1.4rem; align-items: flex-start; flex-grow: 1; min-height: 0;">
+
+    <div style="display: flex; flex-direction: column; gap: .2rem; min-width: 9.5rem;">
+      <div style="background: #191410; color: #f3ede1; border: 1px solid #322a20; padding: .5rem .75rem; border-radius: 9px; font-weight: 560; display: flex; align-items: center; gap: .5rem;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: #8bb877; flex-shrink: 0;"></span>Library
+      </div>
+      <div style="color: #a2947d; padding: .5rem .75rem; display: flex; align-items: center; gap: .5rem;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: #8bb877; flex-shrink: 0;"></span>Televisions
+      </div>
+      <div style="color: #a2947d; padding: .5rem .75rem; display: flex; align-items: center; gap: .5rem;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: #3a3126; flex-shrink: 0;"></span>Sharing
+      </div>
+      <div style="color: #a2947d; padding: .5rem .75rem; display: flex; align-items: center; gap: .5rem;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: #f2b544; flex-shrink: 0;"></span>This host
+      </div>
+      <div style="color: #a2947d; padding: .5rem .75rem; display: flex; align-items: center; gap: .5rem;">
+        <span style="width: 6px; height: 6px; border-radius: 999px; background: transparent; flex-shrink: 0;"></span>Support development
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-width: 0;">
+
+      <div style="background: #191410; border: 1px solid #322a20; border-radius: 14px; padding: 1.1rem 1.1rem .9rem; margin-bottom: 1rem;">
+        <div style="font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #a2947d;">Library</div>
+        <div style="font-size: 1.35rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.25; margin-top: .35rem;">
+          2,986 files across two folders, read 4 minutes ago.
+        </div>
+        <div style="display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .7rem;">
+          <span style="display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .74rem; font-weight: 600; letter-spacing: .01em; background: #201a13; color: #8bb877; border: 1px solid rgba(139, 184, 119, .4);">Folders readable</span>
+          <span style="display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .74rem; font-weight: 600; letter-spacing: .01em; background: #201a13; color: #e6b24e; border: 1px solid rgba(230, 178, 78, .45);">Posters on</span>
+          <span style="display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .74rem; font-weight: 600; letter-spacing: .01em; background: #201a13; color: #a2947d; border: 1px solid #322a20;">71 without a poster</span>
+        </div>
+      </div>
+
+      <div style="background: #191410; border: 1px solid #322a20; border-radius: 14px; padding: .2rem 1.1rem;">
+
+        <div style="display: flex; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid #322a20;">
+          <div style="flex-grow: 1; min-width: 0; font-size: .95rem; font-weight: 500;">Name</div>
+          <input type="text" value="The Cinema" style="font: inherit; color: #f3ede1; background: #141009; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .6rem; width: 13rem;">
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid #322a20;">
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="font-size: .95rem; font-weight: 500;">Where the films are</div>
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; color: #a2947d; margin-top: .15rem;">/library/Movies · /library/TV Shows</div>
+          </div>
+          <button style="font: inherit; font-weight: 560; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .85rem; background: transparent; color: #f3ede1; cursor: pointer;">Change</button>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid #322a20;">
+          <div style="flex-grow: 1; min-width: 0; font-size: .95rem; font-weight: 500;">Read it again</div>
+          <div style="display: flex; align-items: center; gap: .4rem;">
+            <select style="font: inherit; color: #f3ede1; background: #141009; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .6rem;">
+              <option>Every 6 hours</option>
+            </select>
+            <button style="display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 7px; background: transparent; border: none; color: #a2947d; cursor: pointer;" title="Read it again" aria-label="Read the folders again now">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9"></path><path d="M20 3.5V8h-4.5"></path></svg>
+            </button>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid #322a20;">
+          <div style="flex-grow: 1; min-width: 0;">
+            <div style="font-size: .95rem; font-weight: 500;">Posters from the internet</div>
+            <div style="color: #a2947d; font-size: .8rem; line-height: 1.4; margin-top: .15rem;">A poster already beside the film always wins.</div>
+          </div>
+          <div style="width: 40px; height: 23px; border-radius: 999px; background: #e6b24e; position: relative; flex-shrink: 0;">
+            <div style="position: absolute; top: 3px; right: 3px; width: 17px; height: 17px; border-radius: 999px; background: #1c1305;"></div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 1rem; padding: .75rem 0;">
+          <div style="flex-grow: 1; min-width: 0; font-size: .95rem; font-weight: 500;">Still missing a poster</div>
+          <button style="font: inherit; font-weight: 560; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .85rem; background: transparent; color: #f3ede1; cursor: pointer;">Look again</button>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":900,"height":700}}'>
+class Component extends DCLogic {
+  renderVals () { return {} }
+}
+</script>
+</body>
+</html>

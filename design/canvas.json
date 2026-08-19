@@ -1,0 +1,31 @@
+{
+  "artboards": [
+    { "file": "Today.dc.html", "x": 0, "y": 0, "w": 900, "h": 700, "title": "Today" },
+    { "file": "Main.dc.html", "x": 980, "y": 0, "w": 900, "h": 700, "title": "A · Ledger" },
+    { "file": "Console.dc.html", "x": 1960, "y": 0, "w": 900, "h": 700, "title": "B · Console" }
+  ],
+  "annotations": [
+    {
+      "id": "today",
+      "x": 0,
+      "y": -180,
+      "w": 380,
+      "text": "TODAY — the Source page as it ships.\n\nNine font sizes between 0.74 and 1.05rem, so a heading, a label and an explanation all read at the same importance. Boxes were the compensation. Two cards, four paragraphs, two Save buttons for one page."
+    },
+    {
+      "id": "ledger",
+      "x": 980,
+      "y": -180,
+      "w": 380,
+      "text": "A · LEDGER — bets on typography.\n\nNo boxes at all. Hierarchy comes from a real scale with steps in it: 1.5rem page title, 0.72rem uppercase group label, 0.95rem row, 0.8rem sub. Amber marks the nav.\n\nRisk: a long page has less to break it up."
+    },
+    {
+      "id": "console",
+      "x": 1960,
+      "y": -180,
+      "w": 380,
+      "text": "B · CONSOLE — bets on state.\n\nEvery Settings page answers 'is this bit working?' first, in one sentence, using the chip vocabulary the app already has. Settings sit below as compact rows. Dots in the nav carry the same state.\n\nRisk: the header is dead weight on a page with nothing to report."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

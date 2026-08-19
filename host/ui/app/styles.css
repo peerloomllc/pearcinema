@@ -1250,3 +1250,48 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
   .setrow { flex-wrap: wrap }
   .setrow .rowctl { width: 100%; justify-content: flex-end }
 }
+
+/* ---- Settings, the Ledger shape -------------------------------------------
+ *
+ * THE TYPE SCALE WAS THE DISEASE, not the borders. Nine font sizes lived between
+ * .74rem and 1.05rem, so a page heading, a setting's name and a line explaining it
+ * all landed within a quarter of a step of each other. Nothing looked more important
+ * than anything else, and a box around every setting was the compensation - which is
+ * what made the pages busy (Tim, 2026-08-19).
+ *
+ * Four steps with real gaps between them, and the boxes come off:
+ *
+ *   1.5rem   the page - said once, at the top
+ *    .95rem  a setting's name
+ *    .8rem   the line under it, when it needs one
+ *    .72rem  the group label above a run of rows, in caps
+ *
+ * The amber is spent in exactly two places on a Settings page: which section you are
+ * in, and a status chip when there is a status. It is the app's one loud colour and
+ * it stops meaning anything if it decorates.
+ */
+.setpage {
+  display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  font-size: 1.5rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.15;
+  margin: 0 0 1.5rem;
+}
+.setgroup {
+  font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); margin: 1.6rem 0 .35rem;
+}
+.setgroup:first-child { margin-top: 0 }
+
+/* WHICH SECTION YOU ARE IN, said with the accent rather than with a filled pill. The
+ * pill was another box on a page whose whole problem was boxes, and it read as a
+ * pressed button rather than as a place. A rule down the left edge is the quieter
+ * answer and it is also the only amber in the nav. */
+.setnav button.on { background: none; border: none; color: var(--fg) }
+.setnav button { border-left: 2px solid transparent; border-radius: 0 9px 9px 0 }
+.setnav button.on { border-left-color: var(--accent) }
+
+@media (max-width: 720px) {
+  /* A left rule means nothing on a horizontal row, so the phone keeps its pills and
+   * spends the accent on the border instead. */
+  .setnav button { border-left: 1px solid var(--line); border-radius: 999px }
+  .setnav button.on { background: var(--card); border: 1px solid var(--accent); color: var(--fg) }
+}

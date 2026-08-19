@@ -624,10 +624,22 @@ function HostPanel ({ state, reload }) {
     ? `Films converted at once when a device cannot play them as they are. 0 turns conversions off. This hardware managed about ${c.measured || 10} in testing.`
     : `Conversions are off: ${t.reason || 'the hardware probe did not pass'}.`
 
+  // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
+  // bad variants since it had a library page, and Settings never used one - so every
+  // page said its state in a paragraph instead.
+  const engineChip = t.available
+    ? { cls: 'chip good', text: `converts ${c.cap ?? 4} at once` }
+    : { cls: 'chip', text: 'no conversions' }
+
   return (
-    <div class='card'>
-      <h3>This host</h3>
+    <>
+      <div class='setpage'>
+        This host
+        <span class={engineChip.cls}>{engineChip.text}</span>
+      </div>
+
       <div class='setrows'>
+        <div class='setgroup'>Reaching it</div>
 
         <div class='setrow'>
           <span class='rowmain'>
@@ -700,6 +712,8 @@ function HostPanel ({ state, reload }) {
           </span>
         </div>
 
+        <div class='setgroup'>What it may do</div>
+
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>Video engine</span>
@@ -732,7 +746,7 @@ function HostPanel ({ state, reload }) {
         </div>
 
       </div>
-    </div>
+    </>
   )
 }
 
