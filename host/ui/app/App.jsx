@@ -33,12 +33,17 @@ const SETTINGS_SECTIONS = [
   ['source', 'Source'],
   ['artwork', 'Artwork'],
   ['library', 'Library'],
-  ['security', 'Security'],
   ['support', 'Support development'],
   ['remotes', 'Remote libraries'],
   ['casting', 'Casting'],
   ['host', 'This host']
 ]
+
+// PAGES THAT WENT SOMEWHERE ELSE. Eight sections is being consolidated to five (Tim,
+// 2026-08-19), and a section that moves must not turn every link and bookmark to it
+// into a silent fall back to Source. Security was one password field with a nav item
+// of its own; it lives on This host now, which is whose password it is.
+const MOVED_SECTIONS = { security: 'host' }
 
 // The hash names the page - #settings/source opens Settings on Source - so a
 // section is linkable, refreshable and reachable by anything that can only
@@ -477,39 +482,30 @@ function CastPanel () {
 }
 
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
-  const [sec, setSec] = useState(() => {
-    const [t, s] = hashParts()
-    return (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) ? s : 'source'
-  })
+  const resolveSection = (t, s) => {
+    if (t !== 'settings') return null
+    if (SETTINGS_SECTIONS.some(([id]) => id === s)) return s
+    return MOVED_SECTIONS[s] || null
+  }
+  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || 'source')
   // The hash can change while Settings is already open - the topbar's
   // download indicator points at settings/remotes - so follow it live rather
   // than only reading it at mount.
   useEffect(() => {
     const follow = () => {
-      const [t, s] = hashParts()
-      if (t === 'settings' && SETTINGS_SECTIONS.some(([id]) => id === s)) setSec(s)
+      const next = resolveSection(...hashParts())
+      if (next) setSec(next)
     }
     window.addEventListener('hashchange', follow)
     return () => window.removeEventListener('hashchange', follow)
   }, [])
   const [name, setName] = useState(state.library || '')
-  const [cur, setCur] = useState('')
-  const [next, setNext] = useState('')
-
-  const src = state.auth?.passwordSource
 
   const saveName = async () => {
     const res = await api('/api/library', { name })
     if (res.error) return notify('Not renamed', res.error)
     await reload()
     notify('Renamed', 'Every paired phone relabels straight away.')
-  }
-
-  const savePassword = async () => {
-    const res = await api('/api/password', { current: cur, next })
-    if (res.error) return notify('Not changed', res.error)
-    setCur(''); setNext('')
-    notify('Changed', 'You are still logged in here. Other browsers will need the new one.')
   }
 
   return (
@@ -548,79 +544,235 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
 
         {sec === 'casting' && <CastPanel />}
 
-        {sec === 'security' && (
-          <div class='card'>
-            <h3>This page's password</h3>
-            {!state.auth?.enabled && (
-              <p class='hint'>
-                There is no password, because this page is only reachable from the machine it
-                runs on. If it is ever opened to the network it will refuse to start without one.
-              </p>
-            )}
-            {src === 'explicit' && (
-              <p class='hint'>
-                This password comes from the platform that installed PearCinema. On Umbrel it is
-                the app password shown next to PearCinema in your app list. Change it there, or a
-                restart would quietly put it back.
-              </p>
-            )}
-            {(src === 'generated' || src === 'file') && (
-              <>
-                <div class='field'>
-                  <label>The current one</label>
-                  <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
-                </div>
-                <div class='field'>
-                  <label>A new one (at least 8 characters)</label>
-                  <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
-                </div>
-              </>
-            )}
-            <div class='actions'>
-              {(src === 'generated' || src === 'file') && (
-                <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
-              )}
-              <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Log out</button>
-              {state.auth?.enabled && (
-                <button class='ghost' onClick={async () => {
-                  const res = await api('/api/logout-everywhere', {})
-                  if (res?.error) return notify('Not done', res.error)
-                  notify('Done', res.others === 0
-                    ? 'No other browser was logged in.'
-                    : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} logged out. This one stays.`)
-                }}>Log out everywhere else</button>
-              )}
+        {sec === 'support' && <SupportPanel />}
+
+        {sec === 'host' && <HostPanel state={state} reload={reload} />}
+
+      </div>
+    </div>
+  )
+}
+
+// THIS HOST, the first page rebuilt in the shape the rest of Settings is moving to
+// (Tim, 2026-08-19: the Settings pages are busy and not aesthetically pleasing).
+//
+// It was two nav items and three cards: This host, Security, and the video engine.
+// They are one page now, because they are all answers to the same question - what is
+// this machine, and what is it allowed to do.
+//
+// THE LIBRARY'S ADDRESS IS NOT ON IT (Tim, 2026-08-19: "do we even need Address? I
+// don't think we even use it anywhere for anything" - he was right). Every other use
+// of the host key is one library reaching another, in code; pairing never asks a
+// person for it, and nothing on any screen was ever copied from here. If it turns out
+// to be wanted for support, the pairing screen is where it belongs.
+//
+// THREE RULES THIS PAGE IS THE PILOT FOR:
+//
+//   ONE SETTING PER ROW. What it is on the left, the control on the right, and a
+//   sub-line only where the control genuinely needs one. What this replaces is a card
+//   per setting with two or three paragraphs above the control, so a page you already
+//   understood still made you read it.
+//
+//   ICONS WHERE A WORD IS NOISE, WORDS WHERE AN ICON IS A GUESS. Copying an address is
+//   an icon. "Log out everywhere else" is not, and neither is "Run again" - a rare or
+//   irreversible action should never be a pictogram somebody has to interpret.
+//
+//   THE CARD'S OWN ACTION ROW STAYS CENTERED (Tim's call, 2026-08-15). A control that
+//   belongs to one row sits in that row, which is a different thing.
+function HostPanel ({ state, reload }) {
+  const [cur, setCur] = useState('')
+  const [next, setNext] = useState('')
+  const [pwOpen, setPwOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const t = state.transcode || {}
+  const c = state.transcodeCap || {}
+  const [cap, setCap] = useState(String(c.cap ?? 4))
+
+  const src = state.auth?.passwordSource
+  // Only a password this host owns can be changed from here. One set by the platform
+  // would be quietly put back on the next restart, which is worse than not offering it.
+  const ownPassword = src === 'generated' || src === 'file'
+
+  const savePassword = async () => {
+    const res = await api('/api/password', { current: cur, next })
+    if (res.error) return notify('Not changed', res.error)
+    setCur(''); setNext(''); setPwOpen(false)
+    notify('Changed', 'You are still signed in here. Other browsers will need the new one.')
+  }
+
+  // THE NUMBER SAVES ITSELF as you change it. It had a Save button, and
+  // that button was the only filled amber control on the page, in the only row with two
+  // controls, next to the only input - four reasons for one row to shout, stacked (Tim,
+  // 2026-08-19, with a screenshot). The same reasoning the casting hide switch already
+  // follows: a control that needs a second press somewhere else to mean anything is a
+  // control people get wrong.
+  const commitCap = async () => {
+    const n = Math.trunc(Number(cap))
+    // An empty or unusable box is not a request to set anything - put the real value
+    // back rather than sending a guess.
+    if (cap === '' || !Number.isFinite(n)) return setCap(String(c.cap ?? 4))
+    const clamped = Math.max(0, Math.min(16, n))
+    setCap(String(clamped))
+    if (String(clamped) === String(c.cap)) return
+
+    setBusy(true)
+    const res = await api('/api/transcode-cap', { cap: clamped })
+    setBusy(false)
+    if (res?.error) {
+      setCap(String(c.cap ?? 4))
+      return notify('Not saved', res.error)
+    }
+    notify('Saved', clamped === 0
+      ? 'Conversions are off. Films stream as they are, and anything a device cannot play is refused honestly.'
+      : `Up to ${clamped} conversions will run at once. Running ones finish as they were.`)
+    reload()
+  }
+
+  // AFTER THE TYPING STOPS, not on every keystroke. Saving per keystroke would set the
+  // cap to 1 on the way to typing 16, and a cap of 1 refuses conversions for as long as
+  // it stands. Each change cancels the last timer, so only the number somebody settled
+  // on is ever sent. Leaving the box or pressing Enter still commits at once, so this is
+  // a shortcut rather than the only way out.
+  useEffect(() => {
+    if (!t.available || cap === '') return
+    const n = Math.max(0, Math.min(16, Math.trunc(Number(cap))))
+    if (!Number.isFinite(n) || String(n) === String(c.cap)) return
+    const timer = setTimeout(commitCap, 700)
+    return () => clearTimeout(timer)
+  }, [cap])
+
+  const passwordSub = !state.auth?.enabled
+    ? 'None. This page is reachable only from this machine.'
+    : src === 'explicit'
+      ? 'Set by the platform that installed this. Change it there.'
+      : 'Other browsers will need the new one.'
+
+  // NO CLAIM ABOUT HARDWARE NOBODY MEASURED. This line used to read "this hardware
+  // managed about 10 in testing" on every install, and the 10 is a constant from the
+  // N100 this was built against - a number about OUR machine, presented as a number
+  // about theirs (Tim, 2026-08-19). What is true everywhere is what zero does.
+  // NAMED ONLY WHEN THERE IS A CHOICE. A render node is a graphics card, not a folder -
+  // it holds nothing and nothing is written to it - but the raw path reads like a
+  // location, and on a machine with one card it changes nothing anyway (Tim, who asked
+  // whether it might run out of space, 2026-08-19). With two cards it is the answer to
+  // which one is working, so it appears.
+  const manyCards = (t.nodes?.length || 0) > 1
+
+  // WHAT THE NUMBER MEANS: how many conversions may run at the same time, and what is
+  // doing them. NOT how many this machine could manage - nothing here has ever measured
+  // that, and the line that used to claim it was quoting the hardware this was built on.
+  // When a host can measure its own engine (TODO), that measurement becomes the field's
+  // ceiling rather than another sentence.
+  const engineSub = !t.available
+    ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
+    : Number(c.cap) === 0
+      ? 'Nothing is converted while this is 0.'
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. 0 turns it off.`
+
+  // THE NAME CARRIES THE STATE, not a pill beside it (Tim, 2026-08-19). A chip was one
+  // more object on a page whose whole problem was objects, and this row was already the
+  // busiest on it.
+  //
+  // COLOUR IS NEVER THE ONLY CARRIER. The line underneath always states the condition in
+  // words - what it is doing, or why it is not - so nobody has to tell green from amber
+  // to read this row.
+  const engineTone = !t.available
+    ? 'dim'
+    : Number(c.cap) === 0
+      ? 'warn'
+      : 'good'
+
+  return (
+    <>
+      <div class='setpage'><span class='setpagename'>This host</span></div>
+
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Password</span>
+            <span class='rowsub'>{passwordSub}</span>
+          </span>
+          {ownPassword && (
+            <span class='rowctl'>
+              <button class='ghost' onClick={() => setPwOpen(!pwOpen)}>{pwOpen ? 'Cancel' : 'Change'}</button>
+            </span>
+          )}
+        </div>
+
+        {pwOpen && ownPassword && (
+          <div class='rowopen'>
+            <div class='field'>
+              <label>The current one</label>
+              <input type='password' value={cur} onInput={e => setCur(e.currentTarget.value)} />
             </div>
-            {state.auth?.enabled && (
-              <p class='hint'>
-                A browser stays logged in for a week. Log out everywhere else is for the
-                laptop you handed back. Every other browser is out at once, and this one stays.
-              </p>
-            )}
+            <div class='field'>
+              <label>A new one (at least 8 characters)</label>
+              <input type='password' value={next} onInput={e => setNext(e.currentTarget.value)} />
+            </div>
+            <div class='actions'>
+              <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
+            </div>
           </div>
         )}
 
-        {sec === 'support' && <SupportPanel />}
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>This browser</span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Sign out</button>
+          </span>
+        </div>
 
-        {sec === 'host' && (
-          <>
-            <div class='card'>
-              <h3>This host</h3>
-              <p class='hint mono' style='word-break:break-all'>{state.hostKey}</p>
-              <p class='hint'>
-                That is this library's address on the network PearCinema uses. It is not a
-                secret, and it is not enough on its own to get in. A device also needs a
-                grant, which only pairing creates.
-              </p>
-              <div class='actions'>
-                <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run first-time setup again</button>
-              </div>
-            </div>
-            <TranscodeCap state={state} reload={reload} />
-          </>
+        {state.auth?.enabled && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>Other browsers</span>
+              <span class='rowsub'>Each stays signed in for a week.</span>
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={async () => {
+                const res = await api('/api/logout-everywhere', {})
+                if (res?.error) return notify('Not done', res.error)
+                notify('Done', res.others === 0
+                  ? 'No other browser was signed in.'
+                  : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} signed out. This one stays.`)
+              }}>Sign out</button>
+            </span>
+          </div>
         )}
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class={`rowname ${engineTone}`}>Video engine</span>
+            <span class='rowsub'>{engineSub}</span>
+          </span>
+          {t.available && (
+            <span class='rowctl'>
+              <input
+                type='number' min='0' max='16' step='1' value={cap} disabled={busy}
+                aria-label='How many films this host will convert at once'
+                onInput={e => setCap(e.currentTarget.value)}
+                onBlur={commitCap}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+              />
+            </span>
+          )}
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>First-time setup</span>
+            <span class='rowsub'>Nothing already set is undone.</span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run again</button>
+          </span>
+        </div>
+
       </div>
-    </div>
+    </>
   )
 }
 
@@ -631,7 +783,6 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
 function SupportPanel () {
   const [rails, setRails] = useState(null)
   const [tab, setTab] = useState('ln')
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -682,56 +833,6 @@ function SupportPanel () {
 // sharing, which is why this is a field and not just an env var. Zero is the
 // off switch: conversions stop being OFFERED (honest refusals), not merely
 // refused at the door as busy.
-function TranscodeCap ({ state, reload }) {
-  const t = state.transcode || {}
-  const c = state.transcodeCap || {}
-  const [cap, setCap] = useState(String(c.cap ?? 4))
-  const [busy, setBusy] = useState(false)
-
-  const save = async () => {
-    setBusy(true)
-    const res = await api('/api/transcode-cap', { cap: Number(cap) })
-    setBusy(false)
-    if (res?.error) return notify('Not saved', res.error)
-    notify('Saved', Number(cap) === 0
-      ? 'Conversions are off. Files stream as they are, and anything a device cannot play is refused honestly.'
-      : `Up to ${cap} conversions will run at once. Running ones finish as they were.`)
-    reload()
-  }
-
-  return (
-    <div class='card'>
-      <h3>The video engine</h3>
-      <p class='hint'>
-        {t.available
-          ? 'This box converts films on its video hardware when a device cannot play them as they are.'
-          : `Conversions are not available: ${t.reason || 'the hardware probe did not pass'}.`}
-      </p>
-      {t.available && (
-        <>
-          <div class='field'>
-            <label>How many films it will convert at once</label>
-            <input
-              type='number' min='0' max='16' step='1' value={cap}
-              style='max-width:6rem'
-              onInput={e => setCap(e.currentTarget.value)}
-            />
-          </div>
-          <p class='hint'>
-            The measured ceiling on this class of hardware is about {c.measured || 10} at
-            once; the default of 4 leaves headroom for whatever else shares the engine.
-            0 turns conversions off entirely.
-          </p>
-          <div class='actions'>
-            <button onClick={save} disabled={busy || String(c.cap) === String(cap) || cap === ''}>
-              {busy ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 export default function App () {
   const [state, setState] = useState(null)

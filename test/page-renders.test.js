@@ -1284,3 +1284,290 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
   await new Promise(r => setTimeout(r, 40))
   assert.ok(doc.querySelector('input[type=password]'), 'and it opens')
 })
+
+// --- This host: the first page rebuilt in the Settings row shape --------------
+//
+// Two nav items and three cards became one page and five rows (Tim, 2026-08-19: the
+// Settings pages are busy and not aesthetically pleasing). What is pinned here is the
+// consolidation - because a page that moves and takes its links with it is worse than
+// a page that was ugly - and the rule that a rare action keeps its words.
+
+async function openHost (t, state = STATE, section = 'host', asked = null) {
+  const opened = await open(state, {}, asked)
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // Through the HASH, because that is how a bookmark or an in-app link arrives, and
+  // the moved section is only interesting when it arrives that way.
+  win.location.hash = 'settings/' + section
+  win.dispatchEvent(new win.Event('hashchange'))
+  await new Promise(r => setTimeout(r, 80))
+  return opened
+}
+
+test('SECURITY MOVED INTO THIS HOST, and the old link still lands there', async (t) => {
+  // Security was one password field with a nav item of its own. It is whose password
+  // it is, so it lives here now - but a bookmark or an in-app link to the old address
+  // must not fall silently back to Source, which is what an unknown section did.
+  const { doc, text } = await openHost(t, STATE, 'security')
+
+  assert.match(text(), /This host/)
+  assert.match(text(), /Password/)
+  assert.match(text(), /Video engine/, 'and the engine came along, because it is this machine\'s hardware')
+
+  // The nav is one item shorter, and Security is not in it.
+  const nav = doc.querySelector('.setnav')
+  const labels = [...nav.querySelectorAll('button')].map(b => b.textContent.trim())
+  assert.equal(labels.includes('Security'), false)
+  assert.ok(labels.includes('This host'))
+})
+
+test('one setting per row, and the explanation is a sub-line rather than a paragraph', async (t) => {
+  const { doc, text } = await openHost(t)
+
+  // The first text node, so a row carrying a status chip is still named by its name.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.childNodes[0].textContent.trim())
+  assert.deepEqual(rows, ['Password', 'This browser', 'Other browsers', 'Video engine', 'First-time setup'])
+
+  // THE LIBRARY'S ADDRESS IS NOT A SETTING, and it was never a control either: every
+  // other use of the host key is one library reaching another, in code, and pairing
+  // never asks a person for it. It sat on screen for nobody (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /hostkey/)
+})
+
+test('ONE BUTTON PER ROW, because every control on the page is flush right', async (t) => {
+  // Width asymmetry is invisible on a ragged left edge and glaring on a flush right
+  // one. Signing this browser out and signing the others out shared a row, and their
+  // two very different widths were the loudest thing on the page (Tim, 2026-08-19).
+  const { doc } = await openHost(t)
+
+  for (const row of doc.querySelectorAll('.setrow')) {
+    const buttons = row.querySelectorAll('.rowctl button:not(.iconbtn)')
+    assert.ok(buttons.length <= 1, 'at most one worded button in a row')
+  }
+
+  // Both say the same word at the same width; the row's own name says which browsers.
+  const words = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.ok(words.includes('This browser') && words.includes('Other browsers'))
+  const outs = [...doc.querySelectorAll('.setrow .rowctl button')].filter(b => b.textContent.trim() === 'Sign out')
+  assert.equal(outs.length, 2)
+
+  // A rare or irreversible action still keeps its words rather than becoming a
+  // pictogram somebody has to interpret correctly the first time.
+  const all = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(all.includes('Run again'))
+})
+
+test('THE ENGINE NUMBER SAVES ITSELF, with no button to hunt for', async (t) => {
+  // It had a Save, and that button was the only filled amber control on the page, in
+  // the only row with two controls, beside the only input - four reasons for one row to
+  // shout, stacked (Tim, 2026-08-19, with a screenshot). The casting hide switch already
+  // saves on the spot for the same reason.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const asked = []
+  const { doc, win, text } = await openHost(t, state, 'host', asked)
+
+  const num = doc.querySelector('.setrow input[type=number]')
+  assert.equal(num.value, '4')
+  assert.equal(doc.querySelectorAll('.setrow .rowctl button').length, 4, 'Change, Sign out, Sign out, Run again - and no Save')
+  assert.equal([...doc.querySelectorAll('.setrow .rowctl button')].some(b => /Save/.test(b.textContent)), false)
+  assert.doesNotMatch(text(), /leave the box/, 'and it needs no line explaining itself')
+
+  // CHANGING IT IS THE SAVE. No blur, no Enter, no button - the request goes on its
+  // own shortly after the typing stops.
+  num.value = '6'
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(asked.some(u => String(u).includes('/api/transcode-cap')), false, 'but not on the keystroke itself')
+  await new Promise(r => setTimeout(r, 900))
+  assert.ok(asked.some(u => String(u).includes('/api/transcode-cap')), 'once the typing settles')
+})
+
+test('typing 16 never sets the cap to 1 on the way', async (t) => {
+  // Saving per keystroke would put a cap of 1 in force for as long as it stood, and a
+  // cap of 1 refuses conversions. Each change cancels the last timer.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const asked = []
+  const { doc, win } = await openHost(t, state, 'host', asked)
+  const num = doc.querySelector('.setrow input[type=number]')
+
+  for (const v of ['1', '16']) {
+    num.value = v
+    num.dispatchEvent(new win.Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 120))
+  }
+  await new Promise(r => setTimeout(r, 900))
+
+  const sent = asked.filter(u => String(u).includes('/api/transcode-cap'))
+  assert.equal(sent.length, 1, 'one request, for the number that was settled on')
+})
+
+test('an unusable number puts the real one back rather than sending a guess', async (t) => {
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const asked = []
+  const { doc, win } = await openHost(t, state, 'host', asked)
+  const num = doc.querySelector('.setrow input[type=number]')
+
+  num.value = ''
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(num.value, '4', 'the box comes back rather than emptying the setting')
+  assert.equal(asked.some(u => String(u).includes('/api/transcode-cap')), false, 'and nothing was sent')
+
+  // Out of range is clamped to what the host will accept rather than bounced back as
+  // an error the person has to read.
+  num.value = '99'
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(num.value, '16')
+})
+
+test('A ROW\'S NAME AND ITS SUB-LINE ARE TWO LINES', async (t) => {
+  // They are spans inside a flex child. Without a block display they run together and
+  // the sub-line reads as part of the name - "PasswordOther browsers will need the new
+  // one." Every text assertion in this file passed while it was wrong, because the
+  // words were all present and in the right order; it took a screenshot to see.
+  const { dom, doc } = await openHost(t)
+
+  for (const row of doc.querySelectorAll('.setrow')) {
+    const sub = row.querySelector('.rowsub')
+    if (!sub) continue
+    assert.equal(dom.window.getComputedStyle(sub).display, 'block', 'the sub-line takes its own line')
+    assert.equal(dom.window.getComputedStyle(row.querySelector('.rowname')).display, 'block')
+  }
+})
+
+test('a password this host does not own cannot be changed from here', async (t) => {
+  // One set by the platform would be quietly put back on the next restart, so offering
+  // to change it would be offering something that does not work.
+  const platform = { ...STATE, auth: { enabled: true, passwordSource: 'explicit' } }
+  const { doc, text } = await openHost(t, platform)
+
+  assert.match(text(), /Set by the platform that installed this/)
+  const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
+  assert.equal(change, undefined, 'and there is no button offering to')
+})
+
+test('THE PAGE IS SAID ONCE AND LOUDLY, and no page of rows carries a chip', async (t) => {
+  // The type scale was the disease, not the borders: nine sizes lived between .74 and
+  // 1.05rem, so a heading, a setting's name and a line explaining it all read at the
+  // same importance, and a box around each one was the compensation. Four steps with
+  // real gaps replace them, and the boxes come off.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const { doc, text } = await openHost(t, state)
+
+  const title = doc.querySelector('.setbody .setpage')
+  assert.ok(title, 'the page names itself once, at the top')
+  assert.match(title.querySelector('.setpagename').textContent, /This host/)
+
+  // NO CHIPS ANYWHERE. The page's name carried one first, where it was a fact with
+  // nothing to attach to; then the row did, where it was one more object on a page
+  // whose problem was objects. The row's own name carries the state now.
+  assert.equal(doc.querySelector('.setbody .chip'), null)
+
+  // AND IT CLAIMS NOTHING ABOUT HARDWARE NOBODY MEASURED. The old line said "this
+  // hardware managed about 10 in testing" on every install, where the 10 is a constant
+  // from the machine this was built against.
+  assert.doesNotMatch(text(), /in testing/)
+
+  // NO GROUP LABELS ON A FIVE-ROW PAGE. Structure where there is structure: the
+  // merged Library page has two genuine subjects and gets them, this one does not and
+  // dividing it twice was decoration (Tim, 2026-08-19).
+  assert.equal(doc.querySelector('.setbody .setgroup'), null)
+
+  // And the box is gone: the settings are on the page, not inside a panel on it.
+  assert.equal(doc.querySelector('.setbody .card'), null, 'no card around a page of rows')
+})
+
+test('a host that cannot convert says so in its own name, and in words', async (t) => {
+  const state = { ...STATE, transcode: { available: false, reason: 'no /dev/dri on this machine' } }
+  const { doc, text } = await openHost(t, state)
+
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('dim'))
+  assert.equal(name.className.includes('good'), false, 'and it does not claim to be fine')
+  // The reason is still there, as the whole of that row's sub-line rather than a
+  // sentence wrapped around it.
+  assert.match(text(), /no \/dev\/dri on this machine/)
+})
+
+test('THE ENGINE READS THE CAP TOO, not only the hardware', async (t) => {
+  // Whether anything is actually converted is the hardware AND the operator's cap.
+  // Reading only the hardware, a host with a working engine and the cap set to zero
+  // said "ready" while nothing would ever be converted - with the zero sitting in the
+  // field beside it saying otherwise (found answering Tim's question, 2026-08-19).
+  const off = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 0, source: 'dashboard', measured: 10 }
+  }
+  const { doc, text } = await openHost(t, off)
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('warn'), 'and it is not green')
+  assert.match(text(), /Nothing is converted while this is 0/)
+})
+
+test('an engine nobody has asked yet says checking, not broken', async (t) => {
+  // The probe runs at startup without being awaited, so a dashboard opened in the
+  // first second used to report hardware that had not been tried as hardware that
+  // failed.
+  const early = { ...STATE, transcode: { available: false, probing: true, reason: 'the hardware has not been probed yet' } }
+  const { doc, text } = await openHost(t, early)
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('dim'))
+  // COLOUR IS NEVER THE ONLY CARRIER: the words say which of the two dim states it is.
+  assert.match(text(), /Asking the hardware what it can do/)
+})
+
+test('the engine line says what the number MEANS, and claims nothing more', async (t) => {
+  // Tim asked the line to carry more than "0 turns it off". What is honestly available
+  // is the cap - which is exactly how many conversions may run at the same time - and
+  // the device doing them. What is NOT available is how many this machine could manage:
+  // nothing has ever measured that, and the line that used to claim it was quoting the
+  // hardware this was built on. That number arrives when a host can measure its own
+  // engine, and it arrives as the field's ceiling rather than as another sentence.
+  const oneCard = {
+    ...STATE,
+    transcode: { available: true, reason: null, device: '/dev/dri/renderD128', nodes: ['/dev/dri/renderD128'] },
+    transcodeCap: { cap: 3, source: 'dashboard', measured: 10 }
+  }
+  const one = await openHost(t, oneCard)
+  assert.match(one.text(), /Up to 3 conversions run at once\. 0 turns it off\./)
+  assert.doesNotMatch(one.text(), /in testing/, 'never a measurement of somebody else\'s hardware')
+
+  // AND THE CARD IS NAMED ONLY WHERE THERE IS A CHOICE. A render node is the graphics
+  // card, not a folder - it holds nothing and nothing is written to it - but the raw
+  // path reads like a location, and on a one-card machine it changes nothing.
+  assert.doesNotMatch(one.text(), /renderD128/, 'one card, nothing to decide, nothing said')
+
+  const twoCards = {
+    ...oneCard,
+    transcode: { ...oneCard.transcode, nodes: ['/dev/dri/renderD128', '/dev/dri/renderD129'] }
+  }
+  const two = await openHost(t, twoCards)
+  assert.match(two.text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
+})

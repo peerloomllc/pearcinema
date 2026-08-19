@@ -247,6 +247,28 @@ class FolderAdapter {
     }
     this.log('folder:walked', { files: files.length, roots: visible.length })
 
+    // A LIBRARY DOES NOT BECOME EMPTY BY ITSELF, and this is the guard that keeps a
+    // missing drive from being written down as one.
+    //
+    // The roots passed the readable test above, so this is not "your folders are
+    // gone" - it is a directory that is present and holds no films. In a container
+    // that is exactly what a bind mount looks like after the drive underneath it is
+    // remounted somewhere else, which happened to Tim's Umbrel on 2026-08-19 when the
+    // same disk came back as `Elements` instead of `Elements (3)`.
+    //
+    // Without this, an auto-rescan walks nothing, saves nothing, and the cache that
+    // held 2,986 films is replaced by an empty one. The drive coming back does not
+    // undo that - the next scan has to re-probe every file, and until it does, every
+    // paired phone sees a library that is simply gone. Refusing costs nothing: the
+    // index already in memory keeps serving, and `rescan()` turns the throw into the
+    // sourceError the dashboard shows.
+    if (!files.length && this._byId.size > 0) {
+      throw new Error(
+        `${this.rootPaths().join(', ')} holds no videos, but this library has ${this._byId.size} - ` +
+        'refusing to replace it with an empty one. Check the drive is still mounted.'
+      )
+    }
+
     // 2. Probe. The expensive half.
     const { results, failed } = await probeAll(files.map(f => f.file), {
       concurrency: PROBE_CONCURRENCY,

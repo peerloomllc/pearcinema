@@ -314,3 +314,26 @@ test('AV1 decodes in software - the engine claims it and the driver cannot deliv
   assert.equal(args.includes('-hwaccel'), false)
   assert.equal(args[args.indexOf('-vf') + 1], 'format=nv12,hwupload')
 })
+
+test('the graphics cards this machine has, read as render nodes', (t) => {
+  // NOT A STORAGE QUESTION. A render node is the card itself: it holds nothing, and
+  // the conversion path writes to a pipe rather than to disk anywhere. This exists so
+  // the dashboard can name the card in use only when there is more than one to choose
+  // between (Tim, 2026-08-19, having asked whether /dev/dri/renderD128 might run out
+  // of space - it cannot, and the fact the raw path invites the question is the point).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pearcinema-dri-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  assert.deepEqual(transcode.renderNodes(dir), [], 'nothing there is no card, not a crash')
+
+  // card0 is the display node and by-path is a directory of symlinks; neither is a
+  // render node, and offering either would name something ffmpeg cannot open.
+  for (const name of ['card0', 'renderD129', 'renderD128', 'by-path']) {
+    fs.writeFileSync(path.join(dir, name), '')
+  }
+  assert.deepEqual(transcode.renderNodes(dir), [`${dir}/renderD128`, `${dir}/renderD129`], 'in order, so the first is the default')
+
+  // A machine with no /dev/dri at all - every Mac, and every host without a usable
+  // card - answers empty rather than throwing on a directory that was never there.
+  assert.deepEqual(transcode.renderNodes('/no/such/place'), [])
+})

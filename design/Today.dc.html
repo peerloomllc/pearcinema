@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font: 15px/1.55 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+    a { color: #e6b24e; } a:hover { color: #f2c778; }
+  </style>
+</helmet>
+
+<div style="width: 900px; height: 700px; background: #0c0a07; color: #f3ede1; background-image: radial-gradient(1200px 600px at 50% -12%, rgba(230, 178, 78, .09) 0%, transparent 60%); padding: 26px 28px; display: flex; flex-direction: column; gap: 18px;">
+
+  <div style="display: flex; align-items: baseline; gap: 10px;">
+    <span style="font-weight: 650; letter-spacing: -.01em; font-size: 1.05rem;">PearCinema</span>
+    <span style="color: #a2947d; font-size: .85rem;">Settings</span>
+  </div>
+
+  <div style="display: flex; gap: 1.4rem; align-items: flex-start; flex-grow: 1; min-height: 0;">
+
+    <div style="display: flex; flex-direction: column; gap: .2rem; min-width: 9.5rem;">
+      <div style="background: #191410; color: #f3ede1; border: 1px solid #322a20; padding: .5rem .75rem; border-radius: 9px; font-weight: 560;">Source</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Artwork</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Library</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Security</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Support development</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Remote libraries</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">Casting</div>
+      <div style="color: #a2947d; padding: .5rem .75rem;">This host</div>
+    </div>
+
+    <div style="flex-grow: 1; min-width: 0;">
+
+      <div style="background: #191410; border: 1px solid #322a20; border-radius: 14px; padding: 1rem; margin-bottom: 1rem;">
+        <div style="font-size: 1rem; font-weight: 620; margin: 0 0 .5rem;">Where the films are</div>
+        <div style="color: #a2947d; font-size: .85rem; margin: .2rem 0;">
+          Two folders on this machine. PearCinema reads them and never writes to them, apart
+          from the sidecar files you ask it to save.
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin: .7rem 0 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; background: #201a13; border: 1px solid #322a20; border-radius: 8px; padding: 6px 6px 6px 11px;">
+            <span style="flex-grow: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem;">/library/Movies</span>
+            <span style="color: #a2947d; font-size: .82rem;">films</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; background: #201a13; border: 1px solid #322a20; border-radius: 8px; padding: 6px 6px 6px 11px;">
+            <span style="flex-grow: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem;">/library/TV Shows</span>
+            <span style="color: #a2947d; font-size: .82rem;">television</span>
+          </div>
+        </div>
+        <div style="color: #a2947d; font-size: .85rem; margin: .2rem 0;">
+          A folder read as television treats a file with no S01E01 in its name as an episode
+          of unknown numbering rather than as a film.
+        </div>
+        <div style="display: flex; gap: .5rem; justify-content: center; margin-top: .9rem; flex-wrap: wrap;">
+          <button style="font: inherit; font-weight: 560; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .85rem; background: transparent; color: #f3ede1; min-width: 7.5rem;">Read it again</button>
+          <button style="font: inherit; font-weight: 560; border: 1px solid transparent; border-radius: 9px; padding: .45rem .85rem; background: #e6b24e; color: #1c1305; min-width: 7.5rem;">Save</button>
+        </div>
+      </div>
+
+      <div style="background: #191410; border: 1px solid #322a20; border-radius: 14px; padding: 1rem;">
+        <div style="font-size: 1rem; font-weight: 620; margin: 0 0 .5rem;">Reading it again on its own</div>
+        <div style="color: #a2947d; font-size: .85rem; margin: .2rem 0;">
+          How often this host walks the folders looking for what has changed. A server source
+          watches its own files, so there this is only a refresh of the counts.
+        </div>
+        <div style="margin-bottom: .7rem; margin-top: .7rem;">
+          <div style="font-size: .85rem; color: #a2947d; margin-bottom: .2rem;">How often</div>
+          <select style="font: inherit; color: #f3ede1; background: #141009; border: 1px solid #322a20; border-radius: 9px; padding: .45rem .6rem;">
+            <option>Every 6 hours</option>
+          </select>
+        </div>
+        <div style="color: #a2947d; font-size: .85rem; margin: .2rem 0;">
+          Nothing is lost by leaving it off - the Read it again button above does the same
+          walk whenever you press it.
+        </div>
+        <div style="display: flex; gap: .5rem; justify-content: center; margin-top: .9rem;">
+          <button style="font: inherit; font-weight: 560; border: 1px solid transparent; border-radius: 9px; padding: .45rem .85rem; background: #e6b24e; color: #1c1305; min-width: 7.5rem;">Save</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":900,"height":700}}'>
+class Component extends DCLogic {
+  renderVals () { return {} }
+}
+</script>
+</body>
+</html>

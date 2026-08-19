@@ -216,3 +216,4 @@ export const People = (p) => (
 export const Home = (p) => (
   <S {...p}><path d='M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5H9V20H5a1 1 0 0 1-1-1z' /></S>
 )
+

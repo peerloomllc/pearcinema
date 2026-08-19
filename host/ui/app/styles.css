@@ -1208,3 +1208,119 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
   margin-top: .7rem; padding-top: .75rem; border-top: 1px solid var(--line);
 }
 .tvfoot .grow { flex: 1 1 auto; margin: 0 }
+
+/* SETTINGS ROWS.
+ *
+ * One setting per row: what it is on the left, the control on the right, and a
+ * sub-line only where the control genuinely needs one. The shape the Settings pages
+ * are moving to (Tim, 2026-08-19: they are busy and not aesthetically pleasing).
+ *
+ * What it replaces is a card per setting, each with a heading and two or three
+ * paragraphs of prose above the control - so a page you already understood still made
+ * you read it, and nothing on it looked more important than anything else.
+ *
+ * The card's OWN action row stays centered (.actions, Tim's call 2026-08-15). A
+ * control that belongs to one row sits in that row, which is a different thing and
+ * not a quiet reversal of it.
+ */
+.setrows { display: flex; flex-direction: column }
+.setrow {
+  display: flex; align-items: flex-start; gap: 1rem;
+  padding: .8rem 0; border-bottom: 1px solid var(--line);
+}
+.setrow:last-child { border-bottom: none }
+.setrow:first-child { padding-top: .2rem }
+.setrow .rowmain { flex: 1 1 0; min-width: 0 }
+.setrow .rowname { font-size: .92rem; line-height: 1.3 }
+.setrow .rowsub { color: var(--muted); font-size: .8rem; line-height: 1.4; margin-top: .15rem }
+/* The control side. Shrinks before the label does, and wraps under it on a phone. */
+.setrow .rowctl { flex: 0 0 auto; display: flex; align-items: center; gap: .4rem }
+/* ONE WIDTH DOWN THE RIGHT-HAND COLUMN. Every control on a Settings page is flush
+ * right, so a field narrower than the buttons above and below it is the most visible
+ * thing on the page. Centred, because a lone digit stranded at the left of a wide box
+ * looks like a mistake. */
+.setrow .rowctl input[type=number] { width: 7.5rem; text-align: center }
+.setrow .rowctl button { min-width: 0 }
+/* A value too long to sit beside its label - a host key, an address - takes the line
+   under it and keeps the copy button up beside the name. */
+.setrow .rowvalue {
+  font-family: var(--mono, monospace); font-size: .78rem; line-height: 1.5;
+  color: var(--muted); overflow-wrap: anywhere; margin-top: .3rem;
+}
+/* What a row opens: a form that was not worth showing until asked for. */
+.rowopen { padding: .2rem 0 .6rem; border-bottom: 1px solid var(--line) }
+
+@media (max-width: 560px) {
+  .setrow { flex-wrap: wrap }
+  .setrow .rowctl { width: 100%; justify-content: flex-end }
+}
+
+/* ---- Settings, the Ledger shape -------------------------------------------
+ *
+ * THE TYPE SCALE WAS THE DISEASE, not the borders. Nine font sizes lived between
+ * .74rem and 1.05rem, so a page heading, a setting's name and a line explaining it
+ * all landed within a quarter of a step of each other. Nothing looked more important
+ * than anything else, and a box around every setting was the compensation - which is
+ * what made the pages busy (Tim, 2026-08-19).
+ *
+ * Four steps with real gaps between them, and the boxes come off:
+ *
+ *   1.5rem   the page - said once, at the top
+ *    .95rem  a setting's name
+ *    .8rem   the line under it, when it needs one
+ *    .72rem  the group label above a run of rows, in caps
+ *
+ * The amber is spent in exactly two places on a Settings page: which section you are
+ * in, and a status chip when there is a status. It is the app's one loud colour and
+ * it stops meaning anything if it decorates.
+ */
+.setpage {
+  display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap;
+  font-size: 1.5rem; font-weight: 600; letter-spacing: -.02em; line-height: 1.15;
+  margin: 0 0 1.5rem;
+}
+.setgroup {
+  font-size: .72rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--muted); margin: 1.6rem 0 .35rem;
+}
+.setgroup:first-child { margin-top: 0 }
+
+/* WHICH SECTION YOU ARE IN, said with the accent rather than with a filled pill. The
+ * pill was another box on a page whose whole problem was boxes, and it read as a
+ * pressed button rather than as a place. A rule down the left edge is the quieter
+ * answer and it is also the only amber in the nav. */
+.setnav button.on { background: none; border: none; color: var(--fg) }
+.setnav button { border-left: 2px solid transparent; border-radius: 0 9px 9px 0 }
+.setnav button.on { border-left-color: var(--accent) }
+
+@media (max-width: 720px) {
+  /* A left rule means nothing on a horizontal row, so the phone keeps its pills and
+   * spends the accent on the border instead. */
+  .setnav button { border-left: 1px solid var(--line); border-radius: 999px }
+  .setnav button.on { background: var(--card); border: 1px solid var(--accent); color: var(--fg) }
+}
+
+/* The page's name and its condition are two things, so they get two lines. Side by
+ * side the chip butted against the name and read as part of it (Tim, 2026-08-19). */
+.setpage { flex-direction: column; align-items: flex-start; gap: .45rem }
+.setpagename { display: block }
+
+/* EVERY CONTROL ON A SETTINGS PAGE IS FLUSH RIGHT, which makes any difference in
+ * button width the most visible thing on the page. The same minimum the card action
+ * rows have used since 2026-08-15, for the same reason and now in a second place. */
+.setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
+
+/* A ROW'S NAME AND ITS SUB-LINE ARE TWO LINES. They are spans inside a flex child, so
+ * without this they run together and the sub-line reads as part of the name -
+ * "PasswordOther browsers will need the new one." (Tim, 2026-08-19, with a screenshot;
+ * every text assertion in the suite passed while it was wrong, because the words were
+ * all present and in the right order). */
+.setrow .rowname, .setrow .rowsub { display: block }
+
+/* A ROW'S NAME CAN CARRY ITS STATE, instead of a chip sitting beside it (Tim,
+ * 2026-08-19) - a chip was one more object on a page whose problem was objects.
+ * Colour is never the only carrier: the sub-line under a coloured name always states
+ * the condition in words. */
+.setrow .rowname.good { color: var(--good) }
+.setrow .rowname.warn { color: var(--warn) }
+.setrow .rowname.dim { color: var(--muted) }

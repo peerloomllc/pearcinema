@@ -31,8 +31,38 @@ DATA='/home/umbrel/pearcinema-data'
 
 # THE LIBRARY IS ON THE EXTERNAL DRIVE, and that is the normal case for video rather
 # than an unusual one - films are hundreds of gigabytes and an Umbrel's internal disk
-# is not where they live. Overridable, because drive labels change.
-LIBRARY="${LIBRARY:-/home/umbrel/umbrel/external/Elements (3)/Video}"
+# is not where they live.
+#
+# FOUND, NOT NAMED. This used to default to a literal
+# `/home/umbrel/umbrel/external/Elements (3)/Video`, and that `(3)` is not part of the
+# drive's name - it is what udisks appends when the mountpoint it wanted was already
+# taken. On 2026-08-19 the same drive came back as plain `Elements` after the box's
+# stack restarted, and a deploy that knew only the old spelling refused to run against
+# a library that was sitting right there.
+#
+# So look for it: any directory under external/ holding a Video folder with the roots
+# in it. An explicit LIBRARY= still wins, for a layout this does not guess.
+find_library () {
+  local d
+  for d in /home/umbrel/umbrel/external/*/Video; do
+    [ -d "$d" ] || continue
+    if [ -d "$d/Movies" ] || [ -d "$d/TV Shows" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+  done
+  # Nothing with the expected roots - fall back to any Video directory at all rather
+  # than to a path from last year.
+  for d in /home/umbrel/umbrel/external/*/Video; do
+    if [ -d "$d" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+  done
+  return 1
+}
+
+LIBRARY="${LIBRARY:-$(find_library || true)}"
 
 # ONLY sudo IF DOCKER ACTUALLY NEEDS IT. On umbrelOS the `umbrel` user is already in
 # the docker group, so a blanket `sudo` turns a working deploy into a password prompt -
@@ -49,11 +79,20 @@ fi
 # deploy. Built here on its own line instead.
 LIBRARY_NAME="${PEARCINEMA_NAME:-My Films}"
 
-if [ ! -d "$LIBRARY" ]; then
-  echo "the library is not at: $LIBRARY" >&2
+if [ -z "$LIBRARY" ] || [ ! -d "$LIBRARY" ]; then
+  echo "no library found under /home/umbrel/umbrel/external/" >&2
   echo "what this box can see:" >&2
   ls -1 /home/umbrel/umbrel/external/ 2>/dev/null | sed 's/^/  /' >&2
   echo "set LIBRARY=... and re-run" >&2
+  exit 1
+fi
+
+# A DRIVE THAT IS THERE BUT EMPTY IS NOT A LIBRARY, and starting against one would
+# hand the host a source it has to call empty. Bail while the old container is still
+# running rather than after replacing it - this check sits above the docker rm below,
+# and it must stay above it.
+if [ -z "$(ls -A "$LIBRARY" 2>/dev/null)" ]; then
+  echo "the library at $LIBRARY is empty - is the drive mounted?" >&2
   exit 1
 fi
 
