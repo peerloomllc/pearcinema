@@ -72,13 +72,22 @@ const BIND = process.env.PEARCINEMA_CAST_BIND || '0.0.0.0'
 // conversion it did not strictly need, which costs the engine some work; the
 // liberal list would hand an older device a film it plays as a black screen,
 // which costs the feature its credibility.
+// WHETHER A TELEVISION WILL TAKE AN UNBOUNDED PROGRESSIVE STREAM, declared with the
+// codecs because it is the same kind of fact and belongs in the same place. A
+// generated stream has no length and no byte offsets, so it answers 200 with
+// `accept-ranges: none`; a Chromecast plays that happily and a Roku refuses it
+// outright ("Full-content response on a range request:200", its own error field).
+// The transport is chosen from THIS rather than from the conversion mode - those
+// are different questions, and treating them as one is what left a remuxed film
+// stalling on a Roku while a transcoded one played.
 const CAST_CAPS = {
   // The Default Media Receiver: H.264 in MP4 and nothing Matroska.
   containers: ['mp4', 'mov'],
   videoCodecs: ['h264'],
   audioCodecs: ['aac', 'mp3'],
   // STEREO, and this is the fix for a silent television. See ROKU_CAPS below.
-  maxAudioChannels: 2
+  maxAudioChannels: 2,
+  progressive: true
 }
 const ROKU_CAPS = {
   // A Roku opens Matroska natively (mkv is on its documented format list), so
@@ -98,7 +107,11 @@ const ROKU_CAPS = {
   //
   // A film that needs this now takes the remux path with its soundtrack mixed down,
   // which is the cheapest conversion there is.
-  maxAudioChannels: 2
+  maxAudioChannels: 2,
+  // AND IT WILL NOT TAKE THAT REMUX PROGRESSIVELY. Measured on Tim's Streaming
+  // Stick Plus 2026-08-19: a generated stream is refused with a range error before
+  // a frame is drawn. Everything generated reaches this device in segments.
+  progressive: false
 }
 
 function capsFor (entityId) {
@@ -126,6 +139,30 @@ function castHost () {
 
 function newToken () {
   return crypto.randomBytes(32).toString('base64url')
+}
+
+// WHICH SEGMENT HOLDS A MOMENT, and where that segment truly begins. Two shapes
+// answer, and the arithmetic one is only correct for the even grid a re-encode
+// produces: `boundaries` is authoritative whenever the host sends it, which it does
+// for every copied stream. Snapping BACK (the last boundary at or before the time)
+// keeps a resume from stepping over the seconds it was meant to land on.
+function segmentAt (at, out) {
+  const seconds = Math.max(0, Number(at) || 0)
+  const boundaries = out?.boundaries
+  if (Array.isArray(boundaries) && boundaries.length) {
+    let k = 0
+    while (k + 1 < boundaries.length && boundaries[k + 1] <= seconds) k++
+    return k
+  }
+  return Math.floor(seconds / (out?.segmentSeconds || 4))
+}
+
+function segmentStart (seq, out) {
+  const boundaries = out?.boundaries
+  if (Array.isArray(boundaries) && boundaries.length) {
+    return boundaries[Math.min(seq, boundaries.length - 1)]
+  }
+  return seq * (out?.segmentSeconds || 4)
 }
 
 // bytes=A-B against a known size. Single range only, the same rule the
@@ -259,12 +296,19 @@ class CastSessions {
   // web player's restart shape, one level up. Segment NAMES keep their true
   // indices, so each fetch maps to the right minutes of film and the
   // position arithmetic in the poll stays honest through row.at.
+  //
+  // WHICH SEGMENT A RESUME LANDS IN is no longer arithmetic. A copied picture is
+  // cut on the film's own keyframes, so segments are uneven - measured from 4.0 s
+  // to 14.0 s on real films - and dividing by four would name a segment that does
+  // not start where it claims. The host sends the real boundaries and the resume
+  // snaps BACK to the last one at or before where the viewer was, so a resume
+  // rewinds by up to one group of pictures rather than skipping past anything.
   async _servePlaylist (req, res, entry, deny) {
     const out = await this.media.playlist({ itemId: entry.itemId, capabilities: entry.caps || CAST_CAPS })
     if (!out?.playlist) return deny(409)
 
     let body = out.playlist
-    const skip = Math.floor(entry.at / (out.segmentSeconds || 4))
+    const skip = segmentAt(entry.at, out)
     if (skip > 0) {
       const lines = body.split('\n')
       const kept = []
@@ -282,9 +326,20 @@ class CastSessions {
       body = kept.join('\n')
       // The true start of what remains, so a player's clock does not guess.
       body = body.replace(/#EXT-X-MEDIA-SEQUENCE:\d+/, `#EXT-X-MEDIA-SEQUENCE:${skip}`)
-      // Every segment actually served begins at skip - keep row.at exact.
-      entry.at = skip * (out.segmentSeconds || 4)
-      this.log('cast:playlist-sliced', { skip, dropped })
+      // Every segment actually served begins at skip - keep row.at exact, because
+      // the poll adds it to whatever the television reports. Measured on a Roku
+      // 2026-08-19: it reports position against the PLAYLIST it was given, not
+      // against the timestamps inside the segments, so this offset is the whole
+      // difference between a resumed film reporting its true minute and reporting
+      // the minutes since the resume.
+      entry.at = segmentStart(skip, out)
+      // AND THE ROW, which is the copy the poll actually reads. These were allowed
+      // to drift apart while the snap was at most four seconds; on a copied stream
+      // it is up to a whole group of pictures, and a position report that is
+      // fourteen seconds out is a resume that lands in the wrong scene.
+      const row = this.byDevice.get(entry.deviceKey)?.get(entry.entityId)
+      if (row) row.at = entry.at
+      this.log('cast:playlist-sliced', { skip, dropped, engine: out.engine || 'encode' })
     }
 
     res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
@@ -402,20 +457,31 @@ class CastSessions {
       throw new Error(verdict?.reason || 'this film cannot play on that television')
     }
 
-    // HOW THE FILM TRAVELS, the living room's measured lesson (2026-08-17):
+    // HOW THE FILM TRAVELS, the living room's measured lesson (2026-08-17,
+    // corrected 2026-08-19):
     //
     //   direct     the raw file, Range honoured, the television seeks itself.
-    //   transcode  HLS - the same playlist and per-segment engine the phone
-    //              rides. A Roku REFUSES an unbounded progressive stream
-    //              ("Full-content response on a range request"), and segments
-    //              also mean revoke bites within one segment, not one film.
-    //   remux      the progressive generated stream. Only the Cast family
-    //              lands here (Roku caps direct-play Matroska), and a
-    //              Chromecast tolerates unseekable progressive MP4.
+    //   generated  HLS when this television refuses progressive streams,
+    //              progressive otherwise. Segments also mean revoke bites within
+    //              one segment rather than one film.
+    //
+    // THE TRANSPORT IS NOT THE MODE. Until today this branched on
+    // `mode === 'transcode'`, which quietly assumed that a converted film is a
+    // re-encoded one. The 5.1 fix broke that assumption the day it shipped: it
+    // started sending films down the REMUX path, which took the progressive
+    // branch, which a Roku refuses. What decides is what the television accepts.
+    // What the film needs decided separately, inside the segment engine, where a
+    // copied picture stays copied.
     //
     // A direct cast starts at 0 and the television seeks itself; a generated
     // one starts where the viewer is - HLS by slicing the playlist to begin
     // at the resume segment, progressive by -ss.
+    // A television that refuses progressive takes everything generated in segments.
+    // One that accepts progressive keeps exactly the behaviour it was measured with:
+    // a re-encode still rides segments there (revoke bites within one segment rather
+    // than one film), and a remux still goes down the pipe. Nothing about fixing the
+    // Roku wanted to move the Cast family.
+    const viaHls = mode !== 'direct' && (caps.progressive === false || mode === 'transcode')
     const startAt = mode === 'direct' ? 0 : Math.max(0, Number(at) || 0)
 
     // Replace whatever this device had on this entity, rather than stacking
@@ -443,7 +509,7 @@ class CastSessions {
 
     // castHost(), not loopback: the television fetches this URL ITSELF.
     const base = `http://${castHost()}:${this.port}/v/${token}`
-    const url = mode === 'transcode' ? `${base}/index.m3u8` : base
+    const url = viaHls ? `${base}/index.m3u8` : base
     // THE FORMAT HINT DESCRIBES WHAT THE TELEVISION WILL RECEIVE, not what is on the
     // disk, and those stop being the same thing the moment anything is converted.
     //
@@ -453,9 +519,9 @@ class CastSessions {
     // container. The television dutifully tried to demux an MP4 as Matroska and sat at
     // 13% forever. It is load-bearing on a Roku specifically - the format hint is what
     // its player picks a demuxer with.
-    const format = mode === 'transcode'
+    const format = viaHls
       ? 'hls'
-      : mode === 'remux'
+      : mode !== 'direct'
         ? 'mp4'
         : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
     try {
@@ -712,4 +778,4 @@ class CastSessions {
   }
 }
 
-module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, TOKEN_TTL_MS, castHost, BIND }
+module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, TOKEN_TTL_MS, castHost, BIND, capsFor, segmentAt, segmentStart }

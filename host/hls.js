@@ -30,36 +30,142 @@
 // path is for CODEC misses - the HEVC a particular chip refuses (measured on the
 // TCL, 2026-08-14: MediaCodec 0x80000000) - which is exactly the transcode case.
 
+// A SECOND ENGINE ON THE SAME PATH, added 2026-08-19. Everything above describes
+// re-encoding, which was the only reason to segment a film when this file was
+// written. It is no longer: a Roku refuses an unbounded progressive stream
+// ("Full-content response on a range request: 200", its own words), so a REMUX has
+// to reach it in segments too - and re-encoding a picture that was already perfect
+// to get them would burn a full hardware transcode for nothing.
+//
+// So the playlist and the segment argv are now built from a PLAN rather than from
+// arithmetic, and there are two ways to make one:
+//
+//   gridPlan   even SEGMENT_SECONDS steps. What a re-encode uses, because an
+//              encode can cut anywhere and `-ss` is exact.
+//   copyPlan   the film's own keyframes, from host/keyframes.js. What a copy must
+//              use, because a copied picture cannot be cut anywhere else.
+//
+// A copy plan's segments are UNEVEN by nature - measured across two real films they
+// run 4.0 s to 14.0 s against a 4 s target, because keyframes land on scene cuts.
+// That is why the playlist takes its `#EXTINF` values from the plan instead of
+// assuming them, and why `boundaries` travels back to the caller: a cast resuming
+// mid-film has to snap to a real cut point rather than to a multiple of four.
+
 const SEGMENT_SECONDS = 4
 
-// The whole playlist, from the item's runtime. `#EXT-X-PLAYLIST-TYPE:VOD` plus
-// every segment named by index is what makes the duration bar and the scrubber
-// real on the player's side.
-function playlistFor (item, { base = '' } = {}) {
-  const runtime = Number(item?.runtime) || 0
-  if (runtime <= 0) return null
+// HOW FAR INTO A KEYFRAME'S OWN GROUP TO AIM `-ss`, and the single most surprising
+// thing measured while building this. ffmpeg's backward seek lands on the keyframe
+// STRICTLY BEFORE the requested time, so asking for a keyframe's exact timestamp
+// hands back the one before it. Bisected on the test episode at eight points spread
+// across the film: it needs between 0.130 and 0.136 seconds of headroom, stable
+// everywhere. 0.30 s is a wide margin over that and still far inside the shortest
+// keyframe gap measured in a real library (0.661 s).
+const SEEK_HEADROOM = 0.30
 
-  const n = Math.ceil(runtime / SEGMENT_SECONDS)
+// A keyframe with less than this before the next one cannot be aimed at safely, so
+// it is not offered as a cut point. Nothing in the measured library comes close to
+// tripping it; it exists so that a file which does degrades by choosing a different
+// cut rather than by producing a broken segment.
+const MIN_GROUP_SECONDS = SEEK_HEADROOM + 0.10
+
+// One extra millisecond off the decode-order end, because `-to` includes the packet
+// AT the limit. Without it the keyframe that opens the next segment also closes this
+// one, and the frame count across the film comes out one high per join.
+const CUT_EPSILON = 0.001
+
+// A plan is { starts, seeks, ends, runtime, engine }: where each segment begins in
+// the film, what to hand `-ss`, what to hand `-to`, and which engine made it. A
+// grid plan needs neither seeks nor ends, because `-ss`/`-t` on a re-encode are
+// exact - those stay null and segmentArgs keeps its original arithmetic.
+function gridPlan (runtimeSeconds) {
+  const runtime = Number(runtimeSeconds) || 0
+  if (runtime <= 0) return null
+  const starts = []
+  for (let at = 0; at < runtime; at += SEGMENT_SECONDS) starts.push(at)
+  return { engine: 'encode', starts, seeks: null, ends: null, runtime }
+}
+
+// The keyframe walk: from each boundary, the first keyframe at least
+// SEGMENT_SECONDS later that has room to be aimed at. `times` is the film's
+// keyframe list in seconds, in order, as host/keyframes.js returns it.
+function copyPlan (times, { runtime, reorderDelay = 0, target = SEGMENT_SECONDS } = {}) {
+  const total = Number(runtime) || 0
+  if (!Array.isArray(times) || times.length < 2 || total <= 0) return null
+
+  const starts = []
+  const seeks = []
+  for (let i = 0; i < times.length; i++) {
+    const t = times[i]
+    if (t >= total) break
+    // The last keyframe's group runs to the end of the film. Without this it
+    // could never be a cut point at all, and the closing segment would carry an
+    // extra group of pictures for no reason.
+    const group = (i + 1 < times.length ? times[i + 1] : total) - t
+    if (group < MIN_GROUP_SECONDS) continue
+    if (starts.length && t - starts[starts.length - 1] < target) continue
+    starts.push(t)
+    // Aim inside the group, never at its edge. Half a group when the group is
+    // short, so a 0.7 s group is still aimed at with room on both sides.
+    seeks.push(t + Math.min(SEEK_HEADROOM, group / 2))
+  }
+  if (starts.length < 2) return null
+
+  // THE FILM BEGINS AT ZERO, whatever its first keyframe's timestamp says. Two of
+  // three real films measured start theirs a few hundredths of a second in, and the
+  // opening segment is the one that is never seeked - it runs from the file's true
+  // beginning - so claiming its own keyframe's time would understate the film by
+  // exactly that much and shift every later position report by it.
+  starts[0] = 0
+
+  // A segment ends where the next one begins, in DECODE order - which is the next
+  // keyframe's presentation time less the reorder delay. The last one runs to the
+  // end of the film and needs no correction.
+  const ends = starts.map((_, k) => k + 1 < starts.length
+    ? starts[k + 1] - reorderDelay - CUT_EPSILON
+    : total)
+
+  return { engine: 'copy', starts, seeks, ends, runtime: total }
+}
+
+// The whole playlist, from a plan. `#EXT-X-PLAYLIST-TYPE:VOD` plus every segment
+// named by index is what makes the duration bar and the scrubber real on the
+// player's side, and the durations have to be the REAL ones: a Roku takes the
+// film's length from the sum of these lines, measured 2026-08-19 (it reported
+// 111924 ms for a playlist whose EXTINF values summed to 111.924 s).
+function playlistFor (item, { base = '', plan = null } = {}) {
+  const p = plan || gridPlan(item?.runtime)
+  if (!p || !p.starts.length) return null
+
+  const durations = durationsOf(p)
   const lines = [
     '#EXTM3U',
     '#EXT-X-VERSION:3',
-    `#EXT-X-TARGETDURATION:${SEGMENT_SECONDS}`,
+    `#EXT-X-TARGETDURATION:${Math.max(1, Math.ceil(Math.max(...durations)))}`,
     '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD'
   ]
-  for (let k = 0; k < n; k++) {
-    const dur = k === n - 1 ? Math.max(0.001, runtime - k * SEGMENT_SECONDS) : SEGMENT_SECONDS
-    lines.push(`#EXTINF:${dur.toFixed(3)},`)
+  for (let k = 0; k < p.starts.length; k++) {
+    lines.push(`#EXTINF:${durations[k].toFixed(3)},`)
     lines.push(`${base}${k}.ts`)
   }
   lines.push('#EXT-X-ENDLIST')
   return lines.join('\n') + '\n'
 }
 
-// How many segments a runtime yields - the route's bound check, kept beside the
-// playlist arithmetic so the two cannot disagree.
-function segmentCount (runtimeSeconds) {
-  const runtime = Number(runtimeSeconds) || 0
+// Every segment's real length, the playlist's EXTINF values and the only honest
+// answer to "how long is segment k".
+function durationsOf (plan) {
+  return plan.starts.map((start, k) => Math.max(
+    0.001,
+    (k + 1 < plan.starts.length ? plan.starts[k + 1] : plan.runtime) - start
+  ))
+}
+
+// How many segments a plan yields - the route's bound check, kept beside the
+// playlist so the two cannot disagree.
+function segmentCount (runtimeOrPlan) {
+  if (runtimeOrPlan && Array.isArray(runtimeOrPlan.starts)) return runtimeOrPlan.starts.length
+  const runtime = Number(runtimeOrPlan) || 0
   return runtime > 0 ? Math.ceil(runtime / SEGMENT_SECONDS) : 0
 }
 
@@ -74,8 +180,61 @@ const TONES = {
   sepia: 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131'
 }
 
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null }) {
-  const at = seq * SEGMENT_SECONDS
+// What MPEG-TS will carry untouched. A soundtrack the client already accepts is
+// still rebuilt when the segment container cannot hold it.
+const TS_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3'])
+
+// The ffmpeg argv for ONE COPIED segment. The picture is not touched at all; only
+// the soundtrack is rebuilt, which is what a remux already does to a pipe.
+//
+// THE FOUR FLAGS THAT MAKE THIS EXACT, each of them measured on 2026-08-19 against
+// a real film, and each of them wrong to drop:
+//
+//   -copyts            keep the film's own timestamps, so `-to` is an absolute
+//                      time in the film and the segment needs no offset faked onto
+//                      it afterwards. Without it the numbers are relative to the
+//                      seek and every arithmetic error compounds.
+//   -noaccurate_seek   do not trim to the requested time. The requested time is
+//                      deliberately INSIDE the group of pictures (see
+//                      SEEK_HEADROOM), so trimming to it would drop the segment's
+//                      first fifth of a second of sound.
+//   -ss <seek>         aimed past the keyframe, never at it.
+//   -to <end>          the next keyframe's decode time, less a millisecond.
+//
+// Verified on two films by counting: the segments hold every source frame in their
+// span exactly once - 2,683 of 2,683 and 3,316 of 3,316, no overlap at any join,
+// with the sound meeting within a millisecond.
+function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', audioCodec = null, audioChannels = 2 }) {
+  const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
+  if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
+
+  args.push('-copyts', '-noaccurate_seek')
+  // The first segment starts at the film's own beginning, so it is not seeked at
+  // all - there is no keyframe before zero to fall back onto.
+  if (seq > 0) args.push('-ss', plan.seeks[seq].toFixed(6))
+  args.push('-i', input)
+  args.push('-to', plan.ends[seq].toFixed(6))
+
+  args.push('-map', '0:v:0', '-map', '0:a:0?', '-map_chapters', '-1')
+  args.push('-c:v', 'copy')
+  if (audio === 'copy' && TS_AUDIO.has(String(audioCodec || '').toLowerCase())) {
+    args.push('-c:a', 'copy')
+  } else {
+    args.push('-c:a', 'aac', '-b:a', '192k', '-ac', String(Math.max(1, Number(audioChannels) || 2)))
+  }
+  args.push('-sn', '-dn')
+  // The muxer's own 1.4 s preload would shift every segment's clock off the film's,
+  // and negative-timestamp shifting would undo -copyts on the first segment.
+  args.push('-avoid_negative_ts', 'disabled', '-muxdelay', '0', '-muxpreload', '0')
+  args.push('-f', 'mpegts', 'pipe:1')
+  return args
+}
+
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null }) {
+  const at = plan?.starts ? plan.starts[seq] : seq * SEGMENT_SECONDS
+  const length = plan?.starts
+    ? (seq + 1 < plan.starts.length ? plan.starts[seq + 1] : plan.runtime) - at
+    : SEGMENT_SECONDS
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
 
   if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
@@ -94,7 +253,7 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   else args.push('-vaapi_device', device)
 
   if (at > 0) args.push('-ss', String(at))
-  args.push('-t', String(SEGMENT_SECONDS))
+  args.push('-t', String(length))
   args.push('-i', input)
   if (burn) {
     // `burnIndex` counts WITHIN the subtitle streams - `[0:s:N]` - the same
@@ -141,4 +300,18 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   return args
 }
 
-module.exports = { playlistFor, segmentCount, segmentArgs, TONES, SEGMENT_SECONDS }
+module.exports = {
+  playlistFor,
+  segmentCount,
+  segmentArgs,
+  copySegmentArgs,
+  gridPlan,
+  copyPlan,
+  durationsOf,
+  TONES,
+  TS_AUDIO,
+  SEGMENT_SECONDS,
+  SEEK_HEADROOM,
+  MIN_GROUP_SECONDS,
+  CUT_EPSILON
+}
