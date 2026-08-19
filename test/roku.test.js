@@ -12,8 +12,18 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const http = require('http')
 
+const fs = require('fs')
+const os = require('os')
+const path = require('path')
+
 const { RokuSpeakers, tag, attr, millis, stateFrom, MEDIA_CHANNELS, MEDIA_CHANNEL_NAME } = require('../host/roku')
 const { CastTargets, isDiscovered } = require('../host/cast-targets')
+const { Televisions } = require('../host/televisions')
+
+// A television is remembered by its SERIAL NUMBER since 2026-08-19, not by the address
+// it happened to answer on. So this is the id the fixture above produces, and the fact
+// that it contains no address at all is the point.
+const LIVING = 'roku:X0012345'
 
 // The shapes a Roku really answers with, trimmed to the fields that are read.
 const DEVICE_INFO = `<?xml version="1.0" encoding="UTF-8" ?>
@@ -89,10 +99,19 @@ async function fakeRoku (t, { info = DEVICE_INFO, media = PLAYING, apps = APPS_W
   return { seen, request, port }
 }
 
-function speakersFor (t, roku, hosts = ['10.0.0.7']) {
+// A throwaway roster on disk, because remembering televisions is the point of most of
+// what follows and an in-memory stub would prove nothing about the store.
+function rosterFor (t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pearcinema-tv-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  return new Televisions({ dataDir: dir })
+}
+
+function speakersFor (t, roku, hosts = ['10.0.0.7'], { televisions = rosterFor(t) } = {}) {
   return new RokuSpeakers({
     discoverFn: async () => hosts.map((host) => ({ host })),
-    request: roku.request
+    request: roku.request,
+    televisions
   })
 }
 
@@ -142,7 +161,7 @@ test('a discovered Roku is named by what its owner called it', async (t) => {
   const list = await s.list()
   assert.equal(list.length, 1)
   assert.equal(list[0].name, 'Living Room', 'the owner\'s own name beats the model')
-  assert.equal(list[0].entityId, 'roku:10.0.0.7')
+  assert.equal(list[0].entityId, LIVING, 'its serial number, not the address it is on today')
   assert.equal(list[0].deviceClass, 'tv')
   assert.equal(list[0].via, 'roku', 'and it says it was found rather than configured')
 })
@@ -192,7 +211,7 @@ test('play launches the media player channel with the url and the format', async
   const s = speakersFor(t, roku)
   await s.list()
 
-  await s.play('roku:10.0.0.7', 'http://10.0.0.2:8752/v/tok123', { title: 'Nosferatu', format: 'mkv' })
+  await s.play(LIVING, 'http://10.0.0.2:8752/v/tok123', { title: 'Nosferatu', format: 'mkv' })
 
   const launch = roku.seen.find((r) => r.url.startsWith('/launch/782875'))
   assert.ok(launch, 'it has to launch the media player channel')
@@ -212,7 +231,7 @@ test('STOP IS HOME, because revoke rides it', async (t) => {
   const s = speakersFor(t, roku)
   await s.list()
 
-  await s.stop('roku:10.0.0.7')
+  await s.stop(LIVING)
   const stop = roku.seen.find((r) => r.url === '/keypress/Home')
   assert.ok(stop, 'nothing else ends a film on a Roku')
   assert.equal(stop.method, 'POST')
@@ -227,7 +246,7 @@ test('state comes back in HOME ASSISTANT\'s shape, because that is what reads it
   const s = speakersFor(t, roku)
   await s.list()
 
-  const state = await s.getState('roku:10.0.0.7')
+  const state = await s.getState(LIVING)
   assert.equal(state.state, 'playing')
   assert.equal(state.position, 63, 'seconds, not milliseconds')
   assert.equal(state.duration, 5820)
@@ -239,24 +258,95 @@ test('no position information is null, and never a confident zero', async (t) =>
   const s = speakersFor(t, roku)
   await s.list()
 
-  const state = await s.getState('roku:10.0.0.7')
+  const state = await s.getState(LIVING)
   assert.equal(state.state, 'idle')
   assert.equal(state.position, null, 'position 0 is the start of a film; unknown is not')
   assert.equal(state.duration, null)
 })
 
-test('a television that has gone is dropped from the roster, not left as a dead button', async (t) => {
+test('A TELEVISION SWITCHED OFF READS AS UNAVAILABLE, it does not vanish', async (t) => {
+  // MEASURED on Tim's own living room stick, 2026-08-19, with the television off: it
+  // answers no search and nothing on its control port, because the stick draws its power
+  // from the television. Before this, a device that missed one search was DELETED, so a
+  // television that worked yesterday simply disappeared from the phone's picker with
+  // nothing said. A Home Assistant television does the opposite - it stays listed and
+  // reads unavailable - and there is no reason for the two to behave differently.
   const roku = await fakeRoku(t)
-  let hosts = ['10.0.0.7', '10.0.0.8']
-  const s = new RokuSpeakers({ discoverFn: async () => hosts.map((host) => ({ host })), request: roku.request })
+  let hosts = ['10.0.0.7']
+  const televisions = rosterFor(t)
+  const s = new RokuSpeakers({
+    discoverFn: async () => hosts.map((host) => ({ host })),
+    request: roku.request,
+    televisions
+  })
 
-  assert.equal((await s.list()).length, 2)
+  const on = await s.list()
+  assert.equal(on.length, 1)
+  assert.equal(on[0].state, 'idle')
 
+  hosts = []
+  await s.scan()
+  const off = await s.list()
+  assert.equal(off.length, 1, 'still listed')
+  assert.equal(off[0].entityId, LIVING, 'and still itself')
+  assert.equal(off[0].state, 'unavailable')
+
+  // Pressing it says what is wrong, rather than waiting out a socket timeout and then
+  // reporting a timeout - which tells a person nothing they can act on.
+  await assert.rejects(() => s.play(LIVING, 'http://x/v/t', {}), /not answering/)
+
+  // And it comes back as itself when the television does.
   hosts = ['10.0.0.7']
   await s.scan()
+  assert.equal((await s.list())[0].state, 'idle')
+})
+
+test('a television keeps its name when its ADDRESS changes', async (t) => {
+  // The reason a television is remembered by serial number. On DHCP an address is a
+  // lease, and on this very network a Philips Hue bridge answers the same search a Roku
+  // does - so a roster keyed by address can end up pointing at one.
+  const roku = await fakeRoku(t)
+  let hosts = ['10.0.0.7']
+  const televisions = rosterFor(t)
+  const s = new RokuSpeakers({
+    discoverFn: async () => hosts.map((host) => ({ host })),
+    request: roku.request,
+    televisions
+  })
+
+  await s.list()
+  hosts = ['10.0.0.55']
+  await s.scan()
+
   const list = await s.list()
-  assert.equal(list.length, 1)
-  assert.equal(list[0].entityId, 'roku:10.0.0.7')
+  assert.equal(list.length, 1, 'one television, not two')
+  assert.equal(list[0].entityId, LIVING)
+  assert.equal(list[0].host, '10.0.0.55', 'the address followed it')
+  assert.equal(s.hostFor(LIVING), '10.0.0.55')
+})
+
+test('A FOUND TELEVISION CAN BE HIDDEN, the same as a configured one', async (t) => {
+  // Somebody with three Rokus could not stop two of them being offered, because a found
+  // television was whatever answered this minute and there was nowhere to write the
+  // choice. The eye icon means the same thing on every row now.
+  const roku = await fakeRoku(t)
+  const televisions = rosterFor(t)
+  const s = speakersFor(t, roku, ['10.0.0.7'], { televisions })
+  await s.list()
+
+  assert.equal(s.isHidden(LIVING), false)
+  s.setHidden(LIVING, true)
+  assert.equal(s.isHidden(LIVING), true)
+  assert.equal((await s.list())[0].hidden, true)
+
+  // AND IT SURVIVES THE TELEVISION COMING BACK. A device that is rediscovered must not
+  // arrive offered again - that would make hiding a thing that undoes itself.
+  await s.scan()
+  assert.equal((await s.list())[0].hidden, true)
+
+  // A fresh store reading the same file agrees, so this outlived the process.
+  const again = new Televisions({ dataDir: televisions.dataDir })
+  assert.equal(again.isHidden(LIVING), true)
 })
 
 test('ROKU MEDIA PLAYER IS NOT ENOUGH - only Media Assistant actually plays', async (t) => {
@@ -280,11 +370,29 @@ test('ROKU MEDIA PLAYER IS NOT ENOUGH - only Media Assistant actually plays', as
   assert.match(said[1].fix, /Media Assistant/, 'the log names the fix, not just the fault')
 })
 
-test('play refuses clearly rather than 404ing into the void', async (t) => {
+test('A ROKU THAT CANNOT PLAY IS NAMED, not just logged and dropped', async (t) => {
+  // It is skipped from the picker, and it must be, because it would be a television that
+  // does nothing when pressed. But skipping it silently is how a person ends up staring
+  // at a picker that does not list the Roku they can see from where they are sitting.
+  // The one free channel is the whole difference, so the roster keeps the misses for the
+  // dashboard to say so out loud.
   const roku = await fakeRoku(t, { apps: APPS_NO_PLAYER })
-  const s = new RokuSpeakers({ discoverFn: async () => [{ host: '10.0.0.7' }], request: roku.request })
-  await s.list()
-  await assert.rejects(() => s.play('roku:10.0.0.7', 'http://x/v/t', {}), /Media Assistant/)
+  const s = speakersFor(t, roku)
+  assert.deepEqual(await s.list(), [], 'still not offered')
+
+  assert.equal(s.needsChannel.length, 1)
+  assert.equal(s.needsChannel[0].name, 'Living Room', 'by the name its owner gave it')
+  assert.equal(s.needsChannel[0].host, '10.0.0.7')
+
+  // Pressing one anyway is refused, and the refusal is about the television rather
+  // than about a socket.
+  await assert.rejects(() => s.play(LIVING, 'http://x/v/t', {}), /not a Roku target|not answering/)
+
+  // And the warning clears when the channel appears, rather than nagging forever.
+  const fixed = await fakeRoku(t)
+  const s2 = speakersFor(t, fixed)
+  await s2.list()
+  assert.deepEqual(s2.needsChannel, [])
 })
 
 test('pause is the Play key, and only when something is playing', async (t) => {
@@ -294,13 +402,13 @@ test('pause is the Play key, and only when something is playing', async (t) => {
   const s = speakersFor(t, roku)
   await s.list()
 
-  await s.pause('roku:10.0.0.7') // the stand-in reports state="play"
+  await s.pause(LIVING) // the stand-in reports state="play"
   assert.ok(roku.seen.some((r) => r.url === '/keypress/Play'), 'a playing film pauses')
 
   const idle = await fakeRoku(t, { media: '<player state="none" error="false"/>' })
   const s2 = speakersFor(t, idle)
   await s2.list()
-  await s2.pause('roku:10.0.0.7')
+  await s2.pause(LIVING)
   assert.ok(!idle.seen.some((r) => r.url === '/keypress/Play'), 'nothing playing, nothing pressed')
 })
 
@@ -308,7 +416,7 @@ test('resume is the same key, and refuses to double-press', async (t) => {
   const playing = await fakeRoku(t)
   const s = speakersFor(t, playing)
   await s.list()
-  await s.resume('roku:10.0.0.7')
+  await s.resume(LIVING)
   assert.ok(!playing.seen.some((r) => r.url === '/keypress/Play'), 'already playing means nothing to do')
 })
 
@@ -361,12 +469,12 @@ test('both rosters arrive, and an id decides who is asked', async (t) => {
   const list = await targets.list()
   assert.equal(list.length, 2)
   assert.ok(list.some((x) => x.entityId === 'media_player.living_room'))
-  assert.ok(list.some((x) => x.entityId === 'roku:10.0.0.7'))
+  assert.ok(list.some((x) => x.entityId === LIVING))
 
-  assert.equal(isDiscovered('roku:10.0.0.7'), true)
+  assert.equal(isDiscovered(LIVING), true)
   assert.equal(isDiscovered('media_player.living_room'), false)
 
-  await targets.play('roku:10.0.0.7', 'http://x/v/t', {})
+  await targets.play(LIVING, 'http://x/v/t', {})
   assert.ok(roku.seen.some((r) => r.url.startsWith('/launch/')), 'a roku: id went to the Roku')
 
   const viaHa = await targets.play('media_player.living_room', 'http://x/v/t', {})
@@ -382,7 +490,7 @@ test('one backend failing does not cost the other its televisions', async (t) =>
 
   const list = await targets.list()
   assert.equal(list.length, 1)
-  assert.equal(list[0].entityId, 'roku:10.0.0.7')
+  assert.equal(list[0].entityId, LIVING)
 })
 
 test('casting is available when either half can look', async (t) => {

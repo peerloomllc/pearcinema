@@ -1174,14 +1174,11 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
 })
 
 
-test('the casting panel says the one thing about Rokus nobody would guess', async (t) => {
-  // A Roku needs the free Media Assistant channel installed, and that is not discoverable
-  // from anywhere: Roku Media Player, the channel every document points at, opens and then
-  // discards the film (measured on a real stick, 2026-08-18). Without this line a person
-  // with a Roku sees an empty picker and no reason, because the reason lives only in a log
-  // they will never read.
-  const { dom, doc, win, text } = await open()
-  t.after(() => dom.window.close())
+// A helper, because every casting assertion needs the same two clicks to get there.
+async function openCasting (t, routes = {}) {
+  const opened = await open(STATE, routes)
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
 
   const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
@@ -1190,9 +1187,98 @@ test('the casting panel says the one thing about Rokus nobody would guess', asyn
   const cast = [...doc.querySelectorAll('button, a, li')].find(b => /casting/i.test(b.textContent))
   if (cast) {
     cast.dispatchEvent(new win.Event('click', { bubbles: true }))
-    await new Promise(r => setTimeout(r, 60))
+    await new Promise(r => setTimeout(r, 80))
   }
+  return opened
+}
+
+const ROKU_TARGET = {
+  entityId: 'roku:X0012345',
+  name: 'Living Room',
+  state: 'idle',
+  supportedFeatures: 0,
+  deviceClass: 'tv',
+  hidden: false,
+  host: '10.0.0.7',
+  via: 'roku'
+}
+
+test('the casting panel says the one thing about Rokus nobody would guess', async (t) => {
+  // A Roku needs the free Media Assistant channel installed, and that is not discoverable
+  // from anywhere: Roku Media Player, the channel every document points at, opens and then
+  // discards the film (measured on a real stick, 2026-08-18). Without this line a person
+  // with a Roku sees an empty picker and no reason, because the reason lives only in a log
+  // they will never read.
+  const { text } = await openCasting(t)
 
   assert.match(text(), /Media Assistant/, 'the requirement has to be on the screen, not in a log')
-  assert.match(text(), /Rokus need no setup here/, 'and it has to say the discovery half needs nothing')
+  assert.match(text(), /nothing to set up/i, 'and it has to say the discovery half needs nothing')
+})
+
+test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async (t) => {
+  // The bug this rebuild was for. Everything on this page used to be gated on a Home
+  // Assistant token, so a person with a Roku and nothing else was told "Casting is off"
+  // and shown an empty page, while casting worked perfectly from their phone. Their
+  // server had found the television. The page never asked.
+  const { text } = await openCasting(t, {
+    // The specific route first: the stub matches by prefix in insertion order, and
+    // '/api/cast/targets' starts with '/api/cast'.
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
+  })
+
+  assert.match(text(), /Living Room/, 'the television is on the page with no Home Assistant anywhere')
+  assert.match(text(), /found on your network/)
+  assert.match(text(), /Ready/)
+  assert.doesNotMatch(text(), /Casting is off/, 'and it never says casting is off while a television is listed')
+})
+
+test('a television that is switched off says so, rather than disappearing', async (t) => {
+  const { text } = await openCasting(t, {
+    '/api/cast/targets': {
+      targets: [{ ...ROKU_TARGET, state: 'unavailable' }],
+      needsChannel: [],
+      mediaChannel: 'Media Assistant'
+    }
+  })
+
+  assert.match(text(), /Living Room/, 'still listed')
+  assert.match(text(), /Switched off or asleep/)
+  assert.match(text(), /comes back by itself/, 'and it says what to do about it, which is nothing')
+})
+
+test('a Roku missing the channel is NAMED on the page, not left in a log', async (t) => {
+  // The one case a person cannot possibly work out: a Roku sitting right there, missing
+  // from the list, because of one free channel.
+  const { text } = await openCasting(t, {
+    '/api/cast/targets': {
+      targets: [],
+      needsChannel: [{ host: '10.0.0.9', name: 'Bedroom Roku' }],
+      mediaChannel: 'Media Assistant'
+    }
+  })
+
+  assert.match(text(), /Bedroom Roku/)
+  assert.match(text(), /no Media Assistant/)
+  assert.match(text(), /channel store/, 'and where to get it')
+})
+
+test('Home Assistant is folded away when it is not set up', async (t) => {
+  const { doc, text } = await openCasting(t, {
+    // The specific route first: the stub matches by prefix in insertion order, and
+    // '/api/cast/targets' starts with '/api/cast'.
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
+  })
+
+  assert.match(text(), /not set up/, 'its status is honest')
+  assert.match(text(), /Optional/, 'and it says it is optional, because for most people it is')
+  // The token field is not on screen until somebody asks for it.
+  assert.equal(doc.querySelector('input[type=password]'), null)
+
+  const setUp = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Set up')
+  assert.ok(setUp, 'there is a way in')
+  setUp.dispatchEvent(new doc.defaultView.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.ok(doc.querySelector('input[type=password]'), 'and it opens')
 })

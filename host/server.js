@@ -26,6 +26,7 @@ const blendLib = require('./blend')
 const { Speakers } = require('./speakers')
 const { RokuSpeakers } = require('./roku')
 const { CastTargets } = require('./cast-targets')
+const { Televisions } = require('./televisions')
 const castLib = require('./cast')
 const watch = require('./watch')
 const sidecars = require('./sidecars')
@@ -220,7 +221,10 @@ class PearCinemaHost {
     // owner who does not run HA is no longer locked out of casting entirely. The topology
     // is unchanged either way: the host finds, commands, serves and stops.
     this.ha = new Speakers({ dataDir: this.dataDir, log })
-    this.roku = new RokuSpeakers({ log })
+    // The televisions this library has met, kept between sightings so that switching
+    // one off makes it read as unavailable rather than delete it from the picker.
+    this.televisions = new Televisions({ dataDir: this.dataDir, log })
+    this.roku = new RokuSpeakers({ log, televisions: this.televisions })
     this.speakers = new CastTargets({ configured: this.ha, discovered: this.roku, log })
     this.casts = new castLib.CastSessions({
       speakers: this.speakers,

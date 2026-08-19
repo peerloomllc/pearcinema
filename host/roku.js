@@ -186,27 +186,54 @@ function stateFrom (xml) {
 // The same surface Speakers exposes, so CastSessions never learns which one it is holding:
 // enabled, list, getState, play, stop, isHidden.
 class RokuSpeakers {
-  constructor ({ log = () => {}, discoverFn = discover, request = ecp } = {}) {
+  // `televisions` is the remembered roster (host/televisions.js). Without one this
+  // still works and simply forgets everything between scans, which is what it did
+  // before there was a store - useful in tests, wrong in a house.
+  constructor ({ log = () => {}, discoverFn = discover, request = ecp, televisions = null } = {}) {
     this.log = log
     this._discover = discoverFn
     this._ecp = request
-    // host -> { entityId, name, host, at }. Rediscovery is not free (it is two seconds of
-    // waiting), so the roster is remembered and refreshed rather than rebuilt per call.
+    this.televisions = televisions
+    // id -> { entityId, name, host, ... } for the devices that answered the LAST scan.
+    // Rediscovery is not free (it is two and a half seconds of waiting), so this is
+    // refreshed rather than rebuilt per call.
     this.devices = new Map()
     this.lastScan = 0
+    // Rokus that answered and are NOT offered, because they have no channel that can
+    // play a film. The dashboard says so; see the scan.
+    this.needsChannel = []
   }
 
   // Always on. There is nothing to configure: a Roku either answers on the network or it
   // does not, which is the entire point of this backend existing.
   get enabled () { return true }
 
-  isHidden () { return false }
+  isHidden (entityId) {
+    return !!this.televisions?.isHidden(entityId)
+  }
 
-  entityIdFor (host) { return `roku:${host}` }
+  setHidden (entityId, hidden) {
+    if (!this.televisions) throw new Error('this host does not remember televisions')
+    return this.televisions.setHidden(entityId, hidden)
+  }
 
+  // THE SERIAL NUMBER, NOT THE ADDRESS. A television used to be called
+  // `roku:192.168.50.13`, which is a lease rather than a name: on DHCP it moves, and
+  // a remembered row would then point at whatever took it. On this very network a
+  // Philips Hue bridge answers the same search a Roku does, so "whatever took it" is
+  // not hypothetical. The UDN is the fallback and the address the last resort.
+  entityIdFor ({ serial, udn, host }) {
+    return `roku:${serial || udn || host}`
+  }
+
+  // Where to send the next request. A remembered television answers from the store
+  // even when it has not been seen this session; one nobody has ever met answers
+  // null, and every caller turns that into a refusal rather than a request to
+  // nowhere.
   hostFor (entityId) {
-    const s = String(entityId || '')
-    return s.startsWith('roku:') ? s.slice(5) : null
+    const id = String(entityId || '')
+    if (!id.startsWith('roku:')) return null
+    return this.devices.get(id)?.host || this.televisions?.get(id)?.host || null
   }
 
   // Refresh the roster. `maxAgeMs` lets a caller that just scanned skip the two seconds.
@@ -223,6 +250,7 @@ class RokuSpeakers {
     // would have put a printer in the television picker under a name that was just its IP
     // address. A device that cannot say what it is does not get offered.
     const identified = []
+    const missingChannel = []
     for (const { host } of found) {
       let info = null
       try {
@@ -236,6 +264,9 @@ class RokuSpeakers {
       // neither is still a real ECP device, so it keeps its address as a last resort.
       const name = tag(info, 'user-device-name') || tag(info, 'friendly-device-name')
       const model = tag(info, 'model-name') || tag(info, 'friendly-model-name')
+      // What this device will still be called after its address changes.
+      const serial = tag(info, 'serial-number')
+      const udn = tag(info, 'udn')
 
       // Can it play something we hand it? A Roku with no media channel installed answers
       // every query happily and 404s the launch, so the roster would otherwise be full of
@@ -249,30 +280,50 @@ class RokuSpeakers {
       }
       if (!channel) {
         // Named in the log because the fix is one the OWNER can apply in a minute: install
-        // Roku Media Player from the channel store. Silence here would read as "PearCinema
+        // Media Assistant from the channel store. Silence here would read as "PearCinema
         // cannot see my television" when it plainly can.
         this.log('roku:no-media-channel', { host, name: name || model || host, fix: `install ${MEDIA_CHANNEL_NAME}` })
+        // AND KEPT, so the dashboard can say it out loud. A log is where this used to
+        // end, and a log is a thing nobody reads: the person sees a television missing
+        // from a picker and has no way to guess that one free channel is the whole
+        // difference. This is the list that page renders.
+        missingChannel.push({ host, name: name || model || `Roku (${host})` })
         continue
       }
 
-      identified.push(host)
-      this.devices.set(host, {
+      const device = {
+        id: this.entityIdFor({ serial, udn, host }),
+        via: 'roku',
         host,
-        entityId: this.entityIdFor(host),
         name: name || model || `Roku (${host})`,
         model: model || null,
+        serial: serial || null,
+        udn: udn || null,
         channel
-      })
+      }
+      device.entityId = device.id
+      identified.push(device.id)
+      this.devices.set(device.id, device)
+      // REMEMBERED, so that switching the television off does not delete it. Measured
+      // on Tim's own stick 2026-08-19: with the television off it answers no search
+      // and nothing on its control port, because the stick is powered by the
+      // television. Deleting it made a working television VANISH from the phone's
+      // picker with nothing said, which is the complaint this store exists for.
+      this.televisions?.remember(device)
     }
 
-    // A device that stopped answering is dropped rather than kept as a dead button - the
-    // roster is "what is here now", and a stale entry ends in an error the person cannot
-    // act on.
-    for (const host of [...this.devices.keys()]) {
-      if (!identified.includes(host)) this.devices.delete(host)
+    // Present means "answered this scan", and it is the only thing that is forgotten
+    // between scans. What the device IS lives in the store.
+    for (const id of [...this.devices.keys()]) {
+      if (!identified.includes(id)) this.devices.delete(id)
     }
 
-    this.log('roku:scanned', { found: this.devices.size })
+    this.needsChannel = missingChannel
+    this.log('roku:scanned', {
+      answering: this.devices.size,
+      known: this.televisions?.all().length ?? this.devices.size,
+      needsChannel: missingChannel.length
+    })
     return [...this.devices.values()]
   }
 
@@ -283,18 +334,27 @@ class RokuSpeakers {
   async list () {
     if (!this.lastScan) await this.scan()
     else if (Date.now() - this.lastScan > 30000) this.scan().catch(() => {})
-    const devices = [...this.devices.values()]
-    return devices.map((d) => ({
-      entityId: d.entityId,
+
+    // EVERY TELEVISION THIS LIBRARY HAS MET, not only the ones answering right now.
+    // One that is not answering is listed as `unavailable`, which is the same word
+    // Home Assistant uses for a television that is switched off - so the phone and
+    // the dashboard treat both kinds the same way, which they could not do while a
+    // found television simply disappeared.
+    const known = this.televisions?.all().filter(d => d.via === 'roku') || [...this.devices.values()]
+    return known.map((d) => ({
+      entityId: d.entityId || d.id,
       name: d.name,
-      state: 'idle',
+      state: this.devices.has(d.entityId || d.id) ? 'idle' : 'unavailable',
       // NO SEEK, and this is the honest answer rather than a limitation of this file: a
       // Roku's media player does not accept a seek command over ECP any more than it
       // declares one through Home Assistant, so the cast path's restart-at-offset is what
       // moves a film - which it already implements for exactly this device.
       supportedFeatures: 0,
       deviceClass: 'tv',
-      hidden: false,
+      hidden: !!d.hidden,
+      // The last address it answered on, which the target router needs to tell this
+      // television apart from the same one seen through Home Assistant.
+      host: d.host || null,
       // Says where this target came from, so a dashboard can be honest that it was found
       // on the network rather than configured by anybody.
       via: 'roku'
@@ -335,10 +395,18 @@ class RokuSpeakers {
   async play (entityId, url, { title = null, format = 'mp4' } = {}) {
     const host = this.hostFor(entityId)
     if (!host) throw new Error('not a Roku target')
+    // A REMEMBERED TELEVISION IS NOT A REACHABLE ONE. Since televisions are kept
+    // between sightings, a switched-off one is still on the picker - which is the
+    // point - so the refusal has to say what is actually wrong. Without this the
+    // person waits four seconds for a socket timeout and is told "roku timed out".
+    if (!this.devices.has(String(entityId))) {
+      const known = this.televisions?.get(entityId)
+      throw new Error(`${known?.name || 'that television'} is not answering - switch it on and try again`)
+    }
     // The channel this device actually has, learned at scan time. A device that reached
     // the roster has one by construction; a stale id is still worth a clear failure over
     // a 404 nobody can read.
-    const channel = this.devices.get(host)?.channel
+    const channel = this.devices.get(String(entityId))?.channel
     if (!channel) throw new Error(`that Roku cannot be handed a film - install ${MEDIA_CHANNEL_NAME} on it`)
     const q = new URLSearchParams({ u: url, t: 'v', videoFormat: format === 'mkv' ? 'mkv' : format })
     if (title) q.set('videoName', title)
