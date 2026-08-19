@@ -1784,10 +1784,14 @@ async function startDashboard ({
       // The Support Development rails, QR included, rendered host-side the same
       // way the pairing code is - the page never needs a QR library of its own.
       if (req.method === 'GET' && url.pathname === '/api/donate') {
+        // EVERY CAPTION SAYS WHICH THING IT IS. Two of these three are Bitcoin and the
+        // page never said so - "Lightning" and "On-chain" are only obvious to somebody
+        // who already knows (Tim, 2026-08-19). They also stay within two lines each, so
+        // the address and the buttons under them do not jump when you switch rails.
         const RAILS = {
-          ln: { value: 'peerloomllc@strike.me', caption: 'Scan with any Lightning wallet (pick your own amount), or copy the address.' },
-          onchain: { value: 'bc1q0kksenz3j4u9ppe6f4krclvzwxk7sjy00cc9cf', caption: 'On-chain Bitcoin - higher fees, so Lightning is cheaper for small tips.' },
-          usd: { value: 'https://buymeacoffee.com/peerloomllc', caption: 'Scan to open Buy Me a Coffee, or open it here to pay by card.' }
+          ln: { value: 'peerloomllc@strike.me', caption: 'Bitcoin over Lightning, the cheapest way to send a small amount. Scan with any wallet, or copy the address.' },
+          onchain: { value: 'bc1q0kksenz3j4u9ppe6f4krclvzwxk7sjy00cc9cf', caption: 'Bitcoin on-chain. Fees are higher, so Lightning is better for a small tip.' },
+          usd: { value: 'https://buymeacoffee.com/peerloomllc', caption: 'Card or bank, through Buy Me a Coffee. Scan it, or open it here.' }
         }
         const out = {}
         for (const [k, r] of Object.entries(RAILS)) {

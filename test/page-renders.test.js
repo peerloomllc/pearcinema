@@ -80,6 +80,15 @@ const ROUTES = {
   '/api/library/list?type=series&limit=100': { items: [], total: 0, cursor: null },
   '/api/subtitles': { items: [] },
   '/api/source/detect': { servers: [], folders: [] },
+  // The tip rails. Stubbed because the page that renders them had NO test at all,
+  // which is how it shipped throwing a ReferenceError the moment they arrived.
+  '/api/donate': {
+    rails: {
+      ln: { svg: '<svg></svg>', caption: 'Lightning', value: 'lnurl1example' },
+      onchain: { svg: '<svg></svg>', caption: 'On-chain', value: 'bc1example' },
+      usd: { svg: '<svg></svg>', caption: 'Card or bank', value: 'https://example.com/tip' }
+    }
+  },
   // Where this person got to. Metropolis is half watched, Nosferatu is finished.
   '/api/watch/state': {
     watching: { id: 'p1', name: 'Me' },
@@ -1256,7 +1265,7 @@ async function openCasting (t, routes = {}) {
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /televisions/i.test(b.textContent))
+  const cast = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent.trim() === 'Casting')
   if (cast) {
     cast.dispatchEvent(new win.Event('click', { bubbles: true }))
     await new Promise(r => setTimeout(r, 80))
@@ -1678,7 +1687,7 @@ test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', asyn
   await new Promise(r => setTimeout(r, 60))
 
   const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
-  assert.deepEqual(labels, ['Library', 'Televisions', 'Sharing', 'This host', 'Support development'])
+  assert.deepEqual(labels, ['Library', 'Sharing', 'Casting', 'This host', 'Support development'])
 
   const lands = async (hash, expect) => {
     win.location.hash = 'settings/' + hash
@@ -1690,7 +1699,10 @@ test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', asyn
 
   await lands('source', 'Library')
   await lands('artwork', 'Library')
-  await lands('casting', 'Televisions')
+  await lands('casting', 'Casting')
+  // Both directions: the page was Casting, then Televisions for a day, then Casting
+  // again (Tim, 2026-08-19), and a bookmark from that day still has to land.
+  await lands('televisions', 'Casting')
   await lands('remotes', 'Sharing')
   await lands('security', 'This host')
   // AN ADDRESS THAT NEVER EXISTED LEAVES YOU WHERE YOU ARE. A stray hash should not
@@ -1984,7 +1996,7 @@ test('THE ROUTES ARE ROWS, not a footer of mismatched buttons', async (t) => {
   // their own - unlabelled there, they would read as part of the routes (Tim,
   // 2026-08-19).
   const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
-  assert.deepEqual(groups, ['How they are found', 'Your televisions'])
+  assert.deepEqual(groups, ['How they are found', 'Where you can cast'])
 
   const names = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
   assert.deepEqual(names, ['On your network', 'Home Assistant', 'Living Room'])
@@ -2032,7 +2044,7 @@ test('WAITING LOOKS THE SAME AS IT DOES ON THE PHONE', async (t) => {
   const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
-  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Televisions')
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Casting')
   nav.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 80))
 
@@ -2259,4 +2271,41 @@ test('NOTHING PAINTS #root A COLOUR, which is how light mode stayed dark', async
     if (!/#root/.test(rule.split('{')[0])) continue
     assert.doesNotMatch(rule, /background/, 'a background on #root strands the page on one theme: ' + rule)
   }
+})
+
+test('THE SUPPORT PAGE COMES UP AT ALL, which it had stopped doing', async (t) => {
+  // It used `copied` and `setCopied` and declared neither, so the moment the rails
+  // arrived it threw "copied is not defined" and took the whole app down with it -
+  // the blank-page shape of the three temporal-dead-zone crashes of 2026-08-17. Every
+  // test in this file asserts on text and structure, and this page had no test of its
+  // own, so nothing in the suite could see it (found 2026-08-19).
+  const { doc, win, dom, errors, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent.trim() === 'Support development')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.deepEqual(errors, [], 'no page error')
+  assert.match(text(), /No accounts, no servers, no subscriptions/)
+  assert.match(text(), /lnurl1example/, 'the rail itself, not a spinner')
+  assert.ok(doc.querySelector('.donate-qr svg'), 'and its code to point a phone at')
+
+  // NO CARD AROUND A PAGE - the last one still wearing one - and the page names itself
+  // once, outside it.
+  assert.ok(doc.querySelector('.setbody .setpage .setpagename'))
+  assert.equal(doc.querySelector('.setbody > .card'), null)
+
+  // Copy is a button that works rather than one that throws.
+  const copy = [...doc.querySelectorAll('.actions button')].find(b => b.textContent.trim() === 'Copy')
+  assert.ok(copy)
+  copy.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.deepEqual(errors, [], 'still no page error after pressing it')
+
+  // An arrow was doing nothing a word was not already doing.
+  assert.doesNotMatch(text(), /↗/)
 })
