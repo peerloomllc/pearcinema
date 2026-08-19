@@ -1148,3 +1148,43 @@ test('log out everywhere drops the other browsers and keeps the presser', async 
   assert.equal((await me.req('GET', '/api/state')).status, 200, 'the presser stays')
   assert.equal((await laptop.req('GET', '/api/state')).status, 401, 'the laptop is out')
 })
+
+test('A HOST WHOSE DRIVE HAS GONE SAYS SO, and stops saying it when it comes back', async (t) => {
+  // The dashboard already renders `sourceError` in two places - the Source panel and
+  // across the top of the library - so the whole job is putting the truth in it. What
+  // was missing is that nothing ever asked: a bind mount whose disk has been remounted
+  // elsewhere is present, readable and empty, so the host stayed green while every
+  // film 404d (Tim's Umbrel, 2026-08-19).
+  const { host } = await cinema(t)
+
+  // A source that cannot answer the question at all is left alone rather than being
+  // reported as broken - a Jellyfin library has no drive to lose.
+  assert.equal(await host._checkSource(), null)
+  assert.equal(host.sourceError, null)
+
+  let health = { ok: true }
+  host._inner = { health: async () => health }
+
+  await host._checkSource()
+  assert.equal(host.sourceError, null)
+
+  health = { ok: false, detail: '/library is readable but holds none of this library files - is the drive still mounted?' }
+  await host._checkSource()
+  assert.match(host.sourceError, /is the drive still mounted/)
+
+  health = { ok: true }
+  await host._checkSource()
+  assert.equal(host.sourceError, null, 'and it clears itself when the drive returns')
+})
+
+test('the watchdog never tidies away a message it did not write', async (t) => {
+  // `sourceError` belongs to whatever last failed. A scan that broke for its own
+  // reasons owns it until a scan succeeds, and a watchdog that cleared it on the next
+  // healthy tick would hide a real fault behind a readable folder.
+  const { host } = await cinema(t)
+  host._inner = { health: async () => ({ ok: true }) }
+
+  host.sourceError = 'the credentials were refused'
+  await host._checkSource()
+  assert.equal(host.sourceError, 'the credentials were refused', 'not its message, not its to clear')
+})

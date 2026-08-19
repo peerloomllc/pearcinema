@@ -771,7 +771,7 @@ test('A LIBRARY DOES NOT BECOME EMPTY BY ITSELF', async (t) => {
     await fsp.rm(path.join(root, entry), { recursive: true, force: true })
   }
 
-  await assert.rejects(() => a.scan({ force: true }), /refusing to replace it with an empty one/)
+  await assert.rejects(() => a.scan({ force: true }), /Refusing to replace it with an empty one/)
 
   // AND THE LIBRARY IS STILL SERVED while it is wrong. Refusing costs nothing: what
   // is already in memory keeps answering, so a rescan that runs at the wrong moment
@@ -795,4 +795,46 @@ test('a library that really is emptied can still be emptied', async (t) => {
   const a = realAdapter({ root: empty, dataDir: await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-d-')) })
   assert.equal(await a.scan(), 0)
   void dataDir
+})
+
+test('THE HOST NOTICES ITS DRIVE HAS GONE, without scanning to find out', async (t) => {
+  // The failure this exists for is silent. In a container, a bind mount whose disk
+  // has been remounted elsewhere leaves a directory that is present, readable and
+  // empty - so `ping()` says yes, the host stays green, and every film 404s. That is
+  // what happened to Tim's Umbrel on 2026-08-19 and what nothing on any screen said.
+  const { root, dataDir } = await library(t)
+  const a = realAdapter({ root, dataDir })
+  await a.scan()
+
+  assert.deepEqual(await a.health(), { ok: true })
+
+  // The drive goes, leaving the mount point behind - readable, and holding nothing.
+  for (const entry of await fsp.readdir(root)) {
+    await fsp.rm(path.join(root, entry), { recursive: true, force: true })
+  }
+
+  assert.equal((await a.ping()).ok, true, 'the folder is still readable, which is the trap')
+  const gone = await a.health()
+  assert.equal(gone.ok, false)
+  assert.match(gone.detail, /Is the drive still mounted/)
+
+  // ONE MISSING FILM IS A DELETED FILM, not a missing disk. The check only calls the
+  // source gone when NONE of the files it knows about are there.
+  const { root: root2, dataDir: dataDir2 } = await library(t)
+  const b = realAdapter({ root: root2, dataDir: dataDir2 })
+  await b.scan()
+  const one = [...b._paths.values()][0]
+  await fsp.rm(one)
+  assert.deepEqual(await b.health(), { ok: true }, 'a gap in the library is not an absent drive')
+})
+
+test('a library with nothing scanned yet has nothing to be missing', async (t) => {
+  const empty = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-fresh-'))
+  const data = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-fd-'))
+  t.after(() => Promise.all([
+    fsp.rm(empty, { recursive: true, force: true }),
+    fsp.rm(data, { recursive: true, force: true })
+  ]))
+  const a = realAdapter({ root: empty, dataDir: data })
+  assert.deepEqual(await a.health(), { ok: true }, 'a host that has scanned nothing is not a host in trouble')
 })

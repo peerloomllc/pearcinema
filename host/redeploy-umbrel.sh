@@ -80,7 +80,7 @@ fi
 LIBRARY_NAME="${PEARCINEMA_NAME:-My Films}"
 
 if [ -z "$LIBRARY" ] || [ ! -d "$LIBRARY" ]; then
-  echo "no library found under /home/umbrel/umbrel/external/" >&2
+  echo "No library found under /home/umbrel/umbrel/external/" >&2
   echo "what this box can see:" >&2
   ls -1 /home/umbrel/umbrel/external/ 2>/dev/null | sed 's/^/  /' >&2
   echo "set LIBRARY=... and re-run" >&2
@@ -92,7 +92,7 @@ fi
 # running rather than after replacing it - this check sits above the docker rm below,
 # and it must stay above it.
 if [ -z "$(ls -A "$LIBRARY" 2>/dev/null)" ]; then
-  echo "the library at $LIBRARY is empty - is the drive mounted?" >&2
+  echo "The library at $LIBRARY is empty. Is the drive mounted?" >&2
   exit 1
 fi
 
