@@ -1556,7 +1556,7 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
     transcodeCap: { cap: 3, source: 'dashboard', measured: 10 }
   }
   const one = await openHost(t, oneCard)
-  assert.match(one.text(), /Up to 3 conversions run at once\. 0 turns it off\./)
+  assert.match(one.text(), /Up to 3 conversions run at once\. Setting it to 0 turns conversions off\./)
   assert.doesNotMatch(one.text(), /in testing/, 'never a measurement of somebody else\'s hardware')
 
   // AND THE CARD IS NAMED ONLY WHERE THERE IS A CHOICE. A render node is the graphics

@@ -283,3 +283,32 @@ test('the relay switch reflects the setting and writes it back', async (t) => {
   const wrote = h.called('setSettings').filter((c) => 'useRelay' in (c.args || {}))
   assert.equal(wrote.at(-1).args.useRelay, false, 'and the worklet was told, not just the screen')
 })
+
+test('A LIBRARY THAT CANNOT REACH ITS FILMS SAYS SO, rather than looking empty', async (t) => {
+  // The two are identical from the phone's side, and the wrong one is the default: an
+  // empty shelf reads as "there is nothing in this library", which is a lie about
+  // somebody's films. The host has always answered this on library.stats and nothing
+  // here ever asked, so when Tim's Umbrel lost its drive on 2026-08-19 the phone said
+  // nothing at all.
+  const { text, dom } = await open({
+    'library.stats': {
+      movies: 0, series: 0, seasons: 0, episodes: 0, source: 'folder',
+      sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?'
+    },
+    'library.list': { items: [], cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /This library cannot reach its films/)
+  assert.match(text(), /Is the drive still mounted/)
+})
+
+test('a library that is simply empty is not accused of losing its drive', async (t) => {
+  const { text, dom } = await open({
+    'library.stats': { movies: 0, series: 0, seasons: 0, episodes: 0, source: 'folder', sourceError: null },
+    'library.list': { items: [], cursor: null }
+  })
+  t.after(() => dom.window.close())
+
+  assert.doesNotMatch(text(), /cannot reach its films/)
+})

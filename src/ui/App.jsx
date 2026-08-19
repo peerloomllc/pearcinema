@@ -1170,6 +1170,23 @@ export default function App () {
     else fetchList({ type: root, limit: 100, sort: sortField || 'title', order: sortOrder })
   }, [state?.active?.hostKey, root, series?.id, season?.id, sortField, sortOrder, mergedFilter, mergedTick])
 
+  // IS THE LIBRARY'S OWN DISK STILL THERE? The host has always answered this on
+  // library.stats and nothing here has ever asked, so a library whose drive had been
+  // unplugged or remounted arrived as an ordinary empty shelf - and an empty shelf
+  // reads as "there is nothing in this library", which is a lie about somebody's
+  // films (Tim's Umbrel lost its drive on 2026-08-19 and nothing on this side said a
+  // word).
+  //
+  // Asked with the list rather than on a timer of its own: the moment worth catching
+  // is somebody opening the app to a shelf that should not be empty.
+  const [sourceErr, setSourceErr] = useState('')
+  useEffect(() => {
+    if (!state?.active) return setSourceErr('')
+    call('library.stats')
+      .then((st) => setSourceErr(st?.sourceError || ''))
+      .catch(() => setSourceErr(''))
+  }, [state?.active?.hostKey, mergedFilter, mergedTick, items])
+
   // The chip is a persisted preference the worklet applies server-side of the
   // IPC line, so a change is a write plus a refetch (the dep above).
   const pickFilter = (lib) => {
@@ -1663,6 +1680,16 @@ export default function App () {
       )}
 
       {err && <div className='error'>{err}</div>}
+
+      {/* THE LIBRARY IS NOT EMPTY, IT IS UNREACHABLE, and those look identical from
+          here. Said above the shelf rather than in place of it, because whatever was
+          already loaded still plays - a download on this phone does not need the
+          host's disk at all. */}
+      {sourceErr && (
+        <div className='error'>
+          <b>This library cannot reach its films.</b> {sourceErr}
+        </div>
+      )}
 
       {/* The marker. Nobody should discover after the fact that their films took the
           long way round, and the quality drop is a fact worth explaining before it is
