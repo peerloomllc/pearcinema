@@ -344,13 +344,38 @@ test('casting is available when either half can look', async (t) => {
 })
 
 test('a television that is both configured and discovered is one television', async (t) => {
-  // Otherwise an owner who runs Home Assistant AND owns a Roku sees it twice, and the
-  // duplicate is the one they cannot hide.
+  // MEASURED against Tim's own Home Assistant, 2026-08-18. His Roku is
+  // `media_player.living_room_roku_streaming_stick_plus` named "Roku Streaming Stick Plus"
+  // - no IP address anywhere in either - and the first cut matched on address only, so the
+  // same television sat in his picker twice with no way to tell which was which.
   const roku = await fakeRoku(t)
-  const ha = fakeHa({ list: async () => [{ ...HA_TARGET, entityId: 'media_player.roku_10_0_0_7', name: 'Roku 10.0.0.7' }] })
-  const targets = new CastTargets({ configured: ha, discovered: speakersFor(t, roku) })
+  const ha = fakeHa({
+    list: async () => [{ ...HA_TARGET, entityId: 'media_player.living_room_roku_streaming_stick_plus', name: 'Roku Streaming Stick Plus' }]
+  })
+  // The discovered one carries the same name, punctuated as the device reports it.
+  const disc = new RokuSpeakers({
+    discoverFn: async () => [{ host: '10.0.0.7' }],
+    request: async (host, path) => (path.startsWith('/query/apps')
+      ? '<apps><app id="782875">Media Assistant</app></apps>'
+      : '<device-info><model-name>Roku Streaming Stick Plus</model-name></device-info>')
+  })
+  const targets = new CastTargets({ configured: ha, discovered: disc })
 
   const list = await targets.list()
   assert.equal(list.length, 1, 'the configured entry wins - it is the one that can be hidden and renamed')
-  assert.equal(list[0].entityId, 'media_player.roku_10_0_0_7')
+  assert.equal(list[0].entityId, 'media_player.living_room_roku_streaming_stick_plus')
+})
+
+test('the address match still works, for Home Assistants that name a device by IP', async (t) => {
+  const roku = await fakeRoku(t)
+  const ha = fakeHa({ list: async () => [{ ...HA_TARGET, entityId: 'media_player.roku_10_0_0_7', name: 'Roku 10.0.0.7' }] })
+  const targets = new CastTargets({ configured: ha, discovered: speakersFor(t, roku) })
+  assert.equal((await targets.list()).length, 1)
+})
+
+test('two DIFFERENT televisions are never collapsed into one', async (t) => {
+  const roku = await fakeRoku(t)
+  const ha = fakeHa({ list: async () => [{ ...HA_TARGET, entityId: 'media_player.kitchen_speaker', name: 'Kitchen speaker' }] })
+  const targets = new CastTargets({ configured: ha, discovered: speakersFor(t, roku) })
+  assert.equal((await targets.list()).length, 2, 'a speaker in the kitchen is not the Roku in the living room')
 })

@@ -17,6 +17,12 @@ function isDiscovered (entityId) {
   return String(entityId || '').startsWith('roku:')
 }
 
+// Names as a person typed them, compared as a machine should: case and punctuation carry
+// no meaning here, and "Roku Streaming Stick Plus" must match "roku streaming stick plus".
+function normalName (name) {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
 class CastTargets {
   constructor ({ configured, discovered, log = () => {} }) {
     this.configured = configured // Speakers (Home Assistant)
@@ -56,10 +62,22 @@ class CastTargets {
     // A television configured in Home Assistant AND found on the wire is ONE television.
     // The configured entry wins, because it is the one the operator can hide, rename and
     // reach through an integration that knows more about it than a multicast answer does.
-    const confHosts = new Set(
-      conf.map((t) => (/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/.exec(String(t.entityId) + ' ' + String(t.name)) || [])[1]).filter(Boolean)
-    )
-    const fresh = disc.filter((t) => !confHosts.has(String(t.entityId).slice(5)))
+    //
+    // MATCHED BY NAME AS WELL AS ADDRESS, and the name is the one that actually fires.
+    // Measured against Tim's own Home Assistant, 2026-08-18: his Roku is
+    // `media_player.living_room_roku_streaming_stick_plus`, named "Roku Streaming Stick
+    // Plus" - no IP anywhere in either, so an address-only test left the same television
+    // in the picker twice. Both are kept because HA installs vary: some integrations do
+    // name a device by address, and that case cost nothing to keep covering.
+    const ips = new Set()
+    const names = new Set()
+    for (const t of conf) {
+      const ip = (/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/.exec(String(t.entityId) + ' ' + String(t.name)) || [])[1]
+      if (ip) ips.add(ip)
+      const n = normalName(t.name)
+      if (n) names.add(n)
+    }
+    const fresh = disc.filter((t) => !ips.has(String(t.entityId).slice(5)) && !names.has(normalName(t.name)))
 
     return [...conf, ...fresh]
   }
@@ -77,4 +95,4 @@ class CastTargets {
   stop (entityId) { return this._for(entityId).stop(entityId) }
 }
 
-module.exports = { CastTargets, isDiscovered }
+module.exports = { CastTargets, isDiscovered, normalName }
