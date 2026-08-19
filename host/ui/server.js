@@ -1670,6 +1670,14 @@ async function startDashboard ({
         })
       }
 
+      // WHICH TITLES CAME BACK WITH NOTHING. Its own route rather than part of the
+      // summary above, because the summary is polled every two seconds while a pass
+      // runs and this can be hundreds of rows - and nobody is looking at it except
+      // when they have opened the window that shows it.
+      if (req.method === 'GET' && url.pathname === '/api/metadata/missing') {
+        return json(res, 200, { items: await host.enricher.missedList(host.adapter) })
+      }
+
       // The explicit save-to-library action. Synchronous on purpose: it is a
       // few hundred small files at most and the operator is looking at the
       // button that asked for them - a fire-and-forget here would just move

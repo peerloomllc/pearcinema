@@ -428,6 +428,30 @@ class Enricher {
     return true
   }
 
+  // WHICH ONES FOUND NOTHING, not just how many (Tim, 2026-08-19: a count you cannot
+  // act on is a count). Resolved against the LIBRARY rather than read straight out of
+  // the store, so every entry carries the title and the type the fix dialog needs, and
+  // a file that has since been deleted or matched by hand drops off the list instead of
+  // haunting it. The store keeps only ids and a reason; the library is what knows what
+  // an id currently is.
+  async missedList (adapter, { limit = 500 } = {}) {
+    const ids = this.missed
+    if (!Object.keys(ids).length) return []
+    const out = []
+    for (const type of ['movies', 'series']) {
+      for (const it of await listAll(adapter, { type })) {
+        const m = ids[it.id]
+        if (!m) continue
+        // Something else answered for it since - artwork on disk, or a hand-picked
+        // match - so it is not missing any more whatever the store still says.
+        if (it.artId || this.matched[it.id]) continue
+        out.push({ id: it.id, title: it.title, year: it.year || null, type: it.type, reason: m.error || null })
+        if (out.length >= limit) return out
+      }
+    }
+    return out
+  }
+
   summary () {
     return {
       running: this.running,

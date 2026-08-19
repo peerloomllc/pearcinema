@@ -109,6 +109,11 @@ const ROUTES = {
       { tmdbId: 22, title: 'Crash', year: 2004, poster: '/c2.jpg', overview: 'the other one' }
     ]
   },
+  // WHICH ONE CAME BACK WITH NOTHING. Listed before '/api/metadata' for the same
+  // reason the search route is: the stub matches by prefix in insertion order.
+  '/api/metadata/missing': {
+    items: [{ id: 'film-9', title: 'K05', year: null, type: 'movie', reason: null }]
+  },
   // The artwork panel after a pass: posters fetched, two of them guesses - so the
   // honesty notice renders and can be asserted on.
   '/api/metadata': {
@@ -1259,8 +1264,11 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   // THE SAME ROWS EVERY SETTINGS PAGE USES, and the name carries the state the way
   // the video engine's does on This host (Tim, 2026-08-19: give the rest of the pages
   // the treatment This host got).
-  const name = doc.querySelector('.setrow .rowname')
-  assert.match(name.textContent, /Living Room/)
+  // Found by name rather than by position: the routes are the settings on this page
+  // and the televisions are what they produced, so the routes come first (Tim,
+  // 2026-08-19) and the first row on the page is no longer a television.
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Living Room/.test(n.textContent))
+  assert.ok(name, 'the television is a row')
   assert.ok(name.className.includes('good'), 'ready reads as ready')
   assert.equal(doc.querySelector('.tvrow'), null, 'no bespoke row shape left on this page')
   assert.doesNotMatch(text(), /Casting is off/, 'and it never says casting is off while a television is listed')
@@ -1278,7 +1286,8 @@ test('a television that is switched off says so, rather than disappearing', asyn
   assert.match(text(), /Living Room/, 'still listed')
   assert.match(text(), /Switched off or asleep/)
   // Amber rather than green, and the words say it too.
-  assert.ok(doc.querySelector('.setrow .rowname').className.includes('warn'))
+  const tv = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Living Room/.test(n.textContent))
+  assert.ok(tv.className.includes('warn'))
   assert.match(text(), /comes back by itself/, 'and it says what to do about it, which is nothing')
 })
 
@@ -1711,6 +1720,60 @@ test('the source editor is behind one button, and the news is not', async (t) =>
   assert.ok(doc.querySelector('.rootlist'), 'the picker is one press in')
 })
 
+test('BROWSING FOR A FOLDER IS A STEP IN THE WINDOW, not a window on a window', async (t) => {
+  const { doc, win, dom } = await open()
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  assert.equal(doc.querySelectorAll('.overlay').length, 1, 'the editor is one window')
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Where the films are')
+
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // ONE WINDOW STILL. The picker used to be a second overlay on top of the first,
+  // which is the thing to avoid (Tim, 2026-08-19).
+  assert.equal(doc.querySelectorAll('.overlay').length, 1)
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Pick a folder')
+  assert.equal(doc.querySelector('.rootlist'), null, 'the source is not underneath it, it is behind it')
+
+  // And its way out is the step behind it rather than out of everything.
+  const back = doc.querySelector('.modal-head button')
+  assert.equal(back.getAttribute('aria-label'), 'Back')
+  back.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Where the films are')
+  assert.ok(doc.querySelector('.rootlist'))
+})
+
+test('the titles that found nothing are shown, and fixed in the same window', async (t) => {
+  const { doc, win, dom, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // A COUNT YOU CANNOT ACT ON IS A COUNT (Tim, 2026-08-19).
+  const show = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Show them')
+  assert.ok(show, 'the row opens the list')
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Titles with no artwork')
+  assert.match(text(), /K05/, 'the title itself, not just how many')
+
+  const find = [...doc.querySelectorAll('.overlay .setrow .rowctl button')].find(b => b.textContent.trim() === 'Find it')
+  find.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  // The same choices the pencil on a tile gives, as a step INSIDE this window.
+  assert.equal(doc.querySelectorAll('.overlay').length, 1)
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'K05')
+  assert.ok(doc.querySelector('.candgrid .cand'), 'candidates to pick from')
+})
+
 test('artwork with no key says so, refuses to be turned on, and hides its form', async (t) => {
   // WHAT A KEY IS AND WHERE TO GET ONE moved out of the standing paragraph and into
   // the form that opens from the key row - said where it applies, not above a switch
@@ -1742,9 +1805,11 @@ test('artwork with no key says so, refuses to be turned on, and hides its form',
   assert.ok(doc.querySelector('.rowopen input[type=password]'))
 })
 
-test('a library with no source opens ready to be pointed at one', async (t) => {
-  // The setup story belongs in the empty state, and a Set up button in front of an
-  // editor that is the only thing on the page is one press for no reason.
+test('a library with no source says so and offers to be pointed at one', async (t) => {
+  // The setup story belongs in the empty state. The editor used to open itself here,
+  // back when it opened inside the page; it is a window now, and a window that throws
+  // itself over the page the moment you arrive is one you close before reading
+  // anything (Tim, 2026-08-19, choosing the window).
   const { doc, win, dom, text } = await open({
     ...STATE,
     source: { kind: 'empty', roots: [], url: null, username: null },
@@ -1759,7 +1824,12 @@ test('a library with no source opens ready to be pointed at one', async (t) => {
   const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
   assert.ok(src.className.includes('warn'))
   assert.match(src.parentElement.textContent, /Nothing set yet/)
-  assert.ok(doc.querySelector('.rootlist'), 'the editor is already open')
+  assert.equal(doc.querySelector('.overlay'), null, 'nothing has thrown itself over the page')
+  const setup = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Set up')
+  assert.ok(setup, 'and it says Set up rather than Change, because there is nothing to change')
+  setup.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(doc.querySelector('.overlay .rootlist'), 'which opens the window')
 
   // And nothing offers to rescan a library that does not exist.
   const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
@@ -1778,11 +1848,14 @@ test('THE ROUTES ARE ROWS, not a footer of mismatched buttons', async (t) => {
     '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
   })
 
+  // HOW THEY ARE FOUND COMES FIRST, and the televisions below it under a label of
+  // their own - unlabelled there, they would read as part of the routes (Tim,
+  // 2026-08-19).
   const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
-  assert.deepEqual(groups, ['How they are found'])
+  assert.deepEqual(groups, ['How they are found', 'Your televisions'])
 
   const names = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
-  assert.deepEqual(names, ['Living Room', 'On your network', 'Home Assistant'])
+  assert.deepEqual(names, ['On your network', 'Home Assistant', 'Living Room'])
 
   // One worded button per row, so the right-hand column is one width.
   for (const row of doc.querySelectorAll('.setrow')) {

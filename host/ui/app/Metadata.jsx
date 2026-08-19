@@ -15,7 +15,8 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { api } from './api'
-import { notify } from './ui'
+import { notify, Modal } from './ui'
+import { FixMatchBody } from './FixMatch'
 
 // TWO SHAPES, one panel. `embedded` drops the card chrome so the same panel can sit
 // inside the first-run wizard (Tim, 2026-08-14: this step belongs in onboarding, not
@@ -30,6 +31,7 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
   const [writing, setWriting] = useState(false)
   const [written, setWritten] = useState(null)
   const [keyOpen, setKeyOpen] = useState(false)
+  const [missingOpen, setMissingOpen] = useState(false)
   const timer = useRef(null)
 
   const reload = async () => {
@@ -71,6 +73,19 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
       // find a second button (Tim, 2026-08-14).
       onEnabled?.()
     }
+  }
+
+  // One press: test, and only then save. A key TMDB refuses never reaches the store,
+  // which is the whole reason the Test button existed.
+  const saveKey = async () => {
+    if (!key) return
+    setTesting(true)
+    const t = await api('/api/metadata/test', { key })
+    setTesting(false)
+    setTested(t)
+    if (!t?.ok) return
+    await save(meta.enabled)
+    setKeyOpen(false)
   }
 
   const writeSidecars = async () => {
@@ -150,33 +165,30 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
             </span>
           </div>
 
+          {/* THE SAME SHAPE THE PASSWORD FORM HAS on This host: a labelled field and
+              ONE button. It had a Test beside the box and a Save under it, which is two
+              presses and a decision for something with one possible outcome - so Save
+              tests first and refuses out loud with TMDB's own reason. Nothing is saved
+              by a button that says it tested. */}
           {keyOpen && (
             <div class='rowopen'>
               <p class='hint'>
                 It is free and it takes a minute: create one at{' '}
-                <a href='https://www.themoviedb.org/settings/api' target='_blank' rel='noreferrer'>themoviedb.org/settings/api</a>{' '}
-                and paste it here. It is tested before it is saved.
+                <a href='https://www.themoviedb.org/settings/api' target='_blank' rel='noreferrer'>themoviedb.org/settings/api</a>.
               </p>
-              <div class='row artkey'>
+              <div class='field'>
+                <label>{meta.hasKey ? 'A new key, replacing the saved one' : 'Your TMDB key'}</label>
                 <input
                   type='password'
-                  placeholder={meta.hasKey ? 'Paste a key to replace the saved one' : 'Paste your TMDB key'}
                   value={key}
                   onInput={e => { setKey(e.currentTarget.value); setTested(null) }}
+                  onKeyDown={e => { if (e.key === 'Enter') saveKey() }}
                 />
-                <button class='ghost' disabled={!key || testing} onClick={test}>{testing ? 'Testing…' : 'Test'}</button>
               </div>
-              {tested && (
-                <p class='hint' style={tested.ok ? 'color:var(--ok)' : 'color:var(--danger)'}>
-                  {tested.ok ? 'TMDB accepted the key.' : tested.error}
-                </p>
-              )}
+              {tested && !tested.ok && <p class='error'>{tested.error}</p>}
               <div class='actions'>
-                <button
-                  disabled={!tested?.ok}
-                  onClick={async () => { await save(meta.enabled); setKeyOpen(false) }}
-                >
-                  Save key
+                <button disabled={!key || testing} onClick={saveKey}>
+                  {testing ? 'Checking…' : 'Save key'}
                 </button>
               </div>
             </div>
@@ -190,8 +202,13 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
                 <span class='rowname warn'>Titles with no artwork</span>
                 <span class='rowsub'>{meta.missed} came back with nothing.</span>
               </span>
+              {/* A COUNT YOU CANNOT ACT ON IS A COUNT (Tim, 2026-08-19). The button was
+                  Look again, which asks TMDB the same question and gets the same answer
+                  for a film whose filename is not its name. This one shows WHICH, and
+                  each of them opens the same choices the pencil on a tile gives - as a
+                  step inside this window rather than a pop-up over it. */}
               <span class='rowctl'>
-                <button class='ghost' onClick={lookAgain}>Look again</button>
+                <button class='ghost' onClick={() => setMissingOpen(true)}>Show them</button>
               </span>
             </div>
           )}
@@ -234,6 +251,13 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
             several possibilities, so a poster may be wrong here and there. Correcting one is
             the pencil on its tile, in the library.
           </p>
+        )}
+
+        {missingOpen && (
+          <MissingArtwork
+            onClose={() => { setMissingOpen(false); reload() }}
+            onLookAgain={async () => { setMissingOpen(false); await lookAgain() }}
+          />
         )}
       </>
     )
@@ -343,6 +367,88 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
         </div>
       )}
     </div>
+  )
+}
+
+// WHICH TITLES FOUND NOTHING, and the fix for each of them in the same window.
+//
+// A film TMDB has never heard of is rare. A film whose FILE is not named what the film
+// is called is not - and asking TMDB the same question again returns the same nothing,
+// which is all the old Look again button could do. Here the answer is a person typing
+// the real name, which is exactly what the pencil on a tile already offers.
+//
+// ONE WINDOW, TWO STEPS. Picking a title replaces the list with the choices for it and
+// gives the list back afterwards, rather than opening a second window on top of the
+// first (Tim, 2026-08-19).
+function MissingArtwork ({ onClose, onLookAgain }) {
+  const [items, setItems] = useState(null)
+  const [fixing, setFixing] = useState(null)
+  // Fixed in this sitting, so a title that has just been given a poster stops looking
+  // like one that has not - without re-reading the whole list on every pick.
+  const [done, setDone] = useState({})
+
+  useEffect(() => {
+    let live = true
+    api('/api/metadata/missing').then(r => { if (live) setItems(r?.items || []) })
+    return () => { live = false }
+  }, [])
+
+  const left = (items || []).filter(i => !done[i.id])
+
+  return (
+    <Modal
+      title={fixing ? fixing.title : 'Titles with no artwork'}
+      onClose={() => (fixing ? setFixing(null) : onClose())}
+      closeLabel={fixing ? 'Back' : 'Close'}
+      wide
+    >
+      {fixing
+        ? (
+          <FixMatchBody
+            item={fixing}
+            onFixed={() => setDone(d => ({ ...d, [fixing.id]: true }))}
+            onDone={() => setFixing(null)}
+          />
+          )
+        : (
+          <>
+            {items === null && <p class='hint'>Reading the list…</p>}
+            {items !== null && left.length === 0 && (
+              <p class='hint'>
+                {items.length === 0
+                  ? 'Nothing is missing artwork any more.'
+                  : 'That is all of them done.'}
+              </p>
+            )}
+            {left.length > 0 && (
+              <p class='hint'>
+                TMDB found nothing for these. Usually the file is not named what the film
+                is called, so picking one and searching by its real name is what fixes it.
+              </p>
+            )}
+            <div class='setrows'>
+              {left.map(it => (
+                <div class='setrow' key={it.id}>
+                  <span class='rowmain'>
+                    <span class='rowname'>{it.title}</span>
+                    <span class='rowsub'>
+                      {it.type === 'series' ? 'TV show' : 'Film'}
+                      {it.year ? ` · ${it.year}` : ''}
+                      {it.reason ? ` · ${it.reason}` : ''}
+                    </span>
+                  </span>
+                  <span class='rowctl'>
+                    <button class='ghost' onClick={() => setFixing(it)}>Find it</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div class='actions'>
+              <button class='ghost' onClick={onLookAgain}>Ask TMDB again</button>
+            </div>
+          </>
+          )}
+    </Modal>
   )
 }
 

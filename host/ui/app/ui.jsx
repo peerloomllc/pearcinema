@@ -83,7 +83,9 @@ export function ConfirmHost () {
   )
 }
 
-export function Modal ({ title, onClose, children, wide = false }) {
+// `closeLabel` is for a window with STEPS in it: on a step, the corner button goes
+// back rather than out, and a screen reader should not be told otherwise.
+export function Modal ({ title, onClose, children, wide = false, closeLabel = 'Close' }) {
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', h)
@@ -94,7 +96,7 @@ export function Modal ({ title, onClose, children, wide = false }) {
       <div class='modal' role='dialog' aria-modal='true' aria-label={title} style={wide ? 'max-width:44rem' : ''}>
         <div class='modal-head'>
           <h3>{title}</h3>
-          <button class='iconbtn' onClick={onClose} aria-label='Close'><Close size={16} /></button>
+          <button class='iconbtn' onClick={onClose} aria-label={closeLabel}><Close size={16} /></button>
         </div>
         {children}
       </div>

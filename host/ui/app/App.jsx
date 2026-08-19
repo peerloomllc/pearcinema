@@ -536,76 +536,11 @@ function CastPanel () {
         </div>
       )}
 
-      {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
-          block left on any Settings page - for a situation most people are never in.
-          The Media Assistant fact stays because nobody could guess it; the rest of the
-          explanation was the page describing itself. */}
-      {targets !== null && rows.length === 0 && (
-        <p class='hint'>
-          None yet. Your server finds televisions on its own network, and a Roku also
-          needs the free {mediaChannel} channel installed on it.
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <div class='setrows'>
-          {rows.map(t => (
-            <div class='setrow' key={t.entityId}>
-              <span class='rowmain'>
-                {/* THE NAME CARRIES THE STATE, the same way the video engine's does on
-                    This host - and the words are in the line below, so nobody has to
-                    tell green from amber to read the row. */}
-                <span class={'rowname ' + toneFor(t)}>{t.name}</span>
-                {/* ONE CLAUSE. The state, and then only what is unusual about this
-                    television: that it came through Home Assistant rather than being
-                    found, or that it is a speaker rather than a screen. Being hidden is
-                    not said at all - the eye beside it is already saying it. */}
-                <span class='rowsub'>
-                  {readableState(t)}
-                  {t.via !== 'roku' ? ' · via Home Assistant' : ''}
-                  {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
-                </span>
-              </span>
-              <span class='rowctl'>
-                <button
-                  class='iconbtn'
-                  disabled={busy}
-                  onClick={() => toggleHidden(t)}
-                  aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
-                  title={t.hidden ? 'Offer this one' : 'Hide from phones'}
-                >
-                  {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
-                </button>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* SAID ONLY WHEN IT APPLIES. A line about switched-off televisions is noise on
-          a page where none of them are. */}
-      {anyOff && (
-        <p class='hint'>
-          A television that is switched off stays on this list and comes back by itself.
-        </p>
-      )}
-
-      {/* The one thing nobody could work out: a Roku sitting right there, missing from
-          the list, because of one free channel. */}
-      {needsChannel.length > 0 && (
-        <p class='error'>
-          {needsChannel.length === 1
-            ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
-            : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
-          {' '}Install it from the Roku channel store, then press Look again.
-        </p>
-      )}
-
-      {/* THE ROUTES ARE ROWS TOO, rather than a footer with two buttons of different
-          widths on one line - which is the asymmetry Tim caught on This host, and it
-          had grown back here. A group label because a route sitting unlabelled among
-          televisions would read as one. Always shown, so an empty list still offers
-          both ways to fix itself. */}
+      {/* THE ROUTES COME FIRST (Tim, 2026-08-19). They are the settings on this page -
+          the televisions themselves are the RESULT of them - and a result reads better
+          under the thing that produced it. Which is also why the list now carries a
+          label of its own: sitting unlabelled below "How they are found" it would read
+          as part of it. */}
       <div class='setgroup'>How they are found</div>
 
       <div class='setrows'>
@@ -677,6 +612,74 @@ function CastPanel () {
           </div>
         </div>
       )}
+
+      <div class='setgroup'>Your televisions</div>
+
+      {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
+          block left on any Settings page - for a situation most people are never in.
+          The Media Assistant fact stays because nobody could guess it; the rest of the
+          explanation was the page describing itself. */}
+      {targets !== null && rows.length === 0 && (
+        <p class='hint'>
+          None yet. Your server finds televisions on its own network, and a Roku also
+          needs the free {mediaChannel} channel installed on it.
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <div class='setrows'>
+          {rows.map(t => (
+            <div class='setrow' key={t.entityId}>
+              <span class='rowmain'>
+                {/* THE NAME CARRIES THE STATE, the same way the video engine's does on
+                    This host - and the words are in the line below, so nobody has to
+                    tell green from amber to read the row. */}
+                <span class={'rowname ' + toneFor(t)}>{t.name}</span>
+                {/* ONE CLAUSE. The state, and then only what is unusual about this
+                    television: that it came through Home Assistant rather than being
+                    found, or that it is a speaker rather than a screen. Being hidden is
+                    not said at all - the eye beside it is already saying it. */}
+                <span class='rowsub'>
+                  {readableState(t)}
+                  {t.via !== 'roku' ? ' · via Home Assistant' : ''}
+                  {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
+                </span>
+              </span>
+              <span class='rowctl'>
+                <button
+                  class='iconbtn'
+                  disabled={busy}
+                  onClick={() => toggleHidden(t)}
+                  aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
+                  title={t.hidden ? 'Offer this one' : 'Hide from phones'}
+                >
+                  {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SAID ONLY WHEN IT APPLIES. A line about switched-off televisions is noise on
+          a page where none of them are. */}
+      {anyOff && (
+        <p class='hint'>
+          A television that is switched off stays on this list and comes back by itself.
+        </p>
+      )}
+
+      {/* The one thing nobody could work out: a Roku sitting right there, missing from
+          the list, because of one free channel. */}
+      {needsChannel.length > 0 && (
+        <p class='error'>
+          {needsChannel.length === 1
+            ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
+            : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
+          {' '}Install it from the Roku channel store, then press Look again.
+        </p>
+      )}
+
     </>
   )
 }
@@ -688,9 +691,11 @@ function CastPanel () {
 // rather than a setting: a folder browser, a roots editor with a type per folder, a
 // Jellyfin form, Test and Save. Left open it was the whole page, on a page people
 // mostly open to check something. So where the films are is a ROW - what it is, how
-// many films it found - and Change opens the app in place, the way Password does on
-// This host. The picker itself is untouched: the typed-path-inside-the-container trap
-// it was built around is that panel's founding scar, not something to reshape casually.
+// many films it found - and Change opens the app in a window of its own, which is the
+// rule this page follows: a small edit happens where you are (the TMDB key), a job
+// with steps in it gets a window. The picker itself is untouched: the
+// typed-path-inside-the-container trap it was built around is that panel's founding
+// scar, not something to reshape casually.
 //
 // RESCANNING CAME OUT WITH IT, and had to. It is what you came for when a film you
 // just copied in is missing, and burying it inside a disclosure would mean opening the
@@ -703,9 +708,11 @@ function LibraryPanel ({ state, reload }) {
   const [name, setName] = useState(state.library || '')
   const src = state.source || { kind: 'empty' }
   const empty = src.kind === 'empty'
-  // Open by default when there is nothing set, because then the editor IS the page
-  // and a Set up button in front of it is one press for no reason.
-  const [editing, setEditing] = useState(empty)
+  // NOT OPENED FOR YOU. It was, while the editor lived inside the page - with nothing
+  // set there was nothing else on the page for it to be in the way of. A window is
+  // different: one that throws itself over the page the moment you arrive is a window
+  // you close before you read anything.
+  const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const saveName = async () => {
@@ -780,16 +787,21 @@ function LibraryPanel ({ state, reload }) {
             <span class='rowsub'>{sourceSub}</span>
           </span>
           <span class='rowctl'>
-            <button class='ghost' onClick={() => setEditing(!editing)}>
-              {editing ? 'Cancel' : (empty ? 'Set up' : 'Change')}
+            {/* It said Cancel while the editor was open, which was right when the
+                editor unfolded inside the page. A window has its own way out, and a
+                second one on the row behind it is a button nobody can see anyway. */}
+            <button class='ghost' onClick={() => setEditing(true)}>
+              {empty ? 'Set up' : 'Change'}
             </button>
           </span>
         </div>
 
         {editing && (
-          <div class='rowopen'>
-            <SourcePanel state={state} reload={reload} editor onSaved={() => setEditing(false)} />
-          </div>
+          <SourcePanel
+            state={state} reload={reload} editor
+            onSaved={() => setEditing(false)}
+            onClose={() => setEditing(false)}
+          />
         )}
 
         {!empty && (

@@ -17,7 +17,7 @@
 
 import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
-import { notify, askConfirm } from './ui'
+import { notify, askConfirm, Modal } from './ui'
 import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
 
 // WHAT A FOLDER HOLDS, in the words somebody would use about their own shelves.
@@ -176,17 +176,22 @@ function Detected ({ onFolders, onServer }) {
 // THREE PLACES THIS IS SHOWN, and they differ in two independent ways: whether it
 // wears a card, and who owns the controls that keep a working library fresh.
 //
-//   wizard - the first run. No chrome, and no rescan controls because there is no
-//            library to keep fresh yet.
-//   editor - inside the Library page's "Change" disclosure. No chrome either, but
-//            for a different reason: the PAGE owns rescanning now, as two rows of
-//            its own that are visible without opening anything.
+//   wizard - the first run. Inline, no chrome, and no rescan controls because there
+//            is no library to keep fresh yet.
+//   editor - the Library page's window. It wears the overlay and the title bar
+//            itself, and it does not own rescanning: the PAGE owns that now, as two
+//            rows visible without opening anything.
 //   neither - the standalone card, heading and banners included.
 //
 // Conflating the first two once cost the Settings page its rescan button entirely.
 // The invariant that matters is not a prop, it is that the Library page has a rescan
 // control somewhere on it, and page-renders.test.js is what holds that.
-export default function SourcePanel ({ state, reload, editor = false, wizard = false, onSaved = null }) {
+//
+// A WINDOW THAT NEVER OPENS A SECOND WINDOW (Tim, 2026-08-19). Picking a folder is a
+// step: it replaces what is in this window and hands it back, rather than stacking a
+// pop-up on a pop-up. Inline - the wizard - the picker is still its own overlay,
+// because inline there is nothing for it to be a step inside of.
+export default function SourcePanel ({ state, reload, editor = false, wizard = false, onSaved = null, onClose = null }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
   const [roots, setRoots] = useState((current.roots || []).map(asRoot))
@@ -385,7 +390,7 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
         </label>
       )}
 
-      {picking && (
+      {picking && !editor && (
         <div class='overlay' onMouseDown={e => { if (e.target === e.currentTarget) setPicking(false) }}>
           <div class='modal'>
             <div class='modal-head'>
@@ -405,7 +410,25 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
     </>
   )
 
-  if (wizard || editor) return Body
+  if (wizard) return Body
+
+  // THE WINDOW, and one step at a time inside it. Closing from the folder browser goes
+  // BACK to the source rather than out of the whole thing - it is a step, and a step's
+  // way out is the step behind it.
+  if (editor) {
+    return (
+      <Modal
+        title={picking ? 'Pick a folder' : 'Where the films are'}
+        onClose={() => (picking ? setPicking(false) : onClose?.())}
+        closeLabel={picking ? 'Back' : 'Close'}
+        wide
+      >
+        {picking
+          ? <FolderPicker onPick={(p) => addRoots([p])} onClose={() => setPicking(false)} />
+          : Body}
+      </Modal>
+    )
+  }
 
   return (
     <div class='card'>
