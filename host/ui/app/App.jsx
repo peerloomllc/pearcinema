@@ -837,7 +837,7 @@ function LibraryPanel ({ state, reload }) {
               </span>
             </span>
             <span class='rowctl'>
-              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>Rescan now</button>
+              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>Rescan</button>
             </span>
           </div>
         )}

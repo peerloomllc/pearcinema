@@ -357,12 +357,17 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   assert.equal(selects.length, 3, 'one per folder, including the bare string')
   assert.deepEqual(selects.map(s => s.value), ['movies', 'auto', 'auto'])
 
-  // The resolution is SHOWN rather than silent: a folder called `TV Shows` left on
-  // "work it out" says out loud that it was read as television, so nobody has to
-  // reverse-engineer why their library sorted itself out.
-  assert.match(selects[1].textContent, /Work it out \(tv shows\)/)
+  // EVERY CHOOSER SAYS THE SAME THREE WORDS. It used to fold the resolution into the
+  // option itself - "Work it out (tv shows)" - which made three different labels down
+  // one column and left Tim asking what it meant (2026-08-19).
+  assert.deepEqual([...selects[1].options].map(o => o.textContent), ['Automatic', 'Films', 'TV shows'])
+
+  // The resolution is still SHOWN rather than silent, on the row's own second line, so
+  // nobody has to reverse-engineer why their library sorted itself out.
+  const rows = [...doc.querySelectorAll('.rootlist .rootrow')]
+  assert.match(rows[1].textContent, /Read as TV shows\./)
   // And a folder whose name says nothing claims nothing.
-  assert.doesNotMatch(selects[2].textContent, /Work it out \(/)
+  assert.doesNotMatch(rows[2].textContent, /Read as/)
 })
 
 test('a folder picked by hand arrives with a type control of its own', async (t) => {
@@ -1690,7 +1695,7 @@ test('a merged page names itself once and labels what it holds', async (t) => {
   // hands the settings page lost them entirely. They are visible without opening
   // anything now.
   const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
-  assert.ok(buttons.includes('Rescan now'))
+  assert.ok(buttons.includes('Rescan'))
   assert.ok(doc.querySelector('.setrow .rowctl select'), 'the schedule is a chooser that commits itself')
   assert.doesNotMatch(text(), /Auto-rescan/, 'it is a row with a name now, not a label beside a box')
 })
@@ -1717,7 +1722,7 @@ test('A SCAN IN PROGRESS IS SAID IN THE LINE AND ON THE BAR, not in the button',
   assert.ok(row.parentElement.querySelector('.meter'), 'and how far through')
 
   const btn = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Rescan/.test(b.textContent))
-  assert.equal(btn.textContent.trim(), 'Rescan now', 'the button is a button, not a status line')
+  assert.equal(btn.textContent.trim(), 'Rescan', 'the button is a button, not a status line')
   assert.equal(btn.disabled, true)
   assert.doesNotMatch(text(), /Rescanning…/)
 })
@@ -1772,6 +1777,42 @@ test('BROWSING FOR A FOLDER IS A STEP IN THE WINDOW, not a window on a window', 
   await new Promise(r => setTimeout(r, 60))
   assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Where the films are')
   assert.ok(doc.querySelector('.rootlist'))
+})
+
+test('WHAT WAS DETECTED IS NAMED BY WHAT IT IS, and never offers back what you already use', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/detect': {
+      // The first is what this library already reads. The second is not.
+      folders: [
+        { at: '/library', label: 'Movies and TV Shows', roots: [{ path: '/library/Movies', type: 'movies' }, { path: '/library/TV Shows', type: 'shows' }] },
+        { at: '/media/usb', label: 'Films', roots: [{ path: '/media/usb/Films', type: 'movies' }] }
+      ],
+      servers: [
+        { kind: 'jellyfin', server: 'Jellyfin', name: 'umbrel', url: 'http://localhost:8096', usable: true },
+        { kind: 'plex', server: 'Plex', name: 'Plex Media Server', url: 'http://localhost:32400', usable: false, reason: 'Cannot be read yet. Point PearCinema at the folders your films are in instead.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+
+  const names = [...doc.querySelectorAll('.overlay .setrow .rowname')].map(n => n.textContent.trim())
+  // Named by KIND. It used to be "Movies and TV Shows" and "umbrel" - the names of the
+  // things - leaving the one question the row answers to be read off an icon.
+  assert.deepEqual(names, ['Folders', 'Jellyfin', 'Plex'])
+  // And the two folders this library is already reading are not offered back to it -
+  // asserted on the detected rows themselves, since those paths are of course still in
+  // the editor below, which is where they belong.
+  const detected = doc.querySelector('.overlay .setrows').textContent
+  assert.doesNotMatch(detected, /\/library\/TV Shows/)
+  assert.match(detected, /Films · \/media\/usb\/Films/, 'what it holds first, then where')
+  assert.match(detected, /umbrel · http:\/\/localhost:8096/)
+
+  // ONE WORD, THE SAME WORD, and nothing to press on the one that cannot be read.
+  const buttons = [...doc.querySelectorAll('.overlay .setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.deepEqual(buttons, ['Use', 'Use'])
+  assert.match(text(), /Cannot be read yet/)
 })
 
 test('the titles that found nothing are shown, and fixed in the same window', async (t) => {

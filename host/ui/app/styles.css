@@ -1114,10 +1114,24 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
   flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-family: var(--mono, monospace); font-size: .82rem;
 }
-.rootrow select { width: auto }
+/* ONE WIDTH, like every other control on a settings row. They sized to their own
+ * words, so "Films" and "TV shows" and "Automatic" made three different boxes down one
+ * column (Tim, 2026-08-19). */
+.rootrow select { width: 7.5rem }
+/* The row carries a second line now - what Automatic decided - so it aligns to the top
+ * like a settings row rather than centring on a single line. */
+.rootrow { align-items: flex-start }
+.rootrow .rowmain { flex: 1 1 0; min-width: 0 }
+.rootrow .rowsub { display: block; color: var(--muted); font-size: .78rem; margin-top: .2rem }
+.rootrow .rowctl { display: flex; align-items: center; gap: .4rem; flex: 0 0 auto }
 
-.pickrow { display: flex; margin-bottom: 4px }
-.pickrow button { flex: 1 1 0 }
+/* ADD A FOLDER IS A BUTTON, not a box. Full width, directly under a list of bordered
+ * boxes, it read as a fourth box of the wrong colour - which is what Tim's arrow was
+ * pointing at (2026-08-19). Centred, at the width every other button on a form has.
+ * Its own class, too: `.pickrow` is the library's sticky category bar and these two
+ * had no business sharing a name. */
+.addfolder { display: flex; justify-content: center; margin: .2rem 0 .7rem }
+.addfolder button { min-width: 7.5rem }
 
 /* `.srcactions` - a grid of buttons stretched to fill the row - is gone. The source
  * editor uses `.actions`, the centred row with one minimum width that every other

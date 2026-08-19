@@ -838,3 +838,42 @@ test('a library with nothing scanned yet has nothing to be missing', async (t) =
   const a = realAdapter({ root: empty, dataDir: data })
   assert.deepEqual(await a.health(), { ok: true }, 'a host that has scanned nothing is not a host in trouble')
 })
+
+test('A RESCAN RE-READS ONLY WHAT CHANGED, which is why one new episode is not 2,986 probes', async (t) => {
+  // Tim, 2026-08-19, on his real library: "Plex is pretty quick to detect new/updated
+  // items, takes maybe 10-15 seconds". Ours took minutes because `force` meant do not
+  // trust the index and was implemented as do not trust anything - so every file went
+  // back through ffprobe to be told what it already knew.
+  const { root, dataDir } = await library(t)
+
+  // How many files each scan hands to ffprobe, off the adapter's own plan line.
+  let probes = -1
+  const watch = (a) => { a.log = (ev, d) => { if (ev === 'folder:probe-plan') probes = d.toProbe }; return a }
+
+  const a = watch(realAdapter({ root, dataDir }))
+  await a.scan({ force: true })
+  const first = await a.stats()
+  assert.ok(first.movies > 0, 'the library scanned')
+  assert.ok(probes > 0, 'the first pass reads everything, because it has nothing yet')
+
+  // A second adapter over the same data dir, forced: it reuses the probes the first
+  // one wrote, so nothing is handed to ffprobe at all.
+  const b = watch(realAdapter({ root, dataDir }))
+  await b.scan({ force: true })
+  assert.equal(probes, 0, 'nothing changed, so nothing was re-read')
+  const second = await b.stats()
+  assert.deepEqual({ ...second, scannedAt: 0 }, { ...first, scannedAt: 0 }, 'and the library is identical')
+
+  // One new file, and exactly one file is read.
+  await fsp.writeFile(path.join(root, 'Blurays', 'Arrival.mkv'), 'x')
+  const c = watch(realAdapter({ root, dataDir }))
+  await c.scan({ force: true })
+  assert.equal(probes, 1, 'the new one, and only the new one')
+  assert.equal((await c.stats()).movies, first.movies + 1)
+
+  // A file that CHANGED is read again: same path, different size and mtime.
+  await fsp.writeFile(path.join(root, 'Blurays', 'Deadpool.mkv'), 'xxxxxxxxxx')
+  const d = watch(realAdapter({ root, dataDir }))
+  await d.scan({ force: true })
+  assert.equal(probes, 1, 'the changed one')
+})
