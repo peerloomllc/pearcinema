@@ -128,6 +128,18 @@ function decide (media, client = {}, opts = {}) {
   const videos = new Set((client.videoCodecs || ['h264']).map(codec))
   const audios = new Set((client.audioCodecs || ['aac']).map(codec))
 
+  // HOW MANY SPEAKERS THE CLIENT HAS, and why a codec test alone is not enough.
+  // A Roku decodes AAC and does NOT decode AAC 5.1: handed one it plays the picture
+  // in silence, which is the worst possible failure because everything looks right.
+  // Measured on Tim's Roku Streaming Stick Plus 2026-08-19, and proven by re-encoding
+  // the same twenty seconds to stereo and hearing it.
+  //
+  // A client that says nothing is unconstrained, exactly as before - this must not
+  // start rebuilding audio for the phones and browsers that never asked.
+  const maxCh = Number(client.maxAudioChannels) || 0
+  const chans = Number(media?.audioChannels) || 0
+  const audioPlayable = (name) => audios.has(name) && !(maxCh && chans > maxCh)
+
   // Nothing is known about the file. Direct play and let the client find out - a
   // guess that sends it down the expensive path would be worse than a failed play.
   if (!box && !v) return { mode: 'direct', reason: 'nothing is known about this file' }
@@ -139,7 +151,7 @@ function decide (media, client = {}, opts = {}) {
   // asked and the skin's overlay still shows untinted.
   const tone = ['bw', 'sepia'].includes(client.tone) ? client.tone : null
   if (tone && opts.transcode && videos.has('h264')) {
-    const audioOkTone = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    const audioOkTone = !a || (audioPlayable(a) && MP4_AUDIO.has(a))
     return {
       mode: 'transcode',
       reason: `the ${tone === 'bw' ? 'black and white' : 'sepia'} look is pressed into the picture on the host's video hardware`,
@@ -155,7 +167,7 @@ function decide (media, client = {}, opts = {}) {
   // verified the track exists and is burnable (opts.burn), so a stale or
   // foreign subtitle id never forces a conversion.
   if (opts.burn && opts.transcode && videos.has('h264')) {
-    const audioOkBurn = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    const audioOkBurn = !a || (audioPlayable(a) && MP4_AUDIO.has(a))
     return {
       mode: 'transcode',
       reason: 'the chosen subtitles are pictures, so they are burned into the film on the host\'s video hardware',
@@ -174,7 +186,7 @@ function decide (media, client = {}, opts = {}) {
   // keeps a file a hair over budget from paying a whole conversion.
   const maxKbps = Number(client.maxKbps) || 0
   if (maxKbps && opts.fileKbps && opts.fileKbps > maxKbps * 1.15 && opts.transcode && videos.has('h264')) {
-    const audioOkSaver = !a || (audios.has(a) && MP4_AUDIO.has(a))
+    const audioOkSaver = !a || (audioPlayable(a) && MP4_AUDIO.has(a))
     return {
       mode: 'transcode',
       reason: `the client asked to stay near ${maxKbps} kbps and this file runs about ${Math.round(opts.fileKbps)} kbps, so the picture is converted down on the host's video hardware`,
@@ -182,13 +194,24 @@ function decide (media, client = {}, opts = {}) {
     }
   }
 
-  if (containerOk && (!v || videos.has(v)) && (!a || audios.has(a))) {
+  if (containerOk && (!v || videos.has(v)) && (!a || audioPlayable(a))) {
     return { mode: 'direct', reason: 'the client can open this file as it is' }
+  }
+
+  // A FILE THAT IS RIGHT IN EVERY WAY BUT THE SPEAKER COUNT. The container and the
+  // picture are fine, so this is a remux with the sound rebuilt down - the cheapest
+  // conversion there is, and the difference between a silent film and a working one.
+  if (containerOk && (!v || videos.has(v)) && a && audios.has(a) && maxCh && chans > maxCh) {
+    return {
+      mode: 'remux',
+      reason: `this client plays ${maxCh === 2 ? 'stereo' : maxCh + '-channel'} sound and the film carries ${chans} channels, so the soundtrack is mixed down`,
+      audio: AUDIO_FALLBACK.codec
+    }
   }
 
   // The audio question is the same for remux and transcode: copy it when the client
   // can take it and an MP4 can carry it, rebuild it to AAC when not.
-  const audioOk = !a || (audios.has(a) && MP4_AUDIO.has(a))
+  const audioOk = !a || (audioPlayable(a) && MP4_AUDIO.has(a))
 
   // THE VIDEO DECIDES WHETHER REMUX IS EVEN POSSIBLE. A container rewrite cannot
   // change the picture, so if the client cannot decode this video codec, or MP4
@@ -228,7 +251,9 @@ function decide (media, client = {}, opts = {}) {
     mode: 'remux',
     reason: audioOk
       ? 'the picture and sound are already right; only the container has to change'
-      : `the container has to change and the ${a.toUpperCase()} soundtrack has to be rebuilt, which is quick`,
+      : (maxCh && chans > maxCh
+          ? `the container has to change and the ${chans}-channel soundtrack has to be mixed down for this client, which is quick`
+          : `the container has to change and the ${a.toUpperCase()} soundtrack has to be rebuilt, which is quick`),
     audio: audioOk ? 'copy' : AUDIO_FALLBACK.codec
   }
 }

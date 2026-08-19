@@ -266,6 +266,11 @@ test('a Movie maps to our leaf, with the codec facts v1 exists to gather', async
     container: 'mkv',
     videoCodec: 'hevc',
     audioCodec: 'truehd',
+    // The SPEAKER COUNT rides along now. Jellyfin reports it and this adapter used to
+    // drop it, which is half of why a 5.1 film cast to a stereo-only television played
+    // in silence (2026-08-19). Null here because this fixture's stream carries no
+    // Channels, which is itself the case that must not be read as "too many".
+    audioChannels: null,
     width: 3840,
     height: 2160,
     size: 8_000_000_000

@@ -143,3 +143,130 @@ test('A TONE takes the software lane and its filter is a lookup, alone or over a
   const junk = hls.segmentArgs({ ...base, tone: 'vivid; rm -rf /' })
   assert.equal(junk.includes('-hwaccel'), true, 'unknown tone means the plain hardware path')
 })
+
+// --- the copy engine ---------------------------------------------------------
+//
+// Segmenting a film WITHOUT re-encoding its picture. Every number pinned here was
+// measured against real films on the Umbrel on 2026-08-19 and then played on Tim's
+// Roku; the reasoning lives in host/hls.js and DECISIONS.
+
+test('A COPY PLAN CUTS ON KEYFRAMES, and its segments are honestly uneven', () => {
+  // A keyframe list with the shape a real film has: irregular gaps, because
+  // encoders put keyframes on scene cuts. Measured on the test episode at 0.96 s
+  // to 10.43 s apart, so an even grid is not an approximation of this - it is a
+  // different set of times entirely.
+  const times = [0, 2.1, 4.9, 6.6, 8.6, 10.7, 13.7, 15.1, 19.9, 26.3, 31.4]
+  const plan = hls.copyPlan(times, { runtime: 40, reorderDelay: 0.083 })
+
+  assert.equal(plan.engine, 'copy')
+  // Every start is a real keyframe, never a multiple of four.
+  for (const start of plan.starts) assert.ok(times.includes(start), `${start} is a keyframe`)
+  // Each one is at least the target past the last, and it is the FIRST such
+  // keyframe - a plan that skipped one would make segments longer than they need
+  // to be for no reason.
+  assert.deepEqual(plan.starts, [0, 4.9, 10.7, 15.1, 19.9, 26.3, 31.4])
+
+  // The playlist's durations are the real ones. A player takes the film's length
+  // from their sum, so an even 4.000 everywhere would be a lie about a copy.
+  const durations = hls.durationsOf(plan)
+  assert.equal(durations.length, plan.starts.length)
+  assert.ok(durations.some(d => Math.abs(d - 4) > 0.5), 'uneven by nature')
+  const total = durations.reduce((a, b) => a + b, 0)
+  assert.ok(Math.abs(total - 40) < 1e-9, 'the durations sum to the film')
+
+  const playlist = hls.playlistFor({ runtime: 40 }, { plan })
+  assert.match(playlist, /#EXTINF:4\.900,\n0\.ts/)
+  assert.match(playlist, /#EXT-X-TARGETDURATION:9/, 'the ceiling of the longest, not the target')
+  assert.equal((playlist.match(/#EXTINF/g) || []).length, 7)
+})
+
+test('a keyframe with no room to aim at is not offered as a cut point', () => {
+  // ffmpeg's backward seek lands on the keyframe STRICTLY BEFORE the time asked
+  // for, so a cut point has to be aimed at from inside its own group of pictures.
+  // A group too short to aim into would be cut on the keyframe before it, and the
+  // segment would open with seconds that belong to the previous one.
+  const times = [0, 5, 5.05, 10, 15]
+  const plan = hls.copyPlan(times, { runtime: 20 })
+  assert.equal(plan.starts.includes(5), false, 'a 0.05 s group is skipped')
+  assert.deepEqual(plan.starts, [0, 5.05, 10, 15])
+
+  // The seek aims INSIDE the group, never at its edge, and never further than
+  // halfway - so a short group is still aimed at with room on both sides.
+  const seeks = plan.seeks
+  for (let k = 0; k < plan.starts.length; k++) {
+    assert.ok(seeks[k] > plan.starts[k], 'past the keyframe')
+    assert.ok(seeks[k] - plan.starts[k] >= hls.SEEK_HEADROOM || seeks[k] < plan.starts[k] + 2.5)
+  }
+
+  // Too few cut points to make a plan out of is not a plan.
+  assert.equal(hls.copyPlan([0], { runtime: 20 }), null)
+  assert.equal(hls.copyPlan([0, 4, 8], { runtime: 0 }), null)
+  assert.equal(hls.copyPlan(null, { runtime: 20 }), null)
+})
+
+test('A COPIED SEGMENT NEVER TOUCHES THE PICTURE, and its cut is exact', () => {
+  const nasty = '/library/TV/MST3K; rm -rf $HOME/"quoted".mkv'
+  const plan = hls.copyPlan([0, 5, 10.5, 16, 22], { runtime: 30, reorderDelay: 0.083 })
+  const args = hls.copySegmentArgs({ input: nasty, seq: 2, plan, audio: 'aac', audioChannels: 2 })
+
+  // The picture is copied. Nothing hardware, no filter, no bitrate - that is the
+  // whole point, and a stray encoder flag here is a full transcode nobody asked for.
+  assert.equal(args[args.indexOf('-c:v') + 1], 'copy')
+  assert.equal(args.includes('h264_vaapi'), false)
+  assert.equal(args.includes('-vaapi_device'), false)
+  assert.equal(args.includes('-vf'), false)
+  assert.equal(args.includes('-b:v'), false)
+
+  // The soundtrack IS rebuilt, mixed to the client's speaker count - the reason a
+  // film with a perfect picture is being touched at all.
+  assert.equal(args[args.indexOf('-c:a') + 1], 'aac')
+  assert.equal(args[args.indexOf('-ac') + 1], '2')
+
+  // The three flags that make the cut exact, each measured. Dropping any one of
+  // them puts overlapping seconds at every join.
+  assert.ok(args.includes('-copyts'))
+  assert.ok(args.includes('-noaccurate_seek'))
+  assert.equal(args[args.indexOf('-avoid_negative_ts') + 1], 'disabled')
+
+  // -ss aims INSIDE the group at 10.5, and -to is the NEXT boundary's decode time:
+  // 16 less the reorder delay less a millisecond.
+  assert.equal(Number(args[args.indexOf('-ss') + 1]), 10.5 + hls.SEEK_HEADROOM)
+  assert.equal(Number(args[args.indexOf('-to') + 1]).toFixed(3), (16 - 0.083 - 0.001).toFixed(3))
+
+  // The filename is exactly one element, the same shell-injection rule every
+  // ffmpeg argv in this repo follows.
+  assert.equal(args.filter(a => a === nasty).length, 1)
+  assert.equal(args[args.length - 1], 'pipe:1')
+
+  // The FIRST segment is not seeked at all: there is no keyframe before zero to
+  // fall back onto, so a seek could only land it wrong.
+  const first = hls.copySegmentArgs({ input: '/x.mkv', seq: 0, plan })
+  assert.equal(first.includes('-ss'), false)
+  // And the LAST runs to the end of the film, with no reorder correction to make.
+  const last = hls.copySegmentArgs({ input: '/x.mkv', seq: plan.starts.length - 1, plan })
+  assert.equal(Number(last[last.indexOf('-to') + 1]), 30)
+})
+
+test('a soundtrack MPEG-TS can carry is copied; one it cannot is rebuilt', () => {
+  const plan = hls.copyPlan([0, 5, 10, 15], { runtime: 20 })
+  const of = (audio, audioCodec) => hls.copySegmentArgs({ input: '/x.mkv', seq: 1, plan, audio, audioCodec })
+
+  assert.equal(of('copy', 'ac3')[of('copy', 'ac3').indexOf('-c:a') + 1], 'copy')
+  // TRUEHD is a real thing in a real library and MPEG-TS will not carry it, so
+  // "the client can take this soundtrack" is not on its own a reason to copy it.
+  assert.equal(of('copy', 'truehd')[of('copy', 'truehd').indexOf('-c:a') + 1], 'aac')
+  assert.equal(of('aac', 'eac3')[of('aac', 'eac3').indexOf('-c:a') + 1], 'aac')
+})
+
+test('the encode engine is untouched: an even grid, and its old arithmetic', () => {
+  const grid = hls.gridPlan(10)
+  assert.equal(grid.engine, 'encode')
+  assert.deepEqual(grid.starts, [0, 4, 8])
+  assert.equal(grid.seeks, null)
+  assert.deepEqual(hls.durationsOf(grid), [4, 4, 2])
+
+  // playlistFor with no plan still builds the grid itself, so every caller that
+  // predates the copy engine keeps working unchanged.
+  assert.equal(hls.playlistFor({ runtime: 10 }), hls.playlistFor({ runtime: 10 }, { plan: grid }))
+  assert.equal(hls.segmentCount(grid), 3)
+})

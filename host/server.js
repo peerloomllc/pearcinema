@@ -31,6 +31,7 @@ const watch = require('./watch')
 const sidecars = require('./sidecars')
 const subtitles = require('./subtitles')
 const hls = require('./hls')
+const keyframes = require('./keyframes')
 
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
@@ -710,56 +711,121 @@ class PearCinemaHost {
     return { mode: verdict.mode, reason: verdict.reason }
   }
 
-  async hlsPlaylist ({ itemId, capabilities = {} }) {
+  // ONE PLAN, TWO ENGINES, and the whole reason the segment path stopped being
+  // the transcode path (2026-08-19).
+  //
+  //   transcode  the picture is re-encoded, so a segment can start anywhere and
+  //              the plan is even four-second steps, exactly as before.
+  //   remux      the picture is COPIED and only the sound is rebuilt, so segments
+  //              can only start on the film's own keyframes. host/keyframes.js
+  //              reads them out of the container's index in milliseconds.
+  //
+  // A remux with no readable index falls back to the encode engine, which is what
+  // this host did for every generated stream before today - slower, never wrong.
+  // Both the playlist and every segment recompute the plan from the same cached
+  // index, so the two cannot disagree about where a segment begins.
+  async _hlsPlan ({ item, verdict, source }) {
+    if (verdict.mode !== 'remux') return hls.gridPlan(item.runtime)
+    if (!source) return null
+
+    // A Jellyfin source hands out an HTTP URL rather than a path, and an index
+    // cannot be read cheaply from one. That is a fallback, not a failure.
+    const index = await keyframes.read(source.input, { ffprobe: ffmpegBin.ffprobe() })
+    if (!index) {
+      this.log('host:hls-no-keyframes', { itemId: String(item.id), engine: 'encode' })
+      return this.transcodeOn() ? hls.gridPlan(item.runtime) : null
+    }
+
+    const plan = hls.copyPlan(index.times, { runtime: item.runtime, reorderDelay: index.reorderDelay })
+    if (!plan) return this.transcodeOn() ? hls.gridPlan(item.runtime) : null
+    return plan
+  }
+
+  async _hlsContext ({ itemId, capabilities }) {
     const item = await this.adapter.get({ id: String(itemId) })
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
     const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
-    if (verdict.mode !== 'transcode') return { mode: verdict.mode, reason: verdict.reason, playlist: null }
-    const playlist = hls.playlistFor(item)
-    if (!playlist) return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
+    if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') return { item, verdict, burn, source: null, plan: null }
+
+    const source = this.adapter.ffmpegInput
+      ? await this.adapter.ffmpegInput({ itemId: String(itemId) })
+      : null
+    const plan = await this._hlsPlan({ item, verdict, source })
+    return { item, verdict, burn, source, plan }
+  }
+
+  async hlsPlaylist ({ itemId, capabilities = {} }) {
+    const ctx = await this._hlsContext({ itemId, capabilities })
+    if (!ctx) return null
+    const { item, verdict, plan } = ctx
+    if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') {
+      return { mode: verdict.mode, reason: verdict.reason, playlist: null }
+    }
+    const playlist = plan ? hls.playlistFor(item, { plan }) : null
+    if (!playlist) {
+      // Two ways to get here and they deserve different words, because one is a
+      // fact about the film and the other is a fact about this host.
+      const reason = Number(item.runtime) > 0
+        ? 'this film has to be converted to reach that client, and this host cannot cut it into segments'
+        : 'this item reports no runtime, so a playlist cannot be computed'
+      return { mode: 'refuse', reason, playlist: null }
+    }
     return {
-      mode: 'transcode',
+      mode: verdict.mode,
+      engine: plan.engine,
       playlist,
-      segments: hls.segmentCount(item.runtime),
-      segmentSeconds: hls.SEGMENT_SECONDS
+      segments: plan.starts.length,
+      segmentSeconds: hls.SEGMENT_SECONDS,
+      // WHERE EACH SEGMENT REALLY BEGINS. A copy plan's segments are uneven, so a
+      // cast resuming mid-film cannot work out its start point by dividing - it
+      // has to be told. host/cast.js snaps to these.
+      boundaries: plan.starts
     }
   }
 
   async hlsSegment ({ itemId, seq, capabilities = {} }) {
-    const item = await this.adapter.get({ id: String(itemId) })
-    if (!item) return null
+    const ctx = await this._hlsContext({ itemId, capabilities })
+    if (!ctx) return null
+    const { item, verdict, burn, source, plan } = ctx
+    if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') return null
+    if (!plan || !source) return null
 
-    const n = hls.segmentCount(item.runtime)
     const k = Number(seq)
-    if (!Number.isInteger(k) || k < 0 || k >= n) return null
+    if (!Number.isInteger(k) || k < 0 || k >= plan.starts.length) return null
 
-    const burn = this._burnTarget(itemId, capabilities)
-    const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
-    if (verdict.mode !== 'transcode') return null
-
-    if (!this.adapter.ffmpegInput) return null
-    const source = await this.adapter.ffmpegInput({ itemId: String(itemId) })
-    if (!source) return null
-
-    const tc = require('./transcode')
-    const argv = hls.segmentArgs({
-      input: source.input,
-      headers: source.headers || null,
-      seq: k,
-      media: item.media || {},
-      device: this.transcoder.device,
-      hwDecode: tc.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
-      // The width ladder, capped at the client's stated budget when it gave one.
-      bitrate: tc.capBitrate(tc.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
-      burn: burn || null,
-      tone: ['bw', 'sepia'].includes(capabilities.tone) ? capabilities.tone : null
-    })
+    const argv = plan.engine === 'copy'
+      ? hls.copySegmentArgs({
+        input: source.input,
+        headers: source.headers || null,
+        seq: k,
+        plan,
+        audio: verdict.audio || 'aac',
+        audioCodec: item.media?.audioCodec || null,
+        // The client's own speaker count, which is the whole reason a film with
+        // a perfect picture is being touched at all.
+        audioChannels: Number(capabilities.maxAudioChannels) || 2
+      })
+      : hls.segmentArgs({
+        input: source.input,
+        headers: source.headers || null,
+        seq: k,
+        plan,
+        media: item.media || {},
+        device: this.transcoder.device,
+        hwDecode: transcode.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
+        // The width ladder, capped at the client's stated budget when it gave one.
+        bitrate: transcode.capBitrate(transcode.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
+        burn: burn || null,
+        tone: ['bw', 'sepia'].includes(capabilities.tone) ? capabilities.tone : null
+      })
 
     // Through the SAME pool as the browser's transcodes: one engine, one cap,
-    // one BUSY message, one kill path.
-    const session = this.transcoder.start({ argv, at: k * hls.SEGMENT_SECONDS, audio: 'aac', media: item.media })
-    this.log('host:hls-segment', { seq: k, running: this.transcoder.running })
+    // one BUSY message, one kill path. A copied segment barely touches the video
+    // hardware, but it still holds a file handle on the library drive and still
+    // has to die when a revoke says so.
+    const session = this.transcoder.start({ argv, at: plan.starts[k], audio: 'aac', media: item.media })
+    this.log('host:hls-segment', { seq: k, engine: plan.engine, running: this.transcoder.running })
     return session
   }
 

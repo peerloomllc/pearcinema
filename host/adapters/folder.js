@@ -747,7 +747,13 @@ class FolderAdapter {
       // only the files found beside them, so a host loading one would show an empty
       // Subtitles panel on 2,715 television episodes that have perfectly good text
       // tracks - the exact complaint this version answers.
-      if (raw.version !== 5) return false
+      // Version 6 added the AUDIO CHANNEL COUNT, and a version 5 cache is why a film
+      // with 5.1 sound cast to a television in silence: ffprobe reported the count all
+      // along, the media object dropped it, and every decision was made on the codec
+      // alone. A cache without it cannot be reasoned about - the fix would apply to
+      // nothing until each file was probed again, which is exactly the kind of silent
+      // half-fix that reads as "it did not work".
+      if (raw.version !== 6) return false
       // A cache built from different folders describes a different library - and a
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
@@ -768,7 +774,7 @@ class FolderAdapter {
     try {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
-        version: 5,
+        version: 6,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,
