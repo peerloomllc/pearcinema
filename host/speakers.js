@@ -157,6 +157,19 @@ class Speakers {
     return this.publicConfig()
   }
 
+  // One television, one switch. The dashboard used to send the whole hidden list back
+  // on every toggle, which works and reads as a rewrite of the operator's choices when
+  // it is really one of them; since found televisions hide through the same call
+  // (host/cast-targets.js routes it), both kinds now take the same shape.
+  setHidden (entityId, hidden) {
+    const id = String(entityId || '').trim()
+    if (!id) throw new Error('which television?')
+    const now = new Set(this.config.hidden || [])
+    hidden ? now.add(id) : now.delete(id)
+    this.save({ hidden: [...now] })
+    return { id, hidden: !!hidden }
+  }
+
   get enabled () {
     return !!this.config.enabled && !!this.config.token && isLoopbackUrl(this.config.baseUrl)
   }

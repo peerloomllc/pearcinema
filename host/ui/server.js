@@ -56,6 +56,7 @@ function capsFromQuery (url) {
   }
 }
 const watch = require('../watch')
+const { MEDIA_CHANNEL_NAME } = require('../roku')
 const subtitleRules = require('../subtitles')
 const mergeLib = require('../../src/merge')
 
@@ -1792,9 +1793,44 @@ async function startDashboard ({
       // The media players BY NAME, because a count is not enough to find the
       // television among the kitchen speakers (Tim, 2026-08-17) - PearTune's
       // panel lists them and this one does too.
+      //
+      // NOT GATED ON HOME ASSISTANT, and that was a real bug rather than a layout
+      // preference: a person with a Roku and no Home Assistant was shown "casting is
+      // off" and an empty page while casting worked perfectly from their phone. Their
+      // server had found the television. The page simply never asked.
       if (req.method === 'GET' && url.pathname === '/api/cast/targets') {
         try {
+          return json(res, 200, {
+            targets: await host.speakers.list(),
+            // What was found on the wire and NOT offered, so the page can say why.
+            needsChannel: host.roku?.needsChannel || [],
+            mediaChannel: MEDIA_CHANNEL_NAME
+          })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      // Hiding, for either kind of television. One entity and a boolean: the router
+      // decides which store the answer lands in, and the page does not have to know.
+      if (req.method === 'POST' && url.pathname === '/api/cast/hidden') {
+        const body = await readBody(req)
+        try {
+          host.speakers.setHidden(body?.entityId, !!body?.hidden)
           return json(res, 200, { targets: await host.speakers.list() })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      // Look again now, for the person who just switched a television on and does not
+      // want to wait out the roster's own refresh.
+      if (req.method === 'POST' && url.pathname === '/api/cast/rescan') {
+        try {
+          await host.roku?.scan()
+          return json(res, 200, {
+            targets: await host.speakers.list(),
+            needsChannel: host.roku?.needsChannel || [],
+            mediaChannel: MEDIA_CHANNEL_NAME
+          })
         } catch (e) {
           return json(res, 400, { error: e.message })
         }

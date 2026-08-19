@@ -45,11 +45,23 @@ class CastTargets {
     return !!(this.configured?.enabled || this.discovered?.enabled)
   }
 
-  // Only the configured backend has a notion of hiding: it is the operator's pruning of a
-  // house full of media players, done in the dashboard. A discovered television is
-  // whatever answered, and there is nothing to prune it with yet.
+  // Hiding is the operator's pruning of a house full of media players, and since
+  // 2026-08-19 it means the same thing on BOTH kinds of row. It could not before: a
+  // found television was whatever answered this minute, so there was nowhere to write
+  // the choice down. host/televisions.js is that somewhere, and a person with three
+  // Rokus can now stop two of them being offered.
   isHidden (entityId) {
-    return isDiscovered(entityId) ? false : !!this.configured?.isHidden?.(entityId)
+    return isDiscovered(entityId)
+      ? !!this.discovered?.isHidden?.(entityId)
+      : !!this.configured?.isHidden?.(entityId)
+  }
+
+  // One switch, either backend. The dashboard sends an entity and a boolean and does
+  // not have to know which store the answer lands in.
+  setHidden (entityId, hidden) {
+    const backend = isDiscovered(entityId) ? this.discovered : this.configured
+    if (!backend?.setHidden) throw new Error('that television cannot be hidden')
+    return backend.setHidden(entityId, hidden)
   }
 
   _for (entityId) {
@@ -85,7 +97,11 @@ class CastTargets {
       const n = normalName(t.name)
       if (n) names.add(n)
     }
-    const fresh = disc.filter((t) => !ips.has(String(t.entityId).slice(5)) && !names.has(normalName(t.name)))
+    // THE ADDRESS COMES OFF THE ROW NOW, not off the id. A found television used to be
+    // called `roku:<address>` and this line read the address back out of its own name;
+    // televisions are remembered by serial number since 2026-08-19, so the address is a
+    // field that travels beside it and moves when the lease does.
+    const fresh = disc.filter((t) => !(t.host && ips.has(t.host)) && !names.has(normalName(t.name)))
 
     return [...conf, ...fresh]
   }
