@@ -2244,3 +2244,19 @@ test('AN EMPTY GROUP STILL SAYS SOMETHING, rather than a heading over nothing', 
   assert.match(text(), /Nobody has asked you for anything yet/)
   assert.match(text(), /You have not asked for anything yet/)
 })
+
+test('NOTHING PAINTS #root A COLOUR, which is how light mode stayed dark', async () => {
+  // The boot <style> carried `background:#0e0f13` on `#root` under a comment saying not
+  // to do exactly that. An id selector beats every rule in the stylesheet below it, so
+  // the header was light and everything under it was on a dark ground with dark text on
+  // it (Tim, 2026-08-19: "light mode isn't rendering properly"). No test could have seen
+  // it - every assertion in this file is about text and structure - so the guard is on
+  // the rule itself.
+  // The FIRST style block is the boot one; the app's own stylesheet follows it and is
+  // free to paint #root from a token, which is the correct way to do it.
+  const boot = PAGE.slice(PAGE.indexOf('<style>') + 7, PAGE.indexOf('</style>'))
+  for (const rule of boot.match(/[^{}]*\{[^{}]*\}/g) || []) {
+    if (!/#root/.test(rule.split('{')[0])) continue
+    assert.doesNotMatch(rule, /background/, 'a background on #root strands the page on one theme: ' + rule)
+  }
+})
