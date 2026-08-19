@@ -601,7 +601,7 @@ function HostPanel ({ state, reload }) {
     notify('Changed', 'You are still signed in here. Other browsers will need the new one.')
   }
 
-  // THE NUMBER SAVES ITSELF, on leaving the box or on Enter. It had a Save button, and
+  // THE NUMBER SAVES ITSELF as you change it. It had a Save button, and
   // that button was the only filled amber control on the page, in the only row with two
   // controls, next to the only input - four reasons for one row to shout, stacked (Tim,
   // 2026-08-19, with a screenshot). The same reasoning the casting hide switch already
@@ -629,6 +629,19 @@ function HostPanel ({ state, reload }) {
     reload()
   }
 
+  // AFTER THE TYPING STOPS, not on every keystroke. Saving per keystroke would set the
+  // cap to 1 on the way to typing 16, and a cap of 1 refuses conversions for as long as
+  // it stands. Each change cancels the last timer, so only the number somebody settled
+  // on is ever sent. Leaving the box or pressing Enter still commits at once, so this is
+  // a shortcut rather than the only way out.
+  useEffect(() => {
+    if (!t.available || cap === '') return
+    const n = Math.max(0, Math.min(16, Math.trunc(Number(cap))))
+    if (!Number.isFinite(n) || String(n) === String(c.cap)) return
+    const timer = setTimeout(commitCap, 700)
+    return () => clearTimeout(timer)
+  }, [cap])
+
   const passwordSub = !state.auth?.enabled
     ? 'None. This page is reachable only from this machine.'
     : src === 'explicit'
@@ -643,7 +656,7 @@ function HostPanel ({ state, reload }) {
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : '0 turns it off. Saved when you leave the box.'
+      : '0 turns it off.'
 
   // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
   // bad variants since it had a library page, and Settings never used one - so every

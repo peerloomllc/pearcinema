@@ -1379,14 +1379,39 @@ test('THE ENGINE NUMBER SAVES ITSELF, with no button to hunt for', async (t) => 
   assert.equal(num.value, '4')
   assert.equal(doc.querySelectorAll('.setrow .rowctl button').length, 4, 'Change, Sign out, Sign out, Run again - and no Save')
   assert.equal([...doc.querySelectorAll('.setrow .rowctl button')].some(b => /Save/.test(b.textContent)), false)
-  assert.match(text(), /Saved when you leave the box/, 'and the row says so, because an implicit save has to be stated once')
+  assert.doesNotMatch(text(), /leave the box/, 'and it needs no line explaining itself')
 
+  // CHANGING IT IS THE SAVE. No blur, no Enter, no button - the request goes on its
+  // own shortly after the typing stops.
   num.value = '6'
   num.dispatchEvent(new win.Event('input', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 30))
-  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
-  assert.ok(asked.some(u => String(u).includes('/api/transcode-cap')), 'leaving the box is the save')
+  assert.equal(asked.some(u => String(u).includes('/api/transcode-cap')), false, 'but not on the keystroke itself')
+  await new Promise(r => setTimeout(r, 900))
+  assert.ok(asked.some(u => String(u).includes('/api/transcode-cap')), 'once the typing settles')
+})
+
+test('typing 16 never sets the cap to 1 on the way', async (t) => {
+  // Saving per keystroke would put a cap of 1 in force for as long as it stood, and a
+  // cap of 1 refuses conversions. Each change cancels the last timer.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const asked = []
+  const { doc, win } = await openHost(t, state, 'host', asked)
+  const num = doc.querySelector('.setrow input[type=number]')
+
+  for (const v of ['1', '16']) {
+    num.value = v
+    num.dispatchEvent(new win.Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 120))
+  }
+  await new Promise(r => setTimeout(r, 900))
+
+  const sent = asked.filter(u => String(u).includes('/api/transcode-cap'))
+  assert.equal(sent.length, 1, 'one request, for the number that was settled on')
 })
 
 test('an unusable number puts the real one back rather than sending a guess', async (t) => {
