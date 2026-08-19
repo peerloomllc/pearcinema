@@ -722,6 +722,51 @@ async function startDashboard ({
       if (req.method === 'GET' && url.pathname === '/api/requests') {
         return json(res, 200, { items: [] })
       }
+
+      // WHAT PEOPLE HAVE ASKED **THIS** LIBRARY FOR, which the dashboard has never
+      // shown. `/api/requests` above is the other direction - what this machine asked
+      // somebody else's library for - and asking your own library is not a thing, so
+      // it answers empty and always has. Tim made requests from a paired phone on
+      // 2026-08-19 and found nowhere on the dashboard they could appear.
+      //
+      // The store was built for this: listRequests with no requester is documented in
+      // the package as "every request (the operator's dashboard/owner view)", and the
+      // wire has had `request.all` for the phone's owner view all along. Only the
+      // dashboard was missing.
+      if (req.method === 'GET' && url.pathname === '/api/requests/received') {
+        try {
+          const rows = await host.userState.listRequests()
+          const labels = await host.grants.personLabels()
+          return json(res, 200, {
+            items: rows.map((r) => ({
+              ...r,
+              // WHO ASKED, by the name their owner chose rather than by a key. A
+              // request nobody can attribute is one nobody can answer.
+              requesterLabel: labels.get(r.requester) || null
+            }))
+          })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/requests/resolve') {
+        const body = await readBody(req)
+        const status = String(body?.status || '')
+        if (!['added', 'declined'].includes(status)) return json(res, 400, { error: 'bad status' })
+        try {
+          const row = await host.userState.resolveRequest(String(body?.id || ''), status)
+          if (!row) return json(res, 404, { error: 'no such request' })
+          // The requester hears the answer wherever they are signed in - the same
+          // push the wire method sends, because it is the same event.
+          if (host.host?.presence && row.requester) {
+            host.host.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+          }
+          host.onevent?.('request:resolved', { id: row.id, title: row.title || null, status })
+          return json(res, 200, { request: row })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
       if (req.method === 'POST' && (url.pathname === '/api/request' || url.pathname === '/api/request/remove')) {
         return json(res, 400, { error: 'asking is for a friend\'s library - this one is yours' })
       }

@@ -59,22 +59,37 @@ const fmtClock = (ms) => {
 
 // Tap vs hold, the donor's shape: a hold opens the action sheet, a tap opens
 // the thing.
+// A BUTTON INSIDE A PRESSABLE ROW IS NOT PART OF THE ROW, and this is the one place
+// that can promise it. A row is driven by pointerdown and pointerup; a button inside it
+// stops the CLICK, which happens afterwards - so pressing the delete on a download
+// opened the film AND removed it on the way out (Tim, 2026-08-19). The Unmark button on
+// the Watched list had the same fault, quietly.
+//
+// Checked on the event's own target rather than by adding a second listener that stops
+// propagation: one rule, in one place, that a new row-button cannot forget to apply.
+const insideControl = (e) => !!e.target?.closest?.('button, a, input, select, label')
+
 function usePress (onPress, onLongPress) {
   const timer = useRef(null)
   const fired = useRef(false)
-  const start = () => {
+  const skip = useRef(false)
+  const start = (e) => {
+    skip.current = insideControl(e)
+    if (skip.current) return
     fired.current = false
     if (onLongPress) timer.current = setTimeout(() => { fired.current = true; haptic('medium'); onLongPress() }, 450)
   }
-  const stop = (go) => {
+  const stop = (go, e) => {
+    // A press that STARTED on a control is not this row's press, however it ends.
+    if (skip.current || (e && insideControl(e))) { clearTimeout(timer.current); return }
     clearTimeout(timer.current)
     if (go && !fired.current) { haptic('light'); onPress?.() }
   }
   return {
     onPointerDown: start,
-    onPointerUp: () => stop(true),
-    onPointerLeave: () => stop(false),
-    onPointerCancel: () => stop(false),
+    onPointerUp: (e) => stop(true, e),
+    onPointerLeave: (e) => stop(false, e),
+    onPointerCancel: (e) => stop(false, e),
     onContextMenu: (e) => e.preventDefault()
   }
 }

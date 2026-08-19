@@ -407,3 +407,46 @@ test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
   assert.match(text(), /not downloaded to this phone/)
   void doc
 })
+
+test('A BUTTON INSIDE A ROW IS NOT THE ROW', async (t) => {
+  // Pressing the delete on a download OPENED the film and removed it on the way out
+  // (Tim, 2026-08-19). The row is driven by pointerdown and pointerup; the button
+  // stopped the CLICK, which happens afterwards - so both fired, in that order.
+  //
+  // Fixed in usePress rather than on each button: one rule, in one place, that a new
+  // row-button cannot forget to apply. The Unmark button on the Watched list had the
+  // same fault and never showed it.
+  const { dom, doc, press, click, settle, called } = await open({
+    'download.list': { items: [{ itemId: 'metropolis', size: 1024 }], running: [] },
+    'library.get': { id: 'metropolis', type: 'movie', title: 'Metropolis', year: 1927, runtime: 9180 }
+  })
+  t.after(() => dom.window.close())
+
+  // The nav and the sub-tabs are plain buttons; only rows and tiles are pressed.
+  click([...doc.querySelectorAll('nav button')].find(b => b.getAttribute('aria-label') === 'You'))
+  await settle(200)
+  const dl = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Downloads')
+  assert.ok(dl, 'the You tab opened')
+  click(dl)
+  await settle(320)
+
+  const row = doc.querySelector('li.track')
+  assert.ok(row, 'the download is listed')
+  const trash = row.querySelector('button')
+  assert.ok(trash, 'with something to remove it')
+
+  // A FINGER FIRES BOTH: pointerdown, pointerup, then click. The row listens to the
+  // first two and the button to the last, which is exactly how one press did both.
+  press(trash)
+  click(trash)
+  await settle(200)
+
+  assert.equal(called('stream.url').length, 0, 'pressing remove does not start the film')
+  assert.equal(called('resume.get').length, 0, 'and does not ask where it was left')
+  assert.ok(called('download.remove').length > 0, 'but it does remove it')
+
+  // The rest of the row is still the row.
+  press(row.querySelector('.meta') || row)
+  await settle(200)
+  assert.ok(called('stream.url').length > 0, 'the rest of the row is still the row')
+})

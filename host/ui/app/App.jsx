@@ -112,13 +112,14 @@ function RemotePanel ({ remotes, reload, onSource, source, embedded = false }) {
                 <span class={'rowname ' + (r.online ? 'good' : 'warn')}>{r.libraryName || 'Library'}</span>
                 <span class='rowsub'>
                   {r.online ? 'Online' : 'Offline'}
-                  {source === r.libraryId ? ' · being watched' : ''}
+                  {source === r.libraryId ? ' · the one you are watching' : ''}
                 </span>
               </span>
+              {/* NO WATCH BUTTON. Which library you are looking at is the picker in the
+                  header bar, on every screen, and a second way to do it on this page was
+                  a control that duplicated one (Tim, 2026-08-19). Removing a library is
+                  the only thing this row decides. */}
               <span class='rowctl'>
-                <button class='ghost' onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
-                  {source === r.libraryId ? 'Stop watching' : 'Watch'}
-                </button>
                 <button
                   class='iconbtn danger' onClick={() => remove(r)}
                   aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
@@ -269,6 +270,77 @@ function RequestsCard ({ remotes, embedded = false }) {
                 ><Trash size={17} /></button>
               )}
             </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// WHAT PEOPLE HAVE ASKED THIS LIBRARY FOR, which had nowhere to appear until now.
+// RequestsCard above is the other direction - what this machine asked somebody else's
+// library for - and the two were easy to conflate because they are both "requests".
+//
+// The store and the wire have both had the owner's view all along (listRequests with
+// no requester, and `request.all`); only the dashboard never asked. Tim made requests
+// from a paired phone on 2026-08-19 and found nowhere they could show up.
+function ReceivedCard ({ embedded = false }) {
+  const [rows, setRows] = useState(null)
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(async () => {
+    const r = await api('/api/requests/received').catch(() => null)
+    setRows(r?.items || [])
+  }, [])
+
+  useEffect(() => {
+    load()
+    // The same live channel the outgoing card uses: an ask arriving from a phone
+    // should land on an open page rather than waiting for a reload.
+    const off = onLive(['request:created', 'request:removed', 'request:resolved'], load)
+    return off
+  }, [load])
+
+  const answer = async (q, status) => {
+    setBusy(q.id)
+    const r = await api('/api/requests/resolve', { id: q.id, status })
+    setBusy('')
+    if (r?.error) return notify('Not saved', r.error)
+    notify(status === 'added' ? 'Marked as added' : 'Declined',
+      status === 'added'
+        ? `${q.title || 'That'} is marked as added. Whoever asked is told wherever they are signed in.`
+        : `${q.title || 'That'} was declined. Whoever asked is told wherever they are signed in.`)
+    load()
+  }
+
+  if (!rows?.length) return null
+
+  return (
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Asked of you</h3>}
+      <div class='setrows'>
+        {rows.map(q => (
+          <div class='setrow' key={q.id}>
+            <span class='rowmain'>
+              <span class={'rowname ' + (q.status === 'added' ? 'good' : q.status === 'declined' ? 'warn' : '')}>
+                {q.title || 'Untitled'}
+              </span>
+              <span class='rowsub'>
+                {q.status} · {q.kind === 'series' ? 'show' : 'film'}
+                {q.requesterLabel ? ` · asked by ${q.requesterLabel}` : ''}
+                {q.count > 1 ? ` · asked ${q.count} times` : ''}
+              </span>
+            </span>
+            {q.status === 'pending' && (
+              <span class='rowctl'>
+                <button class='ghost' disabled={busy === q.id} onClick={() => answer(q, 'added')}>Added it</button>
+                <button
+                  class='iconbtn danger' disabled={busy === q.id}
+                  aria-label={`Decline the request for ${q.title || 'this'}`} title='Decline'
+                  onClick={() => answer(q, 'declined')}
+                ><Close size={17} /></button>
+              </span>
+            )}
           </div>
         ))}
       </div>
@@ -645,7 +717,9 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
             <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} embedded />
             <div class='setgroup'>Downloads</div>
             <DownloadsCard remotes={remotes} onPlay={onPlayDownload} embedded />
-            <div class='setgroup'>Requests</div>
+            <div class='setgroup'>Asked of you</div>
+            <ReceivedCard embedded />
+            <div class='setgroup'>Your requests</div>
             <RequestsCard remotes={remotes} embedded />
           </>
         )}
@@ -962,6 +1036,10 @@ export default function App () {
   const [blendOn, setBlendOn] = useState(false)
   // How many downloads are running, for the topbar indicator.
   const [dlBusy, setDlBusy] = useState(0)
+  // Unanswered requests. COUNTED BY THE SHELL rather than by the panel that lists
+  // them: the panel only exists on the Sharing page, so a light that waited for it
+  // would appear only once you had already gone looking.
+  const [pendingAsks, setPendingAsks] = useState(0)
   // The theme lives up here now rather than inside Settings: it is a light switch, and
   // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
   const [theme, setTheme] = useState(loadThemePref())
@@ -1008,6 +1086,17 @@ export default function App () {
   // one remote, '_blend' all of them as one collection. The choice is
   // remembered per browser - how somebody likes to look at their libraries
   // is not the host's business.
+  useEffect(() => {
+    let live = true
+    const count = async () => {
+      const r = await api('/api/requests/received').catch(() => null)
+      if (live) setPendingAsks((r?.items || []).filter(q => q.status === 'pending').length)
+    }
+    count()
+    const off = onLive(['request:created', 'request:removed', 'request:resolved'], count)
+    return () => { live = false; off() }
+  }, [])
+
   const pickSource = (lib) => {
     setSource(lib)
     setRemoteBase(lib === '_blend' ? '/blend' : lib ? '/remote/' + lib : '')
@@ -1176,9 +1265,25 @@ export default function App () {
               class='iconbtn dlbusy'
               aria-label={dlBusy === 1 ? 'One download running. See its progress' : dlBusy + ' downloads running. See their progress'}
               title={dlBusy === 1 ? 'One download running' : dlBusy + ' downloads running'}
-              onClick={() => { location.hash = 'settings/remotes'; setTab('settings'); setPlaying(null) }}
+              onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
             >
               <DownloadIcon size={18} />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
+
+          {/* SOMEBODY IS WAITING FOR AN ANSWER (Tim, 2026-08-19), the same shape the
+              downloads light uses: a bar-level mark while any request is unanswered,
+              one press from the page that answers it. An ask that nobody notices is an
+              ask that never gets answered. */}
+          {pendingAsks > 0 && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={pendingAsks === 1 ? 'One request waiting for an answer' : pendingAsks + ' requests waiting for an answer'}
+              title={pendingAsks === 1 ? 'One request waiting' : pendingAsks + ' requests waiting'}
+              onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
+            >
+              <PeopleIcon size={18} />
               <span class='dot' aria-hidden='true' />
             </button>
           )}

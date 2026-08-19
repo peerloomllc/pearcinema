@@ -1782,3 +1782,64 @@ test('the pairing explanation appears only when there is nothing else to read', 
 
   assert.match(text(), /Ask them to open a pairing window on their dashboard/)
 })
+
+test('WHAT PEOPLE ASKED THIS LIBRARY FOR HAS SOMEWHERE TO APPEAR', async (t) => {
+  // The dashboard had "Your requests" - what this machine asked somebody else's
+  // library for - and nothing at all for the other direction. The store and the wire
+  // have both had the owner's view all along; only the dashboard never asked, so Tim
+  // made requests from a paired phone and found nowhere they could show up
+  // (2026-08-19).
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/requests/received': {
+      items: [
+        { id: 'r1', title: 'Solaris', kind: 'movie', status: 'pending', count: 2, requester: 'o1', requesterLabel: 'Ben' },
+        { id: 'r2', title: 'Chernobyl', kind: 'series', status: 'added', count: 1, requester: 'o1', requesterLabel: 'Ben' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.match(text(), /Solaris/)
+  // WHO ASKED, by the name their owner chose rather than by a key - a request nobody
+  // can attribute is one nobody can answer.
+  assert.match(text(), /asked by Ben/)
+  assert.match(text(), /asked 2 times/)
+
+  // Only the unanswered one offers an answer.
+  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.equal(buttons.filter(b => b === 'Added it').length, 1)
+})
+
+test('SOMEBODY WAITING FOR AN ANSWER IS VISIBLE FROM ANY PAGE', async (t) => {
+  // The count is the shell's, not the panel's: the panel only exists on the Sharing
+  // page, so a light that waited for it would appear only once you had already gone
+  // looking (Tim, 2026-08-19, asking for the same treatment downloads get).
+  const { dom, doc } = await open(STATE, {
+    '/api/requests/received': {
+      items: [{ id: 'r1', title: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  // Still on the library, nowhere near Sharing.
+  const light = [...doc.querySelectorAll('.barright button')]
+    .find(b => /request/i.test(b.getAttribute('aria-label') || ''))
+  assert.ok(light, 'the bar says somebody is waiting')
+  assert.match(light.getAttribute('aria-label'), /One request waiting/)
+  assert.ok(light.querySelector('.dot'), 'and it is marked the way a running download is')
+})
+
+test('nothing waiting means nothing in the bar', async (t) => {
+  const { dom, doc } = await open(STATE, { '/api/requests/received': { items: [] } })
+  t.after(() => dom.window.close())
+  const light = [...doc.querySelectorAll('.barright button')]
+    .find(b => /request/i.test(b.getAttribute('aria-label') || ''))
+  assert.equal(light, undefined)
+})
