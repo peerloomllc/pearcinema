@@ -1550,13 +1550,24 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
   // nothing has ever measured that, and the line that used to claim it was quoting the
   // hardware this was built on. That number arrives when a host can measure its own
   // engine, and it arrives as the field's ceiling rather than as another sentence.
-  const state = {
+  const oneCard = {
     ...STATE,
-    transcode: { available: true, reason: null, device: '/dev/dri/renderD128' },
+    transcode: { available: true, reason: null, device: '/dev/dri/renderD128', nodes: ['/dev/dri/renderD128'] },
     transcodeCap: { cap: 3, source: 'dashboard', measured: 10 }
   }
-  const { text } = await openHost(t, state)
+  const one = await openHost(t, oneCard)
+  assert.match(one.text(), /Up to 3 conversions run at once\. 0 turns it off\./)
+  assert.doesNotMatch(one.text(), /in testing/, 'never a measurement of somebody else\'s hardware')
 
-  assert.match(text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
-  assert.doesNotMatch(text(), /in testing/, 'never a measurement of somebody else\'s hardware')
+  // AND THE CARD IS NAMED ONLY WHERE THERE IS A CHOICE. A render node is the graphics
+  // card, not a folder - it holds nothing and nothing is written to it - but the raw
+  // path reads like a location, and on a one-card machine it changes nothing.
+  assert.doesNotMatch(one.text(), /renderD128/, 'one card, nothing to decide, nothing said')
+
+  const twoCards = {
+    ...oneCard,
+    transcode: { ...oneCard.transcode, nodes: ['/dev/dri/renderD128', '/dev/dri/renderD129'] }
+  }
+  const two = await openHost(t, twoCards)
+  assert.match(two.text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
 })

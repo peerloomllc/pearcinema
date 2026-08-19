@@ -19,10 +19,31 @@
 // remux.js says about delay_moov, chapters and argv-never-a-shell-string applies
 // here verbatim, because it is the same pipe with an encoder in it.
 
+const fs = require('fs')
 const { spawn } = require('child_process')
 const { Remuxer, codec, AUDIO_FALLBACK, FMP4_FLAGS } = require('./remux')
 
 const DEVICE_DEFAULT = '/dev/dri/renderD128'
+
+// WHICH GRAPHICS CARDS THIS MACHINE HAS, as render nodes under /dev/dri. Not a
+// storage question: a render node is the card itself, it holds nothing, and the
+// conversion path writes to a pipe rather than to disk anywhere (Tim asked whether
+// /dev/dri/renderD128 might run out of space, 2026-08-19 - it cannot, and the fact
+// that the raw path invites the question is why the dashboard only names one when
+// there is more than one to choose between).
+//
+// Empty on a machine with no /dev/dri at all, which is every Mac and every host
+// without a usable card - and there the probe has already failed for its own reasons.
+function renderNodes (dir = '/dev/dri') {
+  try {
+    return fs.readdirSync(dir)
+      .filter((name) => /^renderD\d+$/.test(name))
+      .sort()
+      .map((name) => `${dir}/${name}`)
+  } catch {
+    return []
+  }
+}
 
 // Codecs the engine DECODES in hardware. Anything else is decoded in software and
 // uploaded to the engine for encoding - and that is fine, deliberately: the AVI
@@ -197,5 +218,5 @@ class Transcoder extends Remuxer {
 module.exports = {
   capBitrate,
   Transcoder, transcodeArgs, probeTranscode, bitrateFor,
-  HW_DECODE, DEVICE_DEFAULT
+  HW_DECODE, DEVICE_DEFAULT, renderNodes
 }

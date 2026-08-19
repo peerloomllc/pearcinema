@@ -948,10 +948,14 @@ class PearCinemaHost {
       this.log('host:transcode', this.transcode)
       return this.transcode
     }
+    // The cards this machine has, so the dashboard can name the one in use only when
+    // there is more than one to choose between.
+    const nodes = transcode.renderNodes()
     this.transcode = await transcode.probeTranscode({
       ffmpeg: ffmpegBin.ffmpeg(),
       device: this.transcoder.device
     })
+    this.transcode = { ...this.transcode, nodes }
     this.log('host:transcode', { available: this.transcode.available, reason: this.transcode.reason || undefined })
     return this.transcode
   }

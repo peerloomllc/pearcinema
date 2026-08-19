@@ -652,6 +652,13 @@ function HostPanel ({ state, reload }) {
   // managed about 10 in testing" on every install, and the 10 is a constant from the
   // N100 this was built against - a number about OUR machine, presented as a number
   // about theirs (Tim, 2026-08-19). What is true everywhere is what zero does.
+  // NAMED ONLY WHEN THERE IS A CHOICE. A render node is a graphics card, not a folder -
+  // it holds nothing and nothing is written to it - but the raw path reads like a
+  // location, and on a machine with one card it changes nothing anyway (Tim, who asked
+  // whether it might run out of space, 2026-08-19). With two cards it is the answer to
+  // which one is working, so it appears.
+  const manyCards = (t.nodes?.length || 0) > 1
+
   // WHAT THE NUMBER MEANS: how many conversions may run at the same time, and what is
   // doing them. NOT how many this machine could manage - nothing here has ever measured
   // that, and the line that used to claim it was quoting the hardware this was built on.
@@ -661,7 +668,7 @@ function HostPanel ({ state, reload }) {
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${t.device ? `, on ${t.device}` : ''}. 0 turns it off.`
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. 0 turns it off.`
 
   // THE NAME CARRIES THE STATE, not a pill beside it (Tim, 2026-08-19). A chip was one
   // more object on a page whose whole problem was objects, and this row was already the
