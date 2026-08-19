@@ -76,7 +76,9 @@ const CAST_CAPS = {
   // The Default Media Receiver: H.264 in MP4 and nothing Matroska.
   containers: ['mp4', 'mov'],
   videoCodecs: ['h264'],
-  audioCodecs: ['aac', 'mp3']
+  audioCodecs: ['aac', 'mp3'],
+  // STEREO, and this is the fix for a silent television. See ROKU_CAPS below.
+  maxAudioChannels: 2
 }
 const ROKU_CAPS = {
   // A Roku opens Matroska natively (mkv is on its documented format list), so
@@ -86,7 +88,17 @@ const ROKU_CAPS = {
   // day a real HEVC-capable Roku shows the need.
   containers: ['mp4', 'mov', 'matroska', 'mkv'],
   videoCodecs: ['h264'],
-  audioCodecs: ['aac', 'mp3']
+  audioCodecs: ['aac', 'mp3'],
+  // STEREO ONLY, AND THE CODEC LIST ALONE HID THIS FOR MONTHS. A Roku decodes AAC
+  // and does NOT decode AAC 5.1: handed one it plays the picture in perfect silence,
+  // which is the worst kind of failure because nothing looks wrong. Found by Tim
+  // casting Avatar S01E02 (matroska, h264, AAC 5.1) on 2026-08-19 - the device
+  // reported `audio="none"` while the video played - and proven by re-encoding the
+  // same twenty seconds to stereo and hearing it come back.
+  //
+  // A film that needs this now takes the remux path with its soundtrack mixed down,
+  // which is the cheapest conversion there is.
+  maxAudioChannels: 2
 }
 
 function capsFor (entityId) {

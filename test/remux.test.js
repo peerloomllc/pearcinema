@@ -366,3 +366,40 @@ test('A TONE forces the transcode lane, exactly like burn-in, and junk tones are
   // A tone is a LOOKUP, not a passthrough - junk decides as if nothing was asked.
   assert.strictEqual(decide(playsFine, { ...client, tone: 'vivid' }, { transcode: true }).mode, 'direct')
 })
+
+// --- the speaker count, which the codec list hid for months --------------------
+
+test('a 5.1 soundtrack is mixed down for a client that plays stereo', (t) => {
+  // MEASURED, not theorised. Tim cast Avatar S01E02 - matroska, h264, AAC 5.1 - to his
+  // Roku on 2026-08-19 and it played the picture in perfect silence, reporting
+  // `audio="none"`. ROKU_CAPS said `audioCodecs: ['aac']` and decide judged audio by
+  // CODEC ALONE, so it direct-played a film the television could not fully play. Proven
+  // by re-encoding the same twenty seconds to stereo and hearing it come back.
+  const roku = { containers: ['mp4', 'matroska'], videoCodecs: ['h264'], audioCodecs: ['aac'], maxAudioChannels: 2 }
+  const film = { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 6 }
+
+  const d = remux.decide(film, roku)
+  assert.notEqual(d.mode, 'direct', 'direct play here is a silent television')
+  assert.equal(d.mode, 'remux', 'the picture is already right, so only the sound is rebuilt')
+  assert.equal(d.audio, 'aac')
+  assert.match(d.reason, /stereo|channel/, 'and the reason says what was wrong')
+})
+
+test('stereo in the same shape still direct-plays', (t) => {
+  const roku = { containers: ['mp4', 'matroska'], videoCodecs: ['h264'], audioCodecs: ['aac'], maxAudioChannels: 2 }
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2 }, roku).mode, 'direct')
+})
+
+test('a client that says nothing about speakers is unconstrained, as before', (t) => {
+  // The phones and browsers that never declared a limit must not start paying for a
+  // conversion because this test exists.
+  const phone = { containers: ['mp4', 'matroska'], videoCodecs: ['h264'], audioCodecs: ['aac'] }
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 6 }, phone).mode, 'direct')
+})
+
+test('an unknown channel count is not treated as too many', (t) => {
+  // Older scans have no audioChannels at all. Absent must mean "no reason to convert",
+  // or every film scanned before tonight would suddenly take the long way round.
+  const roku = { containers: ['mp4', 'matroska'], videoCodecs: ['h264'], audioCodecs: ['aac'], maxAudioChannels: 2 }
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac' }, roku).mode, 'direct')
+})

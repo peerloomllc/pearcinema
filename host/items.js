@@ -122,6 +122,13 @@ function media (m = {}) {
     container: clean(m.container, 16).toLowerCase() || null,
     videoCodec: clean(m.videoCodec, 16).toLowerCase() || null,
     audioCodec: clean(m.audioCodec, 16).toLowerCase() || null,
+    // HOW MANY SPEAKERS THE TRACK EXPECTS, and it is not a detail. ffprobe has
+    // reported it since the first scan and this normaliser dropped it, so every
+    // consumer judged audio by codec alone - which is how a 5.1 AAC film cast to a
+    // television that plays only stereo AAC, and played in silence with the picture
+    // perfectly fine (Tim, 2026-08-19, on his Roku; proven by re-encoding the same
+    // twenty seconds to stereo and hearing it).
+    audioChannels: count(m.audioChannels) || null,
     width,
     height,
     // Bytes. Matters here in a way it never did for audio: a film is a thousand

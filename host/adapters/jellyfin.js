@@ -212,6 +212,7 @@ class JellyfinAdapter {
       container: src.Container || item.Container || null,
       videoCodec: video.Codec || null,
       audioCodec: audio.Codec || null,
+      audioChannels: audio.Channels || null,
       width: video.Width || null,
       height: video.Height || null,
       size: src.Size || null
