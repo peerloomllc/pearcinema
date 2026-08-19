@@ -187,6 +187,23 @@ test('bestCopy: primary when connected, fallback when not, primary again when no
   assert.equal(M.bestCopy(entity, new Set()).libraryId, 'A')
 })
 
+test('CONNECTED IS NOT THE SAME AS ABLE, and the caller is what draws that line', () => {
+  // A host whose drive has been unplugged answers every request cheerfully and cannot
+  // read a single film. bestCopy only knows the set it is handed, so the fix is at the
+  // call site (src/bare.js pickCopyId subtracts the libraries whose source has gone) -
+  // pinned here because passing the wrong set is silent: it picks the one copy that
+  // will never play, and the player simply sits at 0:00.
+  //
+  // Tim's Arrival on the Pixel, 2026-08-19. The TCL played the same film only because
+  // a download short-circuits before any copy pick happens.
+  const entity = { copies: [{ libraryId: 'A', id: 'a' }, { libraryId: 'B', id: 'b' }] }
+
+  // Both online, A's disk gone: the caller hands over B alone and B is chosen.
+  assert.equal(M.bestCopy(entity, new Set(['B'])).libraryId, 'B')
+  // Handing over both - the bug - picks the copy that cannot be read.
+  assert.equal(M.bestCopy(entity, new Set(['A', 'B'])).libraryId, 'A')
+})
+
 test('bestCopy: the filter chip outranks the primary', () => {
   const entity = { copies: [{ libraryId: 'A', id: 'a' }, { libraryId: 'B', id: 'b' }] }
   assert.equal(M.bestCopy(entity, new Set(['A', 'B']), 'B').libraryId, 'B')
