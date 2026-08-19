@@ -748,3 +748,51 @@ test('A SAVED SOURCE WINS over the environment', async (t) => {
     await close()
   })
 })
+
+test('A LIBRARY DOES NOT BECOME EMPTY BY ITSELF', async (t) => {
+  // The guard that keeps a missing drive from being written down as an empty library.
+  //
+  // In a container, a bind mount whose drive has been remounted elsewhere looks
+  // exactly like a directory that is present and holds nothing - which happened to
+  // Tim's Umbrel on 2026-08-19, when the same disk came back as `Elements` instead of
+  // `Elements (3)`. Without this, an auto-rescan walks nothing, saves nothing, and the
+  // cache holding thousands of films is replaced by an empty one. The drive coming
+  // back does not undo that: every file has to be re-probed, and until it is, every
+  // paired phone sees a library that is simply gone.
+  const { root, dataDir } = await library(t)
+  const a = realAdapter({ root, dataDir })
+
+  const before = await a.scan()
+  assert.ok(before > 0)
+
+  // The drive goes away underneath, leaving the mount point itself present - the
+  // shape that fools the readable check above.
+  for (const entry of await fsp.readdir(root)) {
+    await fsp.rm(path.join(root, entry), { recursive: true, force: true })
+  }
+
+  await assert.rejects(() => a.scan({ force: true }), /refusing to replace it with an empty one/)
+
+  // AND THE LIBRARY IS STILL SERVED while it is wrong. Refusing costs nothing: what
+  // is already in memory keeps answering, so a rescan that runs at the wrong moment
+  // is a message rather than an outage.
+  const stats = await a.stats()
+  assert.equal(stats.movies, 4)
+  assert.equal(stats.episodes, 4)
+
+  // And the cache on disk was not overwritten, so a restart still comes up full.
+  const fresh = realAdapter({ root, dataDir })
+  assert.ok(await fresh.scan() > 0, 'the saved scan survived the drive going away')
+})
+
+test('a library that really is emptied can still be emptied', async (t) => {
+  // The guard is about a source that VANISHED, not about a user with no films. A host
+  // that has never seen anything has nothing to protect, so it scans to zero happily.
+  const { dataDir } = await library(t)
+  const empty = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-empty-'))
+  t.after(() => fsp.rm(empty, { recursive: true, force: true }))
+
+  const a = realAdapter({ root: empty, dataDir: await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-d-')) })
+  assert.equal(await a.scan(), 0)
+  void dataDir
+})
