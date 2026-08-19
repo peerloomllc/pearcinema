@@ -1790,10 +1790,10 @@ test('WHAT PEOPLE ASKED THIS LIBRARY FOR HAS SOMEWHERE TO APPEAR', async (t) => 
   // made requests from a paired phone and found nowhere they could show up
   // (2026-08-19).
   const { dom, doc, win, text } = await open(STATE, {
-    '/api/requests/received': {
+    '/api/asked': {
       items: [
-        { id: 'r1', title: 'Solaris', kind: 'movie', status: 'pending', count: 2, requester: 'o1', requesterLabel: 'Ben' },
-        { id: 'r2', title: 'Chernobyl', kind: 'series', status: 'added', count: 1, requester: 'o1', requesterLabel: 'Ben' }
+        { id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 2, requester: 'o1', requesterLabel: 'Ben' },
+        { id: 'r2', name: 'Chernobyl', kind: 'series', status: 'added', count: 1, requester: 'o1', requesterLabel: 'Ben' }
       ]
     }
   })
@@ -1812,9 +1812,47 @@ test('WHAT PEOPLE ASKED THIS LIBRARY FOR HAS SOMEWHERE TO APPEAR', async (t) => 
   assert.match(text(), /asked by Ben/)
   assert.match(text(), /asked 2 times/)
 
-  // Only the unanswered one offers an answer.
-  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
-  assert.equal(buttons.filter(b => b === 'Added it').length, 1)
+  // THE NAME COMES OFF THE FIELD THE STORE ACTUALLY USES. Every row read "Untitled"
+  // because this looked for `title` and a request carries `name` (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /Untitled/)
+
+  // SENTENCE CASE. The status words came straight off the wire in the store's own
+  // lowercase vocabulary and sat mid-sentence in a sub-line.
+  assert.match(text(), /Waiting for you · Film/)
+  assert.match(text(), /Added · Show/)
+
+  // A TICK AND A CROSS on the one waiting, and a way to clear the one that is done.
+  const labels = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.getAttribute('aria-label'))
+  assert.ok(labels.some(l => /Mark Solaris as added/.test(l)))
+  assert.ok(labels.some(l => /Decline the request for Solaris/.test(l)))
+  assert.ok(labels.some(l => /Clear the request for Chernobyl/.test(l)), 'an answered ask can be cleared')
+  assert.equal(labels.some(l => /Clear the request for Solaris/.test(l)), false, 'but not one still waiting')
+})
+
+test('answering a request changes that row and nothing else', async (t) => {
+  // It used to refetch the whole list and raise a notification, so answering one row
+  // redrew the page and threw a modal over it (Tim, 2026-08-19).
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/asked/resolve': { request: { id: 'r1', name: 'Solaris', kind: 'movie', status: 'added', count: 1, requesterLabel: 'Ben' } },
+    '/api/asked': {
+      items: [{ id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const tick = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /as added/.test(b.getAttribute('aria-label') || ''))
+  tick.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.match(text(), /Added · Film/, 'the row it changed says so')
+  assert.equal(doc.querySelector(".modal[role='alertdialog']"), null, 'and nothing is thrown over the page')
 })
 
 test('SOMEBODY WAITING FOR AN ANSWER IS VISIBLE FROM ANY PAGE', async (t) => {
@@ -1822,8 +1860,8 @@ test('SOMEBODY WAITING FOR AN ANSWER IS VISIBLE FROM ANY PAGE', async (t) => {
   // page, so a light that waited for it would appear only once you had already gone
   // looking (Tim, 2026-08-19, asking for the same treatment downloads get).
   const { dom, doc } = await open(STATE, {
-    '/api/requests/received': {
-      items: [{ id: 'r1', title: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
+    '/api/asked': {
+      items: [{ id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
     }
   })
   t.after(() => dom.window.close())
@@ -1834,10 +1872,19 @@ test('SOMEBODY WAITING FOR AN ANSWER IS VISIBLE FROM ANY PAGE', async (t) => {
   assert.ok(light, 'the bar says somebody is waiting')
   assert.match(light.getAttribute('aria-label'), /One request waiting/)
   assert.ok(light.querySelector('.dot'), 'and it is marked the way a running download is')
+
+  // NOT THE PEOPLE MARK, which already means "who can get in" in the same bar. Two
+  // lights with the same glyph and different meanings is worse than no light at all
+  // (Tim, 2026-08-19).
+  const people = [...doc.querySelectorAll('.barright button')]
+    .find(b => /people|devices/i.test(b.getAttribute('aria-label') || ''))
+  if (people) {
+    assert.notEqual(light.querySelector('svg')?.innerHTML, people.querySelector('svg')?.innerHTML)
+  }
 })
 
 test('nothing waiting means nothing in the bar', async (t) => {
-  const { dom, doc } = await open(STATE, { '/api/requests/received': { items: [] } })
+  const { dom, doc } = await open(STATE, { '/api/asked': { items: [] } })
   t.after(() => dom.window.close())
   const light = [...doc.querySelectorAll('.barright button')]
     .find(b => /request/i.test(b.getAttribute('aria-label') || ''))

@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Spinner } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Spinner, Bell, Check } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -289,7 +289,7 @@ function ReceivedCard ({ embedded = false }) {
   const [busy, setBusy] = useState('')
 
   const load = useCallback(async () => {
-    const r = await api('/api/requests/received').catch(() => null)
+    const r = await api('/api/asked').catch(() => null)
     setRows(r?.items || [])
   }, [])
 
@@ -301,19 +301,30 @@ function ReceivedCard ({ embedded = false }) {
     return off
   }, [load])
 
+  // ANSWERED IN PLACE. This used to refetch the whole list and raise a notification,
+  // so answering one row redrew the page and threw a modal over it (Tim, 2026-08-19).
+  // The row it changed is the only thing that changes.
   const answer = async (q, status) => {
     setBusy(q.id)
-    const r = await api('/api/requests/resolve', { id: q.id, status })
+    const r = await api('/api/asked/resolve', { id: q.id, status })
     setBusy('')
     if (r?.error) return notify('Not saved', r.error)
-    notify(status === 'added' ? 'Marked as added' : 'Declined',
-      status === 'added'
-        ? `${q.title || 'That'} is marked as added. Whoever asked is told wherever they are signed in.`
-        : `${q.title || 'That'} was declined. Whoever asked is told wherever they are signed in.`)
-    load()
+    setRows((rs) => (rs || []).map((x) => (x.id === q.id ? { ...x, ...(r.request || { status }) } : x)))
+  }
+
+  const forget = async (q) => {
+    setBusy(q.id)
+    const r = await api('/api/asked/remove', { id: q.id })
+    setBusy('')
+    if (r?.error) return notify('Not removed', r.error)
+    setRows((rs) => (rs || []).filter((x) => x.id !== q.id))
   }
 
   if (!rows?.length) return null
+
+  // Sentence case, because a sub-line is a sentence and these were coming straight
+  // off the wire in the store's own lowercase vocabulary (Tim, 2026-08-19).
+  const said = { pending: 'Waiting for you', added: 'Added', declined: 'Declined' }
 
   return (
     <div class={embedded ? '' : 'card'}>
@@ -323,24 +334,41 @@ function ReceivedCard ({ embedded = false }) {
           <div class='setrow' key={q.id}>
             <span class='rowmain'>
               <span class={'rowname ' + (q.status === 'added' ? 'good' : q.status === 'declined' ? 'warn' : '')}>
-                {q.title || 'Untitled'}
+                {q.name || 'Untitled'}
               </span>
               <span class='rowsub'>
-                {q.status} · {q.kind === 'series' ? 'show' : 'film'}
+                {said[q.status] || q.status}
+                {' · '}{q.kind === 'series' ? 'Show' : 'Film'}
                 {q.requesterLabel ? ` · asked by ${q.requesterLabel}` : ''}
                 {q.count > 1 ? ` · asked ${q.count} times` : ''}
               </span>
             </span>
-            {q.status === 'pending' && (
-              <span class='rowctl'>
-                <button class='ghost' disabled={busy === q.id} onClick={() => answer(q, 'added')}>Added it</button>
-                <button
-                  class='iconbtn danger' disabled={busy === q.id}
-                  aria-label={`Decline the request for ${q.title || 'this'}`} title='Decline'
-                  onClick={() => answer(q, 'declined')}
-                ><Close size={17} /></button>
-              </span>
-            )}
+            <span class='rowctl'>
+              {q.status === 'pending'
+                ? (
+                  <>
+                    {/* A TICK AND A CROSS, the one icon pair nobody has to interpret.
+                        Both carry their words to a screen reader and to a tooltip. */}
+                    <button
+                      class='iconbtn primary' disabled={busy === q.id}
+                      aria-label={`Mark ${q.name || 'this'} as added`} title='Added it'
+                      onClick={() => answer(q, 'added')}
+                    ><Check size={18} /></button>
+                    <button
+                      class='iconbtn danger' disabled={busy === q.id}
+                      aria-label={`Decline the request for ${q.name || 'this'}`} title='Decline'
+                      onClick={() => answer(q, 'declined')}
+                    ><Close size={17} /></button>
+                  </>
+                  )
+                : (
+                  <button
+                    class='iconbtn' disabled={busy === q.id}
+                    aria-label={`Clear the request for ${q.name || 'this'}`} title='Clear from this list'
+                    onClick={() => forget(q)}
+                  ><Trash size={17} /></button>
+                  )}
+            </span>
           </div>
         ))}
       </div>
@@ -1089,7 +1117,7 @@ export default function App () {
   useEffect(() => {
     let live = true
     const count = async () => {
-      const r = await api('/api/requests/received').catch(() => null)
+      const r = await api('/api/asked').catch(() => null)
       if (live) setPendingAsks((r?.items || []).filter(q => q.status === 'pending').length)
     }
     count()
@@ -1283,7 +1311,7 @@ export default function App () {
               title={pendingAsks === 1 ? 'One request waiting' : pendingAsks + ' requests waiting'}
               onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
             >
-              <PeopleIcon size={18} />
+              <Bell size={18} />
               <span class='dot' aria-hidden='true' />
             </button>
           )}

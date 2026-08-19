@@ -733,7 +733,12 @@ async function startDashboard ({
       // the package as "every request (the operator's dashboard/owner view)", and the
       // wire has had `request.all` for the phone's owner view all along. Only the
       // dashboard was missing.
-      if (req.method === 'GET' && url.pathname === '/api/requests/received') {
+      // `/api/asked`, NOT `/api/requests/...`, and the name is load-bearing. The
+      // dashboard proxies anything matching `/api/requests` to whichever remote
+      // library is selected, because asking and withdrawing are per-library - so these
+      // two, which are about THIS host and can never be about another, were being sent
+      // to somebody else's server and answered "no such remote route" (Tim, 2026-08-19).
+      if (req.method === 'GET' && url.pathname === '/api/asked') {
         try {
           const rows = await host.userState.listRequests()
           const labels = await host.grants.personLabels()
@@ -749,7 +754,21 @@ async function startDashboard ({
           return json(res, 400, { error: e.message })
         }
       }
-      if (req.method === 'POST' && url.pathname === '/api/requests/resolve') {
+      // AN ANSWERED REQUEST CAN BE CLEARED. Nothing removed them before, so the list
+      // only ever grew - a declined ask sat there for good (Tim, 2026-08-19).
+      if (req.method === 'POST' && url.pathname === '/api/asked/remove') {
+        const body = await readBody(req)
+        try {
+          const row = await host.userState.getRequest(String(body?.id || ''))
+          if (!row) return json(res, 404, { error: 'no such request' })
+          await host.userState.deleteRequest(row.id)
+          host.onevent?.('request:removed', { id: row.id })
+          return json(res, 200, { ok: true })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/asked/resolve') {
         const body = await readBody(req)
         const status = String(body?.status || '')
         if (!['added', 'declined'].includes(status)) return json(res, 400, { error: 'bad status' })
