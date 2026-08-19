@@ -275,8 +275,9 @@ test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  // Settings is a side navigation now; the artwork panel lives behind its entry.
-  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Artwork')
+  // Source, Artwork and Library are one page now - they were three nav items for one
+  // subject, and two held a single control each (Tim, 2026-08-19).
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Library')
   nav.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
@@ -1184,7 +1185,7 @@ async function openCasting (t, routes = {}) {
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /casting/i.test(b.textContent))
+  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /televisions/i.test(b.textContent))
   if (cast) {
     cast.dispatchEvent(new win.Event('click', { bubbles: true }))
     await new Promise(r => setTimeout(r, 80))
@@ -1570,4 +1571,63 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
   }
   const two = await openHost(t, twoCards)
   assert.match(two.text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
+})
+
+// --- five pages, down from eight ---------------------------------------------
+
+test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', async (t) => {
+  // Source, Artwork and Library were three nav items for one subject, and two of them
+  // held a single control each. Security was a password field with a page of its own.
+  // A section that MOVES must not turn every link and bookmark into a silent fall back
+  // to the first page - and the topbar's own download indicator points at the old
+  // remotes address, so this is load-bearing inside the app too.
+  const { doc, win, dom } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
+  assert.deepEqual(labels, ['Library', 'Televisions', 'Sharing', 'This host', 'Support development'])
+
+  const lands = async (hash, expect) => {
+    win.location.hash = 'settings/' + hash
+    win.dispatchEvent(new win.Event('hashchange'))
+    await new Promise(r => setTimeout(r, 60))
+    const on = doc.querySelector('.setnav button.on')
+    assert.equal(on.textContent.trim(), expect, `${hash} lands on ${expect}`)
+  }
+
+  await lands('source', 'Library')
+  await lands('artwork', 'Library')
+  await lands('casting', 'Televisions')
+  await lands('remotes', 'Sharing')
+  await lands('security', 'This host')
+  // AN ADDRESS THAT NEVER EXISTED LEAVES YOU WHERE YOU ARE. A stray hash should not
+  // yank somebody off the page they are reading; only a real section moves them, and
+  // only a fresh load with no usable hash starts at the first page.
+  await lands('nonsense', 'This host')
+})
+
+test('a merged page names itself once and labels what it holds', async (t) => {
+  const { doc, win, dom, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.equal(doc.querySelector('.setbody .setpage .setpagename').textContent.trim(), 'Library')
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Where the films are', 'Artwork'])
+
+  // The name is a row on the page now rather than a card of its own with a heading, a
+  // paragraph and a Save button under it.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.childNodes[0].textContent.trim())
+  assert.ok(rows.includes('Name'))
+  // And the source keeps everything an operator needs - the wizard is what drops the
+  // rescan controls, not the settings page.
+  assert.match(text(), /Auto-rescan/)
+  assert.match(text(), /Rescan now/)
 })

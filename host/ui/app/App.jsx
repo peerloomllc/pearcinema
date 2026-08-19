@@ -29,21 +29,36 @@ const CAPS = probeCapabilities()
 // moment two of them grew real controls; a slim nav gives each section the whole
 // width and the page one calm shape - the same shape Plex and Jellyfin settle on,
 // so it also reads as familiar.
+// FIVE PAGES, DOWN FROM EIGHT (Tim, 2026-08-19). Grouped by what somebody is thinking
+// about rather than by which file the code lives in:
+//
+//   Library      the collection - its name, where the films are, artwork
+//   Televisions  was Casting
+//   Sharing      was Remote libraries - libraries, downloads, requests
+//   This host    this machine - password, sessions, the video engine
+//   Support      unchanged
+//
+// Source, Artwork and Library were three nav items for one subject, and two of them
+// held a single control each.
 const SETTINGS_SECTIONS = [
-  ['source', 'Source'],
-  ['artwork', 'Artwork'],
   ['library', 'Library'],
-  ['support', 'Support development'],
-  ['remotes', 'Remote libraries'],
-  ['casting', 'Casting'],
-  ['host', 'This host']
+  ['televisions', 'Televisions'],
+  ['sharing', 'Sharing'],
+  ['host', 'This host'],
+  ['support', 'Support development']
 ]
 
-// PAGES THAT WENT SOMEWHERE ELSE. Eight sections is being consolidated to five (Tim,
-// 2026-08-19), and a section that moves must not turn every link and bookmark to it
-// into a silent fall back to Source. Security was one password field with a nav item
-// of its own; it lives on This host now, which is whose password it is.
-const MOVED_SECTIONS = { security: 'host' }
+// PAGES THAT WENT SOMEWHERE ELSE. A section that moves must not turn every link and
+// bookmark to it into a silent fall back to the first page - which is what an unknown
+// section did. The topbar's download indicator points at the old remotes address, so
+// this is load-bearing inside the app and not only for bookmarks.
+const MOVED_SECTIONS = {
+  security: 'host',
+  source: 'library',
+  artwork: 'library',
+  casting: 'televisions',
+  remotes: 'sharing'
+}
 
 // The hash names the page - #settings/source opens Settings on Source - so a
 // section is linkable, refreshable and reachable by anything that can only
@@ -53,7 +68,7 @@ const hashParts = () => String(location.hash || '').replace(/^#/, '').split('/')
 // Somebody else's libraries (proposal 2026-08-16-desktop-client): paste the
 // pairing link from their dashboard - the QR always carries its link underneath
 // for machines without a camera - and their films play in these same pages.
-function RemotePanel ({ remotes, reload, onSource, source }) {
+function RemotePanel ({ remotes, reload, onSource, source, embedded = false }) {
   const [link, setLink] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -75,8 +90,8 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
   }
 
   return (
-    <div class='card'>
-      <h3>Remote libraries</h3>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Remote libraries</h3>}
       <p class='hint'>
         Watch a library that lives on somebody else's server. On their dashboard,
         open a pairing window and send you the link under the code. Paste it here.
@@ -116,7 +131,7 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
 // Films kept on this machine from friends' libraries (phase 2). Hidden until
 // there is one - an empty downloads card is a feature announcement, and the
 // place downloads are discovered is the player's details sheet.
-function DownloadsCard ({ remotes, onPlay }) {
+function DownloadsCard ({ remotes, onPlay, embedded = false }) {
   const [items, setItems] = useState(null)
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -137,8 +152,8 @@ function DownloadsCard ({ remotes, onPlay }) {
   if (!items?.length) return null
   const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
   return (
-    <div class='card'>
-      <h3>Downloads</h3>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Downloads</h3>}
       <p class='hint'>
         Films kept on this machine. They play here even while the library they
         came from is offline.
@@ -188,7 +203,7 @@ function DownloadsCard ({ remotes, onPlay }) {
 
 // Your open asks, per remote library (phase 2) - made from an empty search on
 // a friend's library, watched and withdrawn here. Hidden until there is one.
-function RequestsCard ({ remotes }) {
+function RequestsCard ({ remotes, embedded = false }) {
   const [rows, setRows] = useState(null)
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -215,8 +230,8 @@ function RequestsCard ({ remotes }) {
   }, [remotes.map(r => r.libraryId).join(','), tick])
   if (!rows?.length) return null
   return (
-    <div class='card'>
-      <h3>Your requests</h3>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Your requests</h3>}
       <p class='hint'>
         What you have asked these libraries for. Ask by searching a friend's
         library for something it does not have.
@@ -362,8 +377,8 @@ function CastPanel () {
     : 'not set up'
 
   return (
-    <div class='card'>
-      <h3>Televisions</h3>
+    <>
+      <div class='setpage'><span class='setpagename'>Televisions</span></div>
 
       {targets === null && <p class='hint'>Looking…</p>}
 
@@ -477,7 +492,7 @@ function CastPanel () {
           </div>
         </>
       )}
-    </div>
+    </>
   )
 }
 
@@ -487,7 +502,10 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
     if (SETTINGS_SECTIONS.some(([id]) => id === s)) return s
     return MOVED_SECTIONS[s] || null
   }
-  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || 'source')
+  // 'library' IS THE FIRST PAGE, and this fallback has to move with the nav: it read
+  // 'source' after the five-page consolidation, which is not a section any more, so
+  // opening Settings with no hash rendered an empty page.
+  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || SETTINGS_SECTIONS[0][0])
   // The hash can change while Settings is already open - the topbar's
   // download indicator points at settings/remotes - so follow it live rather
   // than only reading it at mount.
@@ -517,32 +535,53 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
       </nav>
 
       <div class='setbody'>
-        {sec === 'source' && <SourcePanel state={state} reload={reload} />}
-
-        {sec === 'artwork' && <Metadata />}
-
+        {/* THE COLLECTION, in one page. Source, Artwork and Library were three nav
+            items for one subject, and two of them held a single control each. The
+            source picker keeps its own machinery inside its group - it is a small app
+            rather than a settings row, and the typed-path trap it was built around is
+            not something to reshape casually. */}
         {sec === 'library' && (
-          <div class='card'>
-            <h3>The library's name</h3>
-            <p class='hint'>This is the name a phone shows when it is paired with you.</p>
-            <div class='field'>
-              <input type='text' value={name} maxLength={64} onInput={e => setName(e.currentTarget.value)} />
-            </div>
-            <div class='actions'>
-              <button onClick={saveName} disabled={!name.trim() || name === state.library}>Save</button>
-            </div>
-          </div>
-        )}
-
-        {sec === 'remotes' && (
           <>
-            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />
-            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} />
-            <RequestsCard remotes={remotes} />
+            <div class='setpage'><span class='setpagename'>Library</span></div>
+
+            <div class='setrows'>
+              <div class='setrow'>
+                <span class='rowmain'>
+                  <span class='rowname'>Name</span>
+                  <span class='rowsub'>What a paired phone calls this library.</span>
+                </span>
+                <span class='rowctl'>
+                  <input
+                    type='text' value={name} maxLength={64}
+                    aria-label="This library's name"
+                    onInput={e => setName(e.currentTarget.value)}
+                    onBlur={() => { if (name.trim() && name !== state.library) saveName() }}
+                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                  />
+                </span>
+              </div>
+            </div>
+
+            <div class='setgroup'>Where the films are</div>
+            <SourcePanel state={state} reload={reload} embedded />
+
+            <div class='setgroup'>Artwork</div>
+            <Metadata embedded />
           </>
         )}
 
-        {sec === 'casting' && <CastPanel />}
+        {sec === 'sharing' && (
+          <>
+            <div class='setpage'><span class='setpagename'>Sharing</span></div>
+            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} embedded />
+            <div class='setgroup'>Downloads</div>
+            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} embedded />
+            <div class='setgroup'>Requests</div>
+            <RequestsCard remotes={remotes} embedded />
+          </>
+        )}
+
+        {sec === 'televisions' && <CastPanel />}
 
         {sec === 'support' && <SupportPanel />}
 
@@ -797,7 +836,7 @@ function SupportPanel () {
 
   return (
     <div class='card'>
-      <h3>Support development</h3>
+      <div class='setpage'><span class='setpagename'>Support development</span></div>
       <p class='hint' style='text-align:center'>
         No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
         helps keep it free, and it is entirely optional.

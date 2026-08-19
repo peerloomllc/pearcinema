@@ -159,7 +159,12 @@ function Detected ({ onFolders, onServer }) {
   )
 }
 
-export default function SourcePanel ({ state, reload, embedded = false }) {
+// TWO KINDS OF "NO CARD", and conflating them cost the Settings page its rescan
+// button. `wizard` is the first run: no chrome at all, and no rescan controls because
+// there is no library to keep fresh yet. `embedded` is the Library settings page: no
+// card and no heading, because the page already names itself - but every control the
+// operator needs is still there.
+export default function SourcePanel ({ state, reload, embedded = false, wizard = false }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
   const [roots, setRoots] = useState((current.roots || []).map(asRoot))
@@ -324,10 +329,10 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       )}
 
       {/* Equal-width buttons filling the row, the donor's action bar. */}
-      <div class={'srcactions' + (embedded || current.kind === 'empty' ? ' two' : '')}>
+      <div class={'srcactions' + (wizard || current.kind === 'empty' ? ' two' : '')}>
         <button class='ghost' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Checking…' : 'Test'}</button>
         <button onClick={save} disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
-        {!embedded && current.kind !== 'empty' && (
+        {!wizard && current.kind !== 'empty' && (
           <button class='ghost' onClick={rescan} disabled={!!busy}>{busy === 'rescan' ? 'Rescanning…' : 'Rescan now'}</button>
         )}
       </div>
@@ -335,7 +340,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       {/* Scheduled auto-rescan, the donor's control: pick new files up without a
           manual Rescan. Not offered during first-run setup - there is no library
           to keep fresh yet. */}
-      {!embedded && (
+      {!wizard && (
         <label class='autoscan'>
           <span>Auto-rescan</span>
           <select
@@ -377,11 +382,12 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     </>
   )
 
-  if (embedded) return Body
+  if (wizard) return Body
 
-  return (
-    <div class='card'>
-      <h3>Where the films are</h3>
+  // The banners belong to the source wherever it is shown - a settings page that
+  // dropped "two of these folders hold the same files" would be quieter and worse.
+  const Banners = (
+    <>
       {state.stats?.duplicates > 0 && (
         <div class='banner bad'>
           <b>Two of these folders hold the same {state.stats.duplicates === 1 ? 'file' : 'files'}.</b>{' '}
@@ -399,6 +405,15 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
           <div class='hint'>Paired devices can still reach this host. They just see an empty library until this is fixed.</div>
         </div>
       )}
+    </>
+  )
+
+  if (embedded) return <>{Banners}{Body}</>
+
+  return (
+    <div class='card'>
+      <h3>Where the films are</h3>
+      {Banners}
       {Body}
     </div>
   )
