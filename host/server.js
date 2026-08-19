@@ -762,12 +762,14 @@ class PearCinemaHost {
     if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') {
       return { mode: verdict.mode, reason: verdict.reason, playlist: null }
     }
-    if (!plan) {
-      return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
-    }
-    const playlist = hls.playlistFor(item, { plan })
+    const playlist = plan ? hls.playlistFor(item, { plan }) : null
     if (!playlist) {
-      return { mode: 'refuse', reason: 'this item reports no runtime, so a playlist cannot be computed', playlist: null }
+      // Two ways to get here and they deserve different words, because one is a
+      // fact about the film and the other is a fact about this host.
+      const reason = Number(item.runtime) > 0
+        ? 'this film has to be converted to reach that client, and this host cannot cut it into segments'
+        : 'this item reports no runtime, so a playlist cannot be computed'
+      return { mode: 'refuse', reason, playlist: null }
     }
     return {
       mode: verdict.mode,
