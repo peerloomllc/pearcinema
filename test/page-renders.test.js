@@ -1329,7 +1329,8 @@ test('SECURITY MOVED INTO THIS HOST, and the old link still lands there', async 
 test('one setting per row, and the explanation is a sub-line rather than a paragraph', async (t) => {
   const { doc, text } = await openHost(t)
 
-  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  // The first text node, so a row carrying a status chip is still named by its name.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.childNodes[0].textContent.trim())
   assert.deepEqual(rows, ['Password', 'This browser', 'Other browsers', 'Video engine', 'First-time setup'])
 
   // THE LIBRARY'S ADDRESS IS NOT A SETTING, and it was never a control either: every
@@ -1361,7 +1362,10 @@ test('ONE BUTTON PER ROW, because every control on the page is flush right', asy
   assert.ok(all.includes('Run again'))
 })
 
-test('the engine row is a reading of the setting until it is an edit of it', async (t) => {
+test('THE ENGINE FIELD DOES NOT MOVE WHILE YOU TYPE IN IT', async (t) => {
+  // Its Save used to appear the moment the number changed, which shoved the field left
+  // under the cursor. Always there and disabled until it can do something is what every
+  // other Save in this dashboard does anyway (Tim, 2026-08-19).
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
@@ -1369,18 +1373,32 @@ test('the engine row is a reading of the setting until it is an edit of it', asy
   }
   const { doc, win, text } = await openHost(t, state)
 
-  assert.match(text(), /managed about 10 in testing/)
   const num = doc.querySelector('.setrow input[type=number]')
   assert.equal(num.value, '4')
-  // No Save while nothing has changed - a button that does nothing is noise on every
-  // row it sits in.
-  const saves = () => [...doc.querySelectorAll('.setrow .rowctl button')].filter(b => /Save/.test(b.textContent))
-  assert.equal(saves().length, 0)
+
+  const save = () => [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Save/.test(b.textContent))
+  assert.ok(save(), 'the button is there before anything changes')
+  assert.equal(save().disabled, true, 'and it does nothing until the number differs')
 
   num.value = '6'
   num.dispatchEvent(new win.Event('input', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
-  assert.equal(saves().length, 1, 'and it appears the moment the number differs')
+  assert.equal(save().disabled, false)
+})
+
+test('A ROW\'S NAME AND ITS SUB-LINE ARE TWO LINES', async (t) => {
+  // They are spans inside a flex child. Without a block display they run together and
+  // the sub-line reads as part of the name - "PasswordOther browsers will need the new
+  // one." Every text assertion in this file passed while it was wrong, because the
+  // words were all present and in the right order; it took a screenshot to see.
+  const { dom, doc } = await openHost(t)
+
+  for (const row of doc.querySelectorAll('.setrow')) {
+    const sub = row.querySelector('.rowsub')
+    if (!sub) continue
+    assert.equal(dom.window.getComputedStyle(sub).display, 'block', 'the sub-line takes its own line')
+    assert.equal(dom.window.getComputedStyle(row.querySelector('.rowname')).display, 'block')
+  }
 })
 
 test('a password this host does not own cannot be changed from here', async (t) => {
@@ -1404,18 +1422,26 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a se
     transcode: { available: true, reason: null },
     transcodeCap: { cap: 4, source: 'default', measured: 10 }
   }
-  const { doc } = await openHost(t, state)
+  const { doc, text } = await openHost(t, state)
 
   const title = doc.querySelector('.setbody .setpage')
   assert.ok(title, 'the page names itself once, at the top')
   assert.match(title.querySelector('.setpagename').textContent, /This host/)
 
-  // The chip vocabulary already existed and Settings never used it, so every page
-  // stated its condition in a paragraph instead.
-  const chip = title.querySelector('.chip')
-  assert.ok(chip, 'and its condition is a chip')
-  assert.match(chip.textContent, /converts 4 at once/)
-  assert.ok(chip.className.includes('good'))
+  // THE CHIP BELONGS TO THE ROW IT IS ABOUT. Beside the page's name it was a fact
+  // with nothing to attach to - "converts 4 at once" reads as being about the whole
+  // host (Tim, 2026-08-19).
+  assert.equal(title.querySelector('.chip'), null)
+  const chip = [...doc.querySelectorAll('.setrow .rowname .chip')]
+  assert.equal(chip.length, 1)
+  assert.match(chip[0].closest('.rowname').textContent, /Video engine/)
+  assert.match(chip[0].textContent, /ready/)
+  assert.ok(chip[0].className.includes('good'))
+
+  // AND IT CLAIMS NOTHING ABOUT HARDWARE NOBODY MEASURED. The old line said "this
+  // hardware managed about 10 in testing" on every install, where the 10 is a constant
+  // from the machine this was built against.
+  assert.doesNotMatch(text(), /in testing/)
 
   // NO GROUP LABELS ON A FIVE-ROW PAGE. Structure where there is structure: the
   // merged Library page has two genuine subjects and gets them, this one does not and
@@ -1430,8 +1456,8 @@ test('a host that cannot convert says so in the chip, not in a paragraph', async
   const state = { ...STATE, transcode: { available: false, reason: 'no /dev/dri on this machine' } }
   const { doc, text } = await openHost(t, state)
 
-  const chip = doc.querySelector('.setpage .chip')
-  assert.match(chip.textContent, /no conversions/)
+  const chip = doc.querySelector('.setrow .rowname .chip')
+  assert.match(chip.textContent, /not available/)
   assert.equal(chip.className.includes('good'), false, 'and it does not claim to be fine')
   // The reason is still there, as the whole of that row's sub-line rather than a
   // sentence wrapped around it.

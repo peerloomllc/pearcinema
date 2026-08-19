@@ -1305,3 +1305,14 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * button width the most visible thing on the page. The same minimum the card action
  * rows have used since 2026-08-15, for the same reason and now in a second place. */
 .setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
+
+/* A ROW'S NAME AND ITS SUB-LINE ARE TWO LINES. They are spans inside a flex child, so
+ * without this they run together and the sub-line reads as part of the name -
+ * "PasswordOther browsers will need the new one." (Tim, 2026-08-19, with a screenshot;
+ * every text assertion in the suite passed while it was wrong, because the words were
+ * all present and in the right order). */
+.setrow .rowname, .setrow .rowsub { display: block }
+
+/* A status chip rides its row's name rather than the page's. `.rowname` is a block, so
+ * the chip goes inside it to stay on the same line. */
+.setrow .rowname .chip { margin-left: .45rem; vertical-align: .05em }

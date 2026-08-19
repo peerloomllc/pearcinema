@@ -618,25 +618,28 @@ function HostPanel ({ state, reload }) {
       ? 'Set by the platform that installed this. Change it there.'
       : 'Other browsers will need the new one.'
 
-  // The chip beside the page's name already says how many, so this says only what the
-  // chip cannot: where the ceiling is, and how to switch it off.
+  // NO CLAIM ABOUT HARDWARE NOBODY MEASURED. This line used to read "this hardware
+  // managed about 10 in testing" on every install, and the 10 is a constant from the
+  // N100 this was built against - a number about OUR machine, presented as a number
+  // about theirs (Tim, 2026-08-19). What is true everywhere is what zero does.
   const engineSub = t.available
-    ? `0 turns it off. This hardware managed about ${c.measured || 10} in testing.`
+    ? '0 turns it off.'
     : t.reason || 'The hardware probe did not pass.'
 
   // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
   // bad variants since it had a library page, and Settings never used one - so every
   // page said its state in a paragraph instead.
+  //
+  // ON THE ROW IT IS ABOUT, not beside the page's name. Up there it was a fact with
+  // nothing to attach to: "converts 4 at once" reads as being about the whole host
+  // (Tim, 2026-08-19).
   const engineChip = t.available
-    ? { cls: 'chip good', text: `converts ${c.cap ?? 4} at once` }
-    : { cls: 'chip', text: 'no conversions' }
+    ? { cls: 'chip good', text: 'ready' }
+    : { cls: 'chip', text: 'not available' }
 
   return (
     <>
-      <div class='setpage'>
-        <span class='setpagename'>This host</span>
-        <span class={engineChip.cls}>{engineChip.text}</span>
-      </div>
+      <div class='setpage'><span class='setpagename'>This host</span></div>
 
       <div class='setrows'>
         <div class='setrow'>
@@ -696,7 +699,7 @@ function HostPanel ({ state, reload }) {
 
         <div class='setrow'>
           <span class='rowmain'>
-            <span class='rowname'>Video engine</span>
+            <span class='rowname'>Video engine <span class={engineChip.cls}>{engineChip.text}</span></span>
             <span class='rowsub'>{engineSub}</span>
           </span>
           {t.available && (
@@ -706,11 +709,14 @@ function HostPanel ({ state, reload }) {
                 aria-label='How many films this host will convert at once'
                 onInput={e => setCap(e.currentTarget.value)}
               />
-              {/* Appears only when the number has actually changed, so the row is a
-                  reading of the setting until it is an edit of it. */}
-              {String(c.cap) !== String(cap) && cap !== '' && (
-                <button onClick={saveCap} disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
-              )}
+              {/* ALWAYS THERE, DISABLED UNTIL IT CAN DO SOMETHING - which is what every
+                  other Save in this dashboard does. Appearing only once the number
+                  changed meant the field jumped left the moment you typed in it, and a
+                  control that moves under the cursor is worse than a button that is
+                  briefly grey (Tim, 2026-08-19). */}
+              <button onClick={saveCap} disabled={busy || String(c.cap) === String(cap) || cap === ''}>
+                {busy ? 'Saving…' : 'Save'}
+              </button>
             </span>
           )}
         </div>
