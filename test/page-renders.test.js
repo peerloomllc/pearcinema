@@ -1232,8 +1232,12 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   })
 
   assert.match(text(), /Living Room/, 'the television is on the page with no Home Assistant anywhere')
-  assert.match(text(), /found on your network/)
   assert.match(text(), /Ready/)
+  // THE ROUTE IS NOT REPEATED ON EVERY ROW. Being found on the network is the default
+  // and saying so on each television was noise; only the exception is marked, and the
+  // routes have a section of their own below (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /Ready · found on your network/)
+  assert.match(text(), /1 television found/)
 
   // THE SAME ROWS EVERY SETTINGS PAGE USES, and the name carries the state the way
   // the video engine's does on This host (Tim, 2026-08-19: give the rest of the pages
@@ -1285,7 +1289,7 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
     '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
   })
 
-  assert.match(text(), /Home Assistant: not set up/, 'its status is honest, and it is one line')
+  assert.match(text(), /Not set up\. Only needed for a television your server cannot find on its own/, 'honest, and only where it applies')
   // The token field is not on screen until somebody asks for it.
   assert.equal(doc.querySelector('input[type=password]'), null)
 
@@ -1640,4 +1644,51 @@ test('a merged page names itself once and labels what it holds', async (t) => {
   // rescan controls, not the settings page.
   assert.match(text(), /Auto-rescan/)
   assert.match(text(), /Rescan now/)
+})
+
+test('THE ROUTES ARE ROWS, not a footer of mismatched buttons', async (t) => {
+  // The footer had Look again on the left and Set up on the right, two buttons of
+  // different widths on one line - the asymmetry Tim caught on This host, grown back
+  // here. They are rows now, under a label, because a route sitting unlabelled among
+  // televisions would read as one.
+  const { doc, text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
+  })
+
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['How they are found'])
+
+  const names = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.deepEqual(names, ['Living Room', 'On your network', 'Home Assistant'])
+
+  // One worded button per row, so the right-hand column is one width.
+  for (const row of doc.querySelectorAll('.setrow')) {
+    assert.ok(row.querySelectorAll('.rowctl button:not(.iconbtn)').length <= 1)
+  }
+  assert.equal(doc.querySelector('.tvfoot'), null, 'the footer is gone, not restyled')
+  void text
+})
+
+test('being hidden is not said twice', async (t) => {
+  // The eye beside the row is already saying it (Tim, 2026-08-19).
+  const { text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [{ ...ROKU_TARGET, hidden: true }], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+  assert.doesNotMatch(text(), /hidden from phones/)
+})
+
+test('an empty list still offers both ways to fix itself', async (t) => {
+  // The routes used to be a footer that rendered regardless; keeping that property
+  // matters more now they are rows, because a page with no televisions is exactly when
+  // somebody needs Look again and Set up.
+  const { doc, text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+
+  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(buttons.includes('Look again'))
+  assert.ok(buttons.includes('Set up'))
+  // And the setup story is two clauses, not the four-line paragraph it was.
+  assert.match(text(), /None yet\. Your server finds televisions on its own network, and a Roku also needs the free Media Assistant channel installed on it\./)
 })

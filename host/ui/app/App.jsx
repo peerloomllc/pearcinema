@@ -382,6 +382,7 @@ function CastPanel () {
 
   const rows = targets || []
   const viaHa = rows.filter(t => t.via !== 'roku')
+  const found = rows.filter(t => t.via === 'roku')
   const anyOff = rows.some(t => !isReachable(t))
   const haStatus = cfg?.tokenSet && cfg?.enabled
     ? `connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}`
@@ -393,14 +394,14 @@ function CastPanel () {
 
       {targets === null && <p class='hint'>Looking…</p>}
 
-      {/* THE ONLY PLACE THE SETUP STORY IS TOLD, because it is the only moment it is
-          any use: an empty list is exactly when somebody wants to know what would
-          make it not empty. */}
+      {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
+          block left on any Settings page - for a situation most people are never in.
+          The Media Assistant fact stays because nobody could guess it; the rest of the
+          explanation was the page describing itself. */}
       {targets !== null && rows.length === 0 && (
         <p class='hint'>
-          None yet. Your server finds televisions on its own network within a few seconds
-          of one being switched on. A Roku also needs the free {mediaChannel} channel
-          installed on it, which is the only one that will play a film handed to it.
+          None yet. Your server finds televisions on its own network, and a Roku also
+          needs the free {mediaChannel} channel installed on it.
         </p>
       )}
 
@@ -413,12 +414,14 @@ function CastPanel () {
                     This host - and the words are in the line below, so nobody has to
                     tell green from amber to read the row. */}
                 <span class={'rowname ' + toneFor(t)}>{t.name}</span>
+                {/* ONE CLAUSE. The state, and then only what is unusual about this
+                    television: that it came through Home Assistant rather than being
+                    found, or that it is a speaker rather than a screen. Being hidden is
+                    not said at all - the eye beside it is already saying it. */}
                 <span class='rowsub'>
                   {readableState(t)}
-                  {' · '}
-                  {t.via === 'roku' ? 'found on your network' : 'via Home Assistant'}
+                  {t.via !== 'roku' ? ' · via Home Assistant' : ''}
                   {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
-                  {t.hidden ? ' · hidden from phones' : ''}
                 </span>
               </span>
               <span class='rowctl'>
@@ -456,24 +459,48 @@ function CastPanel () {
         </p>
       )}
 
-      {/* HOW THEY ARE FOUND, as a footer rather than a section. Finding is always on
-          and needs nothing said about it; Home Assistant is one optional extra, and a
-          status plus a way in is the whole of what it needs on screen. */}
-      <div class='tvfoot'>
-        <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
-        <span class='hint grow'>Home Assistant: {haStatus}</span>
-        <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
-          {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
-        </button>
+      {/* THE ROUTES ARE ROWS TOO, rather than a footer with two buttons of different
+          widths on one line - which is the asymmetry Tim caught on This host, and it
+          had grown back here. A group label because a route sitting unlabelled among
+          televisions would read as one. Always shown, so an empty list still offers
+          both ways to fix itself. */}
+      <div class='setgroup'>How they are found</div>
+
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>On your network</span>
+            <span class='rowsub'>
+              {found.length === 0
+                ? 'Nothing found yet.'
+                : `${found.length} television${found.length === 1 ? '' : 's'} found.`}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Home Assistant</span>
+            <span class='rowsub'>
+              {cfg?.tokenSet && cfg?.enabled
+                ? `Connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}.`
+                : 'Not set up. Only needed for a television your server cannot find on its own.'}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
+              {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
+            </button>
+          </span>
+        </div>
       </div>
 
       {haOpen && cfg && (
-        <>
-          <p class='hint'>
-            Only for televisions your server cannot find on its own: a Chromecast, a
-            Google TV, a television with Cast built in. Make a long-lived access token on
-            your Home Assistant profile page.
-          </p>
+        <div class='rowopen'>
+          <p class='hint'>Make a long-lived access token on your Home Assistant profile page.</p>
           <div class='field'>
             <label>Home Assistant address</label>
             <input
@@ -506,7 +533,7 @@ function CastPanel () {
               <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
             )}
           </div>
-        </>
+        </div>
       )}
     </>
   )

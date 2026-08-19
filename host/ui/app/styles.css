@@ -1195,14 +1195,11 @@ p.error { color: var(--danger); font-size: .85rem }
 aside.sheet h3, .sheet-head h3 { text-align: center }
 .modal-head h3, .modal h3:first-child { text-align: center }
 
-/* How televisions are found, as a footer rather than a section of its own. The rows
-   themselves are `.setrow` now - the same shape every Settings page uses - rather than
-   the bespoke pair this page grew before there was one. */
-.tvfoot {
-  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
-  margin-top: .7rem; padding-top: .75rem; border-top: 1px solid var(--line);
-}
-.tvfoot .grow { flex: 1 1 auto; margin: 0 }
+/* The televisions page uses `.setrow` throughout now - the same shape every Settings
+   page uses - so the bespoke row and footer styles it grew before there was one are
+   gone rather than left as a second way to do the same thing. How televisions are
+   found is two rows under a group label, not a footer with two mismatched buttons on
+   one line (Tim, 2026-08-19). */
 
 /* SETTINGS ROWS.
  *
