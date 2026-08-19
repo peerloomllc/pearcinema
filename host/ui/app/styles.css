@@ -1159,7 +1159,9 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 /* --- Support Development (the donor's modal body, as a Settings card) ----- */
 
 .donate-tabs { display: flex; justify-content: center; gap: .5rem; margin: .3rem 0 .9rem }
-.donate-qr { display: flex; justify-content: center }
+/* Room above the code. The picker sat almost on top of it, so the three tabs and the
+ * QR read as one block rather than as a choice and its answer (Tim, 2026-08-19). */
+.donate-qr { display: flex; justify-content: center; margin-top: 1.3rem }
 .donate-qr svg { width: 220px; height: 220px; border-radius: 10px; background: #fff; padding: 8px }
 /* TWO LINES' WORTH, ALWAYS. Lightning and on-chain need two lines and the card one,
  * so switching rails moved the address box and the buttons under it down and back up
