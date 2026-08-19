@@ -1211,7 +1211,7 @@ function SupportPanel () {
         <b>Bitcoin is preferred</b>, over Lightning for a small amount or on-chain for a
         larger one. A card works too.
       </p>
-      <div class='seg' style='max-width:22rem;margin:0 auto .9rem'>
+      <div class='seg' style='max-width:22rem;margin:1.5rem auto .9rem'>
         <button class={tab === 'ln' ? 'on' : ''} onClick={() => { setTab('ln'); setCopied(false) }}>Lightning</button>
         <button class={tab === 'onchain' ? 'on' : ''} onClick={() => { setTab('onchain'); setCopied(false) }}>On-chain</button>
         <button class={tab === 'usd' ? 'on' : ''} onClick={() => { setTab('usd'); setCopied(false) }}>Card</button>
