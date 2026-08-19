@@ -383,8 +383,12 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   add.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Use /library'))
+  // The button says "Use this folder" rather than "Use /library/...": the path is in
+  // the header above it, and a button that changes width at every step is a button
+  // that moves under the pointer (Tim, 2026-08-19).
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use this folder')
   assert.ok(use, 'the picker opened on what the host can see')
+  assert.match(doc.querySelector('.picker .head .mono').textContent, /\/library/)
   use.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 

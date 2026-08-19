@@ -18,7 +18,7 @@
 import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
 import { notify, askConfirm, Modal } from './ui'
-import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
+import { Drive, Film, Folder, Server, Blocked, Close, ChevronUp } from './icons'
 
 // WHAT A FOLDER HOLDS, in the words somebody would use about their own shelves.
 //
@@ -83,10 +83,23 @@ function FolderPicker ({ onPick, onClose }) {
 
       <div class='picker'>
         <div class='head'>
-          <button class='ghost small' disabled={!data?.parent || busy} onClick={() => go(data.parent)}>Up</button>
+          {/* AN ARROW, because "Up" is a word doing an icon's job in the one place
+              every file browser ever made has used the same picture (Tim,
+              2026-08-19). */}
+          <button
+            class='iconbtn' disabled={!data?.parent || busy}
+            onClick={() => go(data.parent)}
+            aria-label='Up one folder' title='Up one folder'
+          >
+            <ChevronUp size={16} />
+          </button>
           <span class='mono' style='flex:1;word-break:break-all'>{at}</span>
         </div>
-        <div class='list'>
+        {/* KEYED ON WHERE WE ARE, so stepping into a folder replays the fade rather
+            than swapping the rows underneath the cursor. The list is a fixed height:
+            the window used to grow and shrink with however many folders happened to be
+            in one, which threw the buttons around under the pointer. */}
+        <div class='list' key={at}>
           {busy && <div class='item'>Reading…</div>}
           {!busy && data?.mounts?.length > 0 && data.mounts.map(m => (
             <button class='item' key={'m' + m} onClick={() => go(m)}>
@@ -108,10 +121,13 @@ function FolderPicker ({ onPick, onClose }) {
 
       {err && <div class='banner bad' style='margin-top:.7rem'>{err}</div>}
 
-      <div class='confirm-actions'>
+      {/* Centred, like every other pair of buttons in a window - and the path lives in
+          the header above rather than inside the button, which was a button that
+          changed width at every step. */}
+      <div class='confirm-actions center'>
         <button class='ghost' onClick={onClose}>Cancel</button>
         <button disabled={busy || !data} onClick={() => { onPick(at); onClose() }}>
-          Use {at}
+          Use this folder
         </button>
       </div>
     </div>

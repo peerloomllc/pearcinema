@@ -614,7 +614,14 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   display: flex; align-items: center; gap: .5rem; padding: .5rem .7rem;
   background: var(--card-2); border-bottom: 1px solid var(--line); font-size: .85rem;
 }
-.picker .list { max-height: 17rem; overflow: auto }
+/* A FIXED HEIGHT, not a maximum. The window grew and shrank with however many
+ * folders happened to be inside the one you opened, so the buttons underneath moved
+ * every time you stepped in (Tim, 2026-08-19). The rows fade in on each step, which
+ * is what tells you the list changed now that its box does not. */
+.picker .list { height: 17rem; overflow: auto }
+.picker .list { animation: pickfade .16s ease-out }
+@keyframes pickfade { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) { .picker .list { animation: none } }
 .picker .item {
   display: flex; align-items: center; gap: .5rem; width: 100%;
   background: none; border: none; border-bottom: 1px solid var(--line);
@@ -1118,9 +1125,11 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
  * words, so "Films" and "TV shows" and "Automatic" made three different boxes down one
  * column (Tim, 2026-08-19). */
 .rootrow select { width: 7.5rem }
-/* The row carries a second line now - what Automatic decided - so it aligns to the top
- * like a settings row rather than centring on a single line. */
-.rootrow { align-items: flex-start }
+/* CENTRED ON THE ROW, not aligned to its top. The chooser is taller than a line of
+ * text, so aligning to the top left the path sitting against the ceiling with a gap
+ * under it (Tim, 2026-08-19, on the padding). The path and what it was read as sit as
+ * one block against the middle of the control beside them. */
+.rootrow { align-items: center }
 .rootrow .rowmain { flex: 1 1 0; min-width: 0 }
 .rootrow .rowsub { display: block; color: var(--muted); font-size: .78rem; margin-top: .2rem }
 .rootrow .rowctl { display: flex; align-items: center; gap: .4rem; flex: 0 0 auto }
