@@ -154,7 +154,7 @@ class Televisions {
 
   setHidden (id, hidden) {
     const row = this.rows.get(String(id))
-    if (!row) throw new Error('this library has never met that television')
+    if (!row) throw new Error('This library has never met that television.')
     row.hidden = !!hidden
     this._write()
     this.log('televisions:hidden', { id: row.id, hidden: row.hidden })

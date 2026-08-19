@@ -771,7 +771,7 @@ test('A LIBRARY DOES NOT BECOME EMPTY BY ITSELF', async (t) => {
     await fsp.rm(path.join(root, entry), { recursive: true, force: true })
   }
 
-  await assert.rejects(() => a.scan({ force: true }), /refusing to replace it with an empty one/)
+  await assert.rejects(() => a.scan({ force: true }), /Refusing to replace it with an empty one/)
 
   // AND THE LIBRARY IS STILL SERVED while it is wrong. Refusing costs nothing: what
   // is already in memory keeps answering, so a rescan that runs at the wrong moment
@@ -816,7 +816,7 @@ test('THE HOST NOTICES ITS DRIVE HAS GONE, without scanning to find out', async 
   assert.equal((await a.ping()).ok, true, 'the folder is still readable, which is the trap')
   const gone = await a.health()
   assert.equal(gone.ok, false)
-  assert.match(gone.detail, /is the drive still mounted/)
+  assert.match(gone.detail, /Is the drive still mounted/)
 
   // ONE MISSING FILM IS A DELETED FILM, not a missing disk. The check only calls the
   // source gone when NONE of the files it knows about are there.

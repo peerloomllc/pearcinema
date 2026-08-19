@@ -668,7 +668,7 @@ function HostPanel ({ state, reload }) {
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. 0 turns it off.`
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. Setting it to 0 turns conversions off.`
 
   // THE NAME CARRIES THE STATE, not a pill beside it (Tim, 2026-08-19). A chip was one
   // more object on a page whose whole problem was objects, and this row was already the

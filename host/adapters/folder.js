@@ -237,7 +237,7 @@ class FolderAdapter {
 
     return {
       ok: false,
-      detail: `${this.rootPaths().join(', ')} is readable but holds none of this library's files - is the drive still mounted?`
+      detail: `None of this library's files are in ${this.rootPaths().join(', ')}. Is the drive still mounted?`
     }
   }
 
@@ -299,8 +299,8 @@ class FolderAdapter {
     // sourceError the dashboard shows.
     if (!files.length && this._byId.size > 0) {
       throw new Error(
-        `${this.rootPaths().join(', ')} holds no videos, but this library has ${this._byId.size} - ` +
-        'refusing to replace it with an empty one. Check the drive is still mounted.'
+        `This library has ${this._byId.size} items, but ${this.rootPaths().join(', ')} now holds no videos. ` +
+        'Refusing to replace it with an empty one. Check that the drive is still mounted.'
       )
     }
 

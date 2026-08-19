@@ -401,13 +401,13 @@ class RokuSpeakers {
     // person waits four seconds for a socket timeout and is told "roku timed out".
     if (!this.devices.has(String(entityId))) {
       const known = this.televisions?.get(entityId)
-      throw new Error(`${known?.name || 'that television'} is not answering - switch it on and try again`)
+      throw new Error(`${known?.name || 'That television'} is not answering. Switch it on and try again.`)
     }
     // The channel this device actually has, learned at scan time. A device that reached
     // the roster has one by construction; a stale id is still worth a clear failure over
     // a 404 nobody can read.
     const channel = this.devices.get(String(entityId))?.channel
-    if (!channel) throw new Error(`that Roku cannot be handed a film - install ${MEDIA_CHANNEL_NAME} on it`)
+    if (!channel) throw new Error(`That Roku cannot be handed a film. Install ${MEDIA_CHANNEL_NAME} on it.`)
     const q = new URLSearchParams({ u: url, t: 'v', videoFormat: format === 'mkv' ? 'mkv' : format })
     if (title) q.set('videoName', title)
     await this._ecp(host, `/launch/${channel}?${q.toString()}`, { method: 'POST' })
