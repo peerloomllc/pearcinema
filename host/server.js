@@ -34,6 +34,11 @@ const subtitles = require('./subtitles')
 const hls = require('./hls')
 const keyframes = require('./keyframes')
 
+// How often the host asks whether its library is still on the disk. A minute is
+// often enough that nobody watches a dead grid for long, and cheap enough to be
+// invisible: five stats against files it already knows the paths of.
+const SOURCE_CHECK_MS = 60_000
+
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
 //
@@ -67,6 +72,9 @@ class PearCinemaHost {
     this.sourceFrom = 'none'
     this.source = this._readSource()
     this.sourceError = null
+    // Set by the watchdog, so that clearing the message again is only ever undoing
+    // its own and never a failed scan's.
+    this._sourceGone = false
     // Non-null while a scan is running, so the page can say "reading your library,
     // 1,500 of 2,986" instead of showing an empty grid that looks like a bug.
     this.scanning = null
@@ -650,12 +658,47 @@ class PearCinemaHost {
     }
   }
 
+  // THE WATCHDOG. A drive that goes away does not announce itself: in a container a
+  // bind mount whose disk has been remounted elsewhere leaves a directory that is
+  // present, readable and empty, so the host stays green while every film 404s. That
+  // is what happened to Tim's Umbrel on 2026-08-19 and what nothing on any screen
+  // said. Asked every minute, and it is five stats - not a scan.
+  //
+  // IT ONLY CLEARS WHAT IT SET. A scan that failed for its own reasons owns
+  // `sourceError` until a scan succeeds; this must not tidy that away underneath it.
+  _armWatchdog () {
+    if (this._watchdog) clearInterval(this._watchdog)
+    this._watchdog = setInterval(() => { this._checkSource().catch(() => {}) }, SOURCE_CHECK_MS)
+    this._watchdog.unref?.()
+  }
+
+  async _checkSource () {
+    const adapter = this._inner || this.adapter
+    if (typeof adapter?.health !== 'function') return null
+
+    const health = await adapter.health()
+    if (health.ok) {
+      if (this._sourceGone) {
+        this._sourceGone = false
+        this.sourceError = null
+        this.log('host:source-back', {})
+      }
+      return health
+    }
+
+    if (!this._sourceGone) this.log('host:source-gone', { detail: health.detail })
+    this._sourceGone = true
+    this.sourceError = health.detail
+    return health
+  }
+
   // The one rescan everybody calls - the dashboard button, the auto-rescan
   // timer - so the sourceError bookkeeping cannot drift between them.
   async rescan () {
     try {
       const n = await this.adapter.scan({ force: true })
       this.sourceError = null
+      this._sourceGone = false
       return n
     } catch (e) {
       this.sourceError = e.message
@@ -932,6 +975,7 @@ class PearCinemaHost {
     const scan = this._scan({ rescan }).then(() => this._autoMetadata())
     // The saved auto-rescan interval survives a restart the way the name does.
     this._armRescan()
+    this._armWatchdog()
     if (waitForScan) await scan
     return this
   }
@@ -1053,6 +1097,7 @@ class PearCinemaHost {
 
   async close () {
     if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = null }
+    if (this._watchdog) { clearInterval(this._watchdog); this._watchdog = null }
     // BEFORE the host, and unconditionally. An ffmpeg left running after the daemon
     // exits is an orphan holding a file handle on somebody's library drive, and on a
     // small box it is the whole box.

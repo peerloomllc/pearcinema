@@ -206,6 +206,41 @@ class FolderAdapter {
     }
   }
 
+  // IS THE LIBRARY STILL THERE? Asked on a timer rather than only when something
+  // scans, because the failure this exists for is silent: a container's bind mount
+  // whose drive has been remounted elsewhere leaves a directory that is present,
+  // readable and empty, so the host looks perfectly healthy while every film 404s.
+  //
+  // READABLE IS NOT ENOUGH, which is what `ping()` above answers and why this is a
+  // second method. The stronger question is whether the files this library is made of
+  // are still where it left them - so it stats a handful of them, and only calls the
+  // source gone when NONE of them are. One missing film is a deleted film; none of
+  // them is a missing disk.
+  async health () {
+    if (!this.roots.length) return { ok: false, detail: 'no folders configured' }
+
+    const visible = this.visibleRoots()
+    if (!visible.length) {
+      return { ok: false, detail: `no configured folder is readable: ${this.rootPaths().join(', ')}` }
+    }
+
+    // Nothing scanned yet is nothing to check against, and not a fault.
+    const sample = []
+    for (const file of this._paths.values()) {
+      sample.push(file)
+      if (sample.length === 5) break
+    }
+    if (!sample.length) return { ok: true }
+
+    const present = await Promise.all(sample.map(f => fsp.stat(f).then(() => true, () => false)))
+    if (present.some(Boolean)) return { ok: true }
+
+    return {
+      ok: false,
+      detail: `${this.rootPaths().join(', ')} is readable but holds none of this library's files - is the drive still mounted?`
+    }
+  }
+
   // --- scanning -------------------------------------------------------------
 
   // One scan at a time. A cold host answering a screen of requests would otherwise
