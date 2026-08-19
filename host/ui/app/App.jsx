@@ -33,8 +33,8 @@ const CAPS = probeCapabilities()
 // about rather than by which file the code lives in:
 //
 //   Library      the collection - its name, where the films are, artwork
-//   Casting      televisions and speakers, and how they are found
 //   Sharing      was Remote libraries - libraries, downloads, requests
+//   Casting      televisions and speakers, and how they are found
 //   This host    this machine - password, sessions, the video engine
 //   Support      unchanged
 //
@@ -45,10 +45,14 @@ const CAPS = probeCapabilities()
 // speakers Home Assistant knows about - and calling a speaker a television is simply
 // wrong. Casting is the one word that covers everything on the page and it is the verb
 // people use for the action.
+// THE ORDER IS HOW OFTEN, AND WHAT ABOUT (Tim, 2026-08-19). Library and Sharing are
+// both about the collection and the people who see it, and Sharing is where a request
+// waiting for an answer lives - the light on the top bar points at it. Casting and This
+// host are things set up once, so they sit below.
 const SETTINGS_SECTIONS = [
   ['library', 'Library'],
-  ['casting', 'Casting'],
   ['sharing', 'Sharing'],
+  ['casting', 'Casting'],
   ['host', 'This host'],
   ['support', 'Support development']
 ]
@@ -1200,10 +1204,17 @@ function SupportPanel () {
         No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
         helps keep it free, and it is entirely optional.
       </p>
+      {/* WHICH ONE, AND WHICH ONE WE PREFER. Two of the three rails are Bitcoin and
+          nothing on the page said so - "Lightning" and "On-chain" are only obvious to
+          somebody who already knows what they are (Tim, 2026-08-19). */}
+      <p class='hint center'>
+        <b>Bitcoin is preferred</b>, over Lightning for a small amount or on-chain for a
+        larger one. A card works too.
+      </p>
       <div class='seg' style='max-width:22rem;margin:0 auto .9rem'>
         <button class={tab === 'ln' ? 'on' : ''} onClick={() => { setTab('ln'); setCopied(false) }}>Lightning</button>
         <button class={tab === 'onchain' ? 'on' : ''} onClick={() => { setTab('onchain'); setCopied(false) }}>On-chain</button>
-        <button class={tab === 'usd' ? 'on' : ''} onClick={() => { setTab('usd'); setCopied(false) }}>USD</button>
+        <button class={tab === 'usd' ? 'on' : ''} onClick={() => { setTab('usd'); setCopied(false) }}>Card</button>
       </div>
       {rails === null && (
         <div class='waiting'>

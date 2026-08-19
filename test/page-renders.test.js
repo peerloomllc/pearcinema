@@ -1687,7 +1687,7 @@ test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', asyn
   await new Promise(r => setTimeout(r, 60))
 
   const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
-  assert.deepEqual(labels, ['Library', 'Casting', 'Sharing', 'This host', 'Support development'])
+  assert.deepEqual(labels, ['Library', 'Sharing', 'Casting', 'This host', 'Support development'])
 
   const lands = async (hash, expect) => {
     win.location.hash = 'settings/' + hash

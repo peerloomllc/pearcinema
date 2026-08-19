@@ -1161,7 +1161,13 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 .donate-tabs { display: flex; justify-content: center; gap: .5rem; margin: .3rem 0 .9rem }
 .donate-qr { display: flex; justify-content: center }
 .donate-qr svg { width: 220px; height: 220px; border-radius: 10px; background: #fff; padding: 8px }
-.donate-cap { text-align: center; color: var(--muted); font-size: .82rem; margin: .7rem auto .4rem; max-width: 26rem }
+/* TWO LINES' WORTH, ALWAYS. Lightning and on-chain need two lines and the card one,
+ * so switching rails moved the address box and the buttons under it down and back up
+ * (Tim, 2026-08-19). The space is reserved instead, so only the words change. */
+.donate-cap {
+  text-align: center; color: var(--muted); font-size: .82rem;
+  margin: .7rem auto .4rem; max-width: 26rem; min-height: 3.1em;
+}
 .donate-addr {
   font-family: var(--mono, monospace); font-size: .8rem; text-align: center;
   word-break: break-all; background: var(--card-2); border: 1px solid var(--line);
