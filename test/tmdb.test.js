@@ -349,3 +349,26 @@ test('one flaky lookup costs that item only, and lands in missed', async () => {
   assert.equal(out.missed, 1)
   assert.equal(out.matched, 2, 'the show and the guessable film still got their posters')
 })
+
+test('WHICH ONES FOUND NOTHING, resolved against the library rather than read from the store', async () => {
+  // A count you cannot act on is a count (Tim, 2026-08-19). The store keeps ids and a
+  // reason; the list has to carry the title and the type, because what it feeds is the
+  // fix dialog - and the only thing that knows what an id currently IS is the library.
+  const dir = await tmpdir()
+  const en = new tmdb.Enricher({
+    dataDir: dir,
+    fetch: fakeFetch([[/search\/movie.*Uncovered/, respond({}, 500)], ...ROUTES])
+  })
+  const adapter = fakeAdapter()
+  await en.run(adapter, { key: 'k' })
+
+  const missing = await en.missedList(adapter)
+  assert.deepEqual(missing.map(m => m.id), ['bare'])
+  assert.equal(missing[0].title, 'Uncovered')
+  assert.equal(missing[0].type, 'movie', 'the type the fix dialog needs')
+  assert.ok(missing[0].reason, 'and why it came back with nothing')
+
+  // Matched by hand afterwards, so it is not missing any more whatever the store says.
+  await en.fix({ itemId: 'bare', tmdbId: 22, type: 'movie', key: 'k', adapter })
+  assert.deepEqual(await en.missedList(adapter), [])
+})

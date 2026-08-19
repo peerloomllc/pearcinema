@@ -538,7 +538,10 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem }
 .modal-head h3 { margin: 0 }
 .confirm-actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem }
+/* Centred AND equal (Tim, 2026-08-19): two buttons of different widths side by side
+ * is the same ragged edge the settings rows exist to stop, one window further in. */
 .confirm-actions.center { justify-content: center }
+.confirm-actions.center button { min-width: 9rem; justify-content: center }
 
 /* ---- pairing -------------------------------------------------------------
  *
@@ -614,7 +617,14 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   display: flex; align-items: center; gap: .5rem; padding: .5rem .7rem;
   background: var(--card-2); border-bottom: 1px solid var(--line); font-size: .85rem;
 }
-.picker .list { max-height: 17rem; overflow: auto }
+/* A FIXED HEIGHT, not a maximum. The window grew and shrank with however many
+ * folders happened to be inside the one you opened, so the buttons underneath moved
+ * every time you stepped in (Tim, 2026-08-19). The rows fade in on each step, which
+ * is what tells you the list changed now that its box does not. */
+.picker .list { height: 17rem; overflow: auto }
+.picker .list { animation: pickfade .16s ease-out }
+@keyframes pickfade { from { opacity: 0; transform: translateY(2px) } to { opacity: 1; transform: none } }
+@media (prefers-reduced-motion: reduce) { .picker .list { animation: none } }
 .picker .item {
   display: flex; align-items: center; gap: .5rem; width: 100%;
   background: none; border: none; border-bottom: 1px solid var(--line);
@@ -1114,15 +1124,31 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
   flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; font-family: var(--mono, monospace); font-size: .82rem;
 }
-.rootrow select { width: auto }
+/* ONE WIDTH, like every other control on a settings row. They sized to their own
+ * words, so "Films" and "TV shows" and "Automatic" made three different boxes down one
+ * column (Tim, 2026-08-19). */
+.rootrow select { width: 7.5rem }
+/* CENTRED ON THE ROW, not aligned to its top. The chooser is taller than a line of
+ * text, so aligning to the top left the path sitting against the ceiling with a gap
+ * under it (Tim, 2026-08-19, on the padding). The path and what it was read as sit as
+ * one block against the middle of the control beside them. */
+.rootrow { align-items: center }
+.rootrow .rowmain { flex: 1 1 0; min-width: 0 }
+.rootrow .rowsub { display: block; color: var(--muted); font-size: .78rem; margin-top: .2rem }
+.rootrow .rowctl { display: flex; align-items: center; gap: .4rem; flex: 0 0 auto }
 
-.pickrow { display: flex; margin-bottom: 4px }
-.pickrow button { flex: 1 1 0 }
+/* ADD A FOLDER IS A BUTTON, not a box. Full width, directly under a list of bordered
+ * boxes, it read as a fourth box of the wrong colour - which is what Tim's arrow was
+ * pointing at (2026-08-19). Centred, at the width every other button on a form has.
+ * Its own class, too: `.pickrow` is the library's sticky category bar and these two
+ * had no business sharing a name. */
+.addfolder { display: flex; justify-content: center; margin: .2rem 0 .7rem }
+.addfolder button { min-width: 7.5rem }
 
-/* Equal-width buttons filling the row - the donor's action bar. */
-.srcactions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px }
-.srcactions.two { grid-template-columns: repeat(2, 1fr) }
-.srcactions button { width: 100% }
+/* `.srcactions` - a grid of buttons stretched to fill the row - is gone. The source
+ * editor uses `.actions`, the centred row with one minimum width that every other
+ * form in Settings uses (Tim, 2026-08-19, asking for the window to be reviewed against
+ * the Ledger rules). One shape, not two. */
 
 .autoscan {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -1168,7 +1194,10 @@ p.error { color: var(--danger); font-size: .85rem }
   flex: none; width: 2.2rem; height: 2.2rem; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.dlline { display: inline-flex; align-items: center; gap: .5rem; margin-left: .6rem; vertical-align: middle; min-width: 12rem }
+/* The progress line sits UNDER the film's name now rather than beside it, because a
+   download is a row like any other on this page - so it no longer needs the left
+   margin that held it off a title on the same line. */
+.dlline { display: flex; align-items: center; gap: .5rem; min-width: 12rem }
 
 /* THE PHONE-WIDTH LAYER (Tim's sweep, 2026-08-17): nothing may poke past the
    viewport. Inputs shrink instead of forcing their value's width, long ids
@@ -1193,21 +1222,22 @@ p.error { color: var(--danger); font-size: .85rem }
    titling a surface. */
 .card > h3 { text-align: center }
 aside.sheet h3, .sheet-head h3 { text-align: center }
+/* A WINDOW'S TITLE SITS IN THE MIDDLE OF IT, like every page title in Settings (Tim,
+ * 2026-08-19). `text-align` alone never did it: the heading is a flex child beside a
+ * close button, so it was only ever as wide as its own words. It takes the whole row
+ * now, with the button's width added back on the other side so the words land in the
+ * true middle rather than half a button to the left. */
 .modal-head h3, .modal h3:first-child { text-align: center }
+.modal-head h3 { flex: 1; padding-left: 1.8rem }
+/* And prose in a window is centred with it. Field labels are not prose and stay where
+ * a form puts them, on the left above their input. */
+.modal p.hint { text-align: center }
 
-/* A TELEVISION IS A NAME AND A STATE, not a path. `.rootpath` is monospace, one line
-   and ellipsised, which is right for a folder on disk and wrong for "Roku Streaming
-   Stick Plus" - so the casting rows get proportional type and a second line, and the
-   page stops needing a paragraph to explain what each row means. */
-.tvrow { align-items: flex-start; padding-top: 8px; padding-bottom: 8px }
-.tvname { flex: 1 1 0; min-width: 0; font-size: .9rem; line-height: 1.3 }
-.tvname .hint { display: block; font-size: .78rem; margin: .1rem 0 0 }
-/* How they are found, as a footer rather than a section of its own. */
-.tvfoot {
-  display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
-  margin-top: .7rem; padding-top: .75rem; border-top: 1px solid var(--line);
-}
-.tvfoot .grow { flex: 1 1 auto; margin: 0 }
+/* The televisions page uses `.setrow` throughout now - the same shape every Settings
+   page uses - so the bespoke row and footer styles it grew before there was one are
+   gone rather than left as a second way to do the same thing. How televisions are
+   found is two rows under a group label, not a footer with two mismatched buttons on
+   one line (Tim, 2026-08-19). */
 
 /* SETTINGS ROWS.
  *
@@ -1309,6 +1339,17 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * button width the most visible thing on the page. The same minimum the card action
  * rows have used since 2026-08-15, for the same reason and now in a second place. */
 .setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
+/* And a field or a chooser is a control like any other: the SAME width, not a minimum.
+ * Left to themselves they take the width the form gives them, which on the Library
+ * page put a name box and a schedule chooser half an inch wider than every button
+ * above them - the ragged right edge this rule exists to stop. It is also why the
+ * schedule's options read "15 minutes" and not "Every 15 minutes": the row's own
+ * sub-line says the whole sentence, so the control does not have to. */
+.setrow .rowctl input[type=text], .setrow .rowctl select { width: 7.5rem }
+
+/* A progress bar reading inside a sub-line rather than under a paragraph: it sits on
+ * the text baseline row, so it needs a width of its own and a lift off the baseline. */
+.setrow .rowsub .meter { display: inline-block; width: 6rem; vertical-align: middle }
 
 /* A ROW'S NAME AND ITS SUB-LINE ARE TWO LINES. They are spans inside a flex child, so
  * without this they run together and the sub-line reads as part of the name -
@@ -1324,3 +1365,20 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 .setrow .rowname.good { color: var(--good) }
 .setrow .rowname.warn { color: var(--warn) }
 .setrow .rowname.dim { color: var(--muted) }
+
+/* WAITING LOOKS THE SAME EVERYWHERE. The phone answers a slow question with one
+ * spinning circle and a word, centred (src/ui .loadwall); the dashboard used to answer
+ * the same question with a left-aligned "Looking…" in muted type, which reads as a
+ * label rather than as something in progress (Tim, 2026-08-19, with a screenshot). */
+.waiting {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: .55rem; padding: 2.4rem 1rem; color: var(--muted);
+}
+.waiting .spin { animation: pc-spin 1s linear infinite }
+@keyframes pc-spin { to { transform: rotate(360deg) } }
+
+/* A NOTIFICATION IS CENTRED THROUGHOUT. Its title and its button already were, and the
+ * message between them was not - so a one-line answer sat off to the left under a
+ * centred heading and above a centred button (Tim, 2026-08-19, with a screenshot).
+ * Only the alert shape: a real dialog's body is a form and belongs left. */
+.modal[role='alertdialog'] > p { text-align: center }

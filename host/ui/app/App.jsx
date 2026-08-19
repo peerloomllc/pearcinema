@@ -11,12 +11,12 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Spinner, Bell, Check } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
 import Pair from './Pair'
-import SourcePanel from './SourcePanel'
+import SourcePanel, { SourceBanners, describeSource } from './SourcePanel'
 import Metadata from './Metadata'
 import Wizard from './Wizard'
 
@@ -29,21 +29,36 @@ const CAPS = probeCapabilities()
 // moment two of them grew real controls; a slim nav gives each section the whole
 // width and the page one calm shape - the same shape Plex and Jellyfin settle on,
 // so it also reads as familiar.
+// FIVE PAGES, DOWN FROM EIGHT (Tim, 2026-08-19). Grouped by what somebody is thinking
+// about rather than by which file the code lives in:
+//
+//   Library      the collection - its name, where the films are, artwork
+//   Televisions  was Casting
+//   Sharing      was Remote libraries - libraries, downloads, requests
+//   This host    this machine - password, sessions, the video engine
+//   Support      unchanged
+//
+// Source, Artwork and Library were three nav items for one subject, and two of them
+// held a single control each.
 const SETTINGS_SECTIONS = [
-  ['source', 'Source'],
-  ['artwork', 'Artwork'],
   ['library', 'Library'],
-  ['support', 'Support development'],
-  ['remotes', 'Remote libraries'],
-  ['casting', 'Casting'],
-  ['host', 'This host']
+  ['televisions', 'Televisions'],
+  ['sharing', 'Sharing'],
+  ['host', 'This host'],
+  ['support', 'Support development']
 ]
 
-// PAGES THAT WENT SOMEWHERE ELSE. Eight sections is being consolidated to five (Tim,
-// 2026-08-19), and a section that moves must not turn every link and bookmark to it
-// into a silent fall back to Source. Security was one password field with a nav item
-// of its own; it lives on This host now, which is whose password it is.
-const MOVED_SECTIONS = { security: 'host' }
+// PAGES THAT WENT SOMEWHERE ELSE. A section that moves must not turn every link and
+// bookmark to it into a silent fall back to the first page - which is what an unknown
+// section did. The topbar's download indicator points at the old remotes address, so
+// this is load-bearing inside the app and not only for bookmarks.
+const MOVED_SECTIONS = {
+  security: 'host',
+  source: 'library',
+  artwork: 'library',
+  casting: 'televisions',
+  remotes: 'sharing'
+}
 
 // The hash names the page - #settings/source opens Settings on Source - so a
 // section is linkable, refreshable and reachable by anything that can only
@@ -53,7 +68,7 @@ const hashParts = () => String(location.hash || '').replace(/^#/, '').split('/')
 // Somebody else's libraries (proposal 2026-08-16-desktop-client): paste the
 // pairing link from their dashboard - the QR always carries its link underneath
 // for machines without a camera - and their films play in these same pages.
-function RemotePanel ({ remotes, reload, onSource, source }) {
+function RemotePanel ({ remotes, reload, onSource, source, embedded = false }) {
   const [link, setLink] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -75,39 +90,58 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
   }
 
   return (
-    <div class='card'>
-      <h3>Remote libraries</h3>
-      <p class='hint'>
-        Watch a library that lives on somebody else's server. On their dashboard,
-        open a pairing window and send you the link under the code. Paste it here.
-        They can cut this machine off any time, and your spot in a film is kept on
-        their server like any other device's.
-      </p>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Remote libraries</h3>}
+
+      {/* SAID ONLY WHERE IT IS ANY USE. With libraries on the list, the rows are the
+          explanation; without any, this is the whole page. */}
+      {remotes.length === 0 && (
+        <p class='hint'>
+          Watch a library on somebody else's server. Ask them to open a pairing window
+          on their dashboard and send you the link under the code.
+        </p>
+      )}
+
       {remotes.length > 0 && (
-        <div class='rootlist'>
+        <div class='setrows'>
           {remotes.map(r => (
-            <div class='rootrow' key={r.hostKey}>
-              <span class='rootpath'>{r.libraryName || 'Library'}{r.online ? '' : ' (offline)'}</span>
-              <button onClick={() => onSource(source === r.libraryId ? '' : r.libraryId)}>
-                {source === r.libraryId ? 'Watching' : 'Watch'}
-              </button>
-              <button
-                class='iconbtn danger' onClick={() => remove(r)}
-                aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
-              ><Trash size={17} /></button>
+            <div class='setrow' key={r.hostKey}>
+              <span class='rowmain'>
+                {/* Online or not is the row's whole condition, so the name carries it -
+                    and the line below says it in words. */}
+                <span class={'rowname ' + (r.online ? 'good' : 'warn')}>{r.libraryName || 'Library'}</span>
+                <span class='rowsub'>
+                  {r.online ? 'Online' : 'Offline'}
+                  {source === r.libraryId ? ' · the one you are watching' : ''}
+                </span>
+              </span>
+              {/* NO WATCH BUTTON. Which library you are looking at is the picker in the
+                  header bar, on every screen, and a second way to do it on this page was
+                  a control that duplicated one (Tim, 2026-08-19). Removing a library is
+                  the only thing this row decides. */}
+              <span class='rowctl'>
+                <button
+                  class='iconbtn danger' onClick={() => remove(r)}
+                  aria-label={`Remove ${r.libraryName || 'this library'}`} title='Remove'
+                ><Trash size={17} /></button>
+              </span>
             </div>
           ))}
         </div>
       )}
-      <div class='field'>
-        <input
-          type='text' value={link} placeholder='pear://pearcinema/pair?...'
-          onInput={e => setLink(e.currentTarget.value)}
-        />
-      </div>
-      {err && <p class='error'>{err}</p>}
-      <div class='actions'>
-        <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing...' : 'Pair'}</button>
+
+      <div class='rowopen'>
+        <div class='field'>
+          <label>Pairing link</label>
+          <input
+            type='text' value={link} placeholder='pear://pearcinema/pair?...'
+            onInput={e => setLink(e.currentTarget.value)}
+          />
+        </div>
+        {err && <p class='error'>{err}</p>}
+        <div class='actions'>
+          <button onClick={pair} disabled={busy || !link.trim()}>{busy ? 'Pairing…' : 'Pair'}</button>
+        </div>
       </div>
     </div>
   )
@@ -116,7 +150,7 @@ function RemotePanel ({ remotes, reload, onSource, source }) {
 // Films kept on this machine from friends' libraries (phase 2). Hidden until
 // there is one - an empty downloads card is a feature announcement, and the
 // place downloads are discovered is the player's details sheet.
-function DownloadsCard ({ remotes, onPlay }) {
+function DownloadsCard ({ remotes, onPlay, embedded = false }) {
   const [items, setItems] = useState(null)
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -134,51 +168,59 @@ function DownloadsCard ({ remotes, onPlay }) {
     look()
     return () => { live = false; clearTimeout(t) }
   }, [tick, remotes.map(r => r.libraryId).join(',')])
-  if (!items?.length) return null
+  // AN EMPTY GROUP STILL NEEDS A LINE. This used to hide itself entirely, and the
+  // reasoning held while it was a card that would otherwise appear out of nowhere - an
+  // empty downloads card is a feature announcement. Under a heading that is already on
+  // screen it leaves the heading standing over nothing, which reads as broken (Tim,
+  // 2026-08-19).
+  if (!items?.length) {
+    return embedded
+      ? <p class='hint'>Nothing kept on this machine yet.</p>
+      : null
+  }
   const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
   return (
-    <div class='card'>
-      <h3>Downloads</h3>
-      <p class='hint'>
-        Films kept on this machine. They play here even while the library they
-        came from is offline.
-      </p>
-      <div class='rootlist'>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Downloads</h3>}
+      <p class='hint'>These play here even while the library they came from is offline.</p>
+      <div class='setrows'>
         {items.map(d => (
-          <div class='rootrow' key={d.itemId}>
-            <span class='rootpath'>
-              {d.title || 'Untitled'}
+          <div class='setrow' key={d.itemId}>
+            <span class='rowmain'>
+              <span class='rowname'>{d.title || 'Untitled'}</span>
               {d.downloading
                 ? (
-                  <span class='dlline'>
+                  <span class='rowsub dlline'>
                     <span class='meter dlmeter'>
                       <i style={`width:${d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%`} />
                     </span>
-                    <span class='hint'>
+                    <span>
                       {d.size ? Math.min(99, Math.round((d.got / d.size) * 100)) : 0}%{d.converting ? ' · being converted' : ''}
                     </span>
                   </span>
                   )
-                : <span class='hint'> · {fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
+                : <span class='rowsub'>{fmtSize(d.size)} · from {nameOf(d.lib)}</span>}
             </span>
-            {d.downloading
-              ? (
-                <button
-                  class='iconbtn' aria-label={`Stop downloading ${d.title || 'this'}`} title='Stop downloading'
-                  onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}
-                ><Close size={17} /></button>
-                )
-              : (
-                <>
-                  <button class='iconbtn primary' aria-label={`Play ${d.title || 'this'}`} title='Play' onClick={() => onPlay(d)}>
-                    <Play size={18} />
-                  </button>
+            <span class='rowctl'>
+              {d.downloading
+                ? (
                   <button
-                    class='iconbtn danger' aria-label={`Delete ${d.title || 'this'} from this machine`} title='Delete from this machine'
-                    onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}
-                  ><Trash size={17} /></button>
-                </>
-                )}
+                    class='iconbtn' aria-label={`Stop downloading ${d.title || 'this'}`} title='Stop downloading'
+                    onClick={async () => { await api('/api/downloads/cancel', { itemId: d.itemId }); setTick(t => t + 1) }}
+                  ><Close size={17} /></button>
+                  )
+                : (
+                  <>
+                    <button class='iconbtn primary' aria-label={`Play ${d.title || 'this'}`} title='Play' onClick={() => onPlay(d)}>
+                      <Play size={18} />
+                    </button>
+                    <button
+                      class='iconbtn danger' aria-label={`Delete ${d.title || 'this'} from this machine`} title='Delete from this machine'
+                      onClick={async () => { await api('/api/downloads/remove', { itemId: d.itemId }); setTick(t => t + 1) }}
+                    ><Trash size={17} /></button>
+                  </>
+                  )}
+            </span>
           </div>
         ))}
       </div>
@@ -188,7 +230,7 @@ function DownloadsCard ({ remotes, onPlay }) {
 
 // Your open asks, per remote library (phase 2) - made from an empty search on
 // a friend's library, watched and withdrawn here. Hidden until there is one.
-function RequestsCard ({ remotes }) {
+function RequestsCard ({ remotes, embedded = false }) {
   const [rows, setRows] = useState(null)
   const [tick, setTick] = useState(0)
   useEffect(() => {
@@ -213,26 +255,136 @@ function RequestsCard ({ remotes }) {
     const t = setInterval(load, 60000)
     return () => { live = false; off(); clearInterval(t) }
   }, [remotes.map(r => r.libraryId).join(','), tick])
-  if (!rows?.length) return null
+  if (!rows?.length) {
+    return embedded
+      ? <p class='hint'>You have not asked for anything yet. Search a friend's library for something it does not have.</p>
+      : null
+  }
   return (
-    <div class='card'>
-      <h3>Your requests</h3>
-      <p class='hint'>
-        What you have asked these libraries for. Ask by searching a friend's
-        library for something it does not have.
-      </p>
-      <div class='rootlist'>
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Your requests</h3>}
+      <div class='setrows'>
         {rows.map(q => (
-          <div class='rootrow' key={q.lib + q.id}>
-            <span class='rootpath'>
-              {q.name} · {q.kind === 'series' ? 'show' : 'film'} · {q.status} · {q.libraryName || 'a library'}
+          <div class='setrow' key={q.lib + q.id}>
+            <span class='rowmain'>
+              {/* Answered is green, refused is amber, still waiting is neither - and
+                  the word is right there either way. */}
+              <span class={'rowname ' + (q.status === 'granted' ? 'good' : q.status === 'refused' ? 'warn' : '')}>{q.name}</span>
+              <span class='rowsub'>
+                {q.status} · {q.kind === 'series' ? 'show' : 'film'} · {q.libraryName || 'a library'}
+              </span>
             </span>
-            {q.status === 'pending' && (
-              <button
-                class='iconbtn danger' aria-label={`Withdraw your request for ${q.name}`} title='Withdraw'
-                onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}
-              ><Trash size={17} /></button>
-            )}
+            <span class='rowctl'>
+              {q.status === 'pending' && (
+                <button
+                  class='iconbtn danger' aria-label={`Withdraw your request for ${q.name}`} title='Withdraw'
+                  onClick={async () => { await api(`/remote/${q.lib}/api/request/remove`, { id: q.id }); setTick(t => t + 1) }}
+                ><Trash size={17} /></button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// WHAT PEOPLE HAVE ASKED THIS LIBRARY FOR, which had nowhere to appear until now.
+// RequestsCard above is the other direction - what this machine asked somebody else's
+// library for - and the two were easy to conflate because they are both "requests".
+//
+// The store and the wire have both had the owner's view all along (listRequests with
+// no requester, and `request.all`); only the dashboard never asked. Tim made requests
+// from a paired phone on 2026-08-19 and found nowhere they could show up.
+function ReceivedCard ({ embedded = false }) {
+  const [rows, setRows] = useState(null)
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(async () => {
+    const r = await api('/api/asked').catch(() => null)
+    setRows(r?.items || [])
+  }, [])
+
+  useEffect(() => {
+    load()
+    // The same live channel the outgoing card uses: an ask arriving from a phone
+    // should land on an open page rather than waiting for a reload.
+    const off = onLive(['request:created', 'request:removed', 'request:resolved'], load)
+    return off
+  }, [load])
+
+  // ANSWERED IN PLACE. This used to refetch the whole list and raise a notification,
+  // so answering one row redrew the page and threw a modal over it (Tim, 2026-08-19).
+  // The row it changed is the only thing that changes.
+  const answer = async (q, status) => {
+    setBusy(q.id)
+    const r = await api('/api/asked/resolve', { id: q.id, status })
+    setBusy('')
+    if (r?.error) return notify('Not saved', r.error)
+    setRows((rs) => (rs || []).map((x) => (x.id === q.id ? { ...x, ...(r.request || { status }) } : x)))
+  }
+
+  const forget = async (q) => {
+    setBusy(q.id)
+    const r = await api('/api/asked/remove', { id: q.id })
+    setBusy('')
+    if (r?.error) return notify('Not removed', r.error)
+    setRows((rs) => (rs || []).filter((x) => x.id !== q.id))
+  }
+
+  if (!rows?.length) {
+    return embedded
+      ? <p class='hint'>Nobody has asked you for anything yet.</p>
+      : null
+  }
+
+  // Sentence case, because a sub-line is a sentence and these were coming straight
+  // off the wire in the store's own lowercase vocabulary (Tim, 2026-08-19).
+  const said = { pending: 'Waiting for you', added: 'Added', declined: 'Declined' }
+
+  return (
+    <div class={embedded ? '' : 'card'}>
+      {!embedded && <h3>Asked of you</h3>}
+      <div class='setrows'>
+        {rows.map(q => (
+          <div class='setrow' key={q.id}>
+            <span class='rowmain'>
+              <span class={'rowname ' + (q.status === 'added' ? 'good' : q.status === 'declined' ? 'warn' : '')}>
+                {q.name || 'Untitled'}
+              </span>
+              <span class='rowsub'>
+                {said[q.status] || q.status}
+                {' · '}{q.kind === 'series' ? 'Show' : 'Film'}
+                {q.requesterLabel ? ` · asked by ${q.requesterLabel}` : ''}
+                {q.count > 1 ? ` · asked ${q.count} times` : ''}
+              </span>
+            </span>
+            <span class='rowctl'>
+              {q.status === 'pending'
+                ? (
+                  <>
+                    {/* A TICK AND A CROSS, the one icon pair nobody has to interpret.
+                        Both carry their words to a screen reader and to a tooltip. */}
+                    <button
+                      class='iconbtn primary' disabled={busy === q.id}
+                      aria-label={`Mark ${q.name || 'this'} as added`} title='Added it'
+                      onClick={() => answer(q, 'added')}
+                    ><Check size={18} /></button>
+                    <button
+                      class='iconbtn danger' disabled={busy === q.id}
+                      aria-label={`Decline the request for ${q.name || 'this'}`} title='Decline'
+                      onClick={() => answer(q, 'declined')}
+                    ><Close size={17} /></button>
+                  </>
+                  )
+                : (
+                  <button
+                    class='iconbtn' disabled={busy === q.id}
+                    aria-label={`Clear the request for ${q.name || 'this'}`} title='Clear from this list'
+                    onClick={() => forget(q)}
+                  ><Trash size={17} /></button>
+                  )}
+            </span>
           </div>
         ))}
       </div>
@@ -277,6 +429,17 @@ function readableState (t) {
 }
 
 const isReachable = (t) => !['unavailable', 'off', 'standby'].includes(String(t.state || '').toLowerCase())
+
+// A television's name says its condition, the same rule This host follows: green when
+// it is ready or playing, amber when it is switched off or asleep and there is nothing
+// to do about it from here, muted when it is hidden and will not be offered at all.
+// COLOUR IS NEVER THE ONLY CARRIER - readableState puts the same fact in words on the
+// line below.
+function toneFor (t) {
+  if (t.hidden) return 'dim'
+  if (!isReachable(t)) return 'warn'
+  return 'good'
+}
 
 function CastPanel () {
   const [cfg, setCfg] = useState(null)
@@ -356,93 +519,58 @@ function CastPanel () {
 
   const rows = targets || []
   const viaHa = rows.filter(t => t.via !== 'roku')
+  const found = rows.filter(t => t.via === 'roku')
   const anyOff = rows.some(t => !isReachable(t))
   const haStatus = cfg?.tokenSet && cfg?.enabled
     ? `connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}`
     : 'not set up'
 
   return (
-    <div class='card'>
-      <h3>Televisions</h3>
+    <>
+      <div class='setpage'><span class='setpagename'>Televisions</span></div>
 
-      {targets === null && <p class='hint'>Looking…</p>}
+      {/* THE ROUTES COME FIRST (Tim, 2026-08-19). They are the settings on this page -
+          the televisions themselves are the RESULT of them - and a result reads better
+          under the thing that produced it. Which is also why the list now carries a
+          label of its own: sitting unlabelled below "How they are found" it would read
+          as part of it. */}
+      <div class='setgroup'>How they are found</div>
 
-      {/* THE ONLY PLACE THE SETUP STORY IS TOLD, because it is the only moment it is
-          any use: an empty list is exactly when somebody wants to know what would
-          make it not empty. */}
-      {targets !== null && rows.length === 0 && (
-        <p class='hint'>
-          None yet. Your server finds televisions on its own network within a few seconds
-          of one being switched on. A Roku also needs the free {mediaChannel} channel
-          installed on it, which is the only one that will play a film handed to it.
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <div class='rootlist'>
-          {rows.map(t => (
-            <div class='rootrow tvrow' key={t.entityId}>
-              <span class='tvname'>
-                {t.name}
-                <span class='hint'>
-                  {readableState(t)}
-                  {' · '}
-                  {t.via === 'roku' ? 'found on your network' : 'via Home Assistant'}
-                  {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
-                  {t.hidden ? ' · hidden from phones' : ''}
-                </span>
-              </span>
-              <button
-                class='iconbtn'
-                disabled={busy}
-                onClick={() => toggleHidden(t)}
-                aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
-                title={t.hidden ? 'Offer this one' : 'Hide from phones'}
-              >
-                {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
-            </div>
-          ))}
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>On your network</span>
+            <span class='rowsub'>
+              {found.length === 0
+                ? 'Nothing found yet.'
+                : `${found.length} television${found.length === 1 ? '' : 's'} found.`}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
+          </span>
         </div>
-      )}
 
-      {/* SAID ONLY WHEN IT APPLIES. A line about switched-off televisions is noise on
-          a page where none of them are. */}
-      {anyOff && (
-        <p class='hint'>
-          A television that is switched off stays on this list and comes back by itself.
-        </p>
-      )}
-
-      {/* The one thing nobody could work out: a Roku sitting right there, missing from
-          the list, because of one free channel. */}
-      {needsChannel.length > 0 && (
-        <p class='error'>
-          {needsChannel.length === 1
-            ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
-            : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
-          {' '}Install it from the Roku channel store, then press Look again.
-        </p>
-      )}
-
-      {/* HOW THEY ARE FOUND, as a footer rather than a section. Finding is always on
-          and needs nothing said about it; Home Assistant is one optional extra, and a
-          status plus a way in is the whole of what it needs on screen. */}
-      <div class='tvfoot'>
-        <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
-        <span class='hint grow'>Home Assistant: {haStatus}</span>
-        <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
-          {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
-        </button>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Home Assistant</span>
+            <span class='rowsub'>
+              {cfg?.tokenSet && cfg?.enabled
+                ? `Connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}.`
+                : 'Not set up. Only needed for a television your server cannot find on its own.'}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
+              {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
+            </button>
+          </span>
+        </div>
       </div>
 
       {haOpen && cfg && (
-        <>
-          <p class='hint'>
-            Only for televisions your server cannot find on its own: a Chromecast, a
-            Google TV, a television with Cast built in. Make a long-lived access token on
-            your Home Assistant profile page.
-          </p>
+        <div class='rowopen'>
+          <p class='hint'>Make a long-lived access token on your Home Assistant profile page.</p>
           <div class='field'>
             <label>Home Assistant address</label>
             <input
@@ -475,9 +603,278 @@ function CastPanel () {
               <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
             )}
           </div>
-        </>
+        </div>
       )}
-    </div>
+
+      <div class='setgroup'>Your televisions</div>
+
+      {/* THE WAIT BELONGS TO THE LIST, so it waits where the list will be (Tim,
+          2026-08-19). Above the routes it read as the whole page loading. */}
+      {targets === null && (
+        <div class='waiting'>
+          <Spinner size={34} class='spin' />
+          <span>Looking for televisions…</span>
+        </div>
+      )}
+
+      {/* SHORT, AND ONLY ON AN EMPTY LIST. This was four lines of prose - the longest
+          block left on any Settings page - for a situation most people are never in.
+          The Media Assistant fact stays because nobody could guess it; the rest of the
+          explanation was the page describing itself. */}
+      {targets !== null && rows.length === 0 && (
+        <p class='hint'>
+          None yet. Your server finds televisions on its own network, and a Roku also
+          needs the free {mediaChannel} channel installed on it.
+        </p>
+      )}
+
+      {rows.length > 0 && (
+        <div class='setrows'>
+          {rows.map(t => (
+            <div class='setrow' key={t.entityId}>
+              <span class='rowmain'>
+                {/* THE NAME CARRIES THE STATE, the same way the video engine's does on
+                    This host - and the words are in the line below, so nobody has to
+                    tell green from amber to read the row. */}
+                <span class={'rowname ' + toneFor(t)}>{t.name}</span>
+                {/* ONE CLAUSE. The state, and then only what is unusual about this
+                    television: that it came through Home Assistant rather than being
+                    found, or that it is a speaker rather than a screen. Being hidden is
+                    not said at all - the eye beside it is already saying it. */}
+                <span class='rowsub'>
+                  {readableState(t)}
+                  {t.via !== 'roku' ? ' · via Home Assistant' : ''}
+                  {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
+                </span>
+              </span>
+              <span class='rowctl'>
+                <button
+                  class='iconbtn'
+                  disabled={busy}
+                  onClick={() => toggleHidden(t)}
+                  aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
+                  title={t.hidden ? 'Offer this one' : 'Hide from phones'}
+                >
+                  {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SAID ONLY WHEN IT APPLIES. A line about switched-off televisions is noise on
+          a page where none of them are. */}
+      {anyOff && (
+        <p class='hint'>
+          A television that is switched off stays on this list and comes back by itself.
+        </p>
+      )}
+
+      {/* The one thing nobody could work out: a Roku sitting right there, missing from
+          the list, because of one free channel. */}
+      {needsChannel.length > 0 && (
+        <p class='error'>
+          {needsChannel.length === 1
+            ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
+            : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
+          {' '}Install it from the Roku channel store, then press Look again.
+        </p>
+      )}
+
+    </>
+  )
+}
+
+// WHAT A RUNNING SCAN SAYS, in one clause, in two places: the Rescan row and the top
+// bar's light. The total is discovered as the walk goes, so it is 0 for the first
+// moments of a scan and the sentence has to work without it.
+function scanLine (s) {
+  if (!s) return ''
+  if (!s.total) return 'Reading the library now.'
+  return `Reading the library, ${s.done} of ${s.total}.`
+}
+
+// THE COLLECTION, in one page. Source, Artwork and Library were three nav items for
+// one subject, and two of them held a single control each.
+//
+// WHAT THE PICKER IS, and why it is behind a button now. SourcePanel is a small app
+// rather than a setting: a folder browser, a roots editor with a type per folder, a
+// Jellyfin form, Test and Save. Left open it was the whole page, on a page people
+// mostly open to check something. So where the films are is a ROW - what it is, how
+// many films it found - and Change opens the app in a window of its own, which is the
+// rule this page follows: a small edit happens where you are (the TMDB key), a job
+// with steps in it gets a window. The picker itself is untouched: the
+// typed-path-inside-the-container trap it was built around is that panel's founding
+// scar, not something to reshape casually.
+//
+// RESCANNING CAME OUT WITH IT, and had to. It is what you came for when a film you
+// just copied in is missing, and burying it inside a disclosure would mean opening the
+// editor to press a button that has nothing to do with editing. It is two rows: the
+// one that runs now, and the schedule.
+//
+// THE BANNERS STAY AT THE TOP, above everything. A source that has stopped answering
+// is the one thing nobody should have to open anything to hear.
+function LibraryPanel ({ state, reload }) {
+  const [name, setName] = useState(state.library || '')
+  const src = state.source || { kind: 'empty' }
+  const empty = src.kind === 'empty'
+  // NOT OPENED FOR YOU. It was, while the editor lived inside the page - with nothing
+  // set there was nothing else on the page for it to be in the way of. A window is
+  // different: one that throws itself over the page the moment you arrive is a window
+  // you close before you read anything.
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const saveName = async () => {
+    const res = await api('/api/library', { name })
+    if (res.error) return notify('Not renamed', res.error)
+    await reload()
+    notify('Renamed', 'Every paired phone relabels straight away.')
+  }
+
+  // It answers at once now and the work carries on behind it, so there is nothing to
+  // wait for here - the row below says what is happening, and so does the top bar from
+  // wherever you are in the app.
+  const rescan = async () => {
+    setBusy(true)
+    const res = await api('/api/source/rescan', {})
+    setBusy(false)
+    if (res.error) return notify('Rescan failed', res.error)
+    reload()
+  }
+
+  // WHERE THE FILMS ARE, in one line: what kind of place it is, and what was found in
+  // it. The counts belong on this row rather than in a paragraph under the picker -
+  // they are the answer to the question the row asks.
+  const roots = src.roots || []
+  const place = empty
+    ? ''
+    : src.kind === 'jellyfin'
+      ? `Jellyfin at ${(src.url || '').replace(/^https?:\/\//, '') || 'a server'}`
+      : `${roots.length} folder${roots.length === 1 ? '' : 's'} on this machine`
+
+  const sourceSub = empty
+    ? 'Nothing set yet. Point this at a folder of films or a Jellyfin server.'
+    : state.sourceError
+      ? `${place} · not answering`
+      : `${place} · ${describeSource(state.stats || {})}`
+
+  const sourceTone = empty || state.sourceError ? 'warn' : 'good'
+
+  const every = Number(state.rescanIntervalMin) || 0
+  const autoSub = {
+    0: 'Off. New films appear only when you rescan.',
+    15: 'Every 15 minutes.',
+    30: 'Every 30 minutes.',
+    60: 'Every hour.',
+    360: 'Every 6 hours.'
+  }[every] || `Every ${every} minutes.`
+
+  return (
+    <>
+      <div class='setpage'><span class='setpagename'>Library</span></div>
+
+      <SourceBanners state={state} />
+
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Name</span>
+            <span class='rowsub'>What a paired phone calls this library.</span>
+          </span>
+          <span class='rowctl'>
+            <input
+              type='text' value={name} maxLength={64}
+              aria-label="This library's name"
+              onInput={e => setName(e.currentTarget.value)}
+              onBlur={() => { if (name.trim() && name !== state.library) saveName() }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class={'rowname ' + sourceTone}>Where the films are</span>
+            <span class='rowsub'>{sourceSub}</span>
+          </span>
+          <span class='rowctl'>
+            {/* It said Cancel while the editor was open, which was right when the
+                editor unfolded inside the page. A window has its own way out, and a
+                second one on the row behind it is a button nobody can see anyway. */}
+            <button class='ghost' onClick={() => setEditing(true)}>
+              {empty ? 'Set up' : 'Change'}
+            </button>
+          </span>
+        </div>
+
+        {editing && (
+          <SourcePanel
+            state={state} reload={reload} editor
+            onSaved={() => setEditing(false)}
+            onClose={() => setEditing(false)}
+          />
+        )}
+
+        {!empty && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class={'rowname ' + (state.scanning ? 'warn' : '')}>Rescan</span>
+              {/* THE STATE IS IN THE LINE, NOT IN THE BUTTON (Tim, 2026-08-19). A button
+                  whose word changes to "Rescanning…" grows wider than every other button
+                  on the page, and it was the only thing saying anything at all - so a
+                  scan that takes minutes looked identical to one that had wedged. */}
+              <span class='rowsub'>
+                {state.scanning
+                  ? scanLine(state.scanning)
+                  : 'Looks for films added or removed.'}
+                {state.scanning?.total > 0 && (
+                  <span class='meter' style='margin-left:.5rem'>
+                    <i style={`width:${Math.round((state.scanning.done / state.scanning.total) * 100)}%`} />
+                  </span>
+                )}
+              </span>
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>Rescan</button>
+            </span>
+          </div>
+        )}
+
+        {!empty && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>Automatic rescan</span>
+              <span class='rowsub'>{autoSub}</span>
+            </span>
+            {/* IT COMMITS ITSELF. A schedule with a Save button beside it is a schedule
+                people set and do not save. */}
+            <span class='rowctl'>
+              <select
+                value={every}
+                aria-label='How often the library rechecks itself'
+                onChange={async e => {
+                  const minutes = Number(e.currentTarget.value)
+                  const res = await api('/api/rescan-interval', { minutes })
+                  if (res?.error) return notify('Not set', res.error)
+                  reload()
+                }}
+              >
+                <option value={0}>Off</option>
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={360}>6 hours</option>
+              </select>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div class='setgroup'>Artwork</div>
+      <Metadata rows />
+    </>
   )
 }
 
@@ -487,7 +884,10 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
     if (SETTINGS_SECTIONS.some(([id]) => id === s)) return s
     return MOVED_SECTIONS[s] || null
   }
-  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || 'source')
+  // 'library' IS THE FIRST PAGE, and this fallback has to move with the nav: it read
+  // 'source' after the five-page consolidation, which is not a section any more, so
+  // opening Settings with no hash rendered an empty page.
+  const [sec, setSec] = useState(() => resolveSection(...hashParts()) || SETTINGS_SECTIONS[0][0])
   // The hash can change while Settings is already open - the topbar's
   // download indicator points at settings/remotes - so follow it live rather
   // than only reading it at mount.
@@ -499,15 +899,6 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
     window.addEventListener('hashchange', follow)
     return () => window.removeEventListener('hashchange', follow)
   }, [])
-  const [name, setName] = useState(state.library || '')
-
-  const saveName = async () => {
-    const res = await api('/api/library', { name })
-    if (res.error) return notify('Not renamed', res.error)
-    await reload()
-    notify('Renamed', 'Every paired phone relabels straight away.')
-  }
-
   return (
     <div class='settings'>
       <nav class='setnav' aria-label='Settings sections'>
@@ -517,32 +908,22 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
       </nav>
 
       <div class='setbody'>
-        {sec === 'source' && <SourcePanel state={state} reload={reload} />}
+        {sec === 'library' && <LibraryPanel state={state} reload={reload} />}
 
-        {sec === 'artwork' && <Metadata />}
-
-        {sec === 'library' && (
-          <div class='card'>
-            <h3>The library's name</h3>
-            <p class='hint'>This is the name a phone shows when it is paired with you.</p>
-            <div class='field'>
-              <input type='text' value={name} maxLength={64} onInput={e => setName(e.currentTarget.value)} />
-            </div>
-            <div class='actions'>
-              <button onClick={saveName} disabled={!name.trim() || name === state.library}>Save</button>
-            </div>
-          </div>
-        )}
-
-        {sec === 'remotes' && (
+        {sec === 'sharing' && (
           <>
-            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} />
-            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} />
-            <RequestsCard remotes={remotes} />
+            <div class='setpage'><span class='setpagename'>Sharing</span></div>
+            <RemotePanel remotes={remotes} reload={reload} onSource={onSource} source={source} embedded />
+            <div class='setgroup'>Downloads</div>
+            <DownloadsCard remotes={remotes} onPlay={onPlayDownload} embedded />
+            <div class='setgroup'>Asked of you</div>
+            <ReceivedCard embedded />
+            <div class='setgroup'>Your requests</div>
+            <RequestsCard remotes={remotes} embedded />
           </>
         )}
 
-        {sec === 'casting' && <CastPanel />}
+        {sec === 'televisions' && <CastPanel />}
 
         {sec === 'support' && <SupportPanel />}
 
@@ -797,7 +1178,7 @@ function SupportPanel () {
 
   return (
     <div class='card'>
-      <h3>Support development</h3>
+      <div class='setpage'><span class='setpagename'>Support development</span></div>
       <p class='hint' style='text-align:center'>
         No accounts, no servers, no subscriptions. If PearCinema is useful to you, a tip
         helps keep it free, and it is entirely optional.
@@ -854,6 +1235,10 @@ export default function App () {
   const [blendOn, setBlendOn] = useState(false)
   // How many downloads are running, for the topbar indicator.
   const [dlBusy, setDlBusy] = useState(0)
+  // Unanswered requests. COUNTED BY THE SHELL rather than by the panel that lists
+  // them: the panel only exists on the Sharing page, so a light that waited for it
+  // would appear only once you had already gone looking.
+  const [pendingAsks, setPendingAsks] = useState(0)
   // The theme lives up here now rather than inside Settings: it is a light switch, and
   // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
   const [theme, setTheme] = useState(loadThemePref())
@@ -900,6 +1285,17 @@ export default function App () {
   // one remote, '_blend' all of them as one collection. The choice is
   // remembered per browser - how somebody likes to look at their libraries
   // is not the host's business.
+  useEffect(() => {
+    let live = true
+    const count = async () => {
+      const r = await api('/api/asked').catch(() => null)
+      if (live) setPendingAsks((r?.items || []).filter(q => q.status === 'pending').length)
+    }
+    count()
+    const off = onLive(['request:created', 'request:removed', 'request:resolved'], count)
+    return () => { live = false; off() }
+  }, [])
+
   const pickSource = (lib) => {
     setSource(lib)
     setRemoteBase(lib === '_blend' ? '/blend' : lib ? '/remote/' + lib : '')
@@ -950,6 +1346,15 @@ export default function App () {
     const t = setInterval(reload, 8000)
     return () => clearInterval(t)
   }, [])
+
+  // AND FASTER WHILE SOMETHING IS COUNTING. Eight seconds is right for a roster that
+  // changes when somebody pairs; it is wrong for a progress bar, which reads as stuck
+  // between ticks. Only while a scan runs, and it stops the moment it ends.
+  useEffect(() => {
+    if (!state?.scanning) return
+    const t = setInterval(reload, 2000)
+    return () => clearInterval(t)
+  }, [!!state?.scanning])
 
   if (!state) return <div class='empty'>Loading…</div>
 
@@ -1068,9 +1473,42 @@ export default function App () {
               class='iconbtn dlbusy'
               aria-label={dlBusy === 1 ? 'One download running. See its progress' : dlBusy + ' downloads running. See their progress'}
               title={dlBusy === 1 ? 'One download running' : dlBusy + ' downloads running'}
-              onClick={() => { location.hash = 'settings/remotes'; setTab('settings'); setPlaying(null) }}
+              onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
             >
               <DownloadIcon size={18} />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
+
+          {/* THE LIBRARY IS BEING READ (Tim, 2026-08-19), the same shape the downloads
+              light uses. A rescan of the real library is minutes of work that used to
+              show as a button stuck on "Rescanning…" on one page - so it is a light on
+              the bar from anywhere in the app, and pressing it goes to the row that
+              says how far through it is. */}
+          {state.scanning && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={'Reading the library. ' + scanLine(state.scanning)}
+              title={scanLine(state.scanning)}
+              onClick={() => { location.hash = 'settings/library'; setTab('settings'); setPlaying(null) }}
+            >
+              <Spinner size={18} class='spin' />
+              <span class='dot' aria-hidden='true' />
+            </button>
+          )}
+
+          {/* SOMEBODY IS WAITING FOR AN ANSWER (Tim, 2026-08-19), the same shape the
+              downloads light uses: a bar-level mark while any request is unanswered,
+              one press from the page that answers it. An ask that nobody notices is an
+              ask that never gets answered. */}
+          {pendingAsks > 0 && (
+            <button
+              class='iconbtn dlbusy'
+              aria-label={pendingAsks === 1 ? 'One request waiting for an answer' : pendingAsks + ' requests waiting for an answer'}
+              title={pendingAsks === 1 ? 'One request waiting' : pendingAsks + ' requests waiting'}
+              onClick={() => { location.hash = 'settings/sharing'; setTab('settings'); setPlaying(null) }}
+            >
+              <Bell size={18} />
               <span class='dot' aria-hidden='true' />
             </button>
           )}

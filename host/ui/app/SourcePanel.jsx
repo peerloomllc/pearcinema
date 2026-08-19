@@ -17,8 +17,8 @@
 
 import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
-import { notify, askConfirm } from './ui'
-import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
+import { notify, askConfirm, Modal } from './ui'
+import { Drive, Film, Folder, Server, Blocked, Close, ChevronUp } from './icons'
 
 // WHAT A FOLDER HOLDS, in the words somebody would use about their own shelves.
 //
@@ -27,8 +27,29 @@ import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
 // filename rule to read, so before this it landed in the Films list. Saying what the
 // folder holds is the only thing that settles it, and on the real library it was 34
 // television files sitting among the films.
-const TYPE_LABEL = { auto: 'Work it out', movies: 'Films', shows: 'TV shows' }
+//
+// "Work it out" was the first wording and it did not read as a choice - "Work it out
+// (tv shows)" left Tim asking what it meant (2026-08-19). What it means is: decide from
+// the names, and the row says underneath what it decided.
+const TYPE_LABEL = { auto: 'Automatic', movies: 'Films', shows: 'TV shows' }
+// The same thing said inside a sentence. Lower-casing the label gave "read as tv
+// shows", and TV is capitalised wherever it appears (Tim, 2026-08-19).
+const HOLDS_PHRASE = { movies: 'films', shows: 'TV shows', auto: 'films and TV shows' }
 const TYPE_ORDER = ['auto', 'movies', 'shows']
+
+// WHAT WAS FOUND, in one phrase, and there is exactly one of these. The panel says it
+// after a test, a save and a rescan; the Library page says it on the row that names
+// where the films are. Two spellings of the same sentence would drift.
+export function describeSource (r = {}) {
+  // Counted properly, because this is on the page now and not only in a notification.
+  // "1 shows" reads as a bug in the counting rather than a plural nobody bothered with.
+  const bits = []
+  if (r.leaves !== undefined) bits.push(`${r.leaves} films and episodes`)
+  if (r.movies !== undefined) bits.push(`${r.movies} film${r.movies === 1 ? '' : 's'}`)
+  if (r.series) bits.push(`${r.series} show${r.series === 1 ? '' : 's'}`)
+  if (r.episodes) bits.push(`${r.episodes} episode${r.episodes === 1 ? '' : 's'}`)
+  return bits.join(', ') || 'nothing yet'
+}
 
 // A root as the panel holds it. The host sends `{ path, type, holds }`; older saved
 // configs are bare path strings, and a fake state in a test may be either.
@@ -53,6 +74,16 @@ function FolderPicker ({ onPick, onClose }) {
 
   useEffect(() => { go('/') }, [])
 
+  // Why this folder cannot be used, or '' when it can. One clause, and it is also what
+  // disables the button - the sentence and the state are the same fact.
+  const why = !data || busy
+    ? ''
+    : data.parent === null
+      ? 'Pick one of the folders inside. The whole filesystem is not a library.'
+      : (data.here > 0 || (data.dirs || []).some(d => d.video))
+          ? ''
+          : 'No video in this folder or the few levels under it.'
+
   return (
     <div>
       <p class='hint'>
@@ -62,10 +93,23 @@ function FolderPicker ({ onPick, onClose }) {
 
       <div class='picker'>
         <div class='head'>
-          <button class='ghost small' disabled={!data?.parent || busy} onClick={() => go(data.parent)}>Up</button>
+          {/* AN ARROW, because "Up" is a word doing an icon's job in the one place
+              every file browser ever made has used the same picture (Tim,
+              2026-08-19). */}
+          <button
+            class='iconbtn' disabled={!data?.parent || busy}
+            onClick={() => go(data.parent)}
+            aria-label='Up one folder' title='Up one folder'
+          >
+            <ChevronUp size={16} />
+          </button>
           <span class='mono' style='flex:1;word-break:break-all'>{at}</span>
         </div>
-        <div class='list'>
+        {/* KEYED ON WHERE WE ARE, so stepping into a folder replays the fade rather
+            than swapping the rows underneath the cursor. The list is a fixed height:
+            the window used to grow and shrink with however many folders happened to be
+            in one, which threw the buttons around under the pointer. */}
+        <div class='list' key={at}>
           {busy && <div class='item'>Reading…</div>}
           {!busy && data?.mounts?.length > 0 && data.mounts.map(m => (
             <button class='item' key={'m' + m} onClick={() => go(m)}>
@@ -87,10 +131,25 @@ function FolderPicker ({ onPick, onClose }) {
 
       {err && <div class='banner bad' style='margin-top:.7rem'>{err}</div>}
 
-      <div class='confirm-actions'>
+      {/* A FOLDER WITH NO FILMS IN IT CANNOT BE CHOSEN (Tim, 2026-08-19). The host
+          already answers this question for every folder it lists - it is what puts the
+          "video" mark on a row - so the same answer for the folder you are standing in
+          is free. Refusing here is worth more than refusing at Save: the mistake is
+          made in this window, and this is where somebody can still step into the right
+          folder instead.
+
+          THE DETECTOR IS BOUNDED, a few levels deep and a few thousand entries, so it
+          can say no about a library buried deeper than that. That is why the line says
+          where it looked: the way out is to step in, which is the better root anyway. */}
+      {why && <p class='hint'>{why}</p>}
+
+      {/* Centred and the SAME WIDTH. The path lives in the header rather than inside
+          the button, which was a button that changed width at every step - and two
+          buttons of different widths side by side was the next thing Tim saw. */}
+      <div class='confirm-actions center'>
         <button class='ghost' onClick={onClose}>Cancel</button>
-        <button disabled={busy || !data} onClick={() => { onPick(at); onClose() }}>
-          Use {at}
+        <button disabled={busy || !data || !!why} onClick={() => { onPick(at); onClose() }}>
+          Use folder
         </button>
       </div>
     </div>
@@ -103,12 +162,19 @@ function FolderPicker ({ onPick, onClose }) {
 // boxes PearCinema ships to it usually gets it right in one click: a Jellyfin on
 // localhost, or an external drive with Movies and TV Shows on it.
 //
-// The Plex row is the interesting one. Plex is the likeliest thing to be running
-// next to this and it CANNOT be read - it has its own API and needs its own reader -
-// so it is shown, disabled, with the reason and with the thing to do instead. Hiding
-// it would look like PearCinema had failed to notice the media server sitting right
-// there, which is worse than an honest no.
-function Detected ({ onFolders, onServer }) {
+// NOT WHAT YOU ARE ALREADY USING (Tim, 2026-08-19: "do we even need the subtitle
+// details for the source types at the top since we can see them at the bottom?"). He
+// was looking at his own two folders offered back to him above the same two folders.
+// A detected source that is already configured is not an offer, it is an echo - so it
+// is dropped, and when that is all of them the section goes with it.
+//
+// The Plex row is the interesting one. Plex is the likeliest thing to be running next
+// to this and it CANNOT be read - it has its own API and needs its own reader - so it
+// is shown, greyed, in one line. Hiding it would look like PearCinema had failed to
+// notice the media server sitting right there, which is worse than an honest no. It is
+// a row rather than the paragraph it was; a reader for it is feasible work we have not
+// done, not an impossibility that needs explaining.
+function Detected ({ onFolders, onServer, have = [], haveUrl = '' }) {
   const [found, setFound] = useState(null)
 
   useEffect(() => {
@@ -117,49 +183,79 @@ function Detected ({ onFolders, onServer }) {
     return () => { live = false }
   }, [])
 
-  if (!found) return <p class='hint'>Looking for films on this machine…</p>
+  if (!found) return <p class='hint center'>Looking for films on this machine…</p>
 
-  const servers = found.servers || []
-  const folders = found.folders || []
+  const using = new Set(have)
+  const servers = (found.servers || []).filter(sv => !sv.usable || sv.url !== haveUrl)
+  const folders = (found.folders || []).filter(f => !f.roots.every(r => using.has(r.path)))
   if (!servers.length && !folders.length) return null
 
   return (
-    <div style='margin-bottom:1rem'>
-      <h3>Already on this machine</h3>
-
-      {folders.map(f => (
-        <div class='dev' key={f.at}>
-          <span class='ic'><Drive size={18} /></span>
-          <div class='who'>
-            <b>{f.label}</b>
-            {/* The detector matched these folders BY NAME, so it already knows which
-                is films and which is television. Showing that here is what makes
-                "Use these" a one-click typed library rather than a path list. */}
-            {f.roots.map(r => (
-              <div class='mono' key={r.path}>{r.path} <span class='chip'>{TYPE_LABEL[r.type] || TYPE_LABEL.auto}</span></div>
-            ))}
+    <>
+      <div class='setgroup'>Already on this machine</div>
+      <div class='setrows'>
+        {/* NAMED BY WHAT IT IS, not by what it is called (Tim, 2026-08-19). The row
+            used to be headed "Movies and TV Shows" and "umbrel" - the names of the
+            things - which left the one question the row exists to answer, what KIND of
+            source this is, to be inferred from an icon. */}
+        {folders.map(f => (
+          <div class='setrow' key={f.at}>
+            <span class='rowmain'>
+              <span class='rowname'><Drive size={15} /> Folders</span>
+              {/* The detector matched these BY NAME, so it already knows which is films
+                  and which is television. What it holds comes first, because that is
+                  the part somebody reads; the path is the detail under it. */}
+              {f.roots.map(r => (
+                <span class='rowsub' key={r.path}>
+                  {TYPE_LABEL[r.type] || TYPE_LABEL.auto} · {r.path}
+                </span>
+              ))}
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={() => onFolders(f.roots)}>Use</button>
+            </span>
           </div>
-          <button class='small' onClick={() => onFolders(f.roots)}>Use these</button>
-        </div>
-      ))}
+        ))}
 
-      {servers.map(sv => (
-        <div class='dev' key={sv.url}>
-          <span class='ic'>{sv.usable ? <Server size={18} /> : <Blocked size={18} />}</span>
-          <div class='who'>
-            <b>{sv.name}</b>
-            <div>{sv.usable ? sv.url : sv.reason}</div>
+        {servers.map(sv => (
+          <div class='setrow' key={sv.url}>
+            <span class='rowmain'>
+              <span class={'rowname ' + (sv.usable ? '' : 'dim')}>
+                {sv.usable ? <Server size={15} /> : <Blocked size={15} />} {sv.server || 'Server'}
+              </span>
+              <span class='rowsub'>{sv.usable ? `${sv.name} · ${sv.url}` : sv.reason}</span>
+            </span>
+            <span class='rowctl'>
+              {/* ONE WORD, THE SAME WORD. "Use these" beside "Use this" is two labels
+                  for one action, and the difference between them carries nothing. */}
+              {sv.usable && <button class='ghost' onClick={() => onServer(sv)}>Use</button>}
+            </span>
           </div>
-          {sv.usable
-            ? <button class='small' onClick={() => onServer(sv)}>Use this</button>
-            : <span class='chip'>not readable</span>}
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+    </>
   )
 }
 
-export default function SourcePanel ({ state, reload, embedded = false }) {
+// THREE PLACES THIS IS SHOWN, and they differ in two independent ways: whether it
+// wears a card, and who owns the controls that keep a working library fresh.
+//
+//   wizard - the first run. Inline, no chrome, and no rescan controls because there
+//            is no library to keep fresh yet.
+//   editor - the Library page's window. It wears the overlay and the title bar
+//            itself, and it does not own rescanning: the PAGE owns that now, as two
+//            rows visible without opening anything.
+//   neither - the standalone card, heading and banners included.
+//
+// Conflating the first two once cost the Settings page its rescan button entirely.
+// The invariant that matters is not a prop, it is that the Library page has a rescan
+// control somewhere on it, and page-renders.test.js is what holds that.
+//
+// A WINDOW THAT NEVER OPENS A SECOND WINDOW (Tim, 2026-08-19). Picking a folder is a
+// step: it replaces what is in this window and hands it back, rather than stacking a
+// pop-up on a pop-up. Inline - the wizard - the picker is still its own overlay,
+// because inline there is nothing for it to be a step inside of.
+export default function SourcePanel ({ state, reload, editor = false, wizard = false, onSaved = null, onClose = null }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
   const [roots, setRoots] = useState((current.roots || []).map(asRoot))
@@ -173,14 +269,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     ? { kind: 'folder', roots: roots.map(picked) }
     : { kind: 'jellyfin', url: url.trim(), username: user.trim(), password: pass }
 
-  const describe = (r) => {
-    const bits = []
-    if (r.leaves !== undefined) bits.push(`${r.leaves} films and episodes`)
-    if (r.movies !== undefined) bits.push(`${r.movies} films`)
-    if (r.series) bits.push(`${r.series} shows`)
-    if (r.episodes) bits.push(`${r.episodes} episodes`)
-    return bits.join(', ') || 'nothing yet'
-  }
+  const describe = describeSource
 
   const test = async () => {
     setBusy('test')
@@ -199,6 +288,8 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     }
     await reload()
     notify('Saved', `Now serving ${describe(res)}.`)
+    // A disclosure that stays open after it has done its job reads as unfinished.
+    onSaved?.()
   }
 
   const rescan = async () => {
@@ -207,7 +298,9 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     setBusy('')
     if (res.error) return notify('Rescan failed', res.error)
     await reload()
-    notify('Rescanned', `Found ${describe(res)}.`)
+    // It STARTS the scan and answers - a full read of a real library is minutes - so
+    // this cannot claim a result it does not have yet.
+    notify('Rescanning', 'The library is being read. Progress is on the Library settings page.')
   }
 
   const removeRoot = async (r) => {
@@ -238,9 +331,16 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     (kind === 'folder' && JSON.stringify(roots.map(picked)) !== JSON.stringify((current.roots || []).map(asRoot).map(picked))) ||
     (kind === 'jellyfin' && (url.trim() !== (current.url || '') || user.trim() !== (current.username || '') || pass))
 
+  // Who keeps the library fresh. Neither the wizard (no library yet) nor the Library
+  // page's disclosure (the page has rescan rows of its own), and never when there is
+  // no source to rescan.
+  const ownsRescan = !wizard && !editor && current.kind !== 'empty'
+
   const Body = (
     <>
       <Detected
+        have={roots.map(r => r.path)}
+        haveUrl={kind === 'jellyfin' ? url.trim() : ''}
         onFolders={(rs) => {
           setKind('folder')
           addRoots(rs)
@@ -254,32 +354,39 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
       {/* PearTune's segmented picker, full width - the donor design this whole
           panel copies (Tim, 2026-08-15). */}
       <div class='seg wide' style='margin-bottom:.9rem'>
-        <button class={kind === 'folder' ? 'on' : ''} onClick={() => setKind('folder')}>A folder of films</button>
+        <button class={kind === 'folder' ? 'on' : ''} onClick={() => setKind('folder')}>Folders</button>
         <button class={kind === 'jellyfin' ? 'on' : ''} onClick={() => setKind('jellyfin')}>Jellyfin or Emby</button>
       </div>
 
       {kind === 'folder' && (
         <>
-          <label class='srclabel'>Folders <span class='hint-inline'>- paths inside the PearCinema container</span></label>
+          {/* The parenthetical is not decoration: it is why the path here does not look
+              like the path on the box. It is one clause now rather than a line of
+              container vocabulary. */}
+          <label class='srclabel'>Folders <span class='hint-inline'>- as this app sees them</span></label>
           <div class='rootlist'>
             {roots.map(r => (
               <div class='rootrow' key={r.path}>
-                <span class='rootpath' title={r.path}>{r.path}</span>
-                <select
-                  value={r.type || 'auto'}
-                  aria-label={'What is in ' + r.path}
-                  onChange={e => setRootType(r, e.currentTarget.value)}
-                >
-                  {TYPE_ORDER.map(t => (
-                    // "Work it out" says what it worked OUT, when the folder's own
-                    // name settled it. Silently reading `TV Shows` as television and
-                    // showing nothing would be a decision the operator cannot see.
-                    <option value={t} key={t}>
-                      {t === 'auto' && r.holds ? `${TYPE_LABEL.auto} (${TYPE_LABEL[r.holds].toLowerCase()})` : TYPE_LABEL[t]}
-                    </option>
-                  ))}
-                </select>
-                <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}><Close size={15} /></button>
+                <span class='rowmain'>
+                  <span class='rootpath' title={r.path}>{r.path}</span>
+                  {/* WHAT AUTOMATIC DECIDED, on its own line rather than folded into the
+                      chooser's own label. Reading `TV Shows` as television silently would
+                      be a decision the operator cannot see; saying it inside the option
+                      made the option unreadable. */}
+                  {(!r.type || r.type === 'auto') && r.holds && (
+                    <span class='rowsub'>Read as {HOLDS_PHRASE[r.holds] || HOLDS_PHRASE.auto}.</span>
+                  )}
+                </span>
+                <span class='rowctl'>
+                  <select
+                    value={r.type || 'auto'}
+                    aria-label={'What is in ' + r.path}
+                    onChange={e => setRootType(r, e.currentTarget.value)}
+                  >
+                    {TYPE_ORDER.map(t => <option value={t} key={t}>{TYPE_LABEL[t]}</option>)}
+                  </select>
+                  <button class='iconbtn' onClick={() => removeRoot(r)} aria-label={'Remove ' + r.path}><Close size={15} /></button>
+                </span>
               </div>
             ))}
             {!roots.length && <div class='rootrow'><span class='hint-inline'>No folders yet. Add the one your films are in.</span></div>}
@@ -288,14 +395,17 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
               does not - the typed-path-inside-the-container trap is this panel's
               founding scar (see the header comment) - so the row is the picker
               alone, full width like the donor's. */}
-          <div class='pickrow'>
+          <div class='addfolder'>
             <button class='ghost' onClick={() => setPicking(true)}>Add a folder…</button>
           </div>
+          {/* ONE CLAUSE, and only the half nobody could work out. Three of the four
+              sentences here explained the control sitting directly above them: "work it
+              out" already says what it worked out, in the chooser itself. What it cannot
+              say is what saying so BUYS you, which is the episode that would otherwise
+              have turned up as a film. */}
           <p class='hint'>
-            Add films and TV as separate folders if they live apart, and say what each
-            folder holds. In a TV folder, an episode whose name does not say which one
-            it is still goes under its show instead of turning up as a film. On "work it
-            out", a folder called Movies or TV Shows is taken at its word.
+            Saying what a folder holds is what keeps a hand-named episode under its show
+            instead of in with the films.
           </p>
         </>
       )}
@@ -323,19 +433,23 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
         </>
       )}
 
-      {/* Equal-width buttons filling the row, the donor's action bar. */}
-      <div class={'srcactions' + (embedded || current.kind === 'empty' ? ' two' : '')}>
+      {/* THE ACTION ROW EVERY OTHER PAGE HAS: centred, and each button the same 7.5rem
+          minimum. It was two filled buttons stretched to half the width each, which is
+          a shape that exists nowhere else in Settings and reads as a form footer from a
+          different app. */}
+      <div class='actions'>
         <button class='ghost' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Checking…' : 'Test'}</button>
         <button onClick={save} disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
-        {!embedded && current.kind !== 'empty' && (
-          <button class='ghost' onClick={rescan} disabled={!!busy}>{busy === 'rescan' ? 'Rescanning…' : 'Rescan now'}</button>
+        {ownsRescan && (
+          <button class='ghost' onClick={rescan} disabled={!!busy}>Rescan</button>
         )}
       </div>
 
       {/* Scheduled auto-rescan, the donor's control: pick new files up without a
           manual Rescan. Not offered during first-run setup - there is no library
-          to keep fresh yet. */}
-      {!embedded && (
+          to keep fresh yet - and not here on the Library page either, where it is
+          a row of its own that does not need this panel opened to be seen. */}
+      {ownsRescan && (
         <label class='autoscan'>
           <span>Auto-rescan</span>
           <select
@@ -357,7 +471,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
         </label>
       )}
 
-      {picking && (
+      {picking && !editor && (
         <div class='overlay' onMouseDown={e => { if (e.target === e.currentTarget) setPicking(false) }}>
           <div class='modal'>
             <div class='modal-head'>
@@ -377,11 +491,42 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
     </>
   )
 
-  if (embedded) return Body
+  if (wizard) return Body
+
+  // THE WINDOW, and one step at a time inside it. Closing from the folder browser goes
+  // BACK to the source rather than out of the whole thing - it is a step, and a step's
+  // way out is the step behind it.
+  if (editor) {
+    return (
+      <Modal
+        title={picking ? 'Pick a folder' : 'Where the films are'}
+        onClose={() => (picking ? setPicking(false) : onClose?.())}
+        closeLabel={picking ? 'Back' : 'Close'}
+        wide
+      >
+        {picking
+          ? <FolderPicker onPick={(p) => addRoots([p])} onClose={() => setPicking(false)} />
+          : Body}
+      </Modal>
+    )
+  }
 
   return (
     <div class='card'>
       <h3>Where the films are</h3>
+      <SourceBanners state={state} />
+      {Body}
+    </div>
+  )
+}
+
+// THE BANNERS ARE NOT PART OF THE EDITOR, and that separation is the point of pulling
+// them out: on the Library page the editor lives behind a Change button, and a source
+// that has stopped answering is exactly the news nobody should have to open anything
+// to hear.
+export function SourceBanners ({ state }) {
+  return (
+    <>
       {state.stats?.duplicates > 0 && (
         <div class='banner bad'>
           <b>Two of these folders hold the same {state.stats.duplicates === 1 ? 'file' : 'files'}.</b>{' '}
@@ -399,8 +544,7 @@ export default function SourcePanel ({ state, reload, embedded = false }) {
           <div class='hint'>Paired devices can still reach this host. They just see an empty library until this is fixed.</div>
         </div>
       )}
-      {Body}
-    </div>
+    </>
   )
 }
 

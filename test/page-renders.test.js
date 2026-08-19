@@ -109,6 +109,11 @@ const ROUTES = {
       { tmdbId: 22, title: 'Crash', year: 2004, poster: '/c2.jpg', overview: 'the other one' }
     ]
   },
+  // WHICH ONE CAME BACK WITH NOTHING. Listed before '/api/metadata' for the same
+  // reason the search route is: the stub matches by prefix in insertion order.
+  '/api/metadata/missing': {
+    items: [{ id: 'film-9', title: 'K05', year: null, type: 'movie', reason: null }]
+  },
   // The artwork panel after a pass: posters fetched, two of them guesses - so the
   // honesty notice renders and can be asserted on.
   '/api/metadata': {
@@ -275,15 +280,24 @@ test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  // Settings is a side navigation now; the artwork panel lives behind its entry.
-  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Artwork')
+  // Source, Artwork and Library are one page now - they were three nav items for one
+  // subject, and two held a single control each (Tim, 2026-08-19).
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Library')
   nav.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
   // The sentence IS the consent. A toggle without it is a host quietly telling a
-  // third party what somebody owns.
+  // third party what somebody owns. It sits above the switch it is about, and it is
+  // all that is left of a five-line paragraph: what a key is and where to get one now
+  // live in the key row and in the form that opens from it.
   assert.match(text(), /tells TMDB the titles it is identifying/)
-  assert.match(text(), /Off by default/)
+  // "Off by default" was a claim about defaults on a page that can now just say what
+  // this host is actually doing. The row's own name carries the state in colour and
+  // its sub-line says it in words.
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  assert.ok(posters, 'artwork is a row now, not a card with a paragraph')
+  assert.ok(posters.className.includes('good'), 'on, and the name says so')
+  assert.match(posters.parentElement.textContent, /On · 5 titles have artwork/)
   // Nobody is quizzed: the guesses are counted and the correction is pointed at,
   // on the tile, where the mistake is visible (Tim, 2026-08-14).
   assert.match(text(), /matched from several possibilities/)
@@ -314,6 +328,19 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
   assert.equal(doc.querySelector('video'), null)
 })
 
+// THE PICKER LIVES BEHIND ONE BUTTON NOW. It is a folder browser, a roots editor, a
+// Jellyfin form and a Save - a small app rather than a setting - and left open it was
+// the whole Library page. Everything about it is unchanged; it is one press further in.
+async function openSourceEditor (doc, win) {
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
+  assert.ok(change, 'the source row offers a way in')
+  change.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+}
+
 test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read as', async (t) => {
   // The setting exists because some filenames say nothing at all - a box set numbered
   // K05 - and on the real library 34 television files were landing in the Films list
@@ -322,9 +349,7 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
-  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 40))
+  await openSourceEditor(doc, win)
 
   assert.match(text(), /\/library\/Movies/)
 
@@ -332,12 +357,17 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   assert.equal(selects.length, 3, 'one per folder, including the bare string')
   assert.deepEqual(selects.map(s => s.value), ['movies', 'auto', 'auto'])
 
-  // The resolution is SHOWN rather than silent: a folder called `TV Shows` left on
-  // "work it out" says out loud that it was read as television, so nobody has to
-  // reverse-engineer why their library sorted itself out.
-  assert.match(selects[1].textContent, /Work it out \(tv shows\)/)
+  // EVERY CHOOSER SAYS THE SAME THREE WORDS. It used to fold the resolution into the
+  // option itself - "Work it out (tv shows)" - which made three different labels down
+  // one column and left Tim asking what it meant (2026-08-19).
+  assert.deepEqual([...selects[1].options].map(o => o.textContent), ['Automatic', 'Films', 'TV shows'])
+
+  // The resolution is still SHOWN rather than silent, on the row's own second line, so
+  // nobody has to reverse-engineer why their library sorted itself out.
+  const rows = [...doc.querySelectorAll('.rootlist .rootrow')]
+  assert.match(rows[1].textContent, /Read as TV shows\./)
   // And a folder whose name says nothing claims nothing.
-  assert.doesNotMatch(selects[2].textContent, /Work it out \(/)
+  assert.doesNotMatch(rows[2].textContent, /Read as/)
 })
 
 test('a folder picked by hand arrives with a type control of its own', async (t) => {
@@ -347,16 +377,18 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   const { dom, doc, win } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
-  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 40))
+  await openSourceEditor(doc, win)
 
   const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
   add.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Use /library'))
+  // The button says "Use this folder" rather than "Use /library/...": the path is in
+  // the header above it, and a button that changes width at every step is a button
+  // that moves under the pointer (Tim, 2026-08-19).
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
   assert.ok(use, 'the picker opened on what the host can see')
+  assert.match(doc.querySelector('.picker .head .mono').textContent, /\/library/)
   use.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -364,6 +396,46 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   assert.equal(rows.length, 4, 'the three it had plus the one just picked')
   assert.equal(rows.every(r => r.querySelector('select')), true, 'every folder can say what it holds')
   assert.equal(rows[3].querySelector('select').value, 'auto')
+})
+
+test('A FOLDER WITH NO FILMS IN IT CANNOT BE CHOSEN, and it says why', async (t) => {
+  // Tim, 2026-08-19. The host already answers this for every folder it lists - it is
+  // what puts the "video" mark on a row - so answering it for the folder you are
+  // standing in costs nothing, and this window is where the mistake can still be
+  // fixed by stepping into the right folder.
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/folders': { path: '/library/Docs', parent: '/library', mounts: [], dirs: [{ name: 'Manuals', path: '/library/Docs/Manuals', video: false }], here: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
+  assert.equal(use.disabled, true)
+  // The reason is in words, not only in a greyed-out button - and it says where it
+  // looked, because the detector is bounded and can be wrong about a deep library.
+  assert.match(text(), /No video in this folder or the few levels under it\./)
+})
+
+test('the whole filesystem is not a library', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/folders': { path: '/', parent: null, mounts: ['/library'], dirs: [{ name: 'library', path: '/library', video: true }], here: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // There IS video under it - that is the point. Scanning from the root is still the
+  // wrong answer, so the refusal is its own sentence rather than the missing-video one.
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
+  assert.equal(use.disabled, true)
+  assert.match(text(), /Pick one of the folders inside/)
 })
 
 test('two folders holding the same file is said out loud, not absorbed', async (t) => {
@@ -1184,7 +1256,7 @@ async function openCasting (t, routes = {}) {
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /casting/i.test(b.textContent))
+  const cast = [...doc.querySelectorAll('button, a, li')].find(b => /televisions/i.test(b.textContent))
   if (cast) {
     cast.dispatchEvent(new win.Event('click', { bubbles: true }))
     await new Promise(r => setTimeout(r, 80))
@@ -1223,7 +1295,7 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   // Assistant token, so a person with a Roku and nothing else was told "Casting is off"
   // and shown an empty page, while casting worked perfectly from their phone. Their
   // server had found the television. The page never asked.
-  const { text } = await openCasting(t, {
+  const { text, doc } = await openCasting(t, {
     // The specific route first: the stub matches by prefix in insertion order, and
     // '/api/cast/targets' starts with '/api/cast'.
     '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
@@ -1231,13 +1303,28 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   })
 
   assert.match(text(), /Living Room/, 'the television is on the page with no Home Assistant anywhere')
-  assert.match(text(), /found on your network/)
   assert.match(text(), /Ready/)
+  // THE ROUTE IS NOT REPEATED ON EVERY ROW. Being found on the network is the default
+  // and saying so on each television was noise; only the exception is marked, and the
+  // routes have a section of their own below (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /Ready · found on your network/)
+  assert.match(text(), /1 television found/)
+
+  // THE SAME ROWS EVERY SETTINGS PAGE USES, and the name carries the state the way
+  // the video engine's does on This host (Tim, 2026-08-19: give the rest of the pages
+  // the treatment This host got).
+  // Found by name rather than by position: the routes are the settings on this page
+  // and the televisions are what they produced, so the routes come first (Tim,
+  // 2026-08-19) and the first row on the page is no longer a television.
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Living Room/.test(n.textContent))
+  assert.ok(name, 'the television is a row')
+  assert.ok(name.className.includes('good'), 'ready reads as ready')
+  assert.equal(doc.querySelector('.tvrow'), null, 'no bespoke row shape left on this page')
   assert.doesNotMatch(text(), /Casting is off/, 'and it never says casting is off while a television is listed')
 })
 
 test('a television that is switched off says so, rather than disappearing', async (t) => {
-  const { text } = await openCasting(t, {
+  const { text, doc } = await openCasting(t, {
     '/api/cast/targets': {
       targets: [{ ...ROKU_TARGET, state: 'unavailable' }],
       needsChannel: [],
@@ -1247,6 +1334,9 @@ test('a television that is switched off says so, rather than disappearing', asyn
 
   assert.match(text(), /Living Room/, 'still listed')
   assert.match(text(), /Switched off or asleep/)
+  // Amber rather than green, and the words say it too.
+  const tv = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Living Room/.test(n.textContent))
+  assert.ok(tv.className.includes('warn'))
   assert.match(text(), /comes back by itself/, 'and it says what to do about it, which is nothing')
 })
 
@@ -1274,7 +1364,7 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
     '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
   })
 
-  assert.match(text(), /Home Assistant: not set up/, 'its status is honest, and it is one line')
+  assert.match(text(), /Not set up\. Only needed for a television your server cannot find on its own/, 'honest, and only where it applies')
   // The token field is not on screen until somebody asks for it.
   assert.equal(doc.querySelector('input[type=password]'), null)
 
@@ -1570,4 +1660,587 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
   }
   const two = await openHost(t, twoCards)
   assert.match(two.text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
+})
+
+// --- five pages, down from eight ---------------------------------------------
+
+test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', async (t) => {
+  // Source, Artwork and Library were three nav items for one subject, and two of them
+  // held a single control each. Security was a password field with a page of its own.
+  // A section that MOVES must not turn every link and bookmark into a silent fall back
+  // to the first page - and the topbar's own download indicator points at the old
+  // remotes address, so this is load-bearing inside the app too.
+  const { doc, win, dom } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
+  assert.deepEqual(labels, ['Library', 'Televisions', 'Sharing', 'This host', 'Support development'])
+
+  const lands = async (hash, expect) => {
+    win.location.hash = 'settings/' + hash
+    win.dispatchEvent(new win.Event('hashchange'))
+    await new Promise(r => setTimeout(r, 60))
+    const on = doc.querySelector('.setnav button.on')
+    assert.equal(on.textContent.trim(), expect, `${hash} lands on ${expect}`)
+  }
+
+  await lands('source', 'Library')
+  await lands('artwork', 'Library')
+  await lands('casting', 'Televisions')
+  await lands('remotes', 'Sharing')
+  await lands('security', 'This host')
+  // AN ADDRESS THAT NEVER EXISTED LEAVES YOU WHERE YOU ARE. A stray hash should not
+  // yank somebody off the page they are reading; only a real section moves them, and
+  // only a fresh load with no usable hash starts at the first page.
+  await lands('nonsense', 'This host')
+})
+
+test('a merged page names itself once and labels what it holds', async (t) => {
+  const { doc, win, dom, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.equal(doc.querySelector('.setbody .setpage .setpagename').textContent.trim(), 'Library')
+
+  // ONE GROUP, because there is one genuinely separate subject on this page. The
+  // source used to carry a heading of its own; it is a row now, and a heading over a
+  // single row is a heading over nothing.
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Artwork'])
+
+  // EVERYTHING IS A ROW. The name, where the films are, the two halves of keeping it
+  // fresh, and then artwork - rather than one row and two panels of loose controls.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.deepEqual(rows, [
+    'Name', 'Where the films are', 'Rescan', 'Automatic rescan',
+    'Posters', 'TMDB key', 'Titles with no artwork'
+  ])
+
+  // The row says what it is and what was found in it, so the counts are not something
+  // you open a picker to read.
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('good'))
+  assert.match(src.parentElement.textContent, /3 folders on this machine · 2 films, 1 show, 1 episode/)
+
+  // ONE WORDED BUTTON PER ROW, so the right-hand column is one width.
+  for (const row of doc.querySelectorAll('.setrow')) {
+    assert.ok(row.querySelectorAll('.rowctl button:not(.iconbtn)').length <= 1)
+  }
+
+  // RESCANNING SURVIVED THE MOVE, and this is the assertion that matters most on this
+  // page: it came out of the source panel, and the last time these controls changed
+  // hands the settings page lost them entirely. They are visible without opening
+  // anything now.
+  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(buttons.includes('Rescan'))
+  assert.ok(doc.querySelector('.setrow .rowctl select'), 'the schedule is a chooser that commits itself')
+  assert.doesNotMatch(text(), /Auto-rescan/, 'it is a row with a name now, not a label beside a box')
+})
+
+test('A SCAN IN PROGRESS IS SAID IN THE LINE AND ON THE BAR, not in the button', async (t) => {
+  // Tim pressed Rescan on the real library and watched a button read "Rescanning…" for
+  // several minutes with nothing else on the page saying anything (2026-08-19). A word
+  // that changes inside a button also makes that button wider than every other one,
+  // which is the ragged right edge the whole page shape exists to stop.
+  const { doc, win, dom, text } = await open({ ...STATE, scanning: { done: 412, total: 2986, startedAt: 1 } })
+  t.after(() => dom.window.close())
+
+  // On the bar, from anywhere in the app - not only on the page that started it.
+  const light = [...doc.querySelectorAll('.barright button')].find(b => /Reading the library/.test(b.getAttribute('aria-label') || ''))
+  assert.ok(light, 'the top bar says something is happening')
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const row = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Rescan')
+  assert.ok(row.className.includes('warn'))
+  assert.match(row.parentElement.textContent, /Reading the library, 412 of 2,?986\./)
+  assert.ok(row.parentElement.querySelector('.meter'), 'and how far through')
+
+  const btn = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Rescan/.test(b.textContent))
+  assert.equal(btn.textContent.trim(), 'Rescan', 'the button is a button, not a status line')
+  assert.equal(btn.disabled, true)
+  assert.doesNotMatch(text(), /Rescanning…/)
+})
+
+test('the source editor is behind one button, and the news is not', async (t) => {
+  const { doc, win, dom, text } = await open({ ...STATE, sourceError: 'the drive is not mounted' })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // Closed, the picker is not on the page at all.
+  assert.equal(doc.querySelector('.rootlist'), null)
+  assert.doesNotMatch(text(), /Add a folder/)
+
+  // But a source that has stopped answering says so without being asked, in the banner
+  // AND on the row, because a page whose editor is closed must still be able to tell
+  // you that the thing behind it is broken.
+  assert.match(text(), /The source is not answering/)
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('warn'))
+  assert.match(src.parentElement.textContent, /not answering/)
+
+  // And it opens.
+  await openSourceEditor(doc, win)
+  assert.ok(doc.querySelector('.rootlist'), 'the picker is one press in')
+})
+
+test('BROWSING FOR A FOLDER IS A STEP IN THE WINDOW, not a window on a window', async (t) => {
+  const { doc, win, dom } = await open()
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  assert.equal(doc.querySelectorAll('.overlay').length, 1, 'the editor is one window')
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Where the films are')
+
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // ONE WINDOW STILL. The picker used to be a second overlay on top of the first,
+  // which is the thing to avoid (Tim, 2026-08-19).
+  assert.equal(doc.querySelectorAll('.overlay').length, 1)
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Pick a folder')
+  assert.equal(doc.querySelector('.rootlist'), null, 'the source is not underneath it, it is behind it')
+
+  // And its way out is the step behind it rather than out of everything.
+  const back = doc.querySelector('.modal-head button')
+  assert.equal(back.getAttribute('aria-label'), 'Back')
+  back.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Where the films are')
+  assert.ok(doc.querySelector('.rootlist'))
+})
+
+test('WHAT WAS DETECTED IS NAMED BY WHAT IT IS, and never offers back what you already use', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/detect': {
+      // The first is what this library already reads. The second is not.
+      folders: [
+        { at: '/library', label: 'Movies and TV Shows', roots: [{ path: '/library/Movies', type: 'movies' }, { path: '/library/TV Shows', type: 'shows' }] },
+        { at: '/media/usb', label: 'Films', roots: [{ path: '/media/usb/Films', type: 'movies' }] }
+      ],
+      servers: [
+        { kind: 'jellyfin', server: 'Jellyfin', name: 'umbrel', url: 'http://localhost:8096', usable: true },
+        { kind: 'plex', server: 'Plex', name: 'Plex Media Server', url: 'http://localhost:32400', usable: false, reason: 'Cannot be read yet. Point PearCinema at the folders your films are in instead.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+
+  const names = [...doc.querySelectorAll('.overlay .setrow .rowname')].map(n => n.textContent.trim())
+  // Named by KIND. It used to be "Movies and TV Shows" and "umbrel" - the names of the
+  // things - leaving the one question the row answers to be read off an icon.
+  assert.deepEqual(names, ['Folders', 'Jellyfin', 'Plex'])
+  // And the two folders this library is already reading are not offered back to it -
+  // asserted on the detected rows themselves, since those paths are of course still in
+  // the editor below, which is where they belong.
+  const detected = doc.querySelector('.overlay .setrows').textContent
+  assert.doesNotMatch(detected, /\/library\/TV Shows/)
+  assert.match(detected, /Films · \/media\/usb\/Films/, 'what it holds first, then where')
+  assert.match(detected, /umbrel · http:\/\/localhost:8096/)
+
+  // ONE WORD, THE SAME WORD, and nothing to press on the one that cannot be read.
+  const buttons = [...doc.querySelectorAll('.overlay .setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.deepEqual(buttons, ['Use', 'Use'])
+  assert.match(text(), /Cannot be read yet/)
+})
+
+test('the titles that found nothing are shown, and fixed in the same window', async (t) => {
+  const { doc, win, dom, text } = await open()
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // A COUNT YOU CANNOT ACT ON IS A COUNT (Tim, 2026-08-19).
+  const show = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Show them')
+  assert.ok(show, 'the row opens the list')
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Titles with no artwork')
+  assert.match(text(), /K05/, 'the title itself, not just how many')
+
+  const find = [...doc.querySelectorAll('.overlay .setrow .rowctl button')].find(b => b.textContent.trim() === 'Find it')
+  find.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  // The same choices the pencil on a tile gives, as a step INSIDE this window.
+  assert.equal(doc.querySelectorAll('.overlay').length, 1)
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'K05')
+  assert.ok(doc.querySelector('.candgrid .cand'), 'candidates to pick from')
+})
+
+test('an empty list of missing titles says two words, in the middle', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, { '/api/metadata/missing': { items: [] } })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const show = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Show them')
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // "That is all of them done" was awkward (Tim, 2026-08-19), and prose in a window is
+  // centred like everything else in one.
+  const line = doc.querySelector('.overlay p.hint')
+  assert.equal(line.textContent.trim(), 'All done.')
+  assert.ok(line.className.includes('center'))
+  void text
+})
+
+test('artwork with no key says so, refuses to be turned on, and hides its form', async (t) => {
+  // WHAT A KEY IS AND WHERE TO GET ONE moved out of the standing paragraph and into
+  // the form that opens from the key row - said where it applies, not above a switch
+  // somebody has already set up.
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/metadata': { enabled: false, hasKey: false, running: null, lastRun: null, matched: 0, uncertain: 0, missed: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  assert.ok(posters.className.includes('dim'), 'off, and the name says so')
+  // COLOUR IS NEVER THE ONLY CARRIER, and the reason it cannot be turned on yet is in
+  // the words rather than only in a greyed-out button.
+  assert.match(posters.parentElement.textContent, /Off\. It needs a free TMDB key first\./)
+
+  const on = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Turn on')
+  assert.equal(on.disabled, true)
+
+  // The form is not on the page until it is asked for.
+  assert.doesNotMatch(text(), /themoviedb\.org/)
+  const add = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Add')
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.match(text(), /themoviedb\.org/)
+  assert.ok(doc.querySelector('.rowopen input[type=password]'))
+})
+
+test('a library with no source says so and offers to be pointed at one', async (t) => {
+  // The setup story belongs in the empty state. The editor used to open itself here,
+  // back when it opened inside the page; it is a window now, and a window that throws
+  // itself over the page the moment you arrive is one you close before reading
+  // anything (Tim, 2026-08-19, choosing the window).
+  const { doc, win, dom, text } = await open({
+    ...STATE,
+    source: { kind: 'empty', roots: [], url: null, username: null },
+    stats: { movies: 0, series: 0, seasons: 0, episodes: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('warn'))
+  assert.match(src.parentElement.textContent, /Nothing set yet/)
+  assert.equal(doc.querySelector('.overlay'), null, 'nothing has thrown itself over the page')
+  const setup = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Set up')
+  assert.ok(setup, 'and it says Set up rather than Change, because there is nothing to change')
+  setup.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(doc.querySelector('.overlay .rootlist'), 'which opens the window')
+
+  // And nothing offers to rescan a library that does not exist.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.equal(rows.includes('Rescan'), false)
+  assert.equal(rows.includes('Automatic rescan'), false)
+  void text
+})
+
+test('THE ROUTES ARE ROWS, not a footer of mismatched buttons', async (t) => {
+  // The footer had Look again on the left and Set up on the right, two buttons of
+  // different widths on one line - the asymmetry Tim caught on This host, grown back
+  // here. They are rows now, under a label, because a route sitting unlabelled among
+  // televisions would read as one.
+  const { doc, text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
+  })
+
+  // HOW THEY ARE FOUND COMES FIRST, and the televisions below it under a label of
+  // their own - unlabelled there, they would read as part of the routes (Tim,
+  // 2026-08-19).
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['How they are found', 'Your televisions'])
+
+  const names = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.deepEqual(names, ['On your network', 'Home Assistant', 'Living Room'])
+
+  // One worded button per row, so the right-hand column is one width.
+  for (const row of doc.querySelectorAll('.setrow')) {
+    assert.ok(row.querySelectorAll('.rowctl button:not(.iconbtn)').length <= 1)
+  }
+  assert.equal(doc.querySelector('.tvfoot'), null, 'the footer is gone, not restyled')
+  void text
+})
+
+test('being hidden is not said twice', async (t) => {
+  // The eye beside the row is already saying it (Tim, 2026-08-19).
+  const { text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [{ ...ROKU_TARGET, hidden: true }], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+  assert.doesNotMatch(text(), /hidden from phones/)
+})
+
+test('an empty list still offers both ways to fix itself', async (t) => {
+  // The routes used to be a footer that rendered regardless; keeping that property
+  // matters more now they are rows, because a page with no televisions is exactly when
+  // somebody needs Look again and Set up.
+  const { doc, text } = await openCasting(t, {
+    '/api/cast/targets': { targets: [], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+
+  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(buttons.includes('Look again'))
+  assert.ok(buttons.includes('Set up'))
+  // And the setup story is two clauses, not the four-line paragraph it was.
+  assert.match(text(), /None yet\. Your server finds televisions on its own network, and a Roku also needs the free Media Assistant channel installed on it\./)
+})
+
+test('WAITING LOOKS THE SAME AS IT DOES ON THE PHONE', async (t) => {
+  // The phone answers a slow question with one spinning circle and a word, centred.
+  // The dashboard answered the same question with a left-aligned "Looking…" in muted
+  // type, which reads as a label rather than as something in progress (Tim, 2026-08-19,
+  // with a screenshot).
+  const opened = await open(STATE, { '/api/cast/targets': new Promise(() => {}) })
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Televisions')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const wait = doc.querySelector('.setbody .waiting')
+  assert.ok(wait, 'a centred wait, not a muted label')
+  assert.ok(wait.querySelector('svg.spin'), 'and it is turning')
+  assert.match(wait.textContent, /Looking for televisions/)
+})
+
+test('a notification is centred all the way through', async (t) => {
+  // Title and button were centred and the message between them was not, so a one-line
+  // answer sat off to the left under a centred heading (Tim, 2026-08-19, screenshot).
+  const { doc, win, dom } = await openCasting(t, {
+    '/api/cast/rescan': { targets: [], needsChannel: [], mediaChannel: 'Media Assistant' },
+    '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' }
+  })
+
+  const look = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Look again')
+  look.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const alert = doc.querySelector(".modal[role='alertdialog']")
+  assert.ok(alert, 'the answer arrives as a notification')
+  const body = alert.querySelector('p')
+  assert.ok(body, 'with a message between the heading and the button')
+  assert.equal(dom.window.getComputedStyle(body).textAlign, 'center')
+})
+
+test('SHARING IS ROWS TOO, and a library says whether it is answering', async (t) => {
+  // The three panels used `.rootpath` for things that are names rather than paths -
+  // monospace, one line, ellipsised - which is right for a folder on disk and wrong
+  // for "Ben's Cinema". Same fault Televisions had (Tim, 2026-08-19).
+  const { dom, doc, win } = await open(STATE, {
+    '/api/remote/list': {
+      remotes: [
+        { hostKey: 'k1', libraryId: 'lib-1', libraryName: "Ben's Cinema", online: true },
+        { hostKey: 'k2', libraryId: 'lib-2', libraryName: 'The Loft', online: false }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+
+  const names = [...doc.querySelectorAll('.setrow .rowname')]
+  assert.ok(names.length >= 2)
+  const ben = names.find(n => /Ben's Cinema/.test(n.textContent))
+  const loft = names.find(n => /The Loft/.test(n.textContent))
+  assert.ok(ben.className.includes('good'), 'online reads as online')
+  assert.ok(loft.className.includes('warn'), 'and offline does not')
+  // Colour is never the only carrier.
+  assert.match(ben.parentElement.textContent, /Online/)
+  assert.match(loft.parentElement.textContent, /Offline/)
+
+  // The four-line paragraph is gone while there is anything to look at.
+  assert.doesNotMatch(doc.getElementById('root').textContent, /open a pairing window on their dashboard/)
+})
+
+test('the pairing explanation appears only when there is nothing else to read', async (t) => {
+  const { dom, doc, win, text } = await open(STATE, { '/api/remote/list': { remotes: [] } })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+
+  assert.match(text(), /Ask them to open a pairing window on their dashboard/)
+})
+
+test('WHAT PEOPLE ASKED THIS LIBRARY FOR HAS SOMEWHERE TO APPEAR', async (t) => {
+  // The dashboard had "Your requests" - what this machine asked somebody else's
+  // library for - and nothing at all for the other direction. The store and the wire
+  // have both had the owner's view all along; only the dashboard never asked, so Tim
+  // made requests from a paired phone and found nowhere they could show up
+  // (2026-08-19).
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/asked': {
+      items: [
+        { id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 2, requester: 'o1', requesterLabel: 'Ben' },
+        { id: 'r2', name: 'Chernobyl', kind: 'series', status: 'added', count: 1, requester: 'o1', requesterLabel: 'Ben' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.match(text(), /Solaris/)
+  // WHO ASKED, by the name their owner chose rather than by a key - a request nobody
+  // can attribute is one nobody can answer.
+  assert.match(text(), /asked by Ben/)
+  assert.match(text(), /asked 2 times/)
+
+  // THE NAME COMES OFF THE FIELD THE STORE ACTUALLY USES. Every row read "Untitled"
+  // because this looked for `title` and a request carries `name` (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /Untitled/)
+
+  // SENTENCE CASE. The status words came straight off the wire in the store's own
+  // lowercase vocabulary and sat mid-sentence in a sub-line.
+  assert.match(text(), /Waiting for you · Film/)
+  assert.match(text(), /Added · Show/)
+
+  // A TICK AND A CROSS on the one waiting, and a way to clear the one that is done.
+  const labels = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.getAttribute('aria-label'))
+  assert.ok(labels.some(l => /Mark Solaris as added/.test(l)))
+  assert.ok(labels.some(l => /Decline the request for Solaris/.test(l)))
+  assert.ok(labels.some(l => /Clear the request for Chernobyl/.test(l)), 'an answered ask can be cleared')
+  assert.equal(labels.some(l => /Clear the request for Solaris/.test(l)), false, 'but not one still waiting')
+})
+
+test('answering a request changes that row and nothing else', async (t) => {
+  // It used to refetch the whole list and raise a notification, so answering one row
+  // redrew the page and threw a modal over it (Tim, 2026-08-19).
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/asked/resolve': { request: { id: 'r1', name: 'Solaris', kind: 'movie', status: 'added', count: 1, requesterLabel: 'Ben' } },
+    '/api/asked': {
+      items: [{ id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const tick = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /as added/.test(b.getAttribute('aria-label') || ''))
+  tick.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.match(text(), /Added · Film/, 'the row it changed says so')
+  assert.equal(doc.querySelector(".modal[role='alertdialog']"), null, 'and nothing is thrown over the page')
+})
+
+test('SOMEBODY WAITING FOR AN ANSWER IS VISIBLE FROM ANY PAGE', async (t) => {
+  // The count is the shell's, not the panel's: the panel only exists on the Sharing
+  // page, so a light that waited for it would appear only once you had already gone
+  // looking (Tim, 2026-08-19, asking for the same treatment downloads get).
+  const { dom, doc } = await open(STATE, {
+    '/api/asked': {
+      items: [{ id: 'r1', name: 'Solaris', kind: 'movie', status: 'pending', count: 1, requester: 'o1', requesterLabel: 'Ben' }]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  // Still on the library, nowhere near Sharing.
+  const light = [...doc.querySelectorAll('.barright button')]
+    .find(b => /request/i.test(b.getAttribute('aria-label') || ''))
+  assert.ok(light, 'the bar says somebody is waiting')
+  assert.match(light.getAttribute('aria-label'), /One request waiting/)
+  assert.ok(light.querySelector('.dot'), 'and it is marked the way a running download is')
+
+  // NOT THE PEOPLE MARK, which already means "who can get in" in the same bar. Two
+  // lights with the same glyph and different meanings is worse than no light at all
+  // (Tim, 2026-08-19).
+  const people = [...doc.querySelectorAll('.barright button')]
+    .find(b => /people|devices/i.test(b.getAttribute('aria-label') || ''))
+  if (people) {
+    assert.notEqual(light.querySelector('svg')?.innerHTML, people.querySelector('svg')?.innerHTML)
+  }
+})
+
+test('nothing waiting means nothing in the bar', async (t) => {
+  const { dom, doc } = await open(STATE, { '/api/asked': { items: [] } })
+  t.after(() => dom.window.close())
+  const light = [...doc.querySelectorAll('.barright button')]
+    .find(b => /request/i.test(b.getAttribute('aria-label') || ''))
+  assert.equal(light, undefined)
+})
+
+test('AN EMPTY GROUP STILL SAYS SOMETHING, rather than a heading over nothing', async (t) => {
+  // All three of these hid themselves entirely when empty, and that held while each
+  // was a card that would otherwise appear out of nowhere. Under a heading that is
+  // already on screen it leaves the heading standing over nothing, which reads as
+  // broken (Tim, 2026-08-19) - and the merged Sharing page put the headings there.
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/asked': { items: [] },
+    '/api/downloads': { items: [] },
+    '/api/remote/list': { remotes: [] }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 160))
+
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Downloads', 'Asked of you', 'Your requests'])
+
+  assert.match(text(), /Nothing kept on this machine yet/)
+  assert.match(text(), /Nobody has asked you for anything yet/)
+  assert.match(text(), /You have not asked for anything yet/)
 })

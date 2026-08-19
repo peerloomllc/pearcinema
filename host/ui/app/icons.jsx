@@ -217,3 +217,16 @@ export const Home = (p) => (
   <S {...p}><path d='M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5H9V20H5a1 1 0 0 1-1-1z' /></S>
 )
 
+// A circle with a gap, spun by CSS. The phone's connecting screen uses the same shape
+// (src/ui: ArrowsClockwise under .spin), and a dashboard that is waiting for the same
+// kind of answer should not say so a different way.
+export const Spinner = (p) => (
+  <S {...p}><path d='M12 3.5a8.5 8.5 0 1 0 8.5 8.5' /></S>
+)
+
+// A BELL, for somebody waiting on an answer. Deliberately not the People mark, which
+// already means "who can get in" in the same bar - two lights with the same glyph and
+// different meanings is worse than no light at all (Tim, 2026-08-19).
+export const Bell = (p) => (
+  <S {...p}><path d='M18 9.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5z' /><path d='M13.7 19.5a2 2 0 0 1-3.4 0' /></S>
+)

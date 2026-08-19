@@ -1027,6 +1027,22 @@ class PearCinemaHost {
     }
   }
 
+  // RESCANNING DOES NOT BLOCK THE PERSON WHO ASKED FOR IT (Tim, 2026-08-19: he pressed
+  // Rescan on the real library, watched the button say "Rescanning…" for several
+  // minutes and had no way to tell whether anything was happening). The dashboard used
+  // to await `adapter.scan()` inside the request, which on the 3 TB drive is minutes of
+  // ffprobe against one held-open HTTP connection - and because it went round `_scan`
+  // rather than through it, `scanning` stayed null the whole time, so nothing else on
+  // the page could say so either.
+  //
+  // Now it starts the same scan the startup and the timer use, and answers at once.
+  // Progress lives where every other slow thing's does: `scanning` on /api/state.
+  rescan () {
+    if (this.scanning) return { scanning: this.scanning }
+    this._scan({ rescan: true }).catch(() => {})
+    return { started: true, scanning: this.scanning }
+  }
+
   startPairing (opts) { return this.host.startPairing(opts) }
   stopPairing () { return this.host.stopPairing() }
   // The package's rows, plus what each device is WATCHING right now - resolved

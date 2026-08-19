@@ -428,6 +428,49 @@ class Enricher {
     return true
   }
 
+  // WHICH ONES FOUND NOTHING, not just how many (Tim, 2026-08-19: a count you cannot
+  // act on is a count). Resolved against the LIBRARY rather than read straight out of
+  // the store, so every entry carries the title and the type the fix dialog needs, and
+  // a file that has since been deleted or matched by hand drops off the list instead of
+  // haunting it. The store keeps only ids and a reason; the library is what knows what
+  // an id currently is.
+  // AND IT PRUNES AS IT READS. The count on the settings row comes from the store and
+  // the list comes from the library, so anything the store still holds that the library
+  // has answered for makes the two disagree - "1 came back with nothing" over an empty
+  // list (Tim, 2026-08-19, looking at exactly that). Whatever is no longer missing is
+  // dropped here, which is the one place that can tell.
+  async missedList (adapter, { limit = 500 } = {}) {
+    const ids = this.missed
+    if (!Object.keys(ids).length) return []
+    const out = []
+    const alive = new Set()
+    for (const type of ['movies', 'series']) {
+      for (const it of await listAll(adapter, { type })) {
+        const m = ids[it.id]
+        if (!m) continue
+        // Something else answered for it since - artwork on disk, or a hand-picked
+        // match - so it is not missing any more whatever the store still says.
+        if (it.artId || this.matched[it.id]) continue
+        alive.add(it.id)
+        if (out.length >= limit) continue
+        out.push({ id: it.id, title: it.title, year: it.year || null, type: it.type, reason: m.error || null })
+      }
+    }
+    let pruned = 0
+    for (const id of Object.keys(ids)) {
+      // An id the library no longer has at all - a deleted file - goes too.
+      if (alive.has(id)) continue
+      delete ids[id]
+      pruned++
+    }
+    if (pruned) {
+      if (this.state.lastRun) this.state.lastRun.missed = Object.keys(ids).length
+      this._write()
+      this.log('tmdb:missed-pruned', { pruned, left: Object.keys(ids).length })
+    }
+    return out
+  }
+
   summary () {
     return {
       running: this.running,

@@ -1188,3 +1188,40 @@ test('the watchdog never tidies away a message it did not write', async (t) => {
   await host._checkSource()
   assert.equal(host.sourceError, 'the credentials were refused', 'not its message, not its to clear')
 })
+
+test('RESCAN ANSWERS AT ONCE AND SAYS SO ON /api/state', async (t) => {
+  // Tim pressed Rescan against the real 3 TB library, watched the button read
+  // "Rescanning…" for several minutes and had no way to tell whether anything was
+  // happening (2026-08-19). Two faults in one: the route awaited the whole scan inside
+  // the request, and it called `adapter.scan` directly - going around `host._scan`,
+  // which is the only thing that sets `scanning`. So nothing anywhere could report it.
+  const { host, adapter, base } = await cinema(t, { password: '' })
+  const c = client(base)
+
+  let release = null
+  const held = new Promise(resolve => { release = resolve })
+  adapter.scan = async ({ onProgress } = {}) => {
+    onProgress?.(7, 42)
+    await held
+    return 42
+  }
+
+  const started = Date.now()
+  const res = await c.req('POST', '/api/source/rescan', { body: {} })
+  assert.equal(res.status, 200)
+  assert.equal(res.json.started, true)
+  assert.ok(Date.now() - started < 1000, 'it did not wait for the scan')
+
+  const state = await c.req('GET', '/api/state')
+  assert.equal(state.json.scanning.done, 7, 'and the progress is where every other slow thing puts it')
+  assert.equal(state.json.scanning.total, 42)
+
+  // Asking twice while one runs does not start a second walk of the drive.
+  const again = await c.req('POST', '/api/source/rescan', { body: {} })
+  assert.equal(again.json.started, undefined)
+  assert.ok(again.json.scanning)
+
+  release()
+  await new Promise(r => setTimeout(r, 50))
+  assert.equal(host.scanning, null, 'and it is over when it is over')
+})

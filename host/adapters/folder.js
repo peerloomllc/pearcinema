@@ -42,6 +42,15 @@ const SCAN_TTL_MS = 12 * 60 * 60 * 1000
 // note in probe.js about why this is a disk limit rather than a CPU one.
 const PROBE_CONCURRENCY = 4
 
+// THE CACHE FORMAT'S VERSION, in one place because two of them now read it: the item
+// index and the probe store beside it.
+const CACHE_VERSION = 7
+
+// How many files to stat at once when deciding which of them need probing. A stat is
+// nothing next to an ffprobe, but three thousand at once is three thousand open file
+// descriptors, so it goes in handfuls.
+const STAT_CONCURRENCY = 64
+
 // Artwork and subtitles are found by READING EACH DIRECTORY ONCE, during the walk.
 //
 // The obvious implementation - stat a handful of candidate names per film - is
@@ -304,20 +313,57 @@ class FolderAdapter {
       )
     }
 
-    // 2. Probe. The expensive half.
-    const { results, failed } = await probeAll(files.map(f => f.file), {
+    // 2. Probe - but only what has actually changed.
+    //
+    // A RESCAN IS NOT A RE-READ OF EVERY FILE (Tim, 2026-08-19: "Plex is pretty quick
+    // to detect new/updated items, takes maybe 10-15 seconds"). It used to be exactly
+    // that: `force` meant do not trust the index, and it was implemented as do not
+    // trust anything - so adding one episode re-probed 2,986 files, which on a USB
+    // drive is minutes. Asking ffprobe what a file is again, when the file has not
+    // been touched, cannot return a different answer.
+    //
+    // The freshness test is the one every scanner uses: same size, same mtime. Both
+    // come free - `size` off the old probe, `addedAt` being the mtime it already
+    // stats for the recently-added shelf - so nothing new is stored to make this work
+    // beyond the probes themselves.
+    //
+    // A CHANGE TO WHAT A PROBE MEANS still re-reads everything, because the whole
+    // store is versioned with the cache: a version bump drops the probes with it,
+    // which is what makes a fix like the missing audio channel count actually apply.
+    const known = await this._loadProbes()
+    const toProbe = []
+    const reused = []
+    for (let i = 0; i < files.length; i += STAT_CONCURRENCY) {
+      await Promise.all(files.slice(i, i + STAT_CONCURRENCY).map(async ({ file }) => {
+        const was = known.get(file)
+        if (!was) return toProbe.push(file)
+        try {
+          const st = await fsp.stat(file)
+          if (was.size === st.size && was.addedAt === Math.round(st.mtimeMs)) return reused.push(was)
+        } catch {}
+        toProbe.push(file)
+      }))
+    }
+    this.log('folder:probe-plan', { unchanged: reused.length, toProbe: toProbe.length })
+
+    const { results, failed } = await probeAll(toProbe, {
       concurrency: PROBE_CONCURRENCY,
       ffprobe: this.ffprobe,
       onProgress: (n, total) => {
         // The log every 500; the caller on EVERY file, because the page shows a
-        // count and a number that moves once a minute reads as a hang.
+        // count and a number that moves once a minute reads as a hang. Counted
+        // against the whole library rather than against the new files, so the bar
+        // does not read as 3 of 3 for a library of three thousand.
         if (n % 500 === 0) this.log('folder:probing', { done: n, total })
-        if (onProgress) onProgress(n, total)
+        if (onProgress) onProgress(reused.length + n, reused.length + total)
       }
     })
     if (failed.length) this.log('folder:unreadable', { count: failed.length })
 
-    const media = new Map(results.map(r => [r.file, r]))
+    const media = new Map([...reused, ...results].map(r => [r.file, r]))
+    // Held for the cache write below: only what this walk found, so a file that has
+    // gone leaves the store with it.
+    this._probes = media
 
     // 3. Read every directory that holds a video, ONCE, plus the folders above
     // them - a show's poster lives in the show folder, not beside the episode.
@@ -810,7 +856,11 @@ class FolderAdapter {
       // alone. A cache without it cannot be reasoned about - the fix would apply to
       // nothing until each file was probed again, which is exactly the kind of silent
       // half-fix that reads as "it did not work".
-      if (raw.version !== 6) return false
+      //
+      // Version 7 keeps the PROBES themselves beside the index, so a rescan re-reads
+      // only files whose size or mtime has changed. A version 6 cache has none, which
+      // costs one full probe pass and then behaves like any other.
+      if (raw.version !== CACHE_VERSION) return false
       // A cache built from different folders describes a different library - and a
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
@@ -825,17 +875,34 @@ class FolderAdapter {
     }
   }
 
+  // WHAT WAS READ OFF EACH FILE, kept so the next rescan does not have to read it
+  // again. Loaded on its own rather than through `_loadCache`, because the two answer
+  // different questions: that one asks whether this INDEX can be trusted (same roots,
+  // recent enough), and a probe of an untouched file is true regardless of either.
+  async _loadProbes () {
+    const file = this._cacheFile()
+    if (!file) return new Map()
+    try {
+      const raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+      if (raw.version !== CACHE_VERSION) return new Map()
+      return new Map(Object.entries(raw.probes || {}))
+    } catch {
+      return new Map()
+    }
+  }
+
   async _saveCache (movies, episodes) {
     const file = this._cacheFile()
     if (!file) return
     try {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
-        version: 6,
+        version: CACHE_VERSION,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,
-        episodes
+        episodes,
+        probes: Object.fromEntries(this._probes || [])
       }))
     } catch (e) {
       // A cache that cannot be written is slow, not broken.

@@ -97,7 +97,10 @@ async function probe (kind, base) {
         // adapter plus a token from plex.tv, so this is a real piece of work rather
         // than a missing config field.
         usable: false,
-        reason: 'PearCinema cannot read a Plex library yet - Plex has its own API and needs its own reader. Point PearCinema at the FOLDERS your films are in instead; it reads them directly and does not need Plex at all.'
+        // ONE CLAUSE. This was three sentences on a settings row (Tim, 2026-08-19),
+        // and two of them explained an implementation. What somebody needs is that it
+        // cannot be used and what to do instead.
+        reason: 'Cannot be read yet. Point PearCinema at the folders your films are in instead.'
       }
     }
   }

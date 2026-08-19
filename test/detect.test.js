@@ -69,10 +69,12 @@ test('PLEX IS FOUND AND REFUSED, with the reason and the thing to do instead', a
   const hit = await probe('plex', base)
   assert.equal(hit.kind, 'plex')
   assert.equal(hit.usable, false, 'PearCinema cannot read a Plex library')
-  assert.match(hit.reason, /its own API/)
-  // The useful half: what to do about it. Plex's films are on a disk, and this reads
-  // disks - so the answer is not "wait for a Plex adapter".
-  assert.match(hit.reason, /FOLDERS/)
+  // ONE CLAUSE, and the useful half of it is what to do instead: Plex's films are on
+  // a disk, and this reads disks, so the answer is not "wait for a Plex adapter". The
+  // sentences about Plex having its own API were explaining our implementation to
+  // somebody who only wanted to point this at their films (Tim, 2026-08-19).
+  assert.match(hit.reason, /Cannot be read/)
+  assert.match(hit.reason, /folders your films are in/)
 })
 
 test('something unrelated on the same port is not mistaken for a media server', async (t) => {

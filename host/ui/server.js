@@ -722,6 +722,70 @@ async function startDashboard ({
       if (req.method === 'GET' && url.pathname === '/api/requests') {
         return json(res, 200, { items: [] })
       }
+
+      // WHAT PEOPLE HAVE ASKED **THIS** LIBRARY FOR, which the dashboard has never
+      // shown. `/api/requests` above is the other direction - what this machine asked
+      // somebody else's library for - and asking your own library is not a thing, so
+      // it answers empty and always has. Tim made requests from a paired phone on
+      // 2026-08-19 and found nowhere on the dashboard they could appear.
+      //
+      // The store was built for this: listRequests with no requester is documented in
+      // the package as "every request (the operator's dashboard/owner view)", and the
+      // wire has had `request.all` for the phone's owner view all along. Only the
+      // dashboard was missing.
+      // `/api/asked`, NOT `/api/requests/...`, and the name is load-bearing. The
+      // dashboard proxies anything matching `/api/requests` to whichever remote
+      // library is selected, because asking and withdrawing are per-library - so these
+      // two, which are about THIS host and can never be about another, were being sent
+      // to somebody else's server and answered "no such remote route" (Tim, 2026-08-19).
+      if (req.method === 'GET' && url.pathname === '/api/asked') {
+        try {
+          const rows = await host.userState.listRequests()
+          const labels = await host.grants.personLabels()
+          return json(res, 200, {
+            items: rows.map((r) => ({
+              ...r,
+              // WHO ASKED, by the name their owner chose rather than by a key. A
+              // request nobody can attribute is one nobody can answer.
+              requesterLabel: labels.get(r.requester) || null
+            }))
+          })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      // AN ANSWERED REQUEST CAN BE CLEARED. Nothing removed them before, so the list
+      // only ever grew - a declined ask sat there for good (Tim, 2026-08-19).
+      if (req.method === 'POST' && url.pathname === '/api/asked/remove') {
+        const body = await readBody(req)
+        try {
+          const row = await host.userState.getRequest(String(body?.id || ''))
+          if (!row) return json(res, 404, { error: 'no such request' })
+          await host.userState.deleteRequest(row.id)
+          host.onevent?.('request:removed', { id: row.id })
+          return json(res, 200, { ok: true })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+      if (req.method === 'POST' && url.pathname === '/api/asked/resolve') {
+        const body = await readBody(req)
+        const status = String(body?.status || '')
+        if (!['added', 'declined'].includes(status)) return json(res, 400, { error: 'bad status' })
+        try {
+          const row = await host.userState.resolveRequest(String(body?.id || ''), status)
+          if (!row) return json(res, 404, { error: 'no such request' })
+          // The requester hears the answer wherever they are signed in - the same
+          // push the wire method sends, because it is the same event.
+          if (host.host?.presence && row.requester) {
+            host.host.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+          }
+          host.onevent?.('request:resolved', { id: row.id, title: row.title || null, status })
+          return json(res, 200, { request: row })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
       if (req.method === 'POST' && (url.pathname === '/api/request' || url.pathname === '/api/request/remove')) {
         return json(res, 400, { error: 'asking is for a friend\'s library - this one is yours' })
       }
@@ -1606,6 +1670,14 @@ async function startDashboard ({
         })
       }
 
+      // WHICH TITLES CAME BACK WITH NOTHING. Its own route rather than part of the
+      // summary above, because the summary is polled every two seconds while a pass
+      // runs and this can be hundreds of rows - and nobody is looking at it except
+      // when they have opened the window that shows it.
+      if (req.method === 'GET' && url.pathname === '/api/metadata/missing') {
+        return json(res, 200, { items: await host.enricher.missedList(host.adapter) })
+      }
+
       // The explicit save-to-library action. Synchronous on purpose: it is a
       // few hundred small files at most and the operator is looking at the
       // button that asked for them - a fire-and-forget here would just move
@@ -1724,15 +1796,13 @@ async function startDashboard ({
         return json(res, 200, { rails: out })
       }
 
+      // STARTED, NOT FINISHED. A full rescan of the real library is minutes of ffprobe,
+      // and awaiting it here held the request open for all of them while `scanning`
+      // stayed null because this went around `host._scan` instead of through it. The
+      // answer is immediate now and the progress is on /api/state, which every surface
+      // already reads.
       if (req.method === 'POST' && url.pathname === '/api/source/rescan') {
-        try {
-          const n = await host.adapter.scan({ force: true })
-          host.sourceError = null
-          return json(res, 200, { ok: true, items: n, ...(await host.adapter.stats().catch(() => ({}))) })
-        } catch (e) {
-          host.sourceError = e.message
-          return json(res, 400, { error: e.message })
-        }
+        return json(res, 200, host.rescan())
       }
 
       // WHAT IS ALREADY ON THIS BOX. Servers and folders together, because the

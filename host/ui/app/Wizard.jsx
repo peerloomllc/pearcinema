@@ -126,7 +126,7 @@ export default function Wizard ({ state, reload, onDone, onRemotePaired = null }
       {step === 'source' && (
         <>
           <h2>Where are your films?</h2>
-          <SourcePanel state={state} reload={reload} embedded />
+          <SourcePanel state={state} reload={reload} wizard />
           <div class='confirm-actions'>
             <button class='ghost' onClick={advance}>Do this later</button>
             <button onClick={advance} disabled={state.source?.kind === 'empty'}>Next</button>
