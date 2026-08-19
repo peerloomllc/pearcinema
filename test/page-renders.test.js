@@ -1212,7 +1212,10 @@ test('the casting panel says the one thing about Rokus nobody would guess', asyn
   const { text } = await openCasting(t)
 
   assert.match(text(), /Media Assistant/, 'the requirement has to be on the screen, not in a log')
-  assert.match(text(), /nothing to set up/i, 'and it has to say the discovery half needs nothing')
+  // AND ONLY WHERE IT IS ANY USE. An empty list is exactly the moment somebody wants to
+  // know what would make it not empty; a page that already lists their television does
+  // not need telling how televisions get found.
+  assert.match(text(), /finds televisions on its own network/, 'the discovery half needs nothing said about it')
 })
 
 test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async (t) => {
@@ -1271,8 +1274,7 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
     '/api/cast': { enabled: false, baseUrl: 'http://127.0.0.1:8123', tokenSet: false, hidden: [], problem: null }
   })
 
-  assert.match(text(), /not set up/, 'its status is honest')
-  assert.match(text(), /Optional/, 'and it says it is optional, because for most people it is')
+  assert.match(text(), /Home Assistant: not set up/, 'its status is honest, and it is one line')
   // The token field is not on screen until somebody asks for it.
   assert.equal(doc.querySelector('input[type=password]'), null)
 

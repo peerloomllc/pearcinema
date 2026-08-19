@@ -282,9 +282,8 @@ function CastPanel () {
   const [targets, setTargets] = useState(null)
   const [needsChannel, setNeedsChannel] = useState([])
   const [mediaChannel, setMediaChannel] = useState('Media Assistant')
-  // Home Assistant is folded away, because most people will never open it. It opens
-  // itself when it is already set up, so somebody who configured it is not made to go
-  // looking for their own settings.
+  // Folded away, because most people will never open it. It opens itself when it is
+  // already set up, so somebody who configured it is not made to go looking.
   const [haOpen, setHaOpen] = useState(false)
 
   const readTargets = (r) => {
@@ -350,158 +349,130 @@ function CastPanel () {
     if (!r?.error) loadTargets()
   }
 
-  const found = (targets || []).filter(t => t.via === 'roku')
-  const viaHa = (targets || []).filter(t => t.via !== 'roku')
+  const rows = targets || []
+  const viaHa = rows.filter(t => t.via !== 'roku')
+  const anyOff = rows.some(t => !isReachable(t))
+  const haStatus = cfg?.tokenSet && cfg?.enabled
+    ? `connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}`
+    : 'not set up'
 
   return (
-    <>
-      <div class='card'>
-        <h3>Televisions</h3>
+    <div class='card'>
+      <h3>Televisions</h3>
+
+      {targets === null && <p class='hint'>Looking…</p>}
+
+      {/* THE ONLY PLACE THE SETUP STORY IS TOLD, because it is the only moment it is
+          any use: an empty list is exactly when somebody wants to know what would
+          make it not empty. */}
+      {targets !== null && rows.length === 0 && (
         <p class='hint'>
-          Send films from a phone to a television. Only phones paired as owner can cast,
-          and cutting a phone off also stops whatever it put on a screen.
+          None yet. Your server finds televisions on its own network within a few seconds
+          of one being switched on. A Roku also needs the free {mediaChannel} channel
+          installed on it, which is the only one that will play a film handed to it.
         </p>
+      )}
 
-        {targets === null && <p class='hint'>Looking…</p>}
-        {targets !== null && targets.length === 0 && (
-          <p class='hint'>
-            None yet. Your server looks for televisions on its own network, and finds
-            them within a few seconds of one being switched on.
-          </p>
-        )}
-
-        {targets !== null && targets.length > 0 && (
-          <div class='rootlist'>
-            {targets.map(t => (
-              <div class='rootrow' key={t.entityId}>
-                <span class='rootpath'>
-                  {t.name}
-                  <span class='hint'>
-                    {readableState(t)}
-                    {' · '}
-                    {t.via === 'roku' ? 'found on your network' : 'through Home Assistant'}
-                    {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
-                    {t.hidden ? ' · hidden from phones' : ''}
-                  </span>
+      {rows.length > 0 && (
+        <div class='rootlist'>
+          {rows.map(t => (
+            <div class='rootrow tvrow' key={t.entityId}>
+              <span class='tvname'>
+                {t.name}
+                <span class='hint'>
+                  {readableState(t)}
+                  {' · '}
+                  {t.via === 'roku' ? 'found on your network' : 'via Home Assistant'}
+                  {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
+                  {t.hidden ? ' · hidden from phones' : ''}
                 </span>
-                <button
-                  class='iconbtn'
-                  disabled={busy}
-                  onClick={() => toggleHidden(t)}
-                  aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
-                  title={t.hidden ? 'Offer this one' : 'Hide from phones'}
-                >
-                  {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {targets !== null && targets.length > 0 && (
-          <p class='hint'>
-            Phones offer these when casting, televisions first. Hide the ones you will
-            never send a film to and they stop appearing on the phone.
-            {found.some(t => !isReachable(t)) && ' A television that is switched off stays on this list and comes back by itself when you turn it on.'}
-          </p>
-        )}
-      </div>
-
-      <div class='card'>
-        <h3>How they are found</h3>
-
-        {/* ALWAYS ON, NOTHING TO SET UP. This is the route almost everybody will use,
-            so it comes first and it is not a form. */}
-        <div class='rootrow'>
-          <span class='rootpath'>
-            On your network
-            <span class='hint'>
-              Always on, nothing to set up
-              {' · '}
-              {found.length === 0 ? 'nothing found yet' : `${found.length} television${found.length === 1 ? '' : 's'}`}
-            </span>
-          </span>
-          <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
-        </div>
-        <p class='hint'>
-          Rokus are found here with no setup at all. They do need the free
-          <strong>{' ' + mediaChannel + ' '}</strong>
-          channel installed on the Roku itself: it is the only one that will play a film
-          handed to it, so a Roku without it is left off the list rather than offered as a
-          television that does nothing.
-        </p>
-
-        {/* THE ONE CASE SOMEBODY CANNOT GUESS. A Roku sitting right there, missing from
-            the list, with the reason living only in a log nobody reads. */}
-        {needsChannel.length > 0 && (
-          <p class='error'>
-            {needsChannel.length === 1
-              ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
-              : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
-            {' '}Install it from the Roku channel store, then press Look again.
-          </p>
-        )}
-
-        <div class='rootrow' style='margin-top:.75rem'>
-          <span class='rootpath'>
-            Home Assistant
-            <span class='hint'>
-              Optional
-              {' · '}
-              {cfg?.tokenSet && cfg?.enabled
-                ? `connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}`
-                : 'not set up'}
-            </span>
-          </span>
-          <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
-            {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
-          </button>
-        </div>
-        <p class='hint'>
-          Only needed for televisions your server cannot find on its own: a Chromecast, a
-          Google TV, a television with Cast built in. It talks to the Home Assistant
-          running on this same machine.
-        </p>
-
-        {haOpen && cfg && (
-          <>
-            <div class='field'>
-              <label>Home Assistant address</label>
-              <input
-                type='text' value={baseUrl} placeholder='http://127.0.0.1:8123'
-                onInput={e => setBaseUrl(e.currentTarget.value)}
-              />
-            </div>
-            <div class='field'>
-              <label>Access token{cfg.tokenSet ? ' (saved, leave empty to keep it)' : ''}</label>
-              <input
-                type='password' value={token}
-                onInput={e => setToken(e.currentTarget.value)}
-              />
-            </div>
-            <p class='hint'>Make one on your Home Assistant profile page, under long-lived access tokens.</p>
-            {cfg.problem && <p class='error'>{cfg.problem}</p>}
-            {test?.bad && <p class='error'>{test.bad}</p>}
-            {test?.ok !== undefined && (
-              <p class='hint'>
-                Connected. Home Assistant knows about {test.ok} media player{test.ok === 1 ? '' : 's'}.
-              </p>
-            )}
-            <div class='actions'>
-              <button onClick={() => save(true)} disabled={busy || (!cfg.tokenSet && !token.trim())}>
-                {cfg.enabled ? 'Save' : 'Save and connect'}
+              </span>
+              <button
+                class='iconbtn'
+                disabled={busy}
+                onClick={() => toggleHidden(t)}
+                aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
+                title={t.hidden ? 'Offer this one' : 'Hide from phones'}
+              >
+                {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
               </button>
-              {cfg.enabled && (
-                <button class='ghost' onClick={() => save(false)} disabled={busy}>Disconnect</button>
-              )}
-              {cfg.tokenSet && (
-                <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
-              )}
             </div>
-          </>
-        )}
+          ))}
+        </div>
+      )}
+
+      {/* SAID ONLY WHEN IT APPLIES. A line about switched-off televisions is noise on
+          a page where none of them are. */}
+      {anyOff && (
+        <p class='hint'>
+          A television that is switched off stays on this list and comes back by itself.
+        </p>
+      )}
+
+      {/* The one thing nobody could work out: a Roku sitting right there, missing from
+          the list, because of one free channel. */}
+      {needsChannel.length > 0 && (
+        <p class='error'>
+          {needsChannel.length === 1
+            ? `Found ${needsChannel[0].name}, but it has no ${mediaChannel}.`
+            : `Found ${needsChannel.length} Rokus with no ${mediaChannel}: ${needsChannel.map(d => d.name).join(', ')}.`}
+          {' '}Install it from the Roku channel store, then press Look again.
+        </p>
+      )}
+
+      {/* HOW THEY ARE FOUND, as a footer rather than a section. Finding is always on
+          and needs nothing said about it; Home Assistant is one optional extra, and a
+          status plus a way in is the whole of what it needs on screen. */}
+      <div class='tvfoot'>
+        <button class='ghost' onClick={rescan} disabled={busy}>Look again</button>
+        <span class='hint grow'>Home Assistant: {haStatus}</span>
+        <button class='ghost' onClick={() => setHaOpen(!haOpen)} disabled={!cfg}>
+          {haOpen ? 'Hide' : (cfg?.tokenSet ? 'Change' : 'Set up')}
+        </button>
       </div>
-    </>
+
+      {haOpen && cfg && (
+        <>
+          <p class='hint'>
+            Only for televisions your server cannot find on its own: a Chromecast, a
+            Google TV, a television with Cast built in. Make a long-lived access token on
+            your Home Assistant profile page.
+          </p>
+          <div class='field'>
+            <label>Home Assistant address</label>
+            <input
+              type='text' value={baseUrl} placeholder='http://127.0.0.1:8123'
+              onInput={e => setBaseUrl(e.currentTarget.value)}
+            />
+          </div>
+          <div class='field'>
+            <label>Access token{cfg.tokenSet ? ' (saved, leave empty to keep it)' : ''}</label>
+            <input
+              type='password' value={token}
+              onInput={e => setToken(e.currentTarget.value)}
+            />
+          </div>
+          {cfg.problem && <p class='error'>{cfg.problem}</p>}
+          {test?.bad && <p class='error'>{test.bad}</p>}
+          {test?.ok !== undefined && (
+            <p class='hint'>
+              Connected. Home Assistant knows about {test.ok} media player{test.ok === 1 ? '' : 's'}.
+            </p>
+          )}
+          <div class='actions'>
+            <button onClick={() => save(true)} disabled={busy || (!cfg.tokenSet && !token.trim())}>
+              {cfg.enabled ? 'Save' : 'Save and connect'}
+            </button>
+            {cfg.enabled && (
+              <button class='ghost' onClick={() => save(false)} disabled={busy}>Disconnect</button>
+            )}
+            {cfg.tokenSet && (
+              <button class='ghost' onClick={runTest} disabled={busy}>Test connection</button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
