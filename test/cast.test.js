@@ -60,7 +60,7 @@ function fakeSpeakers () {
 // The media seam, the same calls the dashboard routes ride. `mode` decides
 // which serving path a fetch takes; the session double records kills the way
 // the fake speakers record stops.
-function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS } = {}) {
+function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, boundaries = null } = {}) {
   const m = {
     mode,
     killed: 0,
@@ -85,8 +85,26 @@ function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS
       const session = { at, audio: 'copy', stdout, kill: () => { m.killed++; stdout.destroy() } }
       return { mode: 'remux', session }
     },
-    // Ten 4-second segments, the host playlist's exact shape.
+    // Ten 4-second segments, the host playlist's exact shape - or, when the film
+    // is COPIED rather than re-encoded, the uneven keyframe-cut shape a real one
+    // has, with the boundaries the host sends alongside it.
     async playlist () {
+      if (boundaries) {
+        const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:14', '#EXT-X-MEDIA-SEQUENCE:0']
+        for (let i = 0; i < boundaries.length; i++) {
+          const end = i + 1 < boundaries.length ? boundaries[i + 1] : boundaries[i] + 5
+          lines.push(`#EXTINF:${(end - boundaries[i]).toFixed(3)},`, i + '.ts')
+        }
+        lines.push('#EXT-X-ENDLIST')
+        return {
+          mode: 'remux',
+          engine: 'copy',
+          playlist: lines.join('\n'),
+          segments: boundaries.length,
+          segmentSeconds: 4,
+          boundaries
+        }
+      }
       const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:4', '#EXT-X-MEDIA-SEQUENCE:0']
       for (let i = 0; i < 10; i++) lines.push('#EXTINF:4.000,', i + '.ts')
       lines.push('#EXT-X-ENDLIST')
@@ -103,10 +121,10 @@ function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS
   return m
 }
 
-async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null } = {}) {
+async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null, boundaries = null } = {}) {
   const speakers = fakeSpeakers()
   const grants = fakeGrants(grantRows)
-  const media = fakeMedia({ mode, container, expectCaps })
+  const media = fakeMedia({ mode, container, expectCaps, boundaries })
   const casts = new CastSessions({ speakers, grants, media, report })
   const port = await casts.start()
   return { casts, speakers, grants, media, port }
@@ -452,10 +470,135 @@ test('A CONVERTED FILM IS LABELLED MP4, WHATEVER IT WAS ON THE DISK', async (t) 
   //
   // The hint has to describe what the television WILL RECEIVE, and on a Roku that is
   // not decoration - its player picks a demuxer with it.
+  // A television that takes a progressive stream receives that remux as one MP4,
+  // and the hint says so rather than repeating the disk's container.
+  const cast = await build({ mode: 'remux', container: 'matroska' })
+  t.after(() => cast.casts.close())
+  await cast.casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv' })
+  assert.equal(cast.speakers.calls[0][3].format, 'mp4', 'a progressive remux always outputs MP4, whatever went in')
+
+  // A Roku receives the same remux in SEGMENTS, because it refuses a progressive
+  // stream outright - so the hint that describes what it will receive is hls.
   const { casts, speakers } = await build({ mode: 'remux', container: 'matroska', expectCaps: ROKU_CAPS })
   t.after(() => casts.close())
 
   const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku' })
   assert.equal(out.mode, 'remux')
-  assert.equal(speakers.calls[0][3].format, 'mp4', 'a remux always outputs MP4, whatever went in')
+  assert.equal(speakers.calls[0][3].format, 'hls', 'a Roku is told hls, never the disk container')
+})
+
+// --- the transport is the television's question, not the film's ---------------
+
+test('A ROKU TAKES A REMUX IN SEGMENTS, because it refuses a progressive stream', async (t) => {
+  // The last blocker on surround-sound casting, in the Roku's own words:
+  // "reader pick stream error:HTTP error:Full-content response on a range
+  // request:200". A generated stream answers 200 with accept-ranges:none and this
+  // device will not have it. cast.js knew that and routed only TRANSCODE around it,
+  // which was fine until the 5.1 fix started sending films down the REMUX path -
+  // and remux went progressive, straight into the same wall.
+  //
+  // What decides the transport is what the television accepts. What the film needs
+  // is decided separately, inside the segment engine, where a copied picture stays
+  // copied.
+  const { casts, speakers, media } = await build({
+    mode: 'remux',
+    container: 'matroska',
+    expectCaps: ROKU_CAPS,
+    boundaries: [0, 4.859, 10.74, 19.874, 26.339, 31.386]
+  })
+  t.after(() => casts.close())
+
+  const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku' })
+  assert.equal(out.mode, 'remux')
+  const url = urlOf(speakers)
+  assert.match(url, /\/index\.m3u8$/, 'segments, not a pipe')
+  assert.equal(speakers.calls[0][3].format, 'hls')
+
+  const pl = await fetch(url)
+  assert.equal(pl.status, 200)
+  assert.equal(pl.headers.get('content-type'), 'application/vnd.apple.mpegurl')
+  const body = await pl.text()
+  // The durations are the REAL ones. A Roku takes the film's length from their
+  // sum, measured 2026-08-19, so an even 4.000 everywhere would be a lie.
+  assert.match(body, /#EXTINF:4\.859,\n0\.ts/)
+  assert.match(body, /#EXTINF:9\.134,\n2\.ts/)
+
+  const seg = await fetch(url.replace('index.m3u8', '3.ts'))
+  assert.equal(seg.status, 200)
+  assert.equal(seg.headers.get('content-type'), 'video/mp2t')
+  assert.equal(await seg.text(), 'SEG3')
+  assert.deepEqual(media.segmentsAsked, [3])
+})
+
+test('a Cast-family remux is still a pipe, and a Cast-family transcode is still segments', async (t) => {
+  // Nothing about fixing the Roku wanted to move the televisions that were already
+  // working. A device that accepts progressive keeps exactly the transport it was
+  // measured with.
+  const remuxed = await build({ mode: 'remux' })
+  t.after(() => remuxed.casts.close())
+  await remuxed.casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv' })
+  assert.doesNotMatch(urlOf(remuxed.speakers), /index\.m3u8/)
+  assert.equal(remuxed.speakers.calls[0][3].format, 'mp4')
+
+  const converted = await build({ mode: 'transcode' })
+  t.after(() => converted.casts.close())
+  await converted.casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv' })
+  assert.match(urlOf(converted.speakers), /index\.m3u8$/)
+  assert.equal(converted.speakers.calls[0][3].format, 'hls')
+})
+
+test('A RESUME SNAPS TO A REAL CUT POINT, and the position report follows it', async (t) => {
+  // A copied picture is cut on the film's own keyframes, so segments are uneven -
+  // 4.0 s to 14.0 s on real films. Dividing by four would name a segment that does
+  // not begin where it claims, and every position the poll reported afterwards
+  // would carry that error.
+  const { casts, speakers } = await build({
+    mode: 'remux',
+    expectCaps: ROKU_CAPS,
+    boundaries: [0, 4.859, 10.74, 19.874, 26.339, 31.386]
+  })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku', at: 24 })
+  const url = urlOf(speakers)
+  const body = await (await fetch(url)).text()
+
+  // 24 seconds in lands in the segment that STARTS at 19.874, not the one a
+  // four-second cadence would have named.
+  assert.match(body, /#EXT-X-MEDIA-SEQUENCE:3/)
+  assert.ok(!body.includes('\n2.ts'), 'everything before the resume is sliced away')
+  assert.ok(body.includes('3.ts'))
+
+  // And the row the poll reads carries that same real boundary. A television
+  // reports its position against the PLAYLIST it was given (measured on Tim's
+  // Roku 2026-08-19: a playlist sliced to start 59.622 s in reported 0 at its
+  // start), so this offset is the whole difference between a resumed film
+  // reporting its true minute and reporting the minutes since the resume.
+  speakers.states.set('media_player.living_room_roku', { state: 'playing', position: 6, duration: 40, positionUpdatedAt: new Date().toISOString() })
+  const where = await casts.where({ deviceKey: DEVICE, entityId: 'media_player.living_room_roku' })
+  assert.equal(Math.round(where.positionMs / 100), Math.round((19.874 + 6) * 10), 'the boundary plus the television\'s own clock')
+
+  // The film's length comes from the ITEM, never from the sliced playlist.
+  assert.equal(where.durationMs, 5700 * 1000)
+})
+
+test('an even grid still divides, so a re-encoded cast is unchanged', async (t) => {
+  // A host that sends no boundaries is describing an even grid, which is what a
+  // re-encode produces and what every caller predating the copy engine sends.
+  const { segmentAt, segmentStart } = require('../host/cast')
+
+  assert.equal(segmentAt(13, { segmentSeconds: 4 }), 3)
+  assert.equal(segmentStart(3, { segmentSeconds: 4 }), 12)
+
+  // With boundaries it snaps BACK to the last cut point at or before the moment,
+  // so a resume rewinds by up to one group of pictures rather than stepping over
+  // the seconds it was meant to land on.
+  const out = { boundaries: [0, 4.859, 10.74, 19.874], segmentSeconds: 4 }
+  assert.equal(segmentAt(0, out), 0)
+  assert.equal(segmentAt(4.858, out), 0)
+  assert.equal(segmentAt(4.859, out), 1)
+  assert.equal(segmentAt(19.873, out), 2)
+  assert.equal(segmentAt(1e9, out), 3, 'past the end is the last segment, never off the end')
+  assert.equal(segmentStart(2, out), 10.74)
+  assert.equal(segmentStart(99, out), 19.874)
 })
