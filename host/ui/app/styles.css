@@ -538,7 +538,10 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem }
 .modal-head h3 { margin: 0 }
 .confirm-actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem }
+/* Centred AND equal (Tim, 2026-08-19): two buttons of different widths side by side
+ * is the same ragged edge the settings rows exist to stop, one window further in. */
 .confirm-actions.center { justify-content: center }
+.confirm-actions.center button { min-width: 9rem; justify-content: center }
 
 /* ---- pairing -------------------------------------------------------------
  *

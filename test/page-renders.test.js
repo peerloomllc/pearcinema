@@ -386,7 +386,7 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   // The button says "Use this folder" rather than "Use /library/...": the path is in
   // the header above it, and a button that changes width at every step is a button
   // that moves under the pointer (Tim, 2026-08-19).
-  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use this folder')
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
   assert.ok(use, 'the picker opened on what the host can see')
   assert.match(doc.querySelector('.picker .head .mono').textContent, /\/library/)
   use.dispatchEvent(new win.Event('click', { bubbles: true }))
@@ -396,6 +396,46 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   assert.equal(rows.length, 4, 'the three it had plus the one just picked')
   assert.equal(rows.every(r => r.querySelector('select')), true, 'every folder can say what it holds')
   assert.equal(rows[3].querySelector('select').value, 'auto')
+})
+
+test('A FOLDER WITH NO FILMS IN IT CANNOT BE CHOSEN, and it says why', async (t) => {
+  // Tim, 2026-08-19. The host already answers this for every folder it lists - it is
+  // what puts the "video" mark on a row - so answering it for the folder you are
+  // standing in costs nothing, and this window is where the mistake can still be
+  // fixed by stepping into the right folder.
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/folders': { path: '/library/Docs', parent: '/library', mounts: [], dirs: [{ name: 'Manuals', path: '/library/Docs/Manuals', video: false }], here: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
+  assert.equal(use.disabled, true)
+  // The reason is in words, not only in a greyed-out button - and it says where it
+  // looked, because the detector is bounded and can be wrong about a deep library.
+  assert.match(text(), /No video in this folder or the few levels under it\./)
+})
+
+test('the whole filesystem is not a library', async (t) => {
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/source/folders': { path: '/', parent: null, mounts: ['/library'], dirs: [{ name: 'library', path: '/library', video: true }], here: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+  const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // There IS video under it - that is the point. Scanning from the root is still the
+  // wrong answer, so the refusal is its own sentence rather than the missing-video one.
+  const use = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use folder')
+  assert.equal(use.disabled, true)
+  assert.match(text(), /Pick one of the folders inside/)
 })
 
 test('two folders holding the same file is said out loud, not absorbed', async (t) => {

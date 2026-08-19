@@ -74,6 +74,16 @@ function FolderPicker ({ onPick, onClose }) {
 
   useEffect(() => { go('/') }, [])
 
+  // Why this folder cannot be used, or '' when it can. One clause, and it is also what
+  // disables the button - the sentence and the state are the same fact.
+  const why = !data || busy
+    ? ''
+    : data.parent === null
+      ? 'Pick one of the folders inside. The whole filesystem is not a library.'
+      : (data.here > 0 || (data.dirs || []).some(d => d.video))
+          ? ''
+          : 'No video in this folder or the few levels under it.'
+
   return (
     <div>
       <p class='hint'>
@@ -121,13 +131,25 @@ function FolderPicker ({ onPick, onClose }) {
 
       {err && <div class='banner bad' style='margin-top:.7rem'>{err}</div>}
 
-      {/* Centred, like every other pair of buttons in a window - and the path lives in
-          the header above rather than inside the button, which was a button that
-          changed width at every step. */}
+      {/* A FOLDER WITH NO FILMS IN IT CANNOT BE CHOSEN (Tim, 2026-08-19). The host
+          already answers this question for every folder it lists - it is what puts the
+          "video" mark on a row - so the same answer for the folder you are standing in
+          is free. Refusing here is worth more than refusing at Save: the mistake is
+          made in this window, and this is where somebody can still step into the right
+          folder instead.
+
+          THE DETECTOR IS BOUNDED, a few levels deep and a few thousand entries, so it
+          can say no about a library buried deeper than that. That is why the line says
+          where it looked: the way out is to step in, which is the better root anyway. */}
+      {why && <p class='hint'>{why}</p>}
+
+      {/* Centred and the SAME WIDTH. The path lives in the header rather than inside
+          the button, which was a button that changed width at every step - and two
+          buttons of different widths side by side was the next thing Tim saw. */}
       <div class='confirm-actions center'>
         <button class='ghost' onClick={onClose}>Cancel</button>
-        <button disabled={busy || !data} onClick={() => { onPick(at); onClose() }}>
-          Use this folder
+        <button disabled={busy || !data || !!why} onClick={() => { onPick(at); onClose() }}>
+          Use folder
         </button>
       </div>
     </div>
