@@ -30,6 +30,20 @@ import { Drive, Film, Folder, Server, Blocked, Close } from './icons'
 const TYPE_LABEL = { auto: 'Work it out', movies: 'Films', shows: 'TV shows' }
 const TYPE_ORDER = ['auto', 'movies', 'shows']
 
+// WHAT WAS FOUND, in one phrase, and there is exactly one of these. The panel says it
+// after a test, a save and a rescan; the Library page says it on the row that names
+// where the films are. Two spellings of the same sentence would drift.
+export function describeSource (r = {}) {
+  // Counted properly, because this is on the page now and not only in a notification.
+  // "1 shows" reads as a bug in the counting rather than a plural nobody bothered with.
+  const bits = []
+  if (r.leaves !== undefined) bits.push(`${r.leaves} films and episodes`)
+  if (r.movies !== undefined) bits.push(`${r.movies} film${r.movies === 1 ? '' : 's'}`)
+  if (r.series) bits.push(`${r.series} show${r.series === 1 ? '' : 's'}`)
+  if (r.episodes) bits.push(`${r.episodes} episode${r.episodes === 1 ? '' : 's'}`)
+  return bits.join(', ') || 'nothing yet'
+}
+
 // A root as the panel holds it. The host sends `{ path, type, holds }`; older saved
 // configs are bare path strings, and a fake state in a test may be either.
 const asRoot = (r) => (typeof r === 'string' ? { path: r, type: 'auto' } : { ...r })
@@ -159,12 +173,20 @@ function Detected ({ onFolders, onServer }) {
   )
 }
 
-// TWO KINDS OF "NO CARD", and conflating them cost the Settings page its rescan
-// button. `wizard` is the first run: no chrome at all, and no rescan controls because
-// there is no library to keep fresh yet. `embedded` is the Library settings page: no
-// card and no heading, because the page already names itself - but every control the
-// operator needs is still there.
-export default function SourcePanel ({ state, reload, embedded = false, wizard = false }) {
+// THREE PLACES THIS IS SHOWN, and they differ in two independent ways: whether it
+// wears a card, and who owns the controls that keep a working library fresh.
+//
+//   wizard - the first run. No chrome, and no rescan controls because there is no
+//            library to keep fresh yet.
+//   editor - inside the Library page's "Change" disclosure. No chrome either, but
+//            for a different reason: the PAGE owns rescanning now, as two rows of
+//            its own that are visible without opening anything.
+//   neither - the standalone card, heading and banners included.
+//
+// Conflating the first two once cost the Settings page its rescan button entirely.
+// The invariant that matters is not a prop, it is that the Library page has a rescan
+// control somewhere on it, and page-renders.test.js is what holds that.
+export default function SourcePanel ({ state, reload, editor = false, wizard = false, onSaved = null }) {
   const current = state.source || { kind: 'empty' }
   const [kind, setKind] = useState(current.kind === 'jellyfin' ? 'jellyfin' : 'folder')
   const [roots, setRoots] = useState((current.roots || []).map(asRoot))
@@ -178,14 +200,7 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
     ? { kind: 'folder', roots: roots.map(picked) }
     : { kind: 'jellyfin', url: url.trim(), username: user.trim(), password: pass }
 
-  const describe = (r) => {
-    const bits = []
-    if (r.leaves !== undefined) bits.push(`${r.leaves} films and episodes`)
-    if (r.movies !== undefined) bits.push(`${r.movies} films`)
-    if (r.series) bits.push(`${r.series} shows`)
-    if (r.episodes) bits.push(`${r.episodes} episodes`)
-    return bits.join(', ') || 'nothing yet'
-  }
+  const describe = describeSource
 
   const test = async () => {
     setBusy('test')
@@ -204,6 +219,8 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
     }
     await reload()
     notify('Saved', `Now serving ${describe(res)}.`)
+    // A disclosure that stays open after it has done its job reads as unfinished.
+    onSaved?.()
   }
 
   const rescan = async () => {
@@ -242,6 +259,11 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
   const dirty = kind !== current.kind ||
     (kind === 'folder' && JSON.stringify(roots.map(picked)) !== JSON.stringify((current.roots || []).map(asRoot).map(picked))) ||
     (kind === 'jellyfin' && (url.trim() !== (current.url || '') || user.trim() !== (current.username || '') || pass))
+
+  // Who keeps the library fresh. Neither the wizard (no library yet) nor the Library
+  // page's disclosure (the page has rescan rows of its own), and never when there is
+  // no source to rescan.
+  const ownsRescan = !wizard && !editor && current.kind !== 'empty'
 
   const Body = (
     <>
@@ -329,18 +351,19 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
       )}
 
       {/* Equal-width buttons filling the row, the donor's action bar. */}
-      <div class={'srcactions' + (wizard || current.kind === 'empty' ? ' two' : '')}>
+      <div class={'srcactions' + (ownsRescan ? '' : ' two')}>
         <button class='ghost' onClick={test} disabled={!!busy}>{busy === 'test' ? 'Checking…' : 'Test'}</button>
         <button onClick={save} disabled={!!busy || !dirty}>{busy === 'save' ? 'Saving…' : 'Save'}</button>
-        {!wizard && current.kind !== 'empty' && (
+        {ownsRescan && (
           <button class='ghost' onClick={rescan} disabled={!!busy}>{busy === 'rescan' ? 'Rescanning…' : 'Rescan now'}</button>
         )}
       </div>
 
       {/* Scheduled auto-rescan, the donor's control: pick new files up without a
           manual Rescan. Not offered during first-run setup - there is no library
-          to keep fresh yet. */}
-      {!wizard && (
+          to keep fresh yet - and not here on the Library page either, where it is
+          a row of its own that does not need this panel opened to be seen. */}
+      {ownsRescan && (
         <label class='autoscan'>
           <span>Auto-rescan</span>
           <select
@@ -382,11 +405,23 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
     </>
   )
 
-  if (wizard) return Body
+  if (wizard || editor) return Body
 
-  // The banners belong to the source wherever it is shown - a settings page that
-  // dropped "two of these folders hold the same files" would be quieter and worse.
-  const Banners = (
+  return (
+    <div class='card'>
+      <h3>Where the films are</h3>
+      <SourceBanners state={state} />
+      {Body}
+    </div>
+  )
+}
+
+// THE BANNERS ARE NOT PART OF THE EDITOR, and that separation is the point of pulling
+// them out: on the Library page the editor lives behind a Change button, and a source
+// that has stopped answering is exactly the news nobody should have to open anything
+// to hear.
+export function SourceBanners ({ state }) {
+  return (
     <>
       {state.stats?.duplicates > 0 && (
         <div class='banner bad'>
@@ -406,16 +441,6 @@ export default function SourcePanel ({ state, reload, embedded = false, wizard =
         </div>
       )}
     </>
-  )
-
-  if (embedded) return <>{Banners}{Body}</>
-
-  return (
-    <div class='card'>
-      <h3>Where the films are</h3>
-      {Banners}
-      {Body}
-    </div>
   )
 }
 

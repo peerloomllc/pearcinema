@@ -282,9 +282,17 @@ test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were
   await new Promise(r => setTimeout(r, 60))
 
   // The sentence IS the consent. A toggle without it is a host quietly telling a
-  // third party what somebody owns.
+  // third party what somebody owns. It sits above the switch it is about, and it is
+  // all that is left of a five-line paragraph: what a key is and where to get one now
+  // live in the key row and in the form that opens from it.
   assert.match(text(), /tells TMDB the titles it is identifying/)
-  assert.match(text(), /Off by default/)
+  // "Off by default" was a claim about defaults on a page that can now just say what
+  // this host is actually doing. The row's own name carries the state in colour and
+  // its sub-line says it in words.
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  assert.ok(posters, 'artwork is a row now, not a card with a paragraph')
+  assert.ok(posters.className.includes('good'), 'on, and the name says so')
+  assert.match(posters.parentElement.textContent, /On · 5 titles have artwork/)
   // Nobody is quizzed: the guesses are counted and the correction is pointed at,
   // on the tile, where the mistake is visible (Tim, 2026-08-14).
   assert.match(text(), /matched from several possibilities/)
@@ -315,6 +323,19 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
   assert.equal(doc.querySelector('video'), null)
 })
 
+// THE PICKER LIVES BEHIND ONE BUTTON NOW. It is a folder browser, a roots editor, a
+// Jellyfin form and a Save - a small app rather than a setting - and left open it was
+// the whole Library page. Everything about it is unchanged; it is one press further in.
+async function openSourceEditor (doc, win) {
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
+  assert.ok(change, 'the source row offers a way in')
+  change.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+}
+
 test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read as', async (t) => {
   // The setting exists because some filenames say nothing at all - a box set numbered
   // K05 - and on the real library 34 television files were landing in the Films list
@@ -323,9 +344,7 @@ test('EACH FOLDER SAYS WHAT IT HOLDS, and an untyped one says what that was read
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
-  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 40))
+  await openSourceEditor(doc, win)
 
   assert.match(text(), /\/library\/Movies/)
 
@@ -348,9 +367,7 @@ test('a folder picked by hand arrives with a type control of its own', async (t)
   const { dom, doc, win } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
-  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 40))
+  await openSourceEditor(doc, win)
 
   const add = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Add a folder'))
   add.dispatchEvent(new win.Event('click', { bubbles: true }))
@@ -1633,17 +1650,122 @@ test('a merged page names itself once and labels what it holds', async (t) => {
   await new Promise(r => setTimeout(r, 60))
 
   assert.equal(doc.querySelector('.setbody .setpage .setpagename').textContent.trim(), 'Library')
-  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
-  assert.deepEqual(groups, ['Where the films are', 'Artwork'])
 
-  // The name is a row on the page now rather than a card of its own with a heading, a
-  // paragraph and a Save button under it.
-  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.childNodes[0].textContent.trim())
-  assert.ok(rows.includes('Name'))
-  // And the source keeps everything an operator needs - the wizard is what drops the
-  // rescan controls, not the settings page.
-  assert.match(text(), /Auto-rescan/)
-  assert.match(text(), /Rescan now/)
+  // ONE GROUP, because there is one genuinely separate subject on this page. The
+  // source used to carry a heading of its own; it is a row now, and a heading over a
+  // single row is a heading over nothing.
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Artwork'])
+
+  // EVERYTHING IS A ROW. The name, where the films are, the two halves of keeping it
+  // fresh, and then artwork - rather than one row and two panels of loose controls.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.deepEqual(rows, [
+    'Name', 'Where the films are', 'Rescan', 'Automatic rescan',
+    'Posters', 'TMDB key', 'Titles with no artwork'
+  ])
+
+  // The row says what it is and what was found in it, so the counts are not something
+  // you open a picker to read.
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('good'))
+  assert.match(src.parentElement.textContent, /3 folders on this machine · 2 films, 1 show, 1 episode/)
+
+  // ONE WORDED BUTTON PER ROW, so the right-hand column is one width.
+  for (const row of doc.querySelectorAll('.setrow')) {
+    assert.ok(row.querySelectorAll('.rowctl button:not(.iconbtn)').length <= 1)
+  }
+
+  // RESCANNING SURVIVED THE MOVE, and this is the assertion that matters most on this
+  // page: it came out of the source panel, and the last time these controls changed
+  // hands the settings page lost them entirely. They are visible without opening
+  // anything now.
+  const buttons = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(buttons.includes('Rescan now'))
+  assert.ok(doc.querySelector('.setrow .rowctl select'), 'the schedule is a chooser that commits itself')
+  assert.doesNotMatch(text(), /Auto-rescan/, 'it is a row with a name now, not a label beside a box')
+})
+
+test('the source editor is behind one button, and the news is not', async (t) => {
+  const { doc, win, dom, text } = await open({ ...STATE, sourceError: 'the drive is not mounted' })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // Closed, the picker is not on the page at all.
+  assert.equal(doc.querySelector('.rootlist'), null)
+  assert.doesNotMatch(text(), /Add a folder/)
+
+  // But a source that has stopped answering says so without being asked, in the banner
+  // AND on the row, because a page whose editor is closed must still be able to tell
+  // you that the thing behind it is broken.
+  assert.match(text(), /The source is not answering/)
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('warn'))
+  assert.match(src.parentElement.textContent, /not answering/)
+
+  // And it opens.
+  await openSourceEditor(doc, win)
+  assert.ok(doc.querySelector('.rootlist'), 'the picker is one press in')
+})
+
+test('artwork with no key says so, refuses to be turned on, and hides its form', async (t) => {
+  // WHAT A KEY IS AND WHERE TO GET ONE moved out of the standing paragraph and into
+  // the form that opens from the key row - said where it applies, not above a switch
+  // somebody has already set up.
+  const { doc, win, dom, text } = await open(STATE, {
+    '/api/metadata': { enabled: false, hasKey: false, running: null, lastRun: null, matched: 0, uncertain: 0, missed: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  assert.ok(posters.className.includes('dim'), 'off, and the name says so')
+  // COLOUR IS NEVER THE ONLY CARRIER, and the reason it cannot be turned on yet is in
+  // the words rather than only in a greyed-out button.
+  assert.match(posters.parentElement.textContent, /Off\. It needs a free TMDB key first\./)
+
+  const on = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Turn on')
+  assert.equal(on.disabled, true)
+
+  // The form is not on the page until it is asked for.
+  assert.doesNotMatch(text(), /themoviedb\.org/)
+  const add = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Add')
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.match(text(), /themoviedb\.org/)
+  assert.ok(doc.querySelector('.rowopen input[type=password]'))
+})
+
+test('a library with no source opens ready to be pointed at one', async (t) => {
+  // The setup story belongs in the empty state, and a Set up button in front of an
+  // editor that is the only thing on the page is one press for no reason.
+  const { doc, win, dom, text } = await open({
+    ...STATE,
+    source: { kind: 'empty', roots: [], url: null, username: null },
+    stats: { movies: 0, series: 0, seasons: 0, episodes: 0 }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const src = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Where the films are')
+  assert.ok(src.className.includes('warn'))
+  assert.match(src.parentElement.textContent, /Nothing set yet/)
+  assert.ok(doc.querySelector('.rootlist'), 'the editor is already open')
+
+  // And nothing offers to rescan a library that does not exist.
+  const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.equal(rows.includes('Rescan'), false)
+  assert.equal(rows.includes('Automatic rescan'), false)
+  void text
 })
 
 test('THE ROUTES ARE ROWS, not a footer of mismatched buttons', async (t) => {

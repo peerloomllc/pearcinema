@@ -1304,6 +1304,17 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * button width the most visible thing on the page. The same minimum the card action
  * rows have used since 2026-08-15, for the same reason and now in a second place. */
 .setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
+/* And a field or a chooser is a control like any other: the SAME width, not a minimum.
+ * Left to themselves they take the width the form gives them, which on the Library
+ * page put a name box and a schedule chooser half an inch wider than every button
+ * above them - the ragged right edge this rule exists to stop. It is also why the
+ * schedule's options read "15 minutes" and not "Every 15 minutes": the row's own
+ * sub-line says the whole sentence, so the control does not have to. */
+.setrow .rowctl input[type=text], .setrow .rowctl select { width: 7.5rem }
+
+/* A progress bar reading inside a sub-line rather than under a paragraph: it sits on
+ * the text baseline row, so it needs a width of its own and a lift off the baseline. */
+.setrow .rowsub .meter { display: inline-block; width: 6rem; vertical-align: middle }
 
 /* A ROW'S NAME AND ITS SUB-LINE ARE TWO LINES. They are spans inside a flex child, so
  * without this they run together and the sub-line reads as part of the name -

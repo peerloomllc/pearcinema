@@ -16,7 +16,7 @@ import Library from './Library'
 import Player from './Player'
 import People from './People'
 import Pair from './Pair'
-import SourcePanel from './SourcePanel'
+import SourcePanel, { SourceBanners, describeSource } from './SourcePanel'
 import Metadata from './Metadata'
 import Wizard from './Wizard'
 
@@ -681,6 +681,169 @@ function CastPanel () {
   )
 }
 
+// THE COLLECTION, in one page. Source, Artwork and Library were three nav items for
+// one subject, and two of them held a single control each.
+//
+// WHAT THE PICKER IS, and why it is behind a button now. SourcePanel is a small app
+// rather than a setting: a folder browser, a roots editor with a type per folder, a
+// Jellyfin form, Test and Save. Left open it was the whole page, on a page people
+// mostly open to check something. So where the films are is a ROW - what it is, how
+// many films it found - and Change opens the app in place, the way Password does on
+// This host. The picker itself is untouched: the typed-path-inside-the-container trap
+// it was built around is that panel's founding scar, not something to reshape casually.
+//
+// RESCANNING CAME OUT WITH IT, and had to. It is what you came for when a film you
+// just copied in is missing, and burying it inside a disclosure would mean opening the
+// editor to press a button that has nothing to do with editing. It is two rows: the
+// one that runs now, and the schedule.
+//
+// THE BANNERS STAY AT THE TOP, above everything. A source that has stopped answering
+// is the one thing nobody should have to open anything to hear.
+function LibraryPanel ({ state, reload }) {
+  const [name, setName] = useState(state.library || '')
+  const src = state.source || { kind: 'empty' }
+  const empty = src.kind === 'empty'
+  // Open by default when there is nothing set, because then the editor IS the page
+  // and a Set up button in front of it is one press for no reason.
+  const [editing, setEditing] = useState(empty)
+  const [busy, setBusy] = useState(false)
+
+  const saveName = async () => {
+    const res = await api('/api/library', { name })
+    if (res.error) return notify('Not renamed', res.error)
+    await reload()
+    notify('Renamed', 'Every paired phone relabels straight away.')
+  }
+
+  const rescan = async () => {
+    setBusy(true)
+    const res = await api('/api/source/rescan', {})
+    setBusy(false)
+    if (res.error) return notify('Rescan failed', res.error)
+    await reload()
+    notify('Rescanned', `Found ${describeSource(res)}.`)
+  }
+
+  // WHERE THE FILMS ARE, in one line: what kind of place it is, and what was found in
+  // it. The counts belong on this row rather than in a paragraph under the picker -
+  // they are the answer to the question the row asks.
+  const roots = src.roots || []
+  const place = empty
+    ? ''
+    : src.kind === 'jellyfin'
+      ? `Jellyfin at ${(src.url || '').replace(/^https?:\/\//, '') || 'a server'}`
+      : `${roots.length} folder${roots.length === 1 ? '' : 's'} on this machine`
+
+  const sourceSub = empty
+    ? 'Nothing set yet. Point this at a folder of films or a Jellyfin server.'
+    : state.sourceError
+      ? `${place} · not answering`
+      : `${place} · ${describeSource(state.stats || {})}`
+
+  const sourceTone = empty || state.sourceError ? 'warn' : 'good'
+
+  const every = Number(state.rescanIntervalMin) || 0
+  const autoSub = {
+    0: 'Off. New films appear only when you rescan.',
+    15: 'Every 15 minutes.',
+    30: 'Every 30 minutes.',
+    60: 'Every hour.',
+    360: 'Every 6 hours.'
+  }[every] || `Every ${every} minutes.`
+
+  return (
+    <>
+      <div class='setpage'><span class='setpagename'>Library</span></div>
+
+      <SourceBanners state={state} />
+
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Name</span>
+            <span class='rowsub'>What a paired phone calls this library.</span>
+          </span>
+          <span class='rowctl'>
+            <input
+              type='text' value={name} maxLength={64}
+              aria-label="This library's name"
+              onInput={e => setName(e.currentTarget.value)}
+              onBlur={() => { if (name.trim() && name !== state.library) saveName() }}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+            />
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class={'rowname ' + sourceTone}>Where the films are</span>
+            <span class='rowsub'>{sourceSub}</span>
+          </span>
+          <span class='rowctl'>
+            <button class='ghost' onClick={() => setEditing(!editing)}>
+              {editing ? 'Cancel' : (empty ? 'Set up' : 'Change')}
+            </button>
+          </span>
+        </div>
+
+        {editing && (
+          <div class='rowopen'>
+            <SourcePanel state={state} reload={reload} editor onSaved={() => setEditing(false)} />
+          </div>
+        )}
+
+        {!empty && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>Rescan</span>
+              <span class='rowsub'>
+                {state.scanning ? 'Reading the library now.' : 'Looks for films added or removed.'}
+              </span>
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={rescan} disabled={busy || !!state.scanning}>
+                {busy ? 'Rescanning…' : 'Rescan now'}
+              </button>
+            </span>
+          </div>
+        )}
+
+        {!empty && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>Automatic rescan</span>
+              <span class='rowsub'>{autoSub}</span>
+            </span>
+            {/* IT COMMITS ITSELF. A schedule with a Save button beside it is a schedule
+                people set and do not save. */}
+            <span class='rowctl'>
+              <select
+                value={every}
+                aria-label='How often the library rechecks itself'
+                onChange={async e => {
+                  const minutes = Number(e.currentTarget.value)
+                  const res = await api('/api/rescan-interval', { minutes })
+                  if (res?.error) return notify('Not set', res.error)
+                  reload()
+                }}
+              >
+                <option value={0}>Off</option>
+                <option value={15}>15 minutes</option>
+                <option value={30}>30 minutes</option>
+                <option value={60}>1 hour</option>
+                <option value={360}>6 hours</option>
+              </select>
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div class='setgroup'>Artwork</div>
+      <Metadata rows />
+    </>
+  )
+}
+
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
   const resolveSection = (t, s) => {
     if (t !== 'settings') return null
@@ -702,15 +865,6 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
     window.addEventListener('hashchange', follow)
     return () => window.removeEventListener('hashchange', follow)
   }, [])
-  const [name, setName] = useState(state.library || '')
-
-  const saveName = async () => {
-    const res = await api('/api/library', { name })
-    if (res.error) return notify('Not renamed', res.error)
-    await reload()
-    notify('Renamed', 'Every paired phone relabels straight away.')
-  }
-
   return (
     <div class='settings'>
       <nav class='setnav' aria-label='Settings sections'>
@@ -720,40 +874,7 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
       </nav>
 
       <div class='setbody'>
-        {/* THE COLLECTION, in one page. Source, Artwork and Library were three nav
-            items for one subject, and two of them held a single control each. The
-            source picker keeps its own machinery inside its group - it is a small app
-            rather than a settings row, and the typed-path trap it was built around is
-            not something to reshape casually. */}
-        {sec === 'library' && (
-          <>
-            <div class='setpage'><span class='setpagename'>Library</span></div>
-
-            <div class='setrows'>
-              <div class='setrow'>
-                <span class='rowmain'>
-                  <span class='rowname'>Name</span>
-                  <span class='rowsub'>What a paired phone calls this library.</span>
-                </span>
-                <span class='rowctl'>
-                  <input
-                    type='text' value={name} maxLength={64}
-                    aria-label="This library's name"
-                    onInput={e => setName(e.currentTarget.value)}
-                    onBlur={() => { if (name.trim() && name !== state.library) saveName() }}
-                    onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                  />
-                </span>
-              </div>
-            </div>
-
-            <div class='setgroup'>Where the films are</div>
-            <SourcePanel state={state} reload={reload} embedded />
-
-            <div class='setgroup'>Artwork</div>
-            <Metadata embedded />
-          </>
-        )}
+        {sec === 'library' && <LibraryPanel state={state} reload={reload} />}
 
         {sec === 'sharing' && (
           <>

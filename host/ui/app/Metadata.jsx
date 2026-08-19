@@ -17,15 +17,19 @@ import { useState, useEffect, useRef } from 'preact/hooks'
 import { api } from './api'
 import { notify } from './ui'
 
-// `embedded` drops the card chrome so the same panel can sit inside the first-run
-// wizard (Tim, 2026-08-14: this step belongs in onboarding, not only in Settings).
-export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
+// TWO SHAPES, one panel. `embedded` drops the card chrome so the same panel can sit
+// inside the first-run wizard (Tim, 2026-08-14: this step belongs in onboarding, not
+// only in Settings), where a paragraph explaining itself is exactly what is wanted.
+// `rows` is the Library settings page, where it is a switch, a key and two occasional
+// actions - one setting per row, and the setup form only when somebody opens it.
+export default function Metadata ({ embedded = false, rows = false, onEnabled = null } = {}) {
   const [meta, setMeta] = useState(null)
   const [key, setKey] = useState('')
   const [testing, setTesting] = useState(false)
   const [tested, setTested] = useState(null)
   const [writing, setWriting] = useState(false)
   const [written, setWritten] = useState(null)
+  const [keyOpen, setKeyOpen] = useState(false)
   const timer = useRef(null)
 
   const reload = async () => {
@@ -67,6 +71,172 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
       // find a second button (Tim, 2026-08-14).
       onEnabled?.()
     }
+  }
+
+  const writeSidecars = async () => {
+    setWriting(true)
+    setWritten(await api('/api/metadata/sidecars'))
+    setWriting(false)
+  }
+
+  const lookAgain = async () => {
+    await api('/api/metadata/run', { retryMissed: true })
+    reload()
+  }
+
+  if (rows) {
+    // THE NAME CARRIES THE STATE and the sub-line always says it in words, so nobody
+    // has to tell green from grey to know whether this is on.
+    const postersSub = meta.running
+      ? `Looking up ${meta.running.done} of ${meta.running.total}…`
+      : meta.enabled
+        ? (meta.lastRun
+            ? `On · ${meta.matched} title${meta.matched === 1 ? ' has' : 's have'} artwork`
+            : 'On. Nothing has been fetched yet.')
+        : meta.hasKey
+          ? 'Off. Films show only the artwork found beside them.'
+          : 'Off. It needs a free TMDB key first.'
+
+    return (
+      <>
+        {/* THE ONE THING NOBODY COULD GUESS, said once, above the switch it is about.
+            The rest of what this paragraph used to carry - what a key is, where to get
+            one, what happens next - lives where it applies: in the key row, and in the
+            form that opens when somebody sets one up. */}
+        <p class='hint'>
+          With this on, the host asks TMDB, a third-party film database, for posters,
+          which means <b>this host tells TMDB the titles it is identifying</b>. Nothing
+          else is sent, and artwork found beside your own files always wins.
+        </p>
+
+        <div class='setrows'>
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class={'rowname ' + (meta.enabled ? 'good' : 'dim')}>Posters</span>
+              <span class='rowsub'>
+                {postersSub}
+                {meta.running && (
+                  <span class='meter' style='margin-left:.5rem'>
+                    <i style={`width:${meta.running.total ? Math.round((meta.running.done / meta.running.total) * 100) : 0}%`} />
+                  </span>
+                )}
+              </span>
+            </span>
+            <span class='rowctl'>
+              {meta.enabled
+                ? <button class='ghost' onClick={() => save(false)}>Turn off</button>
+                : (
+                  <button
+                    class='ghost'
+                    disabled={!meta.hasKey}
+                    title={meta.hasKey ? '' : 'Add a TMDB key first'}
+                    onClick={() => save(true)}
+                  >
+                    Turn on
+                  </button>
+                  )}
+            </span>
+          </div>
+
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>TMDB key</span>
+              <span class='rowsub'>{meta.hasKey ? 'Your own key is saved.' : 'Needed before anything can be fetched.'}</span>
+            </span>
+            <span class='rowctl'>
+              <button class='ghost' onClick={() => { setKeyOpen(!keyOpen); setTested(null) }}>
+                {keyOpen ? 'Cancel' : (meta.hasKey ? 'Change' : 'Add')}
+              </button>
+            </span>
+          </div>
+
+          {keyOpen && (
+            <div class='rowopen'>
+              <p class='hint'>
+                It is free and it takes a minute: create one at{' '}
+                <a href='https://www.themoviedb.org/settings/api' target='_blank' rel='noreferrer'>themoviedb.org/settings/api</a>{' '}
+                and paste it here. It is tested before it is saved.
+              </p>
+              <div class='row artkey'>
+                <input
+                  type='password'
+                  placeholder={meta.hasKey ? 'Paste a key to replace the saved one' : 'Paste your TMDB key'}
+                  value={key}
+                  onInput={e => { setKey(e.currentTarget.value); setTested(null) }}
+                />
+                <button class='ghost' disabled={!key || testing} onClick={test}>{testing ? 'Testing…' : 'Test'}</button>
+              </div>
+              {tested && (
+                <p class='hint' style={tested.ok ? 'color:var(--ok)' : 'color:var(--danger)'}>
+                  {tested.ok ? 'TMDB accepted the key.' : tested.error}
+                </p>
+              )}
+              <div class='actions'>
+                <button
+                  disabled={!tested?.ok}
+                  onClick={async () => { await save(meta.enabled); setKeyOpen(false) }}
+                >
+                  Save key
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* SAID ONLY WHERE IT APPLIES. A row about titles that found nothing is noise
+              on a library where everything did. */}
+          {meta.enabled && !meta.running && meta.missed > 0 && (
+            <div class='setrow'>
+              <span class='rowmain'>
+                <span class='rowname warn'>Titles with no artwork</span>
+                <span class='rowsub'>{meta.missed} came back with nothing.</span>
+              </span>
+              <span class='rowctl'>
+                <button class='ghost' onClick={lookAgain}>Look again</button>
+              </span>
+            </div>
+          )}
+
+          {/* THE EXPLICIT ACTION. Everything fetched lives in this host's own data
+              folder, which a reinstall or a moved drive loses. This writes it beside
+              the films instead, as the standard files every scanner reads, and it only
+              ever creates, never replaces. Folder libraries only: a Jellyfin library is
+              that server's to manage. */}
+          {meta.canWriteSidecars && meta.matched > 0 && !meta.running && (
+            <div class='setrow'>
+              <span class='rowmain'>
+                <span class='rowname'>Keep artwork with the films</span>
+                <span class='rowsub'>
+                  Artwork lives in this host's own data folder until you save a copy beside the films.
+                </span>
+              </span>
+              <span class='rowctl'>
+                <button class='ghost' disabled={writing} onClick={writeSidecars}>
+                  {writing ? 'Saving…' : 'Save a copy'}
+                </button>
+              </span>
+            </div>
+          )}
+        </div>
+
+        {written && (
+          <p class='hint' style={written.readOnly || written.error ? 'color:var(--danger)' : ''}>
+            {written.error
+              ? written.error
+              : written.readOnly
+                ? 'Nothing could be written: the library is mounted read-only. On an Umbrel, update the app. Newer versions mount the library writable for exactly this.'
+                : sentence(written)}
+          </p>
+        )}
+
+        {!meta.running && meta.uncertain > 0 && (
+          <p class='hint'>
+            <b>{meta.uncertain}</b> of them {meta.uncertain === 1 ? 'was' : 'were'} matched from
+            several possibilities, so a poster may be wrong here and there. Correcting one is
+            the pencil on its tile, in the library.
+          </p>
+        )}
+      </>
+    )
   }
 
   return (
@@ -113,9 +283,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
         )}
         {meta.enabled && <button class='ghost' onClick={() => save(false)}>Turn it off</button>}
         {meta.enabled && !meta.running && (
-          <button class='ghost' onClick={async () => { await api('/api/metadata/run', { retryMissed: true }); reload() }}>
-            Look again
-          </button>
+          <button class='ghost' onClick={lookAgain}>Look again</button>
         )}
         {key && (
           <button class='ghost' disabled={!tested?.ok} onClick={() => save(meta.enabled)}>Save key</button>
@@ -159,11 +327,7 @@ export default function Metadata ({ embedded = false, onEnabled = null } = {}) {
             films is left exactly as it is.
           </p>
           <div class='actions'>
-            <button class='ghost' disabled={writing} onClick={async () => {
-              setWriting(true)
-              setWritten(await api('/api/metadata/sidecars'))
-              setWriting(false)
-            }}>
+            <button class='ghost' disabled={writing} onClick={writeSidecars}>
               {writing ? 'Saving…' : 'Save into the library'}
             </button>
           </div>
