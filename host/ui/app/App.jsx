@@ -11,7 +11,7 @@ import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
-import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Copy, Refresh } from './icons'
+import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff } from './icons'
 import Library from './Library'
 import Player from './Player'
 import People from './People'
@@ -557,8 +557,14 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
 // (Tim, 2026-08-19: the Settings pages are busy and not aesthetically pleasing).
 //
 // It was two nav items and three cards: This host, Security, and the video engine.
-// They are one page and five rows now, because they are all answers to the same
-// question - what is this machine, and what is it allowed to do.
+// They are one page now, because they are all answers to the same question - what is
+// this machine, and what is it allowed to do.
+//
+// THE LIBRARY'S ADDRESS IS NOT ON IT (Tim, 2026-08-19: "do we even need Address? I
+// don't think we even use it anywhere for anything" - he was right). Every other use
+// of the host key is one library reaching another, in code; pairing never asks a
+// person for it, and nothing on any screen was ever copied from here. If it turns out
+// to be wanted for support, the pairing screen is where it belongs.
 //
 // THREE RULES THIS PAGE IS THE PILOT FOR:
 //
@@ -577,7 +583,6 @@ function HostPanel ({ state, reload }) {
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
   const [pwOpen, setPwOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const t = state.transcode || {}
@@ -588,13 +593,6 @@ function HostPanel ({ state, reload }) {
   // Only a password this host owns can be changed from here. One set by the platform
   // would be quietly put back on the next restart, which is worse than not offering it.
   const ownPassword = src === 'generated' || src === 'file'
-
-  const copyKey = async () => {
-    if (await copyText(state.hostKey)) {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    }
-  }
 
   const savePassword = async () => {
     const res = await api('/api/password', { current: cur, next })
@@ -636,28 +634,11 @@ function HostPanel ({ state, reload }) {
   return (
     <>
       <div class='setpage'>
-        This host
+        <span class='setpagename'>This host</span>
         <span class={engineChip.cls}>{engineChip.text}</span>
       </div>
 
       <div class='setrows'>
-        <div class='setrow'>
-          <span class='rowmain'>
-            <span class='rowname'>Address</span>
-            <span class='rowsub'>Not a secret. Only pairing grants access.</span>
-            <span class='rowvalue'>{state.hostKey}</span>
-          </span>
-          <span class='rowctl'>
-            <button
-              class='iconbtn' onClick={copyKey}
-              title={copied ? 'Copied' : 'Copy'}
-              aria-label="Copy this library's address"
-            >
-              <Copy size={17} />
-            </button>
-          </span>
-        </div>
-
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>Password</span>
@@ -688,22 +669,30 @@ function HostPanel ({ state, reload }) {
 
         <div class='setrow'>
           <span class='rowmain'>
-            <span class='rowname'>Signed-in browsers</span>
-            <span class='rowsub'>{state.auth?.enabled ? 'Each stays signed in for a week.' : 'Nothing to sign out of.'}</span>
+            <span class='rowname'>This browser</span>
           </span>
           <span class='rowctl'>
             <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Sign out</button>
-            {state.auth?.enabled && (
+          </span>
+        </div>
+
+        {state.auth?.enabled && (
+          <div class='setrow'>
+            <span class='rowmain'>
+              <span class='rowname'>Other browsers</span>
+              <span class='rowsub'>Each stays signed in for a week.</span>
+            </span>
+            <span class='rowctl'>
               <button class='ghost' onClick={async () => {
                 const res = await api('/api/logout-everywhere', {})
                 if (res?.error) return notify('Not done', res.error)
                 notify('Done', res.others === 0
                   ? 'No other browser was signed in.'
                   : `${res.others} other browser${res.others === 1 ? ' was' : 's were'} signed out. This one stays.`)
-              }}>Sign out everywhere else</button>
-            )}
-          </span>
-        </div>
+              }}>Sign out</button>
+            </span>
+          </div>
+        )}
 
         <div class='setrow'>
           <span class='rowmain'>
@@ -748,7 +737,6 @@ function HostPanel ({ state, reload }) {
 function SupportPanel () {
   const [rails, setRails] = useState(null)
   const [tab, setTab] = useState('ln')
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     let live = true

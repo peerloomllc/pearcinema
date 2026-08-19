@@ -1330,27 +1330,35 @@ test('one setting per row, and the explanation is a sub-line rather than a parag
   const { doc, text } = await openHost(t)
 
   const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
-  assert.deepEqual(rows, ['Address', 'Password', 'Signed-in browsers', 'Video engine', 'First-time setup'])
+  assert.deepEqual(rows, ['Password', 'This browser', 'Other browsers', 'Video engine', 'First-time setup'])
 
-  // The address is on the page with the fact that makes it safe to show.
-  assert.match(text(), /hostkey/)
-  assert.match(text(), /Only pairing grants access/)
+  // THE LIBRARY'S ADDRESS IS NOT A SETTING, and it was never a control either: every
+  // other use of the host key is one library reaching another, in code, and pairing
+  // never asks a person for it. It sat on screen for nobody (Tim, 2026-08-19).
+  assert.doesNotMatch(text(), /hostkey/)
 })
 
-test('ICONS WHERE A WORD IS NOISE, WORDS WHERE AN ICON IS A GUESS', async (t) => {
+test('ONE BUTTON PER ROW, because every control on the page is flush right', async (t) => {
+  // Width asymmetry is invisible on a ragged left edge and glaring on a flush right
+  // one. Signing this browser out and signing the others out shared a row, and their
+  // two very different widths were the loudest thing on the page (Tim, 2026-08-19).
   const { doc } = await openHost(t)
 
-  // Copying an address is an icon, and it still says what it is to a screen reader.
-  const copy = doc.querySelector('.setrow .iconbtn')
-  assert.ok(copy, 'the address is copied with an icon')
-  assert.match(copy.getAttribute('aria-label'), /Copy this library's address/)
-  assert.equal(copy.textContent.trim(), '', 'no word beside it')
+  for (const row of doc.querySelectorAll('.setrow')) {
+    const buttons = row.querySelectorAll('.rowctl button:not(.iconbtn)')
+    assert.ok(buttons.length <= 1, 'at most one worded button in a row')
+  }
 
-  // A rare or irreversible action keeps its words. A pictogram for "sign every other
-  // browser out" is a thing somebody has to interpret correctly the first time.
-  const words = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
-  assert.ok(words.includes('Sign out everywhere else'))
-  assert.ok(words.includes('Run again'))
+  // Both say the same word at the same width; the row's own name says which browsers.
+  const words = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
+  assert.ok(words.includes('This browser') && words.includes('Other browsers'))
+  const outs = [...doc.querySelectorAll('.setrow .rowctl button')].filter(b => b.textContent.trim() === 'Sign out')
+  assert.equal(outs.length, 2)
+
+  // A rare or irreversible action still keeps its words rather than becoming a
+  // pictogram somebody has to interpret correctly the first time.
+  const all = [...doc.querySelectorAll('.setrow .rowctl button')].map(b => b.textContent.trim())
+  assert.ok(all.includes('Run again'))
 })
 
 test('the engine row is a reading of the setting until it is an edit of it', async (t) => {
@@ -1400,7 +1408,7 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a se
 
   const title = doc.querySelector('.setbody .setpage')
   assert.ok(title, 'the page names itself once, at the top')
-  assert.match(title.textContent, /This host/)
+  assert.match(title.querySelector('.setpagename').textContent, /This host/)
 
   // The chip vocabulary already existed and Settings never used it, so every page
   // stated its condition in a paragraph instead.

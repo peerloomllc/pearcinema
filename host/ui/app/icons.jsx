@@ -217,15 +217,3 @@ export const Home = (p) => (
   <S {...p}><path d='M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4v-5.5H9V20H5a1 1 0 0 1-1-1z' /></S>
 )
 
-// Two sheets, one behind the other. Copying is the one action on this dashboard that
-// happens to a VALUE rather than to a thing - a host key, a payment address - so it
-// gets an icon beside the value instead of a word under it.
-export const Copy = (p) => (
-  <S {...p}><rect x='9' y='9' width='11' height='11' rx='2' /><path d='M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5' /></S>
-)
-
-// A circular arrow: look again. Deliberately not a pair of chasing arrows - at 17px
-// the two-arrow version reads as a smudge, and this one still reads as "again".
-export const Refresh = (p) => (
-  <S {...p}><path d='M20 12a8 8 0 1 1-2.6-5.9' /><path d='M20 3.5V8h-4.5' /></S>
-)

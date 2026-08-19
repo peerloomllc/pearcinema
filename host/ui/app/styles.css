@@ -1295,3 +1295,13 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
   .setnav button { border-left: 1px solid var(--line); border-radius: 999px }
   .setnav button.on { background: var(--card); border: 1px solid var(--accent); color: var(--fg) }
 }
+
+/* The page's name and its condition are two things, so they get two lines. Side by
+ * side the chip butted against the name and read as part of it (Tim, 2026-08-19). */
+.setpage { flex-direction: column; align-items: flex-start; gap: .45rem }
+.setpagename { display: block }
+
+/* EVERY CONTROL ON A SETTINGS PAGE IS FLUSH RIGHT, which makes any difference in
+ * button width the most visible thing on the page. The same minimum the card action
+ * rows have used since 2026-08-15, for the same reason and now in a second place. */
+.setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
