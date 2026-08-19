@@ -1179,12 +1179,17 @@ export default function App () {
   //
   // Asked with the list rather than on a timer of its own: the moment worth catching
   // is somebody opening the app to a shelf that should not be empty.
-  const [sourceErr, setSourceErr] = useState('')
+  // EVERY CONNECTED LIBRARY, not just the active one. The first cut asked
+  // library.stats, which answers for the active host - and on a phone with more than
+  // one library the merged shelf shows films from all of them, so the host that lost
+  // its drive is very often not the one being asked. That is exactly how this read as
+  // working on the TCL and silent on Tim's Pixel on the same build.
+  const [lostLibs, setLostLibs] = useState([])
   useEffect(() => {
-    if (!state?.active) return setSourceErr('')
-    call('library.stats')
-      .then((st) => setSourceErr(st?.sourceError || ''))
-      .catch(() => setSourceErr(''))
+    if (!state?.active) return setLostLibs([])
+    call('library.sources')
+      .then((r) => setLostLibs(r?.items || []))
+      .catch(() => setLostLibs([]))
   }, [state?.active?.hostKey, mergedFilter, mergedTick, items])
 
   // The chip is a persisted preference the worklet applies server-side of the
@@ -1685,11 +1690,15 @@ export default function App () {
           here. Said above the shelf rather than in place of it, because whatever was
           already loaded still plays - a download on this phone does not need the
           host's disk at all. */}
-      {sourceErr && (
-        <div className='error'>
-          <b>This library cannot reach its films.</b> {sourceErr}
+      {lostLibs.map((l) => (
+        <div className='error' key={l.libraryId}>
+          <b>
+            {lostLibs.length > 1 || (state?.libraries?.length || 1) > 1
+              ? `${l.libraryName} cannot reach its films.`
+              : 'This library cannot reach its films.'}
+          </b> {l.sourceError}
         </div>
-      )}
+      ))}
 
       {/* The marker. Nobody should discover after the fact that their films took the
           long way round, and the quality drop is a fact worth explaining before it is

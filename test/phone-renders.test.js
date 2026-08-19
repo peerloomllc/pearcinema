@@ -291,16 +291,41 @@ test('A LIBRARY THAT CANNOT REACH ITS FILMS SAYS SO, rather than looking empty',
   // here ever asked, so when Tim's Umbrel lost its drive on 2026-08-19 the phone said
   // nothing at all.
   const { text, dom } = await open({
-    'library.stats': {
-      movies: 0, series: 0, seasons: 0, episodes: 0, source: 'folder',
-      sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?'
+    'library.sources': {
+      items: [{
+        libraryId: 'lib-a',
+        libraryName: 'The Cinema',
+        sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?'
+      }]
     },
     'library.list': { items: [], cursor: null }
   })
   t.after(() => dom.window.close())
 
-  assert.match(text(), /This library cannot reach its films/)
+  assert.match(text(), /cannot reach its films/)
   assert.match(text(), /Is the drive still mounted/)
+})
+
+test('IT ASKS EVERY LIBRARY, not just the active one', async (t) => {
+  // The bug that made this read as working on one phone and silent on another, on the
+  // same build. library.stats answers for the ACTIVE host, and a merged shelf shows
+  // films from all of them - so the host that lost its drive is very often not the one
+  // being asked (Tim's Pixel, 2026-08-19).
+  const { text, dom, called } = await open({
+    'library.sources': {
+      items: [
+        { libraryId: 'lib-b', libraryName: 'The Study', sourceError: 'None of this library\'s files are in /library/Movies. Is the drive still mounted?' },
+        { libraryId: 'lib-c', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }
+      ]
+    }
+  })
+  t.after(() => dom.window.close())
+
+  assert.equal(called('library.sources').length > 0, true, 'it asks the question at all')
+  // NAMED, because "a library cannot reach its films" is no use when you have three
+  // and the shelf is showing all of them at once.
+  assert.match(text(), /The Study cannot reach its films/)
+  assert.match(text(), /The Loft cannot reach its films/)
 })
 
 test('a library that is simply empty is not accused of losing its drive', async (t) => {

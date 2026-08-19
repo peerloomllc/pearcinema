@@ -1056,6 +1056,38 @@ const methods = {
   // the host's. More than one: served from the merged index (proposal
   // 2026-08-16), which speaks the same vocabulary - the UI cannot tell.
   'library.stats': async () => (await connected()).stats(),
+
+  // WHICH LIBRARIES CANNOT REACH THEIR OWN FILMS, asked of every connected host
+  // rather than only the active one.
+  //
+  // `library.stats` answers for the ACTIVE host, and that is the wrong question the
+  // moment a phone has more than one library: the merged shelf shows films from all
+  // of them, so the host that lost its drive is very often not the one being asked.
+  // Found on Tim's Pixel 2026-08-19 - the dashboard said the drive was gone, the
+  // phone said nothing, and the same build on the TCL showed the message correctly
+  // because there the affected library happened to be the active one.
+  //
+  // Named, because "a library cannot reach its films" is not useful when you have
+  // three and the shelf is showing all of them at once.
+  'library.sources': async () => {
+    const out = []
+    for (const libraryId of connectedLibs()) {
+      try {
+        const stats = await (await connectedLib(libraryId)).stats()
+        if (!stats?.sourceError) continue
+        out.push({
+          libraryId,
+          libraryName: hostRow(libraryId)?.libraryName || 'A library',
+          sourceError: stats.sourceError
+        })
+      } catch {
+        // A host that will not answer at all is a DIFFERENT fault, and one the app
+        // already shows as a library that is offline. Saying its drive is missing
+        // would be inventing a reason.
+      }
+    }
+    return { items: out }
+  },
   'library.list': async (args) => {
     if (!mergedOn() || !mergedIndex) return (await connected()).list(args)
     const type = String(args.type || 'movies')
