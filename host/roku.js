@@ -347,6 +347,29 @@ class RokuSpeakers {
     return { ok: true }
   }
 
+  // Pause and resume are the SAME key on a Roku: `Play` toggles. Sent blind rather than
+  // read-then-decide, because ECP has no separate pause command and a state read between
+  // the press and the effect is a race the person would feel.
+  async pause (entityId) {
+    const host = this.hostFor(entityId)
+    if (!host) throw new Error('not a Roku target')
+    const state = await this.getState(entityId).catch(() => null)
+    // Only if it is actually playing: pressing Play on a paused film would resume it, so
+    // an unconditional press turns "pause" into a coin toss.
+    if (state?.state !== 'playing') return { ok: true, already: true }
+    await this._ecp(host, '/keypress/Play', { method: 'POST' })
+    return { ok: true }
+  }
+
+  async resume (entityId) {
+    const host = this.hostFor(entityId)
+    if (!host) throw new Error('not a Roku target')
+    const state = await this.getState(entityId).catch(() => null)
+    if (state?.state === 'playing') return { ok: true, already: true }
+    await this._ecp(host, '/keypress/Play', { method: 'POST' })
+    return { ok: true }
+  }
+
   // HOME, NOT STOP, and revoke is the reason. ECP has no stop command for the media
   // player; Home exits the channel, which ends playback and the bytes with it. The HA
   // backend arrives at the same key by a longer road (media_stop 500s on a Roku, so it

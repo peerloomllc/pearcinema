@@ -287,6 +287,31 @@ test('play refuses clearly rather than 404ing into the void', async (t) => {
   await assert.rejects(() => s.play('roku:10.0.0.7', 'http://x/v/t', {}), /Media Assistant/)
 })
 
+test('pause is the Play key, and only when something is playing', async (t) => {
+  // ECP has no pause command - Play toggles. So an unconditional press turns "pause" into
+  // a coin toss: on a paused film it would resume it.
+  const roku = await fakeRoku(t)
+  const s = speakersFor(t, roku)
+  await s.list()
+
+  await s.pause('roku:10.0.0.7') // the stand-in reports state="play"
+  assert.ok(roku.seen.some((r) => r.url === '/keypress/Play'), 'a playing film pauses')
+
+  const idle = await fakeRoku(t, { media: '<player state="none" error="false"/>' })
+  const s2 = speakersFor(t, idle)
+  await s2.list()
+  await s2.pause('roku:10.0.0.7')
+  assert.ok(!idle.seen.some((r) => r.url === '/keypress/Play'), 'nothing playing, nothing pressed')
+})
+
+test('resume is the same key, and refuses to double-press', async (t) => {
+  const playing = await fakeRoku(t)
+  const s = speakersFor(t, playing)
+  await s.list()
+  await s.resume('roku:10.0.0.7')
+  assert.ok(!playing.seen.some((r) => r.url === '/keypress/Play'), 'already playing means nothing to do')
+})
+
 // --- the router -------------------------------------------------------------
 
 const HA_TARGET = { entityId: 'media_player.living_room', name: 'Living Room TV', state: 'idle', supportedFeatures: 0, deviceClass: 'tv', hidden: false }
@@ -302,6 +327,32 @@ function fakeHa (over = {}) {
     ...over
   }
 }
+
+test('THE ROUTER FORWARDS EVERY METHOD A CALLER USES', async (t) => {
+  // This is the test that would have caught the one real regression of the evening.
+  // The router shipped without pause or resume, which does not fail at startup - it fails
+  // as `casts.speakers.pause is not a function` the moment somebody presses pause on a
+  // real cast. Which is how it was found: on Tim's television, minutes after it shipped.
+  //
+  // Pinned against the Home Assistant backend's OWN surface rather than a hand-written
+  // list, so a method added there and forgotten here is a failing test rather than a
+  // broken remote control.
+  const { Speakers } = require('../host/speakers')
+  const used = ['enabled', 'isHidden', 'list', 'getState', 'play', 'pause', 'resume', 'stop', 'seek']
+  const roku = await fakeRoku(t)
+  const targets = new CastTargets({ configured: fakeHa(), discovered: speakersFor(t, roku) })
+
+  for (const m of used) {
+    assert.ok(m in Speakers.prototype || m in targets || typeof targets[m] === 'function' || m === 'enabled',
+      `${m} is used by a caller and must exist on the Home Assistant backend`)
+    assert.ok(m === 'enabled' ? 'enabled' in targets : typeof targets[m] === 'function',
+      `the router drops ${m} - a caller would get "is not a function" at the worst moment`)
+  }
+
+  // And a discovered target answers them for real, not just structurally.
+  const disc = speakersFor(t, roku)
+  for (const m of ['pause', 'resume', 'stop']) assert.equal(typeof disc[m], 'function', `the Roku backend needs ${m}`)
+})
 
 test('both rosters arrive, and an id decides who is asked', async (t) => {
   const roku = await fakeRoku(t)

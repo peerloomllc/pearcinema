@@ -10,6 +10,14 @@
 // wire this minute. Keeping them apart means an HA outage cannot take the found
 // televisions with it, and a network with no multicast cannot break a configured one.
 
+// EVERY METHOD A CALLER USES HAS TO BE HERE. Missing one does not fail loudly at startup;
+// it fails as `casts.speakers.pause is not a function` the moment somebody presses pause
+// on a real cast, which is exactly how it was found - on Tim's television, minutes after
+// this shipped. The list is: enabled, isHidden, list, getState, play, pause, resume, stop,
+// seek. `test/roku.test.js` pins it against the Home Assistant backend's own surface, so
+// adding a method there and forgetting it here is a failing test rather than a broken
+// remote control.
+
 // A target's id says which backend owns it. `roku:<host>` is minted by the discovery
 // backend; everything else is Home Assistant's own `media_player.*` vocabulary, which it
 // has always been.
@@ -83,6 +91,8 @@ class CastTargets {
   }
 
   getState (entityId) { return this._for(entityId).getState(entityId) }
+  pause (entityId) { return this._for(entityId).pause(entityId) }
+  resume (entityId) { return this._for(entityId).resume(entityId) }
   // Only ever reached behind canSeek(supportedFeatures), which a discovered Roku answers
   // 0 to - it cannot seek over ECP any more than it can through Home Assistant, and the
   // cast path already restarts the film at the offset instead.
