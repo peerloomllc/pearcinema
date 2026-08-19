@@ -615,14 +615,16 @@ function HostPanel ({ state, reload }) {
   }
 
   const passwordSub = !state.auth?.enabled
-    ? 'None, because this page is only reachable from the machine it runs on.'
+    ? 'None. This page is reachable only from this machine.'
     : src === 'explicit'
-      ? 'Set by the platform that installed PearCinema. On Umbrel it is the app password beside PearCinema in your app list.'
-      : 'Other browsers will need the new one. This one stays signed in.'
+      ? 'Set by the platform that installed this. Change it there.'
+      : 'Other browsers will need the new one.'
 
+  // The chip beside the page's name already says how many, so this says only what the
+  // chip cannot: where the ceiling is, and how to switch it off.
   const engineSub = t.available
-    ? `Films converted at once when a device cannot play them as they are. 0 turns conversions off. This hardware managed about ${c.measured || 10} in testing.`
-    : `Conversions are off: ${t.reason || 'the hardware probe did not pass'}.`
+    ? `0 turns it off. This hardware managed about ${c.measured || 10} in testing.`
+    : t.reason || 'The hardware probe did not pass.'
 
   // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
   // bad variants since it had a library page, and Settings never used one - so every
@@ -639,15 +641,10 @@ function HostPanel ({ state, reload }) {
       </div>
 
       <div class='setrows'>
-        <div class='setgroup'>Reaching it</div>
-
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>Address</span>
-            <span class='rowsub'>
-              Not a secret, and not enough on its own. A device also needs a grant, which
-              only pairing creates.
-            </span>
+            <span class='rowsub'>Not a secret. Only pairing grants access.</span>
             <span class='rowvalue'>{state.hostKey}</span>
           </span>
           <span class='rowctl'>
@@ -692,11 +689,7 @@ function HostPanel ({ state, reload }) {
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>Signed-in browsers</span>
-            <span class='rowsub'>
-              {state.auth?.enabled
-                ? 'A browser stays signed in for a week. Sign the others out for the laptop you handed back - this one stays.'
-                : 'Nothing to sign out of while this page has no password.'}
-            </span>
+            <span class='rowsub'>{state.auth?.enabled ? 'Each stays signed in for a week.' : 'Nothing to sign out of.'}</span>
           </span>
           <span class='rowctl'>
             <button class='ghost' onClick={async () => { await api('/api/logout', {}); location.reload() }}>Sign out</button>
@@ -711,8 +704,6 @@ function HostPanel ({ state, reload }) {
             )}
           </span>
         </div>
-
-        <div class='setgroup'>What it may do</div>
 
         <div class='setrow'>
           <span class='rowmain'>
@@ -738,7 +729,7 @@ function HostPanel ({ state, reload }) {
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>First-time setup</span>
-            <span class='rowsub'>Walks through the source, pairing and artwork again. Nothing already set is undone.</span>
+            <span class='rowsub'>Nothing already set is undone.</span>
           </span>
           <span class='rowctl'>
             <button class='ghost' onClick={() => { undismissSetup(); location.reload() }}>Run again</button>

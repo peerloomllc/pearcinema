@@ -1334,7 +1334,7 @@ test('one setting per row, and the explanation is a sub-line rather than a parag
 
   // The address is on the page with the fact that makes it safe to show.
   assert.match(text(), /hostkey/)
-  assert.match(text(), /only pairing creates/)
+  assert.match(text(), /Only pairing grants access/)
 })
 
 test('ICONS WHERE A WORD IS NOISE, WORDS WHERE AN ICON IS A GUESS', async (t) => {
@@ -1381,7 +1381,7 @@ test('a password this host does not own cannot be changed from here', async (t) 
   const platform = { ...STATE, auth: { enabled: true, passwordSource: 'explicit' } }
   const { doc, text } = await openHost(t, platform)
 
-  assert.match(text(), /Set by the platform that installed PearCinema/)
+  assert.match(text(), /Set by the platform that installed this/)
   const change = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Change')
   assert.equal(change, undefined, 'and there is no button offering to')
 })
@@ -1409,9 +1409,10 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a se
   assert.match(chip.textContent, /converts 4 at once/)
   assert.ok(chip.className.includes('good'))
 
-  // Rows are grouped by what they are about rather than by which card they came from.
-  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
-  assert.deepEqual(groups, ['Reaching it', 'What it may do'])
+  // NO GROUP LABELS ON A FIVE-ROW PAGE. Structure where there is structure: the
+  // merged Library page has two genuine subjects and gets them, this one does not and
+  // dividing it twice was decoration (Tim, 2026-08-19).
+  assert.equal(doc.querySelector('.setbody .setgroup'), null)
 
   // And the box is gone: the settings are on the page, not inside a panel on it.
   assert.equal(doc.querySelector('.setbody .card'), null, 'no card around a page of rows')
@@ -1424,6 +1425,7 @@ test('a host that cannot convert says so in the chip, not in a paragraph', async
   const chip = doc.querySelector('.setpage .chip')
   assert.match(chip.textContent, /no conversions/)
   assert.equal(chip.className.includes('good'), false, 'and it does not claim to be fine')
-  // The reason is still available where somebody would look for it.
+  // The reason is still there, as the whole of that row's sub-line rather than a
+  // sentence wrapped around it.
   assert.match(text(), /no \/dev\/dri on this machine/)
 })
