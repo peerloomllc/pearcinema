@@ -168,7 +168,16 @@ function DownloadsCard ({ remotes, onPlay, embedded = false }) {
     look()
     return () => { live = false; clearTimeout(t) }
   }, [tick, remotes.map(r => r.libraryId).join(',')])
-  if (!items?.length) return null
+  // AN EMPTY GROUP STILL NEEDS A LINE. This used to hide itself entirely, and the
+  // reasoning held while it was a card that would otherwise appear out of nowhere - an
+  // empty downloads card is a feature announcement. Under a heading that is already on
+  // screen it leaves the heading standing over nothing, which reads as broken (Tim,
+  // 2026-08-19).
+  if (!items?.length) {
+    return embedded
+      ? <p class='hint'>Nothing kept on this machine yet.</p>
+      : null
+  }
   const nameOf = (lib) => remotes.find(r => r.libraryId === lib)?.libraryName || 'a library'
   return (
     <div class={embedded ? '' : 'card'}>
@@ -246,11 +255,14 @@ function RequestsCard ({ remotes, embedded = false }) {
     const t = setInterval(load, 60000)
     return () => { live = false; off(); clearInterval(t) }
   }, [remotes.map(r => r.libraryId).join(','), tick])
-  if (!rows?.length) return null
+  if (!rows?.length) {
+    return embedded
+      ? <p class='hint'>You have not asked for anything yet. Search a friend's library for something it does not have.</p>
+      : null
+  }
   return (
     <div class={embedded ? '' : 'card'}>
       {!embedded && <h3>Your requests</h3>}
-      <p class='hint'>Ask by searching a friend's library for something it does not have.</p>
       <div class='setrows'>
         {rows.map(q => (
           <div class='setrow' key={q.lib + q.id}>
@@ -320,7 +332,11 @@ function ReceivedCard ({ embedded = false }) {
     setRows((rs) => (rs || []).filter((x) => x.id !== q.id))
   }
 
-  if (!rows?.length) return null
+  if (!rows?.length) {
+    return embedded
+      ? <p class='hint'>Nobody has asked you for anything yet.</p>
+      : null
+  }
 
   // Sentence case, because a sub-line is a sentence and these were coming straight
   // off the wire in the store's own lowercase vocabulary (Tim, 2026-08-19).

@@ -1890,3 +1890,30 @@ test('nothing waiting means nothing in the bar', async (t) => {
     .find(b => /request/i.test(b.getAttribute('aria-label') || ''))
   assert.equal(light, undefined)
 })
+
+test('AN EMPTY GROUP STILL SAYS SOMETHING, rather than a heading over nothing', async (t) => {
+  // All three of these hid themselves entirely when empty, and that held while each
+  // was a card that would otherwise appear out of nowhere. Under a heading that is
+  // already on screen it leaves the heading standing over nothing, which reads as
+  // broken (Tim, 2026-08-19) - and the merged Sharing page put the headings there.
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/asked': { items: [] },
+    '/api/downloads': { items: [] },
+    '/api/remote/list': { remotes: [] }
+  })
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...doc.querySelectorAll('.setnav button')].find(b => b.textContent === 'Sharing')
+  nav.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 160))
+
+  const groups = [...doc.querySelectorAll('.setbody .setgroup')].map(g => g.textContent.trim())
+  assert.deepEqual(groups, ['Downloads', 'Asked of you', 'Your requests'])
+
+  assert.match(text(), /Nothing kept on this machine yet/)
+  assert.match(text(), /Nobody has asked you for anything yet/)
+  assert.match(text(), /You have not asked for anything yet/)
+})
