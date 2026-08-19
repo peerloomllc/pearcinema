@@ -601,14 +601,31 @@ function HostPanel ({ state, reload }) {
     notify('Changed', 'You are still signed in here. Other browsers will need the new one.')
   }
 
-  const saveCap = async () => {
+  // THE NUMBER SAVES ITSELF, on leaving the box or on Enter. It had a Save button, and
+  // that button was the only filled amber control on the page, in the only row with two
+  // controls, next to the only input - four reasons for one row to shout, stacked (Tim,
+  // 2026-08-19, with a screenshot). The same reasoning the casting hide switch already
+  // follows: a control that needs a second press somewhere else to mean anything is a
+  // control people get wrong.
+  const commitCap = async () => {
+    const n = Math.trunc(Number(cap))
+    // An empty or unusable box is not a request to set anything - put the real value
+    // back rather than sending a guess.
+    if (cap === '' || !Number.isFinite(n)) return setCap(String(c.cap ?? 4))
+    const clamped = Math.max(0, Math.min(16, n))
+    setCap(String(clamped))
+    if (String(clamped) === String(c.cap)) return
+
     setBusy(true)
-    const res = await api('/api/transcode-cap', { cap: Number(cap) })
+    const res = await api('/api/transcode-cap', { cap: clamped })
     setBusy(false)
-    if (res?.error) return notify('Not saved', res.error)
-    notify('Saved', Number(cap) === 0
+    if (res?.error) {
+      setCap(String(c.cap ?? 4))
+      return notify('Not saved', res.error)
+    }
+    notify('Saved', clamped === 0
       ? 'Conversions are off. Films stream as they are, and anything a device cannot play is refused honestly.'
-      : `Up to ${cap} conversions will run at once. Running ones finish as they were.`)
+      : `Up to ${clamped} conversions will run at once. Running ones finish as they were.`)
     reload()
   }
 
@@ -626,7 +643,7 @@ function HostPanel ({ state, reload }) {
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : '0 turns it off.'
+      : '0 turns it off. Saved when you leave the box.'
 
   // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
   // bad variants since it had a library page, and Settings never used one - so every
@@ -717,18 +734,12 @@ function HostPanel ({ state, reload }) {
           {t.available && (
             <span class='rowctl'>
               <input
-                type='number' min='0' max='16' step='1' value={cap}
+                type='number' min='0' max='16' step='1' value={cap} disabled={busy}
                 aria-label='How many films this host will convert at once'
                 onInput={e => setCap(e.currentTarget.value)}
+                onBlur={commitCap}
+                onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
-              {/* ALWAYS THERE, DISABLED UNTIL IT CAN DO SOMETHING - which is what every
-                  other Save in this dashboard does. Appearing only once the number
-                  changed meant the field jumped left the moment you typed in it, and a
-                  control that moves under the cursor is worse than a button that is
-                  briefly grey (Tim, 2026-08-19). */}
-              <button onClick={saveCap} disabled={busy || String(c.cap) === String(cap) || cap === ''}>
-                {busy ? 'Saving…' : 'Save'}
-              </button>
             </span>
           )}
         </div>

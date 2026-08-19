@@ -1292,8 +1292,8 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
 // consolidation - because a page that moves and takes its links with it is worse than
 // a page that was ugly - and the rule that a rare action keeps its words.
 
-async function openHost (t, state = STATE, section = 'host') {
-  const opened = await open(state)
+async function openHost (t, state = STATE, section = 'host', asked = null) {
+  const opened = await open(state, {}, asked)
   t.after(() => opened.dom.window.close())
   const { doc, win } = opened
 
@@ -1362,28 +1362,59 @@ test('ONE BUTTON PER ROW, because every control on the page is flush right', asy
   assert.ok(all.includes('Run again'))
 })
 
-test('THE ENGINE FIELD DOES NOT MOVE WHILE YOU TYPE IN IT', async (t) => {
-  // Its Save used to appear the moment the number changed, which shoved the field left
-  // under the cursor. Always there and disabled until it can do something is what every
-  // other Save in this dashboard does anyway (Tim, 2026-08-19).
+test('THE ENGINE NUMBER SAVES ITSELF, with no button to hunt for', async (t) => {
+  // It had a Save, and that button was the only filled amber control on the page, in
+  // the only row with two controls, beside the only input - four reasons for one row to
+  // shout, stacked (Tim, 2026-08-19, with a screenshot). The casting hide switch already
+  // saves on the spot for the same reason.
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
     transcodeCap: { cap: 4, source: 'default', measured: 10 }
   }
-  const { doc, win, text } = await openHost(t, state)
+  const asked = []
+  const { doc, win, text } = await openHost(t, state, 'host', asked)
 
   const num = doc.querySelector('.setrow input[type=number]')
   assert.equal(num.value, '4')
-
-  const save = () => [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Save/.test(b.textContent))
-  assert.ok(save(), 'the button is there before anything changes')
-  assert.equal(save().disabled, true, 'and it does nothing until the number differs')
+  assert.equal(doc.querySelectorAll('.setrow .rowctl button').length, 4, 'Change, Sign out, Sign out, Run again - and no Save')
+  assert.equal([...doc.querySelectorAll('.setrow .rowctl button')].some(b => /Save/.test(b.textContent)), false)
+  assert.match(text(), /Saved when you leave the box/, 'and the row says so, because an implicit save has to be stated once')
 
   num.value = '6'
   num.dispatchEvent(new win.Event('input', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 40))
-  assert.equal(save().disabled, false)
+  await new Promise(r => setTimeout(r, 30))
+  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(asked.some(u => String(u).includes('/api/transcode-cap')), 'leaving the box is the save')
+})
+
+test('an unusable number puts the real one back rather than sending a guess', async (t) => {
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+  }
+  const asked = []
+  const { doc, win } = await openHost(t, state, 'host', asked)
+  const num = doc.querySelector('.setrow input[type=number]')
+
+  num.value = ''
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(num.value, '4', 'the box comes back rather than emptying the setting')
+  assert.equal(asked.some(u => String(u).includes('/api/transcode-cap')), false, 'and nothing was sent')
+
+  // Out of range is clamped to what the host will accept rather than bounced back as
+  // an error the person has to read.
+  num.value = '99'
+  num.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 30))
+  num.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(num.value, '16')
 })
 
 test('A ROW\'S NAME AND ITS SUB-LINE ARE TWO LINES', async (t) => {

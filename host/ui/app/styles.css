@@ -1235,7 +1235,11 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 .setrow .rowsub { color: var(--muted); font-size: .8rem; line-height: 1.4; margin-top: .15rem }
 /* The control side. Shrinks before the label does, and wraps under it on a phone. */
 .setrow .rowctl { flex: 0 0 auto; display: flex; align-items: center; gap: .4rem }
-.setrow .rowctl input[type=number] { width: 4.5rem }
+/* ONE WIDTH DOWN THE RIGHT-HAND COLUMN. Every control on a Settings page is flush
+ * right, so a field narrower than the buttons above and below it is the most visible
+ * thing on the page. Centred, because a lone digit stranded at the left of a wide box
+ * looks like a mistake. */
+.setrow .rowctl input[type=number] { width: 7.5rem; text-align: center }
 .setrow .rowctl button { min-width: 0 }
 /* A value too long to sit beside its label - a host key, an address - takes the line
    under it and keeps the copy button up beside the name. */
