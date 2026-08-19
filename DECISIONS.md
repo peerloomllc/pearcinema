@@ -2,6 +2,92 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-19 - A COPIED PICTURE IS CUT ON THE FILM'S OWN KEYFRAMES
+Tier: T2 (a second engine on the cast and phone segment path, and a change to how the
+cast transport is chosen). PR #113.
+
+Context: a Roku refuses an unbounded progressive stream - "reader pick stream error:HTTP
+error:Full-content response on a range request:200", its own error field - and cast.js
+knew that, but routed only TRANSCODE around it via HLS. The multichannel-audio fix (#112)
+started sending films down the REMUX path for the first time, and remux went progressive,
+straight into the same wall. Surround-sound casting was blocked on it.
+
+The cheap fix, rejected by Tim: route remux to HLS as well. One condition, works the same
+evening, and host/hls.js only ever re-encoded - so the box would burn a full hardware
+transcode on a film whose picture was already perfect.
+
+Decision: teach the segment builder a COPY mode, and choose the transport by what the
+television accepts rather than by what the film needs. Those are different questions and
+conflating them is what caused the bug.
+
+The hard part is that a copied picture can only be cut on a keyframe, and ffmpeg hands
+back the keyframe before any other time you ask for - so the cut points have to be known
+BEFORE the playlist is written, and an even four-second grid produces segments that
+overlap by seconds.
+
+Three things were measured on 2026-08-19 against real films on the Umbrel and settled it:
+
+1. KEYFRAMES ARE NOT PREDICTABLE. Gaps on the test episode run 0.96 s to 10.43 s, because
+   encoders put keyframes on scene cuts. No arithmetic describes them.
+2. THE OBVIOUS READ IS TOO SLOW. `ffprobe -show_entries packet=flags` over the whole file
+   is demuxer-CPU-bound at ~84 MB/s: 4.1 s for a 282 MB episode, 2m07s for a 13.6 GB
+   Blu-ray remux. Nobody waits two minutes for a television to start.
+3. THE FILE ALREADY KNOWS. Matroska's Cues element IS the keyframe list for each track.
+   Read against the full scan on two films it is byte-identical - all 469 and all 2,559
+   timestamps, max difference 0.000000 - in 3 ms and 348 ms. Three hundred times faster
+   for the same answer.
+
+So host/keyframes.js reads the container's own index and never scans. A source with no
+readable index (an MP4 today, or any Jellyfin URL) falls back to the encode engine, which
+is exactly what this host did before - slower, never wrong. NEVER guess a cut point: a
+wrong one is a broken film, an absent one is only the old cost.
+
+Three ffmpeg flags make the cut exact, and each was arrived at by measurement rather than
+by reading the manual:
+
+- `-ss` IS AIMED INSIDE THE GROUP OF PICTURES, not at the keyframe. ffmpeg's backward seek
+  lands on the keyframe STRICTLY BEFORE the requested time, so asking for a keyframe's own
+  timestamp hands back the one before it. Bisected at eight points across a film: it needs
+  0.130 to 0.136 s of headroom, stable everywhere. 0.30 s is used, which is far inside the
+  shortest keyframe gap in the measured library (0.661 s).
+- `-copyts` so `-to` is an absolute time in the film, which removes the offset arithmetic
+  the encode path fakes with `-output_ts_offset`.
+- `-noaccurate_seek` because the seek target is deliberately past the keyframe, and
+  trimming to it would drop the segment's first fifth of a second of SOUND.
+
+The end is cut in DECODE order - the next keyframe's time less the reorder delay less a
+millisecond. B-frames hold PTS and DTS a fixed distance apart (exactly two frames on 468
+of 469 keyframes in the test episode) and one cheap read of the head of the file learns
+it. Without the correction every join carries two frames that also open the next segment.
+
+Proven by counting rather than by watching: the segments hold every source frame in their
+span exactly once, 2,683 of 2,683 and 3,316 of 3,316, no overlap at any join, sound
+meeting within a millisecond. Then the real host served the whole 22-minute Avatar episode
+to Tim's Roku - 227 segments at about 250 ms each, right length, position advancing one
+second per second, no range error.
+
+Two things hardware settled that would otherwise have been guessed:
+
+- A ROKU REPORTS POSITION AGAINST THE PLAYLIST IT WAS GIVEN, not against the timestamps
+  inside the segments. A playlist sliced to start 59.622 s into a film reported 0 at its
+  start even though its segments carried absolute timestamps. So cast.js's "row offset
+  plus the television's clock" is right, and there is no double count.
+- BUT THE SLICE WAS ONLY CORRECTING HALF OF IT. `_servePlaylist` snapped the token's copy
+  of the offset and not the row the poll reads, so every resumed cast reported a position
+  up to a segment out. Invisible at four seconds; up to fourteen on a copied stream, which
+  is how it was found.
+
+Consequences accepted:
+
+- SEGMENTS ARE UNEVEN, 4.0 s to 14.0 s against a 4 s target on real films, so `#EXTINF`
+  must carry the real durations. A player takes the film's length from their sum.
+- A RESUME REWINDS BY UP TO ONE GROUP OF PICTURES rather than up to four seconds, because
+  it snaps back to a real cut point. Arguably kinder - a keyframe is usually a scene cut.
+- REVOKE'S MID-FILM WINDOW WIDENS from about four seconds to about fourteen, since a
+  television plays out the segment it already has. The rule that matters is unchanged:
+  revoke cuts off all NEW access within a second, and the live re-read still runs on every
+  segment fetch.
+
 ## 2026-08-18 - A ROKU IS FOUND, NOT CONFIGURED: casting without Home Assistant
 Tier: T2 (proposal `proposals/2026-08-18-cast-to-nearby-televisions.md` feature A, Tim
 picked the Roku half). PR pending.
