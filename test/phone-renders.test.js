@@ -349,18 +349,61 @@ test('ONLY THE FILMS THAT CANNOT BE REACHED GO DIM', async (t) => {
   const dim = tiles.filter((el) => el.className.includes('unreachable'))
   assert.equal(dim.length, 1, 'one library is out, not the shelf')
   assert.match(dim[0].textContent, /Metropolis/)
-
-  // AND IT IS STILL PRESSABLE: the film may already be downloaded to this phone, and
-  // a download does not need the library at all.
-  assert.equal(dim[0].hasAttribute('disabled'), false)
 })
 
-test('a library that is simply empty is not accused of losing its drive', async (t) => {
-  const { text, dom } = await open({
-    'library.stats': { movies: 0, series: 0, seasons: 0, episodes: 0, source: 'folder', sourceError: null },
-    'library.list': { items: [], cursor: null }
+test('A FILM IN TWO LIBRARIES IS NOT LOST WHEN ONE OF THEM IS', async (t) => {
+  // The merged primary is chosen for completeness, not for being reachable - so the
+  // copy that wins can be the one on the library that has gone, while another library
+  // has had it all along. Tim's Arrival, greyed out on the TCL with a perfectly good
+  // second copy behind it (2026-08-19).
+  const { dom, doc } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [
+        {
+          id: 'arrival-gone',
+          type: 'movie',
+          title: 'Arrival',
+          year: 2016,
+          runtime: 6960,
+          libraryId: 'lib-gone',
+          copies: [
+            { libraryId: 'lib-gone', id: 'arrival-gone' },
+            { libraryId: 'lib-here', id: 'arrival-here' }
+          ]
+        }
+      ],
+      cursor: null
+    }
   })
   t.after(() => dom.window.close())
 
-  assert.doesNotMatch(text(), /cannot reach its films/)
+  const tiles = [...doc.querySelectorAll('.album')]
+  assert.equal(tiles.length, 1)
+  assert.equal(tiles[0].className.includes('unreachable'), false, 'the other library still has it')
+})
+
+test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
+  // Keeping the tile pressable was right for downloads and wrong for everything else.
+  // On the TCL, 2001 had watch state, so the tap offered to resume it - and Resume
+  // opened a player that could never start (Tim, 2026-08-19). Asking "carry on from
+  // 41 minutes?" about a film that cannot start is worse than refusing plainly.
+  const { dom, doc, press, tile, settle, called, text } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [{ id: '2001', type: 'movie', title: '2001 A Space Odyssey', year: 1968, runtime: 8880, libraryId: 'lib-gone' }],
+      cursor: null
+    },
+    'resume.get': { resume: { positionMs: 2460000 } }
+  })
+  t.after(() => dom.window.close())
+
+  press(tile(/2001/))
+  await settle(120)
+
+  assert.equal(called('resume.get').length, 0, 'it never asks where the film was left')
+  assert.equal(called('stream.url').length, 0, 'and never asks for a stream it cannot have')
+  assert.match(text(), /The Loft cannot reach this film/)
+  assert.match(text(), /not downloaded to this phone/)
+  void doc
 })

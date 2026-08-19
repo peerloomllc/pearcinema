@@ -360,9 +360,9 @@ function Cover ({ src, title, onArt = null }) {
 
 function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onArt = null, unreachable = false }) {
   const press = usePress(() => onOpen(item), () => onLong(item))
-  // STILL PRESSABLE. A film whose library has lost its disk may already be downloaded
-  // to this phone, and a download does not need the library at all - so the tile says
-  // it is unreachable and lets the player be the one to find out otherwise.
+  // DIM MEANS THERE IS NO WAY TO PLAY THIS ONE: no library that has it is answering,
+  // and this phone is not holding a copy. A film that is downloaded, or that a second
+  // library also has, is not dim and opens normally - see reach() above.
   const cls = 'album' + (unreachable ? ' unreachable' : '')
   if (list) {
     // The donor's list row: same .album, flexed sideways by .grid.aslist. The
@@ -421,17 +421,14 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onA
 const FIRST_SCREENFUL = 6
 const ART_WAIT_MS = 6000
 
-function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2, onArtReady = null, lostLibs = [] }) {
+function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2, onArtReady = null, isUnreachable = null }) {
   const list = cols === 'list'
-  // Which libraries cannot reach their own files. A merged shelf mixes them, so the
-  // working libraries' films stay perfectly playable and only these go dim.
-  const lost = new Set(lostLibs.map((l) => l.libraryId))
   return (
     <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
       {items.map((i, idx) => (
         <Tile
           key={i.id} item={i} artBase={artBase} list={list}
-          unreachable={!!i.libraryId && lost.has(i.libraryId)}
+          unreachable={isUnreachable ? isUnreachable(i) : false}
           saved={savedSet?.has(i.id)} onOpen={onOpen} onLong={onLong} onSave={onSave}
           // Only the tiles being waited on report back - a 200-film library must not
           // fire two hundred state updates as it scrolls.
@@ -1193,6 +1190,35 @@ export default function App () {
   // its drive is very often not the one being asked. That is exactly how this read as
   // working on the TCL and silent on Tim's Pixel on the same build.
   const [lostLibs, setLostLibs] = useState([])
+
+  // CAN THIS FILM ACTUALLY BE PLAYED, and if so from where. Two things the first cut
+  // got wrong, both found by using it (Tim, 2026-08-19):
+  //
+  //   A FILM IN TWO LIBRARIES IS NOT LOST WHEN ONE OF THEM IS. A merged item carries
+  //   every copy of itself, and the primary is chosen for completeness rather than for
+  //   being reachable - so his Arrival greyed out because the copy that won was on the
+  //   library that had gone, while another library had it all along.
+  //
+  //   AND A DOWNLOAD DOES NOT NEED ITS LIBRARY. Keeping the tile pressable was right
+  //   for those and wrong for everything else: 2001 was not downloaded, the tap still
+  //   offered to resume it, and Resume opened a player that could never start.
+  const reach = useCallback((i) => {
+    if (!i) return { openable: false, openId: null }
+    const lost = new Set(lostLibs.map((l) => l.libraryId))
+    const copies = (i.copies && i.copies.length) ? i.copies : [{ libraryId: i.libraryId, id: i.id }]
+
+    // The item's own copy first, so nothing moves while every library is healthy.
+    const ordered = [{ libraryId: i.libraryId, id: i.id }, ...copies]
+    const live = ordered.find((c) => c.id && !(c.libraryId && lost.has(c.libraryId)))
+    if (live) return { openable: true, openId: live.id }
+
+    // Every library that has it is out, so the only way left is a copy this phone is
+    // already holding.
+    const held = ordered.find((c) => c.id && dlIds.has(c.id))
+    if (held) return { openable: true, openId: held.id }
+
+    return { openable: false, openId: null, lostName: lostLibs.find((l) => l.libraryId === i.libraryId)?.libraryName || null }
+  }, [lostLibs, dlIds])
   useEffect(() => {
     if (!state?.active) return setLostLibs([])
     call('library.sources')
@@ -1336,10 +1362,19 @@ export default function App () {
   const open = async (i) => {
     if (i.type === 'series') { setTab('library'); return setSeries(i) }
     if (i.type === 'season') { setTab('library'); return setSeason(i) }
+
+    // BEFORE THE RESUME PROMPT, not after. Asking "carry on from 41 minutes?" about a
+    // film that cannot start is a worse failure than refusing plainly, because the
+    // person says yes and then watches an empty player.
+    const { openable, openId, lostName } = reach(i)
+    if (!openable) {
+      return setErr(`${lostName || 'That library'} cannot reach this film, and it is not downloaded to this phone.`)
+    }
+
     try {
       const [res, prior] = await Promise.all([
-        call('stream.url', { itemId: i.id }),
-        call('resume.get', { itemId: i.id }).catch(() => null)
+        call('stream.url', { itemId: openId }),
+        call('resume.get', { itemId: openId }).catch(() => null)
       ])
       // The film is reachable only through a relay and this library has never been
       // asked. No url came back, deliberately, so there is nothing to play by accident.
@@ -1746,7 +1781,7 @@ export default function App () {
 
       {items != null && (results
         ? (results.length
-            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} onArtReady={noteArt} lostLibs={lostLibs} />
+            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} onArtReady={noteArt} isUnreachable={(i) => !reach(i).openable} />
             : <p className='muted center-p'>Nothing matches "{query}".</p>)
         : season
           ? (
@@ -1760,7 +1795,7 @@ export default function App () {
               ))}
             </ul>
             )
-          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} onArtReady={noteArt} lostLibs={lostLibs} />)}
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} onArtReady={noteArt} isUnreachable={(i) => !reach(i).openable} />)}
 
       {!results && cursor && (
         <button
@@ -1787,7 +1822,7 @@ export default function App () {
               <p className='sm'>Hold a film, or tap the bookmark on its poster, to put it here.</p>
             </div>
             )
-          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} lostLibs={lostLibs} />}
+          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} isUnreachable={(i) => !reach(i).openable} />}
     </div>
   )
 
