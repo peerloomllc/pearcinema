@@ -1317,6 +1317,10 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * all present and in the right order). */
 .setrow .rowname, .setrow .rowsub { display: block }
 
-/* A status chip rides its row's name rather than the page's. `.rowname` is a block, so
- * the chip goes inside it to stay on the same line. */
-.setrow .rowname .chip { margin-left: .45rem; vertical-align: .05em }
+/* A ROW'S NAME CAN CARRY ITS STATE, instead of a chip sitting beside it (Tim,
+ * 2026-08-19) - a chip was one more object on a page whose problem was objects.
+ * Colour is never the only carrier: the sub-line under a coloured name always states
+ * the condition in words. */
+.setrow .rowname.good { color: var(--good) }
+.setrow .rowname.warn { color: var(--warn) }
+.setrow .rowname.dim { color: var(--muted) }

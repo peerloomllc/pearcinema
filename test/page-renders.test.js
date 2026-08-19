@@ -1468,7 +1468,7 @@ test('a password this host does not own cannot be changed from here', async (t) 
   assert.equal(change, undefined, 'and there is no button offering to')
 })
 
-test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a sentence', async (t) => {
+test('THE PAGE IS SAID ONCE AND LOUDLY, and no page of rows carries a chip', async (t) => {
   // The type scale was the disease, not the borders: nine sizes lived between .74 and
   // 1.05rem, so a heading, a setting's name and a line explaining it all read at the
   // same importance, and a box around each one was the compensation. Four steps with
@@ -1484,15 +1484,10 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a se
   assert.ok(title, 'the page names itself once, at the top')
   assert.match(title.querySelector('.setpagename').textContent, /This host/)
 
-  // THE CHIP BELONGS TO THE ROW IT IS ABOUT. Beside the page's name it was a fact
-  // with nothing to attach to - "converts 4 at once" reads as being about the whole
-  // host (Tim, 2026-08-19).
-  assert.equal(title.querySelector('.chip'), null)
-  const chip = [...doc.querySelectorAll('.setrow .rowname .chip')]
-  assert.equal(chip.length, 1)
-  assert.match(chip[0].closest('.rowname').textContent, /Video engine/)
-  assert.match(chip[0].textContent, /ready/)
-  assert.ok(chip[0].className.includes('good'))
+  // NO CHIPS ANYWHERE. The page's name carried one first, where it was a fact with
+  // nothing to attach to; then the row did, where it was one more object on a page
+  // whose problem was objects. The row's own name carries the state now.
+  assert.equal(doc.querySelector('.setbody .chip'), null)
 
   // AND IT CLAIMS NOTHING ABOUT HARDWARE NOBODY MEASURED. The old line said "this
   // hardware managed about 10 in testing" on every install, where the 10 is a constant
@@ -1508,19 +1503,19 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and its state is a chip rather than a se
   assert.equal(doc.querySelector('.setbody .card'), null, 'no card around a page of rows')
 })
 
-test('a host that cannot convert says so in the chip, not in a paragraph', async (t) => {
+test('a host that cannot convert says so in its own name, and in words', async (t) => {
   const state = { ...STATE, transcode: { available: false, reason: 'no /dev/dri on this machine' } }
   const { doc, text } = await openHost(t, state)
 
-  const chip = doc.querySelector('.setrow .rowname .chip')
-  assert.match(chip.textContent, /not available/)
-  assert.equal(chip.className.includes('good'), false, 'and it does not claim to be fine')
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('dim'))
+  assert.equal(name.className.includes('good'), false, 'and it does not claim to be fine')
   // The reason is still there, as the whole of that row's sub-line rather than a
   // sentence wrapped around it.
   assert.match(text(), /no \/dev\/dri on this machine/)
 })
 
-test('THE ENGINE CHIP READS THE CAP TOO, not only the hardware', async (t) => {
+test('THE ENGINE READS THE CAP TOO, not only the hardware', async (t) => {
   // Whether anything is actually converted is the hardware AND the operator's cap.
   // Reading only the hardware, a host with a working engine and the cap set to zero
   // said "ready" while nothing would ever be converted - with the zero sitting in the
@@ -1531,9 +1526,8 @@ test('THE ENGINE CHIP READS THE CAP TOO, not only the hardware', async (t) => {
     transcodeCap: { cap: 0, source: 'dashboard', measured: 10 }
   }
   const { doc, text } = await openHost(t, off)
-  const chip = doc.querySelector('.setrow .rowname .chip')
-  assert.match(chip.textContent, /switched off/)
-  assert.ok(chip.className.includes('warn'), 'and it is not green')
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('warn'), 'and it is not green')
   assert.match(text(), /Nothing is converted while this is 0/)
 })
 
@@ -1543,6 +1537,26 @@ test('an engine nobody has asked yet says checking, not broken', async (t) => {
   // failed.
   const early = { ...STATE, transcode: { available: false, probing: true, reason: 'the hardware has not been probed yet' } }
   const { doc, text } = await openHost(t, early)
-  assert.match(doc.querySelector('.setrow .rowname .chip').textContent, /checking/)
+  const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.ok(name.className.includes('dim'))
+  // COLOUR IS NEVER THE ONLY CARRIER: the words say which of the two dim states it is.
   assert.match(text(), /Asking the hardware what it can do/)
+})
+
+test('the engine line says what the number MEANS, and claims nothing more', async (t) => {
+  // Tim asked the line to carry more than "0 turns it off". What is honestly available
+  // is the cap - which is exactly how many conversions may run at the same time - and
+  // the device doing them. What is NOT available is how many this machine could manage:
+  // nothing has ever measured that, and the line that used to claim it was quoting the
+  // hardware this was built on. That number arrives when a host can measure its own
+  // engine, and it arrives as the field's ceiling rather than as another sentence.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null, device: '/dev/dri/renderD128' },
+    transcodeCap: { cap: 3, source: 'dashboard', measured: 10 }
+  }
+  const { text } = await openHost(t, state)
+
+  assert.match(text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
+  assert.doesNotMatch(text(), /in testing/, 'never a measurement of somebody else\'s hardware')
 })

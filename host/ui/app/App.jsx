@@ -652,32 +652,29 @@ function HostPanel ({ state, reload }) {
   // managed about 10 in testing" on every install, and the 10 is a constant from the
   // N100 this was built against - a number about OUR machine, presented as a number
   // about theirs (Tim, 2026-08-19). What is true everywhere is what zero does.
+  // WHAT THE NUMBER MEANS: how many conversions may run at the same time, and what is
+  // doing them. NOT how many this machine could manage - nothing here has ever measured
+  // that, and the line that used to claim it was quoting the hardware this was built on.
+  // When a host can measure its own engine (TODO), that measurement becomes the field's
+  // ceiling rather than another sentence.
   const engineSub = !t.available
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : '0 turns it off.'
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${t.device ? `, on ${t.device}` : ''}. 0 turns it off.`
 
-  // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
-  // bad variants since it had a library page, and Settings never used one - so every
-  // page said its state in a paragraph instead.
+  // THE NAME CARRIES THE STATE, not a pill beside it (Tim, 2026-08-19). A chip was one
+  // more object on a page whose whole problem was objects, and this row was already the
+  // busiest on it.
   //
-  // ON THE ROW IT IS ABOUT, not beside the page's name. Up there it was a fact with
-  // nothing to attach to: "converts 4 at once" reads as being about the whole host
-  // (Tim, 2026-08-19).
-  //
-  // FOUR STATES, NOT TWO. Whether anything is actually converted is the hardware AND
-  // the operator's cap, and the chip used to read only the hardware - so a host whose
-  // engine works with the cap set to zero said "ready" while nothing would ever be
-  // converted, with the zero sitting in the field beside it saying otherwise (found
-  // 2026-08-19, answering Tim's question about what the chip's states are).
-  const engineChip = t.probing
-    ? { cls: 'chip', text: 'checking' }
-    : !t.available
-      ? { cls: 'chip', text: 'not available' }
-      : Number(c.cap) === 0
-        ? { cls: 'chip warn', text: 'switched off' }
-        : { cls: 'chip good', text: 'ready' }
+  // COLOUR IS NEVER THE ONLY CARRIER. The line underneath always states the condition in
+  // words - what it is doing, or why it is not - so nobody has to tell green from amber
+  // to read this row.
+  const engineTone = !t.available
+    ? 'dim'
+    : Number(c.cap) === 0
+      ? 'warn'
+      : 'good'
 
   return (
     <>
@@ -741,7 +738,7 @@ function HostPanel ({ state, reload }) {
 
         <div class='setrow'>
           <span class='rowmain'>
-            <span class='rowname'>Video engine <span class={engineChip.cls}>{engineChip.text}</span></span>
+            <span class={`rowname ${engineTone}`}>Video engine</span>
             <span class='rowsub'>{engineSub}</span>
           </span>
           {t.available && (
