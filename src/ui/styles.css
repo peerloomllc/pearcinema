@@ -1624,3 +1624,13 @@ label.flabel { display: block; margin-top: .6rem; }
 }
 /* Locked while a converted stream is being minted again at the new point. */
 .castbar button:disabled { opacity: .4; }
+
+/* A FILM ITS LIBRARY CANNOT REACH. Dimmed rather than removed, and rather than the
+ * whole shelf being greyed: a merged shelf mixes libraries, and the ones that still
+ * have their disks are perfectly playable (Tim, 2026-08-19).
+ *
+ * Still pressable on purpose. A film may already be downloaded to this phone, and a
+ * download does not need the library at all - so the tile says it is unreachable and
+ * lets the player be the one to find out otherwise. */
+.album.unreachable { opacity: .42 }
+.album.unreachable .cover { filter: grayscale(1) }

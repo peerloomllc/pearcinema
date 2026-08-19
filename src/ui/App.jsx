@@ -358,14 +358,18 @@ function Cover ({ src, title, onArt = null }) {
   )
 }
 
-function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onArt = null }) {
+function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onArt = null, unreachable = false }) {
   const press = usePress(() => onOpen(item), () => onLong(item))
+  // STILL PRESSABLE. A film whose library has lost its disk may already be downloaded
+  // to this phone, and a download does not need the library at all - so the tile says
+  // it is unreachable and lets the player be the one to find out otherwise.
+  const cls = 'album' + (unreachable ? ' unreachable' : '')
   if (list) {
     // The donor's list row: same .album, flexed sideways by .grid.aslist. The
     // bookmark swallows pointer events so saving never also opens.
     const swallow = { onPointerDown: (e) => e.stopPropagation(), onPointerUp: (e) => e.stopPropagation() }
     return (
-      <div className='album' {...press}>
+      <div className={cls} {...press}>
         <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=120` : null} title={item.title} onArt={onArt} />
         <div className='meta'>
           <div className='t'>{item.title}</div>
@@ -384,7 +388,7 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onA
     )
   }
   return (
-    <div className='album'>
+    <div className={cls}>
       {onSave && (
         <button
           className={'tileheart' + (saved ? ' on' : '')}
@@ -417,13 +421,17 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onA
 const FIRST_SCREENFUL = 6
 const ART_WAIT_MS = 6000
 
-function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2, onArtReady = null }) {
+function Grid ({ items, artBase, savedSet, onOpen, onLong, onSave, cols = 2, onArtReady = null, lostLibs = [] }) {
   const list = cols === 'list'
+  // Which libraries cannot reach their own files. A merged shelf mixes them, so the
+  // working libraries' films stay perfectly playable and only these go dim.
+  const lost = new Set(lostLibs.map((l) => l.libraryId))
   return (
     <div className={'grid' + (list ? ' aslist' : '')} style={{ '--cols': list ? 1 : cols }}>
       {items.map((i, idx) => (
         <Tile
           key={i.id} item={i} artBase={artBase} list={list}
+          unreachable={!!i.libraryId && lost.has(i.libraryId)}
           saved={savedSet?.has(i.id)} onOpen={onOpen} onLong={onLong} onSave={onSave}
           // Only the tiles being waited on report back - a 200-film library must not
           // fire two hundred state updates as it scrolls.
@@ -1692,11 +1700,7 @@ export default function App () {
           host's disk at all. */}
       {lostLibs.map((l) => (
         <div className='error' key={l.libraryId}>
-          <b>
-            {lostLibs.length > 1 || (state?.libraries?.length || 1) > 1
-              ? `${l.libraryName} cannot reach its films.`
-              : 'This library cannot reach its films.'}
-          </b> {l.sourceError}
+          <b>{l.libraryName} cannot reach its films.</b> {l.sourceError}
         </div>
       ))}
 
@@ -1742,7 +1746,7 @@ export default function App () {
 
       {items != null && (results
         ? (results.length
-            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} onArtReady={noteArt} />
+            ? <Grid items={results} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} onArtReady={noteArt} lostLibs={lostLibs} />
             : <p className='muted center-p'>Nothing matches "{query}".</p>)
         : season
           ? (
@@ -1756,7 +1760,7 @@ export default function App () {
               ))}
             </ul>
             )
-          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} onArtReady={noteArt} />)}
+          : <Grid items={items} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={!series ? toggleSave : null} cols={cols} onArtReady={noteArt} lostLibs={lostLibs} />)}
 
       {!results && cursor && (
         <button
@@ -1783,7 +1787,7 @@ export default function App () {
               <p className='sm'>Hold a film, or tap the bookmark on its poster, to put it here.</p>
             </div>
             )
-          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} />}
+          : <Grid items={savedItems} artBase={artBase} savedSet={saved} onOpen={open} onLong={longPress} onSave={toggleSave} cols={cols} lostLibs={lostLibs} />}
     </div>
   )
 

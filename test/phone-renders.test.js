@@ -322,10 +322,37 @@ test('IT ASKS EVERY LIBRARY, not just the active one', async (t) => {
   t.after(() => dom.window.close())
 
   assert.equal(called('library.sources').length > 0, true, 'it asks the question at all')
-  // NAMED, because "a library cannot reach its films" is no use when you have three
-  // and the shelf is showing all of them at once.
+  // NAMED, ALWAYS. "This library cannot reach its films" is no use on a merged shelf
+  // showing three of them at once, and naming it is never worse on a single one
+  // (Tim, 2026-08-19, with All libraries selected).
   assert.match(text(), /The Study cannot reach its films/)
   assert.match(text(), /The Loft cannot reach its films/)
+  assert.doesNotMatch(text(), /This library cannot reach/)
+})
+
+test('ONLY THE FILMS THAT CANNOT BE REACHED GO DIM', async (t) => {
+  // A merged shelf mixes libraries. Greying the whole grid would be a lie about the
+  // ones that still have their disks, and they are perfectly playable.
+  const { dom, doc } = await open({
+    'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
+    'library.list': {
+      items: [
+        { id: 'a', type: 'movie', title: 'Metropolis', year: 1927, runtime: 9180, libraryId: 'lib-gone' },
+        { id: 'b', type: 'movie', title: 'Nosferatu', year: 1922, runtime: 5820, libraryId: 'lib-here' }
+      ],
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const tiles = [...doc.querySelectorAll('.album')]
+  const dim = tiles.filter((el) => el.className.includes('unreachable'))
+  assert.equal(dim.length, 1, 'one library is out, not the shelf')
+  assert.match(dim[0].textContent, /Metropolis/)
+
+  // AND IT IS STILL PRESSABLE: the film may already be downloaded to this phone, and
+  // a download does not need the library at all.
+  assert.equal(dim[0].hasAttribute('disabled'), false)
 })
 
 test('a library that is simply empty is not accused of losing its drive', async (t) => {
