@@ -1195,14 +1195,9 @@ p.error { color: var(--danger); font-size: .85rem }
 aside.sheet h3, .sheet-head h3 { text-align: center }
 .modal-head h3, .modal h3:first-child { text-align: center }
 
-/* A TELEVISION IS A NAME AND A STATE, not a path. `.rootpath` is monospace, one line
-   and ellipsised, which is right for a folder on disk and wrong for "Roku Streaming
-   Stick Plus" - so the casting rows get proportional type and a second line, and the
-   page stops needing a paragraph to explain what each row means. */
-.tvrow { align-items: flex-start; padding-top: 8px; padding-bottom: 8px }
-.tvname { flex: 1 1 0; min-width: 0; font-size: .9rem; line-height: 1.3 }
-.tvname .hint { display: block; font-size: .78rem; margin: .1rem 0 0 }
-/* How they are found, as a footer rather than a section of its own. */
+/* How televisions are found, as a footer rather than a section of its own. The rows
+   themselves are `.setrow` now - the same shape every Settings page uses - rather than
+   the bespoke pair this page grew before there was one. */
 .tvfoot {
   display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
   margin-top: .7rem; padding-top: .75rem; border-top: 1px solid var(--line);

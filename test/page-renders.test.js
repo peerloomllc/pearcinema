@@ -1224,7 +1224,7 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   // Assistant token, so a person with a Roku and nothing else was told "Casting is off"
   // and shown an empty page, while casting worked perfectly from their phone. Their
   // server had found the television. The page never asked.
-  const { text } = await openCasting(t, {
+  const { text, doc } = await openCasting(t, {
     // The specific route first: the stub matches by prefix in insertion order, and
     // '/api/cast/targets' starts with '/api/cast'.
     '/api/cast/targets': { targets: [ROKU_TARGET], needsChannel: [], mediaChannel: 'Media Assistant' },
@@ -1234,11 +1234,19 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   assert.match(text(), /Living Room/, 'the television is on the page with no Home Assistant anywhere')
   assert.match(text(), /found on your network/)
   assert.match(text(), /Ready/)
+
+  // THE SAME ROWS EVERY SETTINGS PAGE USES, and the name carries the state the way
+  // the video engine's does on This host (Tim, 2026-08-19: give the rest of the pages
+  // the treatment This host got).
+  const name = doc.querySelector('.setrow .rowname')
+  assert.match(name.textContent, /Living Room/)
+  assert.ok(name.className.includes('good'), 'ready reads as ready')
+  assert.equal(doc.querySelector('.tvrow'), null, 'no bespoke row shape left on this page')
   assert.doesNotMatch(text(), /Casting is off/, 'and it never says casting is off while a television is listed')
 })
 
 test('a television that is switched off says so, rather than disappearing', async (t) => {
-  const { text } = await openCasting(t, {
+  const { text, doc } = await openCasting(t, {
     '/api/cast/targets': {
       targets: [{ ...ROKU_TARGET, state: 'unavailable' }],
       needsChannel: [],
@@ -1248,6 +1256,8 @@ test('a television that is switched off says so, rather than disappearing', asyn
 
   assert.match(text(), /Living Room/, 'still listed')
   assert.match(text(), /Switched off or asleep/)
+  // Amber rather than green, and the words say it too.
+  assert.ok(doc.querySelector('.setrow .rowname').className.includes('warn'))
   assert.match(text(), /comes back by itself/, 'and it says what to do about it, which is nothing')
 })
 

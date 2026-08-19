@@ -293,6 +293,17 @@ function readableState (t) {
 
 const isReachable = (t) => !['unavailable', 'off', 'standby'].includes(String(t.state || '').toLowerCase())
 
+// A television's name says its condition, the same rule This host follows: green when
+// it is ready or playing, amber when it is switched off or asleep and there is nothing
+// to do about it from here, muted when it is hidden and will not be offered at all.
+// COLOUR IS NEVER THE ONLY CARRIER - readableState puts the same fact in words on the
+// line below.
+function toneFor (t) {
+  if (t.hidden) return 'dim'
+  if (!isReachable(t)) return 'warn'
+  return 'good'
+}
+
 function CastPanel () {
   const [cfg, setCfg] = useState(null)
   const [baseUrl, setBaseUrl] = useState('')
@@ -394,12 +405,15 @@ function CastPanel () {
       )}
 
       {rows.length > 0 && (
-        <div class='rootlist'>
+        <div class='setrows'>
           {rows.map(t => (
-            <div class='rootrow tvrow' key={t.entityId}>
-              <span class='tvname'>
-                {t.name}
-                <span class='hint'>
+            <div class='setrow' key={t.entityId}>
+              <span class='rowmain'>
+                {/* THE NAME CARRIES THE STATE, the same way the video engine's does on
+                    This host - and the words are in the line below, so nobody has to
+                    tell green from amber to read the row. */}
+                <span class={'rowname ' + toneFor(t)}>{t.name}</span>
+                <span class='rowsub'>
                   {readableState(t)}
                   {' · '}
                   {t.via === 'roku' ? 'found on your network' : 'via Home Assistant'}
@@ -407,15 +421,17 @@ function CastPanel () {
                   {t.hidden ? ' · hidden from phones' : ''}
                 </span>
               </span>
-              <button
-                class='iconbtn'
-                disabled={busy}
-                onClick={() => toggleHidden(t)}
-                aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
-                title={t.hidden ? 'Offer this one' : 'Hide from phones'}
-              >
-                {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
-              </button>
+              <span class='rowctl'>
+                <button
+                  class='iconbtn'
+                  disabled={busy}
+                  onClick={() => toggleHidden(t)}
+                  aria-label={t.hidden ? `Offer ${t.name} when casting` : `Stop offering ${t.name} when casting`}
+                  title={t.hidden ? 'Offer this one' : 'Hide from phones'}
+                >
+                  {t.hidden ? <EyeOff size={17} /> : <Eye size={17} />}
+                </button>
+              </span>
             </div>
           ))}
         </div>
