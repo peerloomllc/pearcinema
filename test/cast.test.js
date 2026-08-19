@@ -442,3 +442,20 @@ test('asking where a television is that this device is not casting to answers no
   t.after(() => casts.close())
   assert.equal(await casts.where({ deviceKey: DEVICE, entityId: TV }), null)
 })
+
+test('A CONVERTED FILM IS LABELLED MP4, WHATEVER IT WAS ON THE DISK', async (t) => {
+  // Found on Tim's Roku 2026-08-19, minutes after multichannel audio started sending
+  // films down the remux path for the first time. The film is Matroska; the remux
+  // output is always fragmented MP4; and the format hint still read the SOURCE
+  // container, so the television was told "mkv" and handed an MP4. It tried to demux
+  // it as Matroska and sat at 13% forever.
+  //
+  // The hint has to describe what the television WILL RECEIVE, and on a Roku that is
+  // not decoration - its player picks a demuxer with it.
+  const { casts, speakers } = await build({ mode: 'remux', container: 'matroska', expectCaps: ROKU_CAPS })
+  t.after(() => casts.close())
+
+  const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku' })
+  assert.equal(out.mode, 'remux')
+  assert.equal(speakers.calls[0][3].format, 'mp4', 'a remux always outputs MP4, whatever went in')
+})

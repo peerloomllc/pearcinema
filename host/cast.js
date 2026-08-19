@@ -444,9 +444,20 @@ class CastSessions {
     // castHost(), not loopback: the television fetches this URL ITSELF.
     const base = `http://${castHost()}:${this.port}/v/${token}`
     const url = mode === 'transcode' ? `${base}/index.m3u8` : base
+    // THE FORMAT HINT DESCRIBES WHAT THE TELEVISION WILL RECEIVE, not what is on the
+    // disk, and those stop being the same thing the moment anything is converted.
+    //
+    // Found on Tim's Roku 2026-08-19, minutes after the 5.1 fix started sending films
+    // down the remux path for the first time: the film is Matroska, the remux output is
+    // always fragmented MP4, and this line still said "mkv" because it read the SOURCE
+    // container. The television dutifully tried to demux an MP4 as Matroska and sat at
+    // 13% forever. It is load-bearing on a Roku specifically - the format hint is what
+    // its player picks a demuxer with.
     const format = mode === 'transcode'
       ? 'hls'
-      : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
+      : mode === 'remux'
+        ? 'mp4'
+        : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
     try {
       // The title rides along for the receiver's own display - a Roku shows
       // it on its player, a Cast device on its loading screen.
