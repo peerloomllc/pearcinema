@@ -108,7 +108,11 @@ class PearCinemaHost {
     if (Number.isFinite(Number(savedCap)) && savedCap !== null) {
       this.transcoder.maxConcurrent = Math.max(0, Math.min(16, Math.trunc(Number(savedCap))))
     }
-    this.transcode = { available: false, reason: 'the hardware has not been probed yet' }
+    // `probing` until the startup probe answers, so a dashboard opened in the first
+    // second says "checking" rather than reporting hardware that has not been asked yet
+    // as hardware that failed. Both probe branches assign a fresh object, so the flag
+    // clears itself.
+    this.transcode = { available: false, probing: true, reason: 'the hardware has not been probed yet' }
 
     this.host = new LibraryHost({
       protocol: PROTOCOL,

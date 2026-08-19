@@ -622,9 +622,11 @@ function HostPanel ({ state, reload }) {
   // managed about 10 in testing" on every install, and the 10 is a constant from the
   // N100 this was built against - a number about OUR machine, presented as a number
   // about theirs (Tim, 2026-08-19). What is true everywhere is what zero does.
-  const engineSub = t.available
-    ? '0 turns it off.'
-    : t.reason || 'The hardware probe did not pass.'
+  const engineSub = !t.available
+    ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
+    : Number(c.cap) === 0
+      ? 'Nothing is converted while this is 0.'
+      : '0 turns it off.'
 
   // A CHIP RATHER THAN A SENTENCE. The app has had a status chip with good, warn and
   // bad variants since it had a library page, and Settings never used one - so every
@@ -633,9 +635,19 @@ function HostPanel ({ state, reload }) {
   // ON THE ROW IT IS ABOUT, not beside the page's name. Up there it was a fact with
   // nothing to attach to: "converts 4 at once" reads as being about the whole host
   // (Tim, 2026-08-19).
-  const engineChip = t.available
-    ? { cls: 'chip good', text: 'ready' }
-    : { cls: 'chip', text: 'not available' }
+  //
+  // FOUR STATES, NOT TWO. Whether anything is actually converted is the hardware AND
+  // the operator's cap, and the chip used to read only the hardware - so a host whose
+  // engine works with the cap set to zero said "ready" while nothing would ever be
+  // converted, with the zero sitting in the field beside it saying otherwise (found
+  // 2026-08-19, answering Tim's question about what the chip's states are).
+  const engineChip = t.probing
+    ? { cls: 'chip', text: 'checking' }
+    : !t.available
+      ? { cls: 'chip', text: 'not available' }
+      : Number(c.cap) === 0
+        ? { cls: 'chip warn', text: 'switched off' }
+        : { cls: 'chip good', text: 'ready' }
 
   return (
     <>

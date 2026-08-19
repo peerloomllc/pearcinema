@@ -1463,3 +1463,30 @@ test('a host that cannot convert says so in the chip, not in a paragraph', async
   // sentence wrapped around it.
   assert.match(text(), /no \/dev\/dri on this machine/)
 })
+
+test('THE ENGINE CHIP READS THE CAP TOO, not only the hardware', async (t) => {
+  // Whether anything is actually converted is the hardware AND the operator's cap.
+  // Reading only the hardware, a host with a working engine and the cap set to zero
+  // said "ready" while nothing would ever be converted - with the zero sitting in the
+  // field beside it saying otherwise (found answering Tim's question, 2026-08-19).
+  const off = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 0, source: 'dashboard', measured: 10 }
+  }
+  const { doc, text } = await openHost(t, off)
+  const chip = doc.querySelector('.setrow .rowname .chip')
+  assert.match(chip.textContent, /switched off/)
+  assert.ok(chip.className.includes('warn'), 'and it is not green')
+  assert.match(text(), /Nothing is converted while this is 0/)
+})
+
+test('an engine nobody has asked yet says checking, not broken', async (t) => {
+  // The probe runs at startup without being awaited, so a dashboard opened in the
+  // first second used to report hardware that had not been tried as hardware that
+  // failed.
+  const early = { ...STATE, transcode: { available: false, probing: true, reason: 'the hardware has not been probed yet' } }
+  const { doc, text } = await openHost(t, early)
+  assert.match(doc.querySelector('.setrow .rowname .chip').textContent, /checking/)
+  assert.match(text(), /Asking the hardware what it can do/)
+})
