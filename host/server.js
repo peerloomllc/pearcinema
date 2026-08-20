@@ -818,9 +818,13 @@ class PearCinemaHost {
     if (verdict.mode !== 'remux') return hls.gridPlan(item.runtime)
     if (!source) return null
 
-    // A Jellyfin source hands out an HTTP URL rather than a path, and an index
-    // cannot be read cheaply from one. That is a fallback, not a failure.
-    const index = await keyframes.read(source.input, { ffprobe: ffmpegBin.ffprobe() })
+    // A Jellyfin source hands out an HTTP URL rather than a path, and the index is
+    // read out of that the same way - two or three Range requests, with the
+    // server's own credentials, rather than a download (2026-08-20).
+    const index = await keyframes.read(source.input, {
+      ffprobe: ffmpegBin.ffprobe(),
+      headers: source.headers || null
+    })
     if (!index) {
       this.log('host:hls-no-keyframes', { itemId: String(item.id), engine: 'encode' })
       return this.transcodeOn() ? hls.gridPlan(item.runtime) : null
