@@ -191,7 +191,7 @@ test('the page mounts and shows the library, rather than a blank control plane',
   // The whole navigation, which is now the name plus three icons rather than three
   // words - see the header test below.
   assert.match(text(), /Pair a device/)
-  for (const label of ['User access', 'Switch theme', 'Settings']) {
+  for (const label of ['People and devices', 'Switch theme', 'Settings']) {
     assert.ok([...doc.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === label), label)
   }
 })
@@ -240,13 +240,16 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 30))
+  await new Promise(r => setTimeout(r, 40))
 
-  // PEARTUNE'S SHAPE: people first, their devices nested under them. A device that
-  // belongs to nobody yet has its own section rather than being mixed in.
-  assert.match(text(), /People & devices/)
+  // IT IS A SETTINGS PAGE NOW (Tim, 2026-08-20), reached from the nav or straight
+  // from the topbar icon - which keeps its dot and keeps Cut off one press away.
+  assert.ok(doc.querySelector('.settings'), 'the topbar icon lands inside Settings')
+  assert.equal(doc.querySelector('.setpagename').textContent, 'People')
+  assert.ok([...doc.querySelectorAll('.setnav button.on')].some(b => b.textContent === 'People'),
+    'and the nav says which page you are on')
   // This phone CLAIMS a name nobody has confirmed, which is the one thing on the page
   // waiting on the operator - so it gets its own card at the top rather than being
   // mixed in with devices that are simply unassigned.
@@ -1100,7 +1103,7 @@ test('THE HEADER IS ONE HEIGHT, whatever tab you are on', async (t) => {
   assert.ok(slot, 'the middle of the bar always holds the search')
   assert.ok(slot.querySelector('.searchbox'), 'and on Watch there is a box in it')
 
-  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  const devices = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
   devices.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
@@ -1170,7 +1173,7 @@ test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) =>
   assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /Back to the library/)
   assert.ok(doc.querySelector('.brand svg'), 'with an icon that says what it does')
 
-  for (const label of ['User access', 'Switch theme', 'Settings']) {
+  for (const label of ['People and devices', 'Switch theme', 'Settings']) {
     assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)
   }
 })
@@ -1208,7 +1211,7 @@ test('TYPING FROM ANOTHER PAGE TAKES YOU TO THE LIBRARY', async (t) => {
   const { dom, doc, win, text } = await open()
   t.after(() => dom.window.close())
 
-  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
   access.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
   assert.match(text(), /A phone/, 'we are on the access page')
@@ -1237,21 +1240,24 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
   const { dom, doc, win, text } = await open(withPerson)
   t.after(() => dom.window.close())
 
-  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'User access')
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
   access.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  const row = doc.querySelector('.prow')
+  const row = [...doc.querySelectorAll('.setrow')].find(r => /1 device/.test(r.textContent))
   assert.ok(row, 'the person is a row')
-  assert.match(row.textContent, /Tim/)
-  assert.match(row.textContent, /1 device/)
-  assert.equal(row.querySelector('.dev'), null, 'and their devices are folded away')
+  assert.match(row.querySelector('.rowname').textContent, /Tim/)
+  assert.doesNotMatch(text(), /A phone/, 'and their devices are folded away')
 
-  row.querySelector('.pname').dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 30))
+  row.querySelector('.rowctl .iconbtn').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
 
-  assert.ok(doc.querySelector('.prow .dev'), 'opening them shows what they hold')
+  assert.ok(doc.querySelector('.rowopen'), 'opening them shows what they hold')
   assert.match(text(), /A phone/)
+  // CUT OFF IS STILL ONE PRESS FROM WHERE THE DEVICE IS NAMED. The reshape was not
+  // allowed to cost that (Tim, 2026-08-20).
+  const dev = [...doc.querySelectorAll('.rowopen .setrow')].find(r => /A phone/.test(r.textContent))
+  assert.ok([...dev.querySelectorAll('.rowctl button')].some(b => b.textContent.trim() === 'Cut off'))
 })
 
 
@@ -1673,7 +1679,7 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
 
 // --- five pages, down from eight ---------------------------------------------
 
-test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', async (t) => {
+test('EIGHT SETTINGS PAGES BECAME SIX, and every old address still lands', async (t) => {
   // Source, Artwork and Library were three nav items for one subject, and two of them
   // held a single control each. Security was a password field with a page of its own.
   // A section that MOVES must not turn every link and bookmark into a silent fall back
@@ -1687,7 +1693,9 @@ test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', asyn
   await new Promise(r => setTimeout(r, 60))
 
   const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
-  assert.deepEqual(labels, ['Library', 'Sharing', 'Casting', 'This host', 'Support development'])
+  // People joined them on 2026-08-20, beside Sharing: the two pages about other
+  // people sit together.
+  assert.deepEqual(labels, ['Library', 'Sharing', 'People', 'Casting', 'This host', 'Support development'])
 
   const lands = async (hash, expect) => {
     win.location.hash = 'settings/' + hash
@@ -1704,6 +1712,9 @@ test('EIGHT SETTINGS PAGES BECAME FIVE, and every old address still lands', asyn
   // again (Tim, 2026-08-19), and a bookmark from that day still has to land.
   await lands('televisions', 'Casting')
   await lands('remotes', 'Sharing')
+  // '#who' was a TAB of its own until People became a page, so the old address has
+  // to land rather than falling back to the library.
+  await lands('who', 'People')
   await lands('security', 'This host')
   // AN ADDRESS THAT NEVER EXISTED LEAVES YOU WHERE YOU ARE. A stray hash should not
   // yank somebody off the page they are reading; only a real section moves them, and
@@ -2580,6 +2591,72 @@ test('CLEARING THE SHELF ASKS FIRST, and says the places will be forgotten', asy
   go.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
   assert.ok(asked.some(u => String(u).includes('/api/watch/clear')))
+})
+
+test('AN OLD #who BOOKMARK OPENS THE PAGE IT NAMED, not the library', async (t) => {
+  // It was a tab, not a settings section, so the section table alone could not
+  // catch it: the tab initialiser reads the hash before Settings exists.
+  const errors = []
+  const vc = new VirtualConsole()
+  vc.on('jsdomError', e => errors.push(e))
+  const dom = new JSDOM(PAGE, {
+    runScripts: 'dangerously',
+    url: 'http://localhost:8751/#who',
+    pretendToBeVisual: true,
+    virtualConsole: vc
+  })
+  t.after(() => dom.window.close())
+  const win = dom.window
+  win.fetch = async (url) => {
+    const hit = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
+    return { status: 200, ok: true, json: async () => (hit ? ROUTES[hit] : {}) }
+  }
+  for (let i = 0; i < 8; i++) await new Promise(r => setTimeout(r, 15))
+
+  assert.deepEqual(errors, [], 'no page error')
+  assert.equal(win.document.querySelector('.setpagename').textContent, 'People')
+  assert.equal(win.location.hash, '#settings/people', 'and the address is rewritten to where it went')
+})
+
+test('THE PEOPLE PAGE IS ROWS NOW, and the reshape did not cost the security claim', async (t) => {
+  // The last screen still wearing a card with nested lists inside it, while every
+  // Settings page had moved to rows (Tim, 2026-08-20). What the move was NOT
+  // allowed to cost is written into this test: Cut off stays one press from where
+  // a device is named, and it still says how many live connections it cut.
+  const withPeople = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Tim', label: 'Tim' }],
+    devices: [
+      { deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true, personId: 'p1', claimedUser: 'Tim', lastSeenAt: Date.now(), scope: 'owner' },
+      { deviceKey: 'dk2', label: 'A laptop', platform: 'linux', online: false, personId: null, claimedUser: null, lastSeenAt: Date.now(), scope: 'full' }
+    ]
+  }
+  const { dom, doc, win, errors, text } = await open(withPeople)
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.deepEqual(errors, [], 'no page error')
+  // ROWS, not the old card. `.access` and `.prow` are gone with the shape.
+  assert.equal(doc.querySelector('.card.access'), null)
+  assert.equal(doc.querySelector('.prow'), null)
+  assert.ok(doc.querySelector('.setrows .setrow'), 'and it is Settings rows like every other page')
+
+  // A device belonging to nobody is still its own group rather than mixed in.
+  assert.match(text(), /Not assigned to anybody/)
+  assert.match(text(), /A laptop/)
+
+  // ADDING SOMEBODY IS A FIELD ON THE PAGE, not the browser's own prompt box -
+  // which is unstyled, suppressible and looks like the page has been hijacked.
+  let prompted = 0
+  win.prompt = () => { prompted++; return null }
+  const add = [...doc.querySelectorAll('.setrow button')].find(b => b.textContent.trim() === 'Add')
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(prompted, 0, 'no window.prompt')
+  assert.ok(doc.querySelector('.setrow .rowctl input[type=text]'), 'a field on the page instead')
 })
 
 function rootText (doc) { return doc.getElementById('root').textContent }
