@@ -1559,11 +1559,17 @@ export default function App () {
       setCasting((s) => (s && s.entityId === c.entityId ? { ...s, seeking: false, paused: false } : s))
       if (r?.restarted) say(deltaMs > 0 ? 'Skipped forward' : 'Skipped back')
       haptic()
-      // WHERE IT ACTUALLY LANDED, now rather than on the next tick. A converted stream
-      // is re-cut from the new point and takes a moment to settle, so ask twice: once
-      // immediately, and once after it has.
+      // WHERE IT IS GOING, said at once. Asking the television instead means asking a
+      // television that has not started the new stream yet - a converted skip re-cuts
+      // the film and takes seconds to come back - so it answers with the old minute and
+      // the number sits wrong until the next poll (Tim, 2026-08-20). The host's own
+      // answer already carries the destination; the polls that follow correct it if the
+      // television lands anywhere else.
+      if (r?.positionMs != null) {
+        setCastAt((a) => ({ positionMs: r.positionMs, durationMs: a?.durationMs || null, at: Date.now() }))
+      }
       readCastAt()
-      setTimeout(readCastAt, 1500)
+      setTimeout(readCastAt, 2500)
     } catch (e) {
       // A television that cannot be told to jump says so once, and then stops
       // offering - a button that always fails is worse than no button. A Roku

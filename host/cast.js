@@ -60,6 +60,13 @@ const POLL_MS = 2000
 // so putting the phone down and picking the film up elsewhere works mid-cast.
 const REPORT_MS = 15000
 
+// HOW CLOSE COUNTS AS ARRIVED, and how long to keep asking. A television that has been
+// told to play from 1:45 lands within a group of pictures of it; one that has landed
+// somewhere else entirely is a case we stop guessing about rather than lie about
+// forever. Both are about a stream restarting, which is seconds, not minutes.
+const SETTLE_TOLERANCE_SEC = 8
+const SETTLE_MS = 20000
+
 // 8752, the port DECISIONS reserved beside the dashboard's 8751 (8742 is
 // PearTune's cast server on the same box).
 const PREFERRED_PORT = Number(process.env.PEARCINEMA_CAST_PORT || 8752)
@@ -184,13 +191,17 @@ class CastSessions {
   // how a television's position lands in watch state - async ({ deviceKey,
   // itemId, positionMs, ended }), implemented by the host against the same
   // rules resume.set applies.
-  constructor ({ speakers, grants, media, presence = null, report = null, log = () => {} }) {
+  constructor ({ speakers, grants, media, presence = null, report = null, log = () => {}, startOffset = true }) {
     this.speakers = speakers
     this.grants = grants
     this.media = media
     this.presence = presence
     this.report = report
     this.log = log
+    // Which playlist shape a resume gets - see _servePlaylist. On by default since it
+    // was measured on the real Roku (2026-08-20); the sliced shape stays one env var
+    // away for a receiver that ignores the tag.
+    this.startOffset = startOffset !== false
 
     // token -> { deviceKey, itemId, entityId, mode, at, expiresAt }
     this.tokens = new Map()
@@ -291,11 +302,32 @@ class CastSessions {
     }
   }
 
-  // The playlist, sliced to START at the resume segment: an HLS receiver
-  // cannot be told where to begin, so the playlist begins there instead - the
-  // web player's restart shape, one level up. Segment NAMES keep their true
-  // indices, so each fetch maps to the right minutes of film and the
-  // position arithmetic in the poll stays honest through row.at.
+  // THE PLAYLIST, AND WHERE THE TELEVISION SHOULD JOIN IT.
+  //
+  // Two shapes, and which one is used decides what the TELEVISION's own on-screen
+  // clock says. Both put the film on the screen at the right frame; they differ in
+  // what the receiver thinks it is holding.
+  //
+  //   offset   the WHOLE playlist plus `#EXT-X-START:TIME-OFFSET`, the standard way
+  //            to say "begin here". The receiver holds the whole film, so its own
+  //            clock is the FILM's clock and its scrubber is the film's length.
+  //   sliced   the playlist cut to begin at the resume segment, because for a long
+  //            time the note here read "an HLS receiver cannot be told where to
+  //            begin". The picture is right and every number PearCinema shows is
+  //            right - the poll adds row.at - but the television's own display
+  //            counts the stream it was given, so it reads zero at a resume and
+  //            resets to zero on every skip (Tim, 2026-08-19, watching his TV).
+  //
+  // `#EXT-X-START` is HLS protocol version 6 and OPTIONAL: a receiver may ignore it
+  // and start at the beginning, which on a resume would be the film starting over. So
+  // it was a setting until it had been measured, and on 2026-08-20 it was: three skips
+  // on the living room Roku went 66 s, 105 s, 142 s, each one adding to the last, which
+  // only adds up if the television is reporting the FILM's own minute. It is the
+  // default now. `PEARCINEMA_HLS_SLICE=1` goes back to slicing for a receiver that
+  // turns out to ignore the tag.
+  //
+  // Segment NAMES keep their true indices in both, so each fetch maps to the right
+  // minutes of film.
   //
   // WHICH SEGMENT A RESUME LANDS IN is no longer arithmetic. A copied picture is
   // cut on the film's own keyframes, so segments are uneven - measured from 4.0 s
@@ -309,6 +341,31 @@ class CastSessions {
 
     let body = out.playlist
     const skip = segmentAt(entry.at, out)
+
+    // THE WHOLE FILM, JOINED IN THE MIDDLE. Nothing is dropped, so the receiver's
+    // timeline is the film's - and row.at goes to zero with it, because the poll adds
+    // row.at to what the television reports and the television is now reporting the
+    // film's own minute.
+    if (skip > 0 && this.startOffset) {
+      const startAt = segmentStart(skip, out)
+      // Before the first segment and after every header, wherever they end - a playlist
+      // is not a fixed set of lines and matching on one of them would put the tag in
+      // the wrong place the day one is added.
+      const lines = body.replace('#EXT-X-VERSION:3', '#EXT-X-VERSION:6').split('\n')
+      const first = lines.findIndex((l) => l.startsWith('#EXTINF'))
+      const tag = `#EXT-X-START:TIME-OFFSET=${startAt.toFixed(3)},PRECISE=YES`
+      lines.splice(first < 0 ? lines.length : first, 0, tag)
+      body = lines.join('\n')
+      // NOTHING IS REWRITTEN HERE. `row.at` is already zero for this shape, decided when
+      // the row was made - and `entry.at` must survive, because a receiver is free to
+      // fetch the playlist twice and the second answer has to begin in the same place.
+      // Zeroing it, as the first cut did, would have handed a re-asking television the
+      // film from the top.
+      this.log('cast:playlist-offset', { startAt, engine: out.engine || 'encode' })
+      res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
+      return res.end(body)
+    }
+
     if (skip > 0) {
       const lines = body.split('\n')
       const kept = []
@@ -338,7 +395,7 @@ class CastSessions {
       // it is up to a whole group of pictures, and a position report that is
       // fourteen seconds out is a resume that lands in the wrong scene.
       const row = this.byDevice.get(entry.deviceKey)?.get(entry.entityId)
-      if (row) row.at = entry.at
+      if (row) { row.at = entry.at; row.startAt = entry.at }
       this.log('cast:playlist-sliced', { skip, dropped, engine: out.engine || 'encode' })
     }
 
@@ -505,7 +562,30 @@ class CastSessions {
       set = new Map()
       this.byDevice.set(deviceKey, set)
     }
-    set.set(entityId, { token, itemId, mode, at: startAt, startedAt: Date.now(), sawPlaying: false, lastReportAt: 0 })
+    // TWO NUMBERS, NOT ONE, and conflating them is what made a thirty-second skip look
+    // like sixty (Tim, 2026-08-20).
+    //
+    //   startAt  where the film was asked to go. What the playlist begins at, and the
+    //            honest answer to "where is it" until the television has got there.
+    //   at       what the poll must ADD to the television's own clock. Zero on the
+    //            offset shape, because there the television is already reporting the
+    //            film's own minute - adding the offset to it counts the skip twice.
+    //
+    // It used to be one field, zeroed when the playlist was fetched. Between the skip
+    // and that fetch - two or three seconds of re-cutting a stream - the offset was
+    // still being added to a clock that already included it.
+    const rowAt = viaHls && this.startOffset ? 0 : startAt
+    set.set(entityId, {
+      token, itemId, mode, at: rowAt, startAt, startedAt: Date.now(),
+      // Whether the television has actually reached the new stream. This is a question
+      // ONLY the offset shape can be wrong about: there the television's clock is the
+      // film's, so the one it is still reporting from the old stream is a plausible
+      // number about the wrong moment. On the sliced shape its clock is relative to
+      // whatever stream it holds and resets with it, so it is right immediately - as is
+      // a direct cast, which seeks itself, and anything starting at zero.
+      settled: !(viaHls && this.startOffset) || startAt <= 0,
+      sawPlaying: false, lastReportAt: 0
+    })
 
     // castHost(), not loopback: the television fetches this URL ITSELF.
     const base = `http://${castHost()}:${this.port}/v/${token}`
@@ -713,7 +793,30 @@ class CastSessions {
     }
     // A generated stream starts its clock at zero wherever it actually began,
     // so the cast's own start offset is part of the true position.
-    return Math.round((row.at + sec) * 1000)
+    const filmSec = row.at + sec
+
+    // WHERE IT IS GOING, UNTIL IT HAS GOT THERE. A skip re-cuts the stream and the
+    // television keeps playing the old one for two or three seconds, so asking it where
+    // the film is gets the answer to a question about the previous stream - and the
+    // phone showed that, jumping to the right minute and then back (Tim, 2026-08-20).
+    //
+    // The test is the television's own clock landing near what was asked for, not a
+    // timer, and it LATCHES: a minute later the film is legitimately far from where it
+    // started, and that is not a television failing to have arrived.
+    if (!row.settled) {
+      const startAt = Number(row.startAt) || 0
+      const since = Date.now() - (row.startedAt || 0)
+      // ARRIVED: at the point it was sent to, give or take a group of pictures behind,
+      // and no further ahead than it could possibly have played since being sent. That
+      // window catches a skip in either direction - a forward one leaves the television
+      // reporting a smaller number than the start, a backward one a larger - where a
+      // plain "close enough" would call a television that has been playing happily for
+      // fifteen seconds "not there yet".
+      const arrived = filmSec >= startAt - SETTLE_TOLERANCE_SEC && filmSec <= startAt + (SETTLE_MS / 1000)
+      if (arrived || since > SETTLE_MS) row.settled = true
+      else return Math.round(startAt * 1000)
+    }
+    return Math.round(filmSec * 1000)
   }
 
   // One last honest write on the way out, so a viewer who stops a cast finds
