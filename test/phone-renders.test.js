@@ -146,6 +146,17 @@ async function open (answers = {}, { settleMs = 260 } = {}) {
   }
 }
 
+// PRESSING A FILM IS TWO STEPS NOW, and it is deliberate (2026-08-20): a tile opens
+// the page ABOUT a film - how long it is, what it is about, whether it is already
+// half watched - and Watch on that page starts it. Every test below that wants a
+// film actually playing goes through here rather than repeating the two presses.
+async function pressWatch (h) {
+  const watch = h.button(/^\s*(Watch|Resume at)/)
+  assert.ok(watch, 'the film has a page, and the page has a Watch')
+  h.click(watch)
+  await h.settle(140)
+}
+
 test('the phone mounts and shows the library rather than a blank screen', async (t) => {
   const h = await open()
   t.after(() => h.dom.window.close())
@@ -215,6 +226,7 @@ test('a relayed film asks before it plays, and remembers the answer', async (t) 
   assert.ok(tile, 'the film has to be on screen before it can be pressed')
   h.press(tile)
   await h.settle(120)
+  await pressWatch(h)
 
   assert.match(h.text(), /Play over a relay/, 'the prompt must appear')
   assert.equal(h.called('shell.play').length, 0, 'and nothing may play while it is unanswered')
@@ -238,6 +250,7 @@ test('saying no to the relay is a decision, not a dialog that returns', async (t
 
   h.press(h.tile(/Metropolis/))
   await h.settle(120)
+  await pressWatch(h)
   h.click(h.button(/Not over a relay/))
   await h.settle(120)
 
@@ -388,7 +401,7 @@ test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
   // On the TCL, 2001 had watch state, so the tap offered to resume it - and Resume
   // opened a player that could never start (Tim, 2026-08-19). Asking "carry on from
   // 41 minutes?" about a film that cannot start is worse than refusing plainly.
-  const { dom, doc, press, tile, settle, called, text } = await open({
+  const { dom, doc, press, tile, settle, called, text, button, click } = await open({
     'library.sources': { items: [{ libraryId: 'lib-gone', libraryName: 'The Loft', sourceError: 'No configured folder is readable.' }] },
     'library.list': {
       items: [{ id: '2001', type: 'movie', title: '2001 A Space Odyssey', year: 1968, runtime: 8880, libraryId: 'lib-gone' }],
@@ -400,8 +413,14 @@ test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
 
   press(tile(/2001/))
   await settle(120)
+  // The page opens for free - the item is already on screen - and it is Watch that
+  // meets the refusal, before any prompt about where the film was left.
+  assert.equal(called('stream.url').length, 0, 'nothing is asked for merely by looking')
+  const watch = button(/^\s*(Watch|Resume at)/)
+  assert.ok(watch)
+  click(watch)
+  await settle(140)
 
-  assert.equal(called('resume.get').length, 0, 'it never asks where the film was left')
   assert.equal(called('stream.url').length, 0, 'and never asks for a stream it cannot have')
   assert.match(text(), /The Loft cannot reach this film/)
   assert.match(text(), /not downloaded to this phone/)
@@ -445,10 +464,15 @@ test('A BUTTON INSIDE A ROW IS NOT THE ROW', async (t) => {
   assert.equal(called('resume.get').length, 0, 'and does not ask where it was left')
   assert.ok(called('download.remove').length > 0, 'but it does remove it')
 
-  // The rest of the row is still the row.
+  // The rest of the row is still the row - it opens the film's page now rather than
+  // playing it outright, so Watch is what asks the host for a stream.
   press(row.querySelector('.meta') || row)
   await settle(200)
-  assert.ok(called('stream.url').length > 0, 'the rest of the row is still the row')
+  const watch = [...doc.querySelectorAll('button')].find(b => /^\s*(Watch|Resume at)/.test(b.textContent))
+  assert.ok(watch, 'the rest of the row is still the row')
+  click(watch)
+  await settle(200)
+  assert.ok(called('stream.url').length > 0, 'and Watch is what starts it')
 })
 
 test('the phone boot style paints no #root either', async () => {
@@ -733,4 +757,112 @@ test('CLEARING THE LIST ASKS FIRST, and says the places will be forgotten', asyn
   await h.settle(150)
   assert.equal(h.called('resume.clear').length, 1)
   assert.match(h.text(), /Nothing in progress/)
+})
+
+/* --------------------------------------- the page about one film -- */
+
+test('TAPPING A FILM OPENS ITS PAGE, and nothing is fetched to do it', async (t) => {
+  // Tim, 2026-08-20, with Plex's phone screen. Tapping a film used to start it,
+  // which is the phone's oldest shortcut and its worst: the only chance anybody gets
+  // to read what a film is, see how long it is, or notice they are already part way
+  // through it.
+  const FILM = {
+    id: 'spider', type: 'movie', title: 'The Amazing Spider-Man', year: 2012, runtime: 8160,
+    overview: 'After Peter Parker is bitten by a genetically altered spider, he gains newfound powers.',
+    genres: ['Action', 'Adventure'], artId: 'art-spider',
+    media: { container: 'matroska', videoCodec: 'h264', audioCodec: 'dts', audioChannels: 6, height: 1080, size: 12_800_000_000 }
+  }
+  const h = await open({
+    'library.list': { items: [FILM], total: 1, cursor: null },
+    'subtitle.list': { items: [{ id: 's1', title: 'English', playable: true }] },
+    'resume.get': { resume: null }
+  })
+  t.after(() => h.dom.window.close())
+  await h.settle(400)
+
+  h.press(h.tile(/Spider-Man/))
+  await h.settle(200)
+
+  assert.equal(h.called('stream.url').length, 0, 'nothing is asked for merely by looking')
+  assert.equal(h.called('shell.play').length, 0, 'and nothing is playing')
+
+  assert.match(h.text(), /The Amazing Spider-Man/)
+  assert.match(h.text(), /2012/)
+  assert.match(h.text(), /2h 16m/, 'how long it is')
+  assert.match(h.text(), /genetically altered spider/, 'what it is about')
+
+  // WHAT IS ACTUALLY IN THE FILE, which is the part nobody else can answer as well:
+  // it is this operator's own file rather than a database entry about the film.
+  assert.match(h.text(), /1080p/)
+  assert.match(h.text(), /DTS/)
+  assert.match(h.text(), /6 channels/)
+  assert.match(h.text(), /1 available/, 'the subtitles are asked for and counted')
+  assert.match(h.text(), /12.8 GB/)
+
+  // AND WATCH IS WHAT STARTS IT.
+  h.click(h.button(/^\s*Watch/))
+  await h.settle(200)
+  assert.equal(h.called('stream.url').length, 1)
+})
+
+test('a film you are part way through offers the minute, not just Resume', async (t) => {
+  const h = await open({
+    'library.list': { items: [{ id: 'm', type: 'movie', title: 'Metropolis', year: 1927, runtime: 9180 }], total: 1, cursor: null },
+    'resume.get': { resume: { positionMs: 2_460_000 } },
+    'subtitle.list': { items: [] }
+  })
+  t.after(() => h.dom.window.close())
+  await h.settle(400)
+
+  h.press(h.tile(/Metropolis/))
+  await h.settle(220)
+  // "Resume" with no number is a promise nobody can check.
+  assert.ok(h.button(/Resume at 41:00/), 'the exact moment: ' + h.text().slice(0, 200))
+})
+
+test('an EPISODE still plays from its season, because the list already says what it is', async (t) => {
+  // The page exists for the thing a grid cannot say. An episode is reached from its
+  // season, where the rows around it carry the number, the length and the summary.
+  const EP = { id: 'e1', type: 'episode', title: 'The Target', seriesTitle: 'The Wire', seasonNumber: 1, episodeNumber: 1, runtime: 3600 }
+  const h = await open({
+    'library.list': { items: [EP], total: 1, cursor: null },
+    'stream.url': { url: 'http://127.0.0.1:1234/s/e1', mode: 'direct' }
+  })
+  t.after(() => h.dom.window.close())
+  await h.settle(400)
+
+  h.press(h.tile(/The Target/))
+  await h.settle(220)
+  assert.equal(h.called('stream.url').length, 1, 'it plays rather than opening a page')
+})
+
+test('A CACHED POSTER STILL SHOWS, even when it finished before anyone was listening', async (t) => {
+  // Tim, 2026-08-20: 300 had its poster in the library grid and a placeholder on its
+  // title page. The first request for a cover crosses P2P and takes long enough that
+  // the element is listening by the time it lands; the shim then holds it in RAM, on
+  // disk and behind a day of cache-control, so every later request is answered
+  // instantly - and instantly beats the listener, so `load` never fires and the
+  // poster sat at opacity 0 over its own initials.
+  //
+  // The grid is almost always somebody's FIRST sight of a poster and the title page
+  // almost always their second, which is why it read as the page being broken.
+  const FILM = { id: 'f300', type: 'movie', title: '300', year: 2007, runtime: 7020, artId: 'art-300' }
+  const h = await open({ 'library.list': { items: [FILM], total: 1, cursor: null }, 'subtitle.list': { items: [] } })
+  t.after(() => h.dom.window.close())
+
+  // JSDOM loads no images, so this is what "already complete" looks like to the
+  // component: the browser answering yes before a handler could ever run.
+  const proto = h.win.HTMLImageElement.prototype
+  Object.defineProperty(proto, 'complete', { configurable: true, get () { return true } })
+  Object.defineProperty(proto, 'naturalWidth', { configurable: true, get () { return 600 } })
+
+  await h.settle(400)
+  h.press(h.tile(/300/))
+  await h.settle(220)
+
+  const poster = h.doc.querySelector('.tposter img.poster')
+  assert.ok(poster, 'the page put the poster in the page')
+  assert.match(poster.getAttribute('src'), /art-300/, 'and pointed it at the right cover')
+  // `in` is what takes it from invisible to visible.
+  assert.ok(poster.classList.contains('in'), 'and it is actually showing')
 })

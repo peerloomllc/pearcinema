@@ -357,7 +357,30 @@ function NavBar ({ active, onTab, saved = 0, busy = 0 }) {
 // which on a big library over a relay is minutes of nothing.
 function Cover ({ src, title, onArt = null }) {
   const [loaded, setLoaded] = useState(false)
-  useEffect(() => { setLoaded(false) }, [src])
+  const img = useRef(null)
+  // A CACHED IMAGE CAN FINISH BEFORE THE HANDLER IS ATTACHED, and then `load` never
+  // fires for it - so the poster sat at opacity 0 over its own initials and the tile
+  // read as artwork-less (Tim, 2026-08-20: 300 had its poster in the library and a
+  // placeholder on its title page).
+  //
+  // WHY IT ONLY SHOWED UP ON THE SECOND SCREEN. The first request for a cover crosses
+  // P2P and takes long enough that the element is listening by the time it lands. The
+  // shim then holds it in RAM, on disk and behind a day of `cache-control`, so every
+  // later request for that exact URL is answered instantly - and instantly is what
+  // beats the listener. The library grid is almost always somebody's first sight of a
+  // poster and the title page is almost always their second, which is why it looked
+  // like the page was broken rather than the component.
+  //
+  // Asking the element whether it is already done is the fix, and it costs one check
+  // per render of a tile.
+  useEffect(() => {
+    setLoaded(false)
+    const el = img.current
+    if (el && el.complete && el.naturalWidth > 0) {
+      setLoaded(true)
+      if (onArt) onArt()
+    }
+  }, [src])
   // `onArt` fires on SETTLED, not on success: a tile with no artwork at all, or one whose
   // poster fails, has finished as far as a screen waiting on it is concerned.
   useEffect(() => { if (onArt && !src) onArt() }, [src])
@@ -366,6 +389,7 @@ function Cover ({ src, title, onArt = null }) {
       <span className='blank'>{(title || '?').slice(0, 2)}</span>
       {src && (
         <img
+          ref={img}
           src={src} loading='lazy' alt='' draggable={false} className={'poster' + (loaded ? ' in' : '')}
           onLoad={() => { setLoaded(true); if (onArt) onArt() }}
           // A poster that 404s or dies mid-transfer leaves the initials showing rather
@@ -892,6 +916,14 @@ export default function App () {
   // The Continue list keeps every place there is, so a year of half-started
   // films buried the one thing actually being watched (Tim, 2026-08-19). The
   // cap is on what is SHOWN; the rest is one press away rather than gone.
+  // THE FILM YOU ARE LOOKING AT. Tapping one in the library used to start it, which
+  // is the phone's oldest shortcut and its worst: the only chance anybody gets to
+  // read what a film is, see how long it is, or notice they are 41 minutes in
+  // already (Tim, 2026-08-20, with Plex's phone screen). Nothing is fetched to open
+  // it - the item is already on screen - so the page costs a tap and no round trip.
+  const [title, setTitle] = useState(null)
+  const [titleSubs, setTitleSubs] = useState(null)
+  const [titleResume, setTitleResume] = useState(null)
   const [showAllContinue, setShowAllContinue] = useState(false)
   const [clearAsk, setClearAsk] = useState(false)
   const [themePref, setThemePref] = useState(loadThemePref())
@@ -1178,6 +1210,7 @@ export default function App () {
       if (u.showDisplay) return setShowDisplay(false)
       if (u.resumeOffer) return setResumeOffer(null)
       if (u.addingLibrary) return setAddingLibrary(false)
+      if (u.title) return setTitle(null)
       if (u.season) return setSeason(null)
       if (u.series) return setSeries(null)
       if (u.tab !== 'library') return setTab('library')
@@ -1186,7 +1219,7 @@ export default function App () {
     return () => { offs.forEach((f) => f()); offTheme(); document.removeEventListener('click', feel, true) }
   }, [])
 
-  uiRef.current = { youView, sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, season: !!season, series: !!series, tab }
+  uiRef.current = { youView, sheet: !!sheet, donate, showDisplay, resumeOffer: !!resumeOffer, addingLibrary, title: !!title, season: !!season, series: !!series, tab }
 
   // --- library data ---------------------------------------------------------
 
@@ -1417,10 +1450,23 @@ export default function App () {
   }
   playRef.current = play
 
+  // A FILM IS A PLACE NOW. An EPISODE is not: it is reached from its season, where
+  // the list around it already says what it is, and the thing somebody wants from an
+  // episode row is the episode.
   const open = async (i) => {
     if (i.type === 'series') { setTab('library'); return setSeries(i) }
     if (i.type === 'season') { setTab('library'); return setSeason(i) }
+    if (i.type === 'movie') {
+      setTab('library')
+      setTitleSubs(null)
+      setTitleResume(null)
+      setTitle(i)
+      return
+    }
+    return watch(i)
+  }
 
+  const watch = async (i) => {
     // BEFORE THE RESUME PROMPT, not after. Asking "carry on from 41 minutes?" about a
     // film that cannot start is a worse failure than refusing plainly, because the
     // person says yes and then watches an empty player.
@@ -1443,6 +1489,20 @@ export default function App () {
     } catch (e) { setErr(e.message) }
   }
 
+  // What the page needs beyond the item it already has: where you got to, and what
+  // subtitles the file carries. Both are cheap, both are asked for once, and neither
+  // blocks the page from drawing - it is on screen before either answers.
+  useEffect(() => {
+    if (!title) return
+    let live = true
+    const id = reach(title).openId || title.id
+    call('resume.get', { itemId: id }).then((r) => { if (live) setTitleResume(r?.resume || null) }).catch(() => {})
+    call('subtitle.list', { itemId: id })
+      .then((r) => { if (live) setTitleSubs((r?.items || [])) })
+      .catch(() => { if (live) setTitleSubs([]) })
+    return () => { live = false }
+  }, [title?.id])
+
   const toggleSave = async (i) => {
     const kind = ['movie', 'episode', 'series', 'season'].includes(i.type) ? i.type : (i.kind || 'movie')
     const on = !saved.has(i.id)
@@ -1454,6 +1514,19 @@ export default function App () {
       say(on ? 'Added to your watchlist' : 'Removed from your watchlist')
       if (on) call('fav.list').then((r) => setSavedItems(r.items || [])).catch(() => {})
     } catch (e) { setErr(e.message) }
+  }
+
+  // Keeping a copy on this phone, from wherever it is asked for - the long-press
+  // sheet and the film's own page. One copy of the words, one copy of the rule.
+  const toggleDownload = (i, want) => {
+    if (want) {
+      call('download.start', { itemId: i.id })
+        .then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading. Watch it in You, Downloads') })
+        .catch((e) => setErr(e.message))
+    } else {
+      call('download.remove', { itemId: i.id })
+        .then(() => { setDlIds((x) => { const n = new Set(x); n.delete(i.id); return n }); say('Removed from this phone') })
+    }
   }
 
   const markWatched = async (i, on) => {
@@ -1817,6 +1890,87 @@ export default function App () {
   const waitingArt = !season && artTarget > 0 && !artWaitOver && artSeen < artTarget
   const noteArt = useCallback(() => setArtSeen((n) => n + 1), [])
 
+  // THE PAGE ABOUT ONE FILM, and its own screen rather than a sheet: a sheet is for
+  // a handful of actions on something you can still see, and this is the thing
+  // itself. Plex's phone shape - the picture, the name, one line of facts, one big
+  // Watch, a row of quiet round actions under it, then what it is about and what is
+  // actually in the file.
+  const titleScreen = title && (
+    <div className='app titlescreen'>
+      {/* A BARE ARROW, no box (Tim, 2026-08-20: the pill was large and ugly). There is
+          exactly one place to go back to and the arrow says so - a word and a border
+          around it is chrome above the thing somebody came to look at. The touch
+          target stays finger-sized; only the paint goes. */}
+      <button className='backarrow' onClick={() => setTitle(null)} aria-label='Back to the library'>
+        <CaretLeft size={22} />
+      </button>
+
+      {err && <div className='error'>{err}</div>}
+
+      <div className='tposter'>
+        <Cover src={title.artId && artBase ? `${artBase}${encodeURIComponent(title.artId)}?s=350` : null} title={title.title} />
+      </div>
+
+      <h2 className='ttitle'>{title.title}</h2>
+      <p className='tfacts'>
+        {[title.year, fmtRuntime(title.runtime), (title.genres || []).slice(0, 2).join(', ')].filter(Boolean).join(' · ')}
+      </p>
+
+      {/* ONE BIG WATCH, because that is what somebody came for - and it says the
+          minute when there is one to carry on from, since "resume" without a number
+          is a promise nobody can check. */}
+      <button className='twatch' onClick={() => { setTitle(null); watch(title) }}>
+        <Play size={18} weight='fill' />
+        {titleResume?.positionMs > 0 ? ` Resume at ${fmtClock(titleResume.positionMs)}` : ' Watch'}
+      </button>
+      {/* START OVER IS THE PLAYER'S OWN QUESTION, asked over the picture where it
+          belongs - so this opens the film exactly as Watch does and the player
+          offers both answers. Asking it twice would be one question too many. */}
+
+      <div className='tacts'>
+        <button onClick={() => toggleSave(title)}>
+          <span className='tcirc'><BookmarkSimple size={20} weight={saved.has(title.id) ? 'fill' : 'regular'} /></span>
+          <span>{saved.has(title.id) ? 'Saved' : 'Watchlist'}</span>
+        </button>
+        <button onClick={() => markWatched(title, !watchedIds.has(title.id))}>
+          <span className='tcirc'><CheckCircle size={20} weight={watchedIds.has(title.id) ? 'fill' : 'regular'} /></span>
+          <span>{watchedIds.has(title.id) ? 'Watched' : 'Mark watched'}</span>
+        </button>
+        <button onClick={() => toggleDownload(title, !dlIds.has(title.id))}>
+          <span className='tcirc'><DownloadSimple size={20} weight={dlIds.has(title.id) ? 'fill' : 'regular'} /></span>
+          <span>{dlIds.has(title.id) ? 'Downloaded' : 'Download'}</span>
+        </button>
+        {canCast && (
+          <button onClick={() => openCast(title)}>
+            <span className='tcirc'><Screencast size={20} /></span>
+            <span>Play on TV</span>
+          </button>
+        )}
+      </div>
+
+      {title.overview && <p className='tsum'>{title.overview}</p>}
+
+      {/* WHAT IS ACTUALLY IN THE FILE. The one part of this page nobody else can
+          answer as well, because it is the operator's own file rather than a
+          database entry about the film. */}
+      <dl className='tspecs'>
+        <dt>Picture</dt>
+        <dd>{[title.media?.height ? `${title.media.height}p` : null, (title.media?.videoCodec || '').toUpperCase() || null].filter(Boolean).join(' · ') || 'not reported'}</dd>
+        <dt>Sound</dt>
+        <dd>{[(title.media?.audioCodec || '').toUpperCase() || null, title.media?.audioChannels ? `${title.media.audioChannels} channels` : null].filter(Boolean).join(' · ') || 'not reported'}</dd>
+        <dt>Subtitles</dt>
+        <dd>
+          {titleSubs === null
+            ? 'Looking…'
+            : titleSubs.length
+              ? `${titleSubs.length} available`
+              : 'None'}
+        </dd>
+        {title.media?.size ? <><dt>File</dt><dd>{fmtBytes(title.media.size)}</dd></> : null}
+      </dl>
+    </div>
+  )
+
   const libraryScreen = (
     <div
       className='app'
@@ -1919,10 +2073,14 @@ export default function App () {
         </div>
       )}
 
+      {/* The same arrow inside a show, so leaving a screen looks the same wherever
+          you are. The header above it already names where that is. */}
       {series && (
-        <div className='pickrow'>
-          <button className='ghost' onClick={() => (season ? setSeason(null) : setSeries(null))}><CaretLeft size={16} /> Back</button>
-        </div>
+        <button
+          className='backarrow'
+          onClick={() => (season ? setSeason(null) : setSeries(null))}
+          aria-label={season ? 'Back to the show' : 'Back to Shows'}
+        ><CaretLeft size={22} /></button>
       )}
 
       {err && <div className='error'>{err}</div>}
@@ -2706,7 +2864,7 @@ export default function App () {
 
   return (
     <div className='shellwrap'>
-      {tab === 'library' && libraryScreen}
+      {tab === 'library' && (titleScreen || libraryScreen)}
       {tab === 'you' && youScreen}
       {tab === 'watchlist' && watchlistScreen}
       {tab === 'settings' && settingsScreen}
@@ -2772,13 +2930,7 @@ export default function App () {
           downloaded={dlIds.has(sheet.id)}
           libraryNames={new Map((state?.hosts || []).map((h) => [h.libraryId, h.libraryName || 'Library']))}
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched} onCast={openCast}
-          onDownload={(i, want) => {
-            if (want) {
-              call('download.start', { itemId: i.id }).then(() => { setDlIds((x) => new Set(x).add(i.id)); say('Downloading. Watch it in You, Downloads') }).catch((e) => setErr(e.message))
-            } else {
-              call('download.remove', { itemId: i.id }).then(() => { setDlIds((x) => { const n = new Set(x); n.delete(i.id); return n }); say('Removed from this phone') })
-            }
-          }}
+          onDownload={toggleDownload}
         />
       )}
 

@@ -1645,3 +1645,90 @@ label.flabel { display: block; margin-top: .6rem; }
  * lets the player be the one to find out otherwise. */
 .album.unreachable { opacity: .42 }
 .album.unreachable .cover { filter: grayscale(1) }
+
+
+/* ---- the page about one film ------------------------------------------------
+ *
+ * Tapping a film in the library used to start it. It opens this instead (Tim,
+ * 2026-08-20, with Plex's phone screen): the picture, the name, one line of facts,
+ * one big Watch, a row of quiet round actions, and then what it is about and what is
+ * actually inside the file.
+ *
+ * Its own SCREEN rather than a sheet. A sheet is for a handful of actions on
+ * something you can still see behind it; this is the thing itself.
+ */
+.titlescreen { padding-bottom: 2rem; }
+
+/* THE WAY BACK IS AN ARROW, not a labelled pill (Tim, 2026-08-20). There is exactly
+ * one place to go back to, so the word was saying nothing the arrow does not - and a
+ * bordered box at the top of a screen is chrome sitting above the thing somebody came
+ * to look at.
+ *
+ * The PAINT shrinks, not the target: it keeps a finger-sized box around a 22px glyph,
+ * which is the whole reason this is padding rather than a smaller icon. */
+.backarrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.75rem; height: 2.75rem; margin: 0.15rem 0.35rem 0;
+  padding: 0; background: none; border: none;
+  color: var(--color-text); border-radius: 999px;
+}
+.backarrow:active { background: var(--color-surface-card); }
+
+/* Centred and about half the width: a phone poster at full width is a wall, and
+ * everything under it is what the page is for. */
+.titlescreen .tposter { width: 55%; max-width: 15rem; margin: 0.4rem auto 1rem; }
+
+/* THE FILM'S OWN NAME, not a section heading. The app's h2 is a small uppercase
+ * label everywhere else, which is right for "Recently added" and wrong for the one
+ * thing this whole screen is about. */
+.titlescreen .ttitle {
+  margin: 0 1rem; text-align: center; font-size: 1.35rem; line-height: 1.2;
+  text-transform: none; letter-spacing: 0; font-weight: 600;
+  color: var(--color-text-primary);
+}
+.titlescreen .tfacts {
+  margin: 0.35rem 1rem 0; text-align: center;
+  color: var(--color-text-dim); font-size: 0.84rem;
+}
+
+/* ONE BIG WATCH, because that is what somebody came for. Full width and unmissable,
+ * the way every other primary action on this app's screens is. */
+.titlescreen .twatch {
+  display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+  margin: 1.1rem 1rem 0; width: calc(100% - 2rem);
+  padding: 0.85rem; font-size: 1rem; font-weight: 600;
+  background: var(--color-primary); border-color: var(--color-primary);
+  color: var(--color-text-on-primary);
+}
+
+/* The rest are round and quiet: everything here is reversible, and none of it is
+ * what the page is for. Icon over a word, which is how a phone says an action
+ * without spending a line on it. */
+.titlescreen .tacts {
+  display: flex; justify-content: center; gap: 1.4rem;
+  margin: 1.1rem 1rem 0; flex-wrap: wrap;
+}
+.titlescreen .tacts button {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  background: none; border: none; padding: 0;
+  color: var(--color-text-dim); font-size: 0.72rem; max-width: 5rem; text-align: center;
+}
+.titlescreen .tcirc {
+  display: grid; place-items: center; width: 2.6rem; height: 2.6rem;
+  border-radius: 999px; background: var(--color-surface-card);
+  border: 1px solid var(--color-border); color: var(--color-text);
+}
+
+.titlescreen .tsum {
+  margin: 1.4rem 1rem 0; line-height: 1.55; color: var(--color-text);
+}
+
+/* WHAT IS ACTUALLY IN THE FILE - the one part of this page nobody else can answer as
+ * well, because it is the operator's own file rather than a database entry about the
+ * film. */
+.titlescreen .tspecs {
+  display: grid; grid-template-columns: 6.5rem 1fr; gap: 0.4rem 0.9rem;
+  margin: 1.4rem 1rem 0;
+}
+.titlescreen .tspecs dt { color: var(--color-text-dim); font-size: 0.82rem; }
+.titlescreen .tspecs dd { margin: 0; font-size: 0.88rem; }
