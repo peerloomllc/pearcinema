@@ -1478,6 +1478,40 @@ test('THE TELEVISIONS SHOW WITHOUT HOME ASSISTANT, which is most people', async 
   assert.doesNotMatch(text(), /Casting is off/, 'and it never says casting is off while a television is listed')
 })
 
+test('A FOUND TELEVISION SAYS WHAT IT PLAYS, and does not claim Home Assistant found it', async (t) => {
+  // Two things, both about a television discovered on the wire rather than configured.
+  // The label read `via !== 'roku'` from when there was one kind of discovery, so every
+  // DLNA television announced itself as coming through Home Assistant - software its
+  // owner may not have installed. And the capability profile is the set's own answer
+  // now (host/dlna.js asks it), which belongs on screen: it is what tells somebody
+  // whether their films will play, rather than a Samsung in another house.
+  const { text } = await openCasting(t, {
+    '/api/cast/targets': {
+      targets: [{
+        entityId: 'dlna:udn-1',
+        name: 'Samsung TU7000 65 TV',
+        state: 'idle',
+        deviceClass: 'tv',
+        hidden: false,
+        host: '192.168.50.216',
+        via: 'dlna',
+        accepts: { containers: ['mp4', 'matroska', 'mkv', 'mov', 'webm'], videoCodecs: ['h264', 'hevc'], playlist: false }
+      }],
+      needsChannel: [],
+      mediaChannel: 'Media Assistant'
+    }
+  })
+
+  assert.match(text(), /Samsung TU7000/)
+  assert.doesNotMatch(text(), /via Home Assistant/, 'nobody found this through software they may not own')
+  // In words the owner of a television would use, and with MKV said once.
+  assert.match(text(), /Says it plays MP4, MKV, MOV and WebM, in H\.264 and HEVC\./)
+
+  // And the counting above the list follows the same correction: a DLNA television is
+  // one this host found, not one Home Assistant supplied.
+  assert.match(text(), /1 television found/)
+})
+
 test('a television that is switched off says so, rather than disappearing', async (t) => {
   const { text, doc } = await openCasting(t, {
     '/api/cast/targets': {

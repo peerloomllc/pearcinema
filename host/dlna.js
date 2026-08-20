@@ -43,6 +43,9 @@ const HTTP_TIMEOUT_MS = 6000
 const FEATURES = 'DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
 
 const AV = 'urn:schemas-upnp-org:service:AVTransport:1'
+// The service that answers what a renderer will actually accept. AVTransport is how a
+// film is put on; this is how the television is ASKED first.
+const CM = 'urn:schemas-upnp-org:service:ConnectionManager:1'
 
 // SEEK, in Home Assistant's own vocabulary, because host/cast.js asks `canSeek` about every
 // television in the same words whichever backend found it.
@@ -110,16 +113,16 @@ function request (url, { method = 'GET', body = null, headers = {}, timeoutMs = 
 // One SOAP action. A UPnP fault comes back as a 500 with an errorCode inside it, and the
 // code is the useful half - 701 means "not in a state where that makes sense", which is a
 // different thing from a television that cannot do it at all.
-async function soap (controlUrl, action, args, { request: send = request } = {}) {
+async function soap (controlUrl, action, args, { request: send = request, service = AV } = {}) {
   const body =
     '<?xml version="1.0"?>' +
     '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">' +
-    `<s:Body><u:${action} xmlns:u="${AV}">${args}</u:${action}></s:Body></s:Envelope>`
+    `<s:Body><u:${action} xmlns:u="${service}">${args}</u:${action}></s:Body></s:Envelope>`
 
   const res = await send(controlUrl, {
     method: 'POST',
     body,
-    headers: { 'content-type': 'text/xml; charset="utf-8"', soapaction: `"${AV}#${action}"` }
+    headers: { 'content-type': 'text/xml; charset="utf-8"', soapaction: `"${service}#${action}"` }
   })
   if (res.status !== 200) {
     const code = tag(res.body, 'errorCode')
@@ -182,35 +185,132 @@ function discover ({ log = () => {}, ms = DISCOVER_MS } = {}) {
 // What a renderer says it is. The control URL is the only thing here that MUST be found:
 // a device with no AVTransport is a renderer that cannot be handed a film - a photo frame,
 // a speaker's control endpoint - and it is dropped rather than offered.
+// One service's control URL out of a device description. Not the first controlURL in
+// the file, which belongs to whichever service happened to be listed first.
+function controlFor (xml, location, service) {
+  const wanted = new RegExp(service.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+  const block = [...xml.matchAll(/<service>([\s\S]*?)<\/service>/gi)]
+    .map((m) => m[1])
+    .find((b) => wanted.test(b))
+  const control = block ? tag(block, 'controlURL') : null
+  return control ? new URL(control, location).toString() : null
+}
+
 async function describe (location, { request: send = request } = {}) {
   const res = await send(location)
   if (res.status !== 200 || !res.body) return null
   const xml = res.body
-  if (!new RegExp(AV.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(xml)) return null
-
-  // The AVTransport block, then its control URL - not the first controlURL in the file,
-  // which belongs to whichever service happened to be listed first.
-  const block = [...xml.matchAll(/<service>([\s\S]*?)<\/service>/gi)]
-    .map((m) => m[1])
-    .find((b) => new RegExp(AV.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i').test(b))
-  const control = block ? tag(block, 'controlURL') : null
-  if (!control) return null
+  const controlUrl = controlFor(xml, location, AV)
+  if (!controlUrl) return null
 
   return {
     udn: (tag(xml, 'UDN') || '').replace(/^uuid:/i, '') || null,
     name: tag(xml, 'friendlyName') || null,
     model: tag(xml, 'modelName') || null,
     manufacturer: tag(xml, 'manufacturer') || null,
-    controlUrl: new URL(control, location).toString()
+    controlUrl,
+    // Optional: a renderer that publishes no ConnectionManager simply cannot be
+    // asked what it accepts, and falls back to the conservative profile.
+    connectionUrl: controlFor(xml, location, CM)
+  }
+}
+
+// --- what this television says it accepts ------------------------------------
+//
+// THE ONE QUESTION WE WERE NOT ASKING (Tim, 2026-08-20: "would these changes to Roku
+// and Samsung casting work for anyone else who installs PearCinema and discovers
+// those devices on their network or is this custom to our setup?"). The mechanism was
+// always generic; the CAPABILITY PROFILE was one Samsung's, inherited by every DLNA
+// television in the world. A renderer publishes exactly this - `GetProtocolInfo` on
+// ConnectionManager returns a `Sink` list of every protocol, container and profile it
+// will take - and it was never being read.
+//
+// WHAT THE ANSWER IS GOOD FOR, and it is narrower than it looks. Read from the real
+// TU7000 (292 entries, 264 DLNA profiles, 2026-08-20) it is exact about CONTAINERS and
+// CODECS - `video/x-mkv`, `video/quicktime`, `video/hevc` and a hundred AVC profiles
+// are the set saying in its own words what it opens.
+//
+// AND IT IS USELESS ABOUT TRANSPORT, which is the thing it would have been most
+// convenient for. The same Samsung advertises no playlist mime type at all and
+// demonstrably plays an HLS playlist (measured before this, and the whole reason the
+// DLNA profile allows one). So an absent playlist type means "did not say", never
+// "cannot" - and the shape of a stream stays a thing to be tried rather than derived.
+// The one thing an ADVERTISED playlist type buys is certainty in the other direction.
+//
+// So this only ever WIDENS, and a device that answers nothing useful keeps exactly the
+// profile it had before this existed.
+
+const MIME_CONTAINERS = {
+  'video/mp4': ['mp4'],
+  'video/quicktime': ['mov'],
+  'video/x-matroska': ['matroska', 'mkv'],
+  // Samsung's own spelling of the same thing.
+  'video/x-mkv': ['matroska', 'mkv'],
+  'video/webm': ['webm']
+}
+
+const PLAYLIST_MIMES = [
+  'application/vnd.apple.mpegurl',
+  'application/x-mpegurl',
+  'audio/mpegurl',
+  'audio/x-mpegurl'
+]
+
+async function protocolInfo (connectionUrl, { soap: call = soap, request: send = request } = {}) {
+  const xml = await call(connectionUrl, 'GetProtocolInfo', '', { request: send, service: CM })
+  return tag(xml, 'Sink') || ''
+}
+
+// A Sink list turned into the half of a capability profile it can honestly answer.
+// Null when there is nothing usable in it, which is the caller's signal to keep the
+// conservative profile whole rather than merge an empty one over it.
+function sinkProfile (sink) {
+  const entries = String(sink || '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (!entries.length) return null
+
+  const containers = new Set()
+  const videoCodecs = new Set()
+  let playlist = false
+
+  for (const entry of entries) {
+    // `http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_720p_AAC`
+    const parts = entry.split(':')
+    if (parts.length < 3) continue
+    if (!/^http-get$/i.test(parts[0])) continue // an internal or RTP protocol is not ours to use
+    const mime = String(parts[2] || '').toLowerCase()
+    const profile = (/DLNA\.ORG_PN=([^;:]+)/i.exec(entry) || [])[1] || ''
+
+    for (const c of MIME_CONTAINERS[mime] || []) containers.add(c)
+    if (PLAYLIST_MIMES.includes(mime)) playlist = true
+
+    // A raw elementary-stream mime type is the set naming a DECODER rather than a
+    // container, which is the most direct statement it makes about codecs.
+    if (mime === 'video/hevc' || mime === 'video/h265' || mime === 'video/x-h265') videoCodecs.add('hevc')
+    if (mime === 'video/h264' || mime === 'video/x-h264' || mime === 'video/avc') videoCodecs.add('h264')
+
+    // And the DLNA profile names say it again, in the vocabulary a certified device
+    // uses: AVC_MP4_MP_HD_AAC is h.264 in mp4, HEVC_TS_MAIN is HEVC.
+    if (/^AVC[_-]/i.test(profile)) videoCodecs.add('h264')
+    if (/HEVC|H265/i.test(profile)) videoCodecs.add('hevc')
+  }
+
+  if (!containers.size && !videoCodecs.size && !playlist) return null
+  return {
+    containers: [...containers],
+    videoCodecs: [...videoCodecs],
+    // TRUE means the device said so; false means it did not say, which is not the
+    // same as "cannot" - see the note above. Never used to take a playlist away.
+    playlist
   }
 }
 
 class DlnaSpeakers {
-  constructor ({ log = () => {}, discoverFn = discover, describeFn = describe, soapFn = soap, televisions = null } = {}) {
+  constructor ({ log = () => {}, discoverFn = discover, describeFn = describe, soapFn = soap, protocolInfoFn = protocolInfo, televisions = null } = {}) {
     this.log = log
     this._discover = discoverFn
     this._describe = describeFn
     this._soap = soapFn
+    this._protocolInfo = protocolInfoFn
     this.televisions = televisions
     this.devices = new Map()
     this.lastScan = 0
@@ -241,6 +341,15 @@ class DlnaSpeakers {
     return this.devices.get(id)?.controlUrl || this.televisions?.get(id)?.control || null
   }
 
+  // WHAT THIS TELEVISION SAID IT ACCEPTS, or null for one that never said. Read from
+  // the live row first and the store second, so a set that is switched off right now
+  // still casts with the profile it published when it was last awake.
+  accepts (entityId) {
+    const id = String(entityId || '')
+    if (!id.startsWith('dlna:')) return null
+    return this.devices.get(id)?.accepts || this.televisions?.get(id)?.accepts || null
+  }
+
   async scan ({ maxAgeMs = 0 } = {}) {
     if (maxAgeMs && this.lastScan && Date.now() - this.lastScan < maxAgeMs) return [...this.devices.values()]
 
@@ -255,20 +364,36 @@ class DlnaSpeakers {
       // describe(), which is the test that actually means something.
       if (!info) return
       const entityId = this.entityIdFor({ udn: info.udn, address: a.address })
+
+      // ASK IT WHAT IT TAKES, once per sighting and never fatally: a television that
+      // does not answer this is a television we know nothing extra about, which is
+      // exactly where we were before. Kept beside the row so the cast path can widen
+      // the conservative profile with the set's own words.
+      let accepts = this.televisions?.get(entityId)?.accepts || null
+      if (info.connectionUrl) {
+        try {
+          const derived = sinkProfile(await this._protocolInfo(info.connectionUrl))
+          if (derived) accepts = derived
+        } catch (e) {
+          this.log('dlna:protocol-info-failed', { entityId, err: e?.message })
+        }
+      }
+
       const row = {
         entityId,
         name: info.name || info.model || a.address,
         model: info.model,
         udn: info.udn,
         host: a.address,
-        controlUrl: info.controlUrl
+        controlUrl: info.controlUrl,
+        accepts
       }
       next.set(entityId, row)
       // The control URL is what a backend needs to reach this television again, and the
       // store keeps one field per backend for exactly that.
       this.televisions?.remember({
         id: entityId, via: 'dlna', name: row.name, model: row.model, udn: row.udn,
-        host: row.host, control: row.controlUrl
+        host: row.host, control: row.controlUrl, accepts
       })
     }))
 
@@ -297,7 +422,10 @@ class DlnaSpeakers {
         deviceClass: 'tv',
         hidden: !!d.hidden,
         host: d.host || null,
-        via: 'dlna'
+        via: 'dlna',
+        // What it said it accepts, for the settings page - so "will this work with my
+        // television" is answered by the television rather than by us.
+        accepts: this.accepts(id)
       }
     })
   }
@@ -399,5 +527,6 @@ class DlnaSpeakers {
 
 module.exports = {
   DlnaSpeakers, discover, describe, soap, request, stateFrom, seconds, clockOf, tag,
-  FEATURES, FEATURE_SEEK, SSDP_ST
+  protocolInfo, sinkProfile, controlFor,
+  FEATURES, FEATURE_SEEK, SSDP_ST, CM
 }

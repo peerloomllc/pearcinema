@@ -49,6 +49,19 @@ const pathOf = (dataDir) => path.join(dataDir, FILE)
 // Only the fields we understand, and each one clamped to something a JSON file
 // cannot use to surprise a renderer. This file is written by us and read by us, but
 // the values inside it came off a network answer.
+// A short list of short lower-case words, or nothing at all.
+function cleanAccepts (a) {
+  if (!a || typeof a !== 'object') return null
+  const list = (v) => (Array.isArray(v)
+    ? [...new Set(v.map((x) => String(x || '').toLowerCase().trim()).filter(Boolean).slice(0, 24))].map((x) => x.slice(0, 32))
+    : [])
+  const containers = list(a.containers)
+  const videoCodecs = list(a.videoCodecs)
+  const playlist = !!a.playlist
+  if (!containers.length && !videoCodecs.length && !playlist) return null
+  return { containers, videoCodecs, playlist }
+}
+
 function clean (row) {
   const str = (v, max) => {
     const s = String(v == null ? '' : v).trim()
@@ -73,6 +86,12 @@ function clean (row) {
     // Kept apart from `channel` rather than sharing it - a channel id is four digits and
     // clamped to thirty-two characters, which would have quietly cut a URL in half.
     control: str(row?.control, 256),
+    // WHAT THE TELEVISION ITSELF SAID IT ACCEPTS (host/dlna.js sinkProfile). Remembered
+    // because a set that is switched off cannot be asked, and a household should not
+    // lose the answer it gave yesterday - the alternative is casting to it with the
+    // conservative profile, which converts films it would have played untouched.
+    // Clamped like everything else here: these lists came off a network answer.
+    accepts: cleanAccepts(row?.accepts),
     hidden: !!row?.hidden,
     firstSeen: Number(row?.firstSeen) || Date.now(),
     lastSeen: Number(row?.lastSeen) || Date.now()

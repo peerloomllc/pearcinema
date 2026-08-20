@@ -9,8 +9,11 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
+const fs = require('fs')
+const path = require('path')
+
 const {
-  DlnaSpeakers, describe: describeDevice, soap, stateFrom, seconds, clockOf
+  DlnaSpeakers, describe: describeDevice, soap, stateFrom, seconds, clockOf, sinkProfile, protocolInfo
 } = require('../host/dlna')
 
 const CONTROL = 'http://192.168.50.216:9197/upnp/control/AVTransport1'
@@ -31,6 +34,10 @@ const DESCRIPTION = `<?xml version="1.0"?>
     <service>
       <serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType>
       <controlURL>/upnp/control/AVTransport1</controlURL>
+    </service>
+    <service>
+      <serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType>
+      <controlURL>/upnp/control/ConnectionManager1</controlURL>
     </service>
   </serviceList>
 </device></root>`
@@ -100,6 +107,8 @@ test('a renderer description yields a name and the AVTransport control url', asy
   // NOT THE FIRST controlURL IN THE FILE. RenderingControl is listed first and controls
   // the volume; sending SetAVTransportURI there is a command to the wrong service.
   assert.equal(info.controlUrl, CONTROL)
+  // AND THE SERVICE THAT ANSWERS WHAT IT ACCEPTS, which is a different one again.
+  assert.equal(info.connectionUrl, 'http://192.168.50.216:9197/upnp/control/ConnectionManager1')
 })
 
 test('something that is not a television is not offered as one', async () => {
@@ -213,4 +222,117 @@ test('the four states, in our words', () => {
   assert.equal(stateFrom('TRANSITIONING'), 'buffering')
   assert.equal(stateFrom('STOPPED'), 'idle')
   assert.equal(stateFrom('NO_MEDIA_PRESENT'), 'idle')
+})
+
+
+// --- what the television says it accepts -------------------------------------
+//
+// Tim, 2026-08-20, reading the DLNA work: "would these changes to Roku and Samsung
+// casting work for anyone else who installs PearCinema and discovers those devices on
+// their network or is this custom to our setup?" The mechanism was always generic; the
+// CAPABILITY PROFILE was one Samsung's, inherited by every DLNA television in the
+// world. This is the standard call that was not being made.
+
+// The real thing: 28 KB of Sink list read off the TU7000 on Tim's network,
+// 2026-08-20, by asking it GetProtocolInfo. 292 entries, 264 DLNA profiles.
+const SAMSUNG_SINK = fs.readFileSync(path.join(__dirname, 'fixtures', 'samsung-tu7000-sink.txt'), 'utf8')
+
+test('THE REAL TELEVISION\'S OWN ANSWER, parsed into what it will take', async () => {
+  const profile = sinkProfile(SAMSUNG_SINK)
+
+  // Containers: the hand-measured profile had mp4, mov and Matroska, and the set
+  // itself says the same three - in its own spelling, `video/x-mkv` - plus webm.
+  assert.deepEqual(profile.containers.sort(), ['matroska', 'mkv', 'mov', 'mp4', 'webm'])
+
+  // AND HEVC, which the hand-measured profile does not offer it. That is not a
+  // guess about a model number: the set publishes `video/hevc`, and 64% of this
+  // library is HEVC television that has been converted for it ever since.
+  assert.deepEqual(profile.videoCodecs.sort(), ['h264', 'hevc'])
+
+  // A PLAYLIST IT NEVER MENTIONS AND DEMONSTRABLY PLAYS. This is why the answer is
+  // only ever used to widen: read as a complete statement it would have taken HLS
+  // away from the one television measured playing it.
+  assert.equal(profile.playlist, false)
+})
+
+test('a device that says nothing usable keeps the profile it had', async () => {
+  assert.equal(sinkProfile(''), null)
+  assert.equal(sinkProfile(null), null)
+  // Every entry unusable: no http-get, and nothing we know how to open.
+  assert.equal(sinkProfile('rtsp-rtp-udp:*:video/mp4:*,http-get:*:audio/mpeg:*,http-get:*:image/jpeg:*'), null)
+})
+
+test('a renderer that DOES advertise a playlist is believed', async () => {
+  const profile = sinkProfile('http-get:*:video/mp4:*,http-get:*:application/vnd.apple.mpegurl:*')
+  assert.equal(profile.playlist, true)
+  assert.deepEqual(profile.containers, ['mp4'])
+})
+
+test('codecs are read from the profile names as well as the mime types', async () => {
+  // A certified device names what it opens in DLNA's own vocabulary rather than by
+  // mime type: AVC_MP4_MP_HD_AAC is h.264 in mp4, HEVC_TS_MAIN is HEVC.
+  const profile = sinkProfile([
+    'http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_720p_AAC',
+    'http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=HEVC_TS_MAIN_AAC'
+  ].join(','))
+  assert.deepEqual(profile.videoCodecs.sort(), ['h264', 'hevc'])
+})
+
+test('the television is ASKED at scan time, and the answer is remembered', async (t) => {
+  const asked = []
+  const s = speakers({
+    tv: fakeTv(),
+    describeFn: async () => ({
+      udn: 'udn-1', name: 'A Television', model: 'X', controlUrl: CONTROL,
+      connectionUrl: 'http://192.168.50.216:9197/upnp/control/ConnectionManager1'
+    })
+  })
+  s._protocolInfo = async (url) => { asked.push(url); return SAMSUNG_SINK }
+
+  await s.scan()
+  assert.equal(asked.length, 1, 'once, on the ConnectionManager it published')
+  assert.match(asked[0], /ConnectionManager1$/)
+
+  const accepts = s.accepts('dlna:udn-1')
+  assert.deepEqual(accepts.videoCodecs.sort(), ['h264', 'hevc'])
+  assert.equal(s.accepts('dlna:nobody'), null)
+  assert.equal(s.accepts('media_player.something'), null, 'this backend answers for its own ids only')
+})
+
+test('a television that will not say is not a television that has changed', async (t) => {
+  // Refusing GetProtocolInfo, publishing no ConnectionManager at all, or answering
+  // something unparseable are all the same outcome: we know nothing extra, so the
+  // conservative profile stands whole. This is the case that must never throw - a
+  // renderer that cannot be asked still has to be castable.
+  const noService = speakers({
+    describeFn: async () => ({ udn: 'udn-2', name: 'Old Set', model: 'Y', controlUrl: CONTROL })
+  })
+  noService._protocolInfo = async () => { throw new Error('should not be asked') }
+  await noService.scan()
+  assert.equal(noService.accepts('dlna:udn-2'), null)
+
+  const refuses = speakers({
+    describeFn: async () => ({ udn: 'udn-3', name: 'Set', model: 'Z', controlUrl: CONTROL, connectionUrl: 'http://x/cm' })
+  })
+  refuses._protocolInfo = async () => { const e = new Error('no'); e.upnpCode = 401; throw e }
+  await refuses.scan()
+  assert.equal(refuses.accepts('dlna:udn-3'), null)
+  assert.equal((await refuses.list()).length, 1, 'and it is still offered as a television')
+})
+
+test('GetProtocolInfo goes to ConnectionManager, not AVTransport', async () => {
+  // The same SOAP envelope with the wrong namespace is a command to the wrong
+  // service, which is the mistake the AVTransport control URL lookup already exists
+  // to prevent one level up.
+  const seen = []
+  const sink = await protocolInfo('http://tv/cm', {
+    soap: async (url, action, args, opts) => {
+      seen.push({ url, action, service: opts.service })
+      return '<s:Envelope><s:Body><u:GetProtocolInfoResponse><Source></Source>' +
+        '<Sink>http-get:*:video/mp4:*</Sink></u:GetProtocolInfoResponse></s:Body></s:Envelope>'
+    }
+  })
+  assert.equal(seen[0].action, 'GetProtocolInfo')
+  assert.match(seen[0].service, /ConnectionManager:1$/)
+  assert.equal(sink, 'http-get:*:video/mp4:*')
 })

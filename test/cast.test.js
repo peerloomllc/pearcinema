@@ -43,12 +43,24 @@ const okGrant = (over = {}) => ({
 
 // Records what HA was asked to do, so "revoke darkened the television" is an
 // assertion about a call that was actually made.
-function fakeSpeakers () {
+function fakeSpeakers ({ accepts = null, refusePlaylist = null } = {}) {
   return {
     enabled: true,
     calls: [],
     states: new Map(),
-    async play (entityId, url, opts) { this.calls.push(['play', entityId, url, opts]) },
+    // What a television said it accepts when it was asked (host/dlna.js). Home
+    // Assistant has no such question and answers null, which is every other test here.
+    accepts (entityId) { return accepts },
+    async play (entityId, url, opts) {
+      this.calls.push(['play', entityId, url, opts])
+      // A renderer refusing a shape ANSWERS: a UPnP fault, with a code. `refusePlaylist`
+      // is that answer for a playlist URL; `null` is a set that takes anything.
+      if (refusePlaylist && /\.m3u8$/.test(url)) {
+        const e = new Error(refusePlaylist.message || 'Illegal MIME-type')
+        e.upnpCode = refusePlaylist.code
+        throw e
+      }
+    },
     async stop (entityId) { this.calls.push(['stop', entityId]) },
     async pause (entityId) { this.calls.push(['pause', entityId]) },
     async resume (entityId) { this.calls.push(['resume', entityId]) },
@@ -121,8 +133,8 @@ function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS
   return m
 }
 
-async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null, boundaries = null, startOffset = true } = {}) {
-  const speakers = fakeSpeakers()
+async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null, boundaries = null, startOffset = true, accepts = null, refusePlaylist = null } = {}) {
+  const speakers = fakeSpeakers({ accepts, refusePlaylist })
   const grants = fakeGrants(grantRows)
   const media = fakeMedia({ mode, container, expectCaps, boundaries })
   const casts = new CastSessions({ speakers, grants, media, report, startOffset })
@@ -777,4 +789,115 @@ test('A SAMSUNG GETS THE SLICED PLAYLIST, because it ignores the tag the Roku ho
   // the row carries the offset the poll adds back.
   const row = casts.active(DEVICE)[0]
   assert.equal(row.at, 12, 'the real boundary, added back to whatever the set reports')
+})
+
+
+// --- a television that is not Tim's ------------------------------------------
+//
+// Tim, 2026-08-20: "would these changes to Roku and Samsung casting work for anyone
+// else who installs PearCinema and discovers those devices on their network or is
+// this custom to our setup?" The mechanism was generic; the PROFILE was his one
+// Samsung's, and every DLNA television in the world inherited it.
+
+const { mergeCaps } = require('../host/cast')
+
+test('WHAT A TELEVISION SAYS IT ACCEPTS WIDENS THE PROFILE, and never narrows it', async () => {
+  const said = { containers: ['mp4', 'matroska', 'mkv', 'mov', 'webm'], videoCodecs: ['h264', 'hevc'], playlist: false }
+  const wider = mergeCaps(DLNA_CAPS, said)
+  assert.ok(wider.videoCodecs.includes('hevc'), 'its own words about its own decoder')
+  assert.ok(wider.containers.includes('webm'))
+  for (const c of DLNA_CAPS.containers) assert.ok(wider.containers.includes(c), c)
+
+  // A SHORTER LIST TAKES NOTHING AWAY. A Sink list is what a renderer chose to
+  // publish, not a promise about what it refuses - and the same Samsung proves it,
+  // by never mentioning the playlist it plays perfectly well.
+  const terse = mergeCaps(DLNA_CAPS, { containers: ['mp4'], videoCodecs: [], playlist: false })
+  assert.deepEqual(terse.containers.sort(), [...DLNA_CAPS.containers].sort())
+  assert.deepEqual(terse.videoCodecs, DLNA_CAPS.videoCodecs)
+
+  // AUDIO IS DELIBERATELY NOT WIDENED: a film that plays in silence has nothing on
+  // screen to say why, which is the worst failure available (the Roku, 2026-08-19).
+  assert.equal(mergeCaps(DLNA_CAPS, { containers: [], videoCodecs: [], playlist: true }).maxAudioChannels, 2)
+
+  // And a television that said nothing keeps exactly what it had.
+  assert.equal(mergeCaps(DLNA_CAPS, null), DLNA_CAPS)
+})
+
+test('a set that publishes HEVC gets its HEVC films untouched', async (t) => {
+  // The measured profile offers h264 only, which is right as a default - a great many
+  // DLNA televisions do not decode HEVC and a black screen is worse than some engine
+  // time. It is wrong for a set that says otherwise in its own words, and 64% of this
+  // library is HEVC television.
+  const accepts = { containers: ['matroska', 'mkv'], videoCodecs: ['h264', 'hevc'], playlist: false }
+  const { casts, speakers } = await build({
+    mode: 'direct',
+    container: 'matroska',
+    accepts,
+    expectCaps: mergeCaps(DLNA_CAPS, accepts)
+  })
+  t.after(() => casts.close())
+
+  // The decide() double asserts the capabilities it was handed, so reaching here at
+  // all is the assertion: the television's own profile went through the same decision
+  // every client goes through.
+  const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:abc-123' })
+  assert.equal(out.mode, 'direct')
+})
+
+test('A TELEVISION THAT REFUSES A PLAYLIST IS GIVEN THE STREAM INSTEAD', async (t) => {
+  // The dangerous half of inheriting one set's profile. Everything converted goes to a
+  // DLNA television as a PLAYLIST, because the one it was measured on refuses a live
+  // progressive stream and unusually plays HLS. A renderer the other way round - takes
+  // the stream, cannot open a playlist, which is the commoner shape - got nothing at
+  // all. And no reading of GetProtocolInfo would have caught it: the Samsung
+  // advertises no playlist type either.
+  const { casts, speakers } = await build({
+    mode: 'transcode',
+    container: 'matroska',
+    expectCaps: DLNA_CAPS,
+    refusePlaylist: { code: 714, message: 'Illegal MIME-type' }
+  })
+  t.after(() => casts.close())
+
+  const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:abc-123', at: 0 })
+  assert.equal(out.mode, 'transcode')
+
+  const plays = speakers.calls.filter(c => c[0] === 'play')
+  assert.equal(plays.length, 2, 'the playlist first, then the other shape')
+  assert.match(plays[0][2], /index\.m3u8$/)
+  assert.doesNotMatch(plays[1][2], /index\.m3u8$/)
+  assert.equal(plays[1][3].format, 'mp4', 'and told what it is actually receiving')
+
+  // The stream it was given is a real one.
+  const res = await fetch(plays[1][2])
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-type'), 'video/mp4')
+
+  // AND THE DOOMED ATTEMPT IS MADE ONCE. A second film goes straight to the shape
+  // this television is known to take.
+  speakers.calls.length = 0
+  await casts.play({ deviceKey: DEVICE, itemId: 'film2', entityId: 'dlna:abc-123', at: 0 })
+  const again = speakers.calls.filter(c => c[0] === 'play')
+  assert.equal(again.length, 1)
+  assert.doesNotMatch(again[0][2], /index\.m3u8$/)
+})
+
+test('a television that is switched off is not asked twice', async (t) => {
+  // A set that never answers is not refusing anything - it is off, or gone. Trying a
+  // second shape at it only doubles the wait before the same error comes back.
+  const { casts, speakers } = await build({
+    mode: 'transcode',
+    container: 'matroska',
+    expectCaps: DLNA_CAPS,
+    refusePlaylist: { code: null, message: 'connect ECONNREFUSED' }
+  })
+  t.after(() => casts.close())
+
+  await assert.rejects(
+    () => casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:abc-123', at: 0 }),
+    /ECONNREFUSED/
+  )
+  assert.equal(speakers.calls.filter(c => c[0] === 'play').length, 1)
+  // And nothing is left behind for a play that never started.
+  assert.deepEqual(casts.active(DEVICE), [])
 })
