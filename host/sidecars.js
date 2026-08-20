@@ -47,10 +47,14 @@ function esc (s) {
 // A minimal Kodi-dialect .nfo. `<tmdbid>` is what our own reader parses
 // (host/nfo.js strips <uniqueid> blocks as nested); <uniqueid> is what Kodi
 // and Jellyfin prefer today. Both are written so every reader finds its own.
-function nfoXml (root, { title, year, tmdbId }) {
+function nfoXml (root, { title, year, tmdbId, overview }) {
   const lines = ['<?xml version="1.0" encoding="UTF-8" standalone="yes"?>', `<${root}>`]
   if (title) lines.push(`  <title>${esc(title)}</title>`)
   if (year) lines.push(`  <year>${Number(year)}</year>`)
+  // <plot> is what our own reader takes as the summary (host/nfo.js) and what Kodi,
+  // Jellyfin and Plex all read. A copy saved into the library that carried the
+  // poster and not the words would be half the answer.
+  if (overview) lines.push(`  <plot>${esc(overview)}</plot>`)
   if (tmdbId) {
     lines.push(`  <tmdbid>${Number(tmdbId)}</tmdbid>`)
     lines.push(`  <uniqueid type="tmdb" default="true">${Number(tmdbId)}</uniqueid>`)

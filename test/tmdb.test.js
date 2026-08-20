@@ -201,6 +201,9 @@ function fakeAdapter () {
 
 const ROUTES = [
   [/search\/movie.*Uncovered|search\/movie.*query=Uncovered/, respond({ results: [{ id: 11, title: 'Uncovered', release_date: '2001-01-01', poster_path: '/u.jpg' }] })],
+  // The film with its own poster on disk. It IS looked up now - it has no summary,
+  // and a match is both halves - but the picture it comes back with is never taken.
+  [/search\/movie.*Covered/, respond({ results: [{ id: 41, title: 'Covered', release_date: '2000-01-01', poster_path: '/hd.jpg', overview: 'covered, and described' }] })],
   [/search\/movie.*Crash/, respond({
     results: [
       { id: 21, title: 'Crash', release_date: '1996-01-01', poster_path: '/c1.jpg' },
@@ -229,16 +232,23 @@ test('THE PASS: sidecar art untouched, everything else gets its best guess, doub
   const adapter = fakeAdapter()
 
   const out = await en.run(adapter, { key: 'k' })
-  assert.equal(out.looked, 3, 'the covered film was never looked up at all')
-  assert.equal(out.matched, 3, 'every bare item got a poster, ambiguous or not')
+  // The covered film is LOOKED UP - it has a poster of its own and no summary, and
+  // a match is both halves - but its picture is left alone, which is the rule that
+  // matters and is asserted on the poster directory below.
+  assert.equal(out.looked, 4)
+  assert.equal(out.matched, 4, 'every item got a match, ambiguous or not')
   assert.equal(out.uncertain, 1, 'and the guessed one is counted as a guess')
   assert.equal(out.missed, 0)
 
   // The poster is real bytes in the DATA dir, nowhere near the library - the
   // ambiguous Crash included, wearing its best guess, and the show's season
-  // poster and episode still beside them.
+  // poster and episode still beside them. NOTHING for the covered film: a picture
+  // that would be downloaded, stored and never shown is not fetched at all.
   const posters = await fsp.readdir(path.join(dir, 'tmdb', 'posters'))
   assert.deepEqual(posters.sort(), ['bare.jpg', 'show-e1.jpg', 'show-s1.jpg', 'show.jpg', 'vague.jpg'])
+  assert.equal(en.matched['has-art'].poster, false, 'matched, with no picture of ours')
+  assert.equal(en.decorate({ id: 'has-art', artId: 'real-art', overview: null }).artId, 'real-art')
+  assert.equal(en.decorate({ id: 'has-art', artId: 'real-art', overview: null }).overview, 'covered, and described')
   assert.equal(en.matched.vague.uncertain, true)
   assert.equal(en.matched.bare.uncertain, undefined)
   assert.equal(out.pictures, 2, 'the season and the one episode TMDB has a still for')
@@ -426,7 +436,7 @@ test('one flaky lookup costs that item only, and lands in missed', async () => {
   })
   const out = await en.run(fakeAdapter(), { key: 'k' })
   assert.equal(out.missed, 1)
-  assert.equal(out.matched, 2, 'the show and the guessable film still got their posters')
+  assert.equal(out.matched, 3, 'the rest of the library was matched as usual')
 })
 
 test('WHICH ONES FOUND NOTHING, resolved against the library rather than read from the store', async () => {

@@ -90,7 +90,7 @@ async function enriched (a, dataDir) {
 
   // The match title deliberately differs from the filename, so the round-trip
   // test can prove the rescan read the .nfo rather than re-parsed the name.
-  e.matched[heat.id] = { tmdbId: 949, title: 'Heat: Definitive Edition', year: 1995, poster: true, how: 'auto', at: 1 }
+  e.matched[heat.id] = { tmdbId: 949, title: 'Heat: Definitive Edition', year: 1995, overview: 'Two men, one on each side of it.', poster: true, how: 'auto', at: 1 }
   e.matched[alien.id] = { tmdbId: 348, title: 'Alien', year: 1979, poster: true, how: 'auto', uncertain: true, at: 1 }
   e.matched[br.id] = { tmdbId: 78, title: 'Blade Runner', year: 1982, poster: true, how: 'auto', at: 1 }
   e.matched[rocky.id] = { tmdbId: 1366, title: 'Rocky', year: 1976, poster: true, how: 'auto', at: 1 }
@@ -147,6 +147,10 @@ test('the write pass creates the standard files and holds back what it must', as
   assert.equal(parsed.title, 'Heat: Definitive Edition')
   assert.equal(parsed.year, 1995)
   assert.equal(parsed.ids.tmdb, '949')
+  // The words too, not just the picture and the name - a copy saved into the
+  // library that carried half the match would be half an answer, and <plot> is
+  // what our own reader and Kodi, Jellyfin and Plex all take as the summary.
+  assert.equal(parsed.plot, 'Two men, one on each side of it.')
   assert.equal(await fsp.readFile(path.join(base, 'Movies/Heat (1995)/Heat (1995)-poster.jpg'), 'utf8'), 'HEATPOSTER')
 
   // Alien was a guess: NOTHING beside it.

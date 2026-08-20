@@ -102,14 +102,18 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
   if (rows) {
     // THE NAME CARRIES THE STATE and the sub-line always says it in words, so nobody
     // has to tell green from grey to know whether this is on.
+    // IDENTIFIED, NOT "HAVE ARTWORK". A match is a poster AND a summary now, and
+    // the count is of matches - so on a library where the films already have their
+    // own posters it would have claimed to have fetched artwork it deliberately
+    // left alone.
     const postersSub = meta.running
       ? `Looking up ${meta.running.done} of ${meta.running.total}…`
       : meta.enabled
         ? (meta.lastRun
-            ? `On · ${meta.matched} title${meta.matched === 1 ? ' has' : 's have'} artwork`
+            ? `On · ${meta.matched} title${meta.matched === 1 ? ' is' : 's are'} identified`
             : 'On. Nothing has been fetched yet.')
         : meta.hasKey
-          ? 'Off. Films show only the artwork found beside them.'
+          ? 'Off. Films show only what is saved beside them.'
           : 'Off. It needs a free TMDB key first.'
 
     return (
@@ -119,15 +123,16 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
             one, what happens next - lives where it applies: in the key row, and in the
             form that opens when somebody sets one up. */}
         <p class='hint'>
-          With this on, the host asks TMDB, a third-party film database, for posters,
-          which means <b>this host tells TMDB the titles it is identifying</b>. Nothing
-          else is sent, and artwork found beside your own files always wins.
+          With this on, the host asks TMDB, a third-party film database, for posters and
+          summaries, which means <b>this host tells TMDB the titles it is identifying</b>.
+          Nothing else is sent, and a poster or a summary saved beside your own files
+          always wins.
         </p>
 
         <div class='setrows'>
           <div class='setrow'>
             <span class='rowmain'>
-              <span class={'rowname ' + (meta.enabled ? 'good' : 'dim')}>Posters</span>
+              <span class={'rowname ' + (meta.enabled ? 'good' : 'dim')}>Posters and summaries</span>
               <span class='rowsub'>
                 {postersSub}
                 {meta.running && (
@@ -201,7 +206,7 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
           {meta.enabled && !meta.running && meta.missed > 0 && (
             <div class='setrow'>
               <span class='rowmain'>
-                <span class='rowname warn'>Titles with no artwork</span>
+                <span class='rowname warn'>Titles nothing was found for</span>
                 <span class='rowsub'>{meta.missed} came back with nothing.</span>
               </span>
               {/* A COUNT YOU CANNOT ACT ON IS A COUNT (Tim, 2026-08-19). The button was
@@ -250,7 +255,7 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
         {!meta.running && meta.uncertain > 0 && (
           <p class='hint'>
             <b>{meta.uncertain}</b> of them {meta.uncertain === 1 ? 'was' : 'were'} matched from
-            several possibilities, so a poster may be wrong here and there. Correcting one is
+            several possibilities, so a poster or a summary may be wrong here and there. Correcting one is
             the pencil on its tile, in the library.
           </p>
         )}
@@ -332,7 +337,7 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
       {!meta.running && meta.uncertain > 0 && (
         <p class='hint'>
           <b>{meta.uncertain}</b> of them {meta.uncertain === 1 ? 'was' : 'were'} matched from
-          several possibilities, so a poster may be wrong here and there. Correcting one is
+          several possibilities, so a poster or a summary may be wrong here and there. Correcting one is
           the pencil on its tile, in the library.
         </p>
       )}
@@ -399,7 +404,7 @@ function MissingArtwork ({ onClose, onLookAgain }) {
 
   return (
     <Modal
-      title={fixing ? fixing.title : 'Titles with no artwork'}
+      title={fixing ? fixing.title : 'Titles nothing was found for'}
       onClose={() => (fixing ? setFixing(null) : onClose())}
       closeLabel={fixing ? 'Back' : 'Close'}
       wide

@@ -261,8 +261,12 @@ class Enricher {
     return stream
   }
 
-  async _apply (client, item, candidate, how, { uncertain = false } = {}) {
-    const bytes = candidate.poster ? await client.poster(candidate.poster) : null
+  // `art: false` means this item has a picture of its own, so the one TMDB holds
+  // would be downloaded, stored and never shown. The MATCH is still worth having -
+  // it is what the summary and the .nfo come from - so the lookup happens and only
+  // the image is skipped.
+  async _apply (client, item, candidate, how, { uncertain = false, art = true } = {}) {
+    const bytes = art && candidate.poster ? await client.poster(candidate.poster) : null
     if (bytes) await this._saveImage(item.id, bytes)
     this.matched[item.id] = {
       tmdbId: candidate.tmdbId,
@@ -286,6 +290,9 @@ class Enricher {
   // The pass. Films and shows only - an episode's thumbnail is a different feature
   // with a different cost, and a show's poster is what its tiles actually want.
   //
+  // WHAT IT LOOKS UP is anything missing a picture OR a summary, since a match is
+  // both. What it FETCHES is only the missing half.
+  //
   // `adapter` must be the INNER adapter, not the decorated one, so "has artwork"
   // means artwork on disk rather than artwork this pass invented last time.
   async run (adapter, { key, retryMissed = false } = {}) {
@@ -302,7 +309,12 @@ class Enricher {
     for (const type of ['movies', 'series']) {
       for (const it of await listAll(adapter, { type })) {
         seen.set(it.id, it)
-        if (it.artId) continue
+        // MISSING EITHER, not missing the picture. `if (it.artId) continue` meant
+        // "this one is done" back when a match was only a poster - so a folder
+        // library with a poster.jpg beside every film was skipped end to end and
+        // its title pages went on saying "no summary for this one, turn artwork on"
+        // while artwork was on (Tim's library, 2026-08-20).
+        if (it.artId && it.overview) continue
         if (this.matched[it.id]) continue
         if (this.missed[it.id] && !retryMissed) continue
         work.push(it)
@@ -329,7 +341,7 @@ class Enricher {
           const candidates = await client.search({ type: item.type, title: item.title, year: item.year })
           const best = bestMatch(item, candidates)
           if (best) {
-            await this._apply(client, item, best.candidate, 'auto', { uncertain: !best.sure })
+            await this._apply(client, item, best.candidate, 'auto', { uncertain: !best.sure, art: !item.artId })
           } else {
             this.missed[item.id] = { title: item.title, at: Date.now() }
           }
