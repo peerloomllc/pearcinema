@@ -73,6 +73,10 @@ const PREFERRED_PORT = Number(process.env.PEARCINEMA_CAST_PORT || 8752)
 
 const BIND = process.env.PEARCINEMA_CAST_BIND || '0.0.0.0'
 
+// The DLNA feature word for a file that can be seeked by byte range. `DLNA.ORG_OP=01` is
+// the half that matters; see _serveDirect for what happens without it.
+const DLNA_FEATURES = 'DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000'
+
 // What the receiver actually plays, declared the way any client declares
 // itself - PER FAMILY, because the living room proved the two main families
 // disagree. Conservative on purpose: an HEVC-capable device gets an H.264
@@ -94,7 +98,10 @@ const CAST_CAPS = {
   audioCodecs: ['aac', 'mp3'],
   // STEREO, and this is the fix for a silent television. See ROKU_CAPS below.
   maxAudioChannels: 2,
-  progressive: true
+  progressive: true,
+  // UNMEASURED on this family, so it keeps the shape every television had before there
+  // was a choice: a guess here costs a resumed film its opening credits.
+  startOffset: false
 }
 const ROKU_CAPS = {
   // A Roku opens Matroska natively (mkv is on its documented format list), so
@@ -118,11 +125,57 @@ const ROKU_CAPS = {
   // AND IT WILL NOT TAKE THAT REMUX PROGRESSIVELY. Measured on Tim's Streaming
   // Stick Plus 2026-08-19: a generated stream is refused with a range error before
   // a frame is drawn. Everything generated reaches this device in segments.
-  progressive: false
+  progressive: false,
+  // AND IT HONOURS `#EXT-X-START`. Measured 2026-08-20: handed the whole playlist with a
+  // start offset it joined in the middle, and three skips accumulated correctly - which
+  // only adds up if the television is reporting the film's own minute. That is what makes
+  // its on-screen clock right.
+  startOffset: true
+}
+
+// A TELEVISION DRIVEN OVER DLNA. Every line measured on a Samsung TU7000, 2026-08-20,
+// and two of them contradict what the first cut assumed.
+//
+// IT REFUSES A LIVE PROGRESSIVE STREAM, exactly as a Roku does. Handed a length-less
+// chunked fragmented-MP4 it fetched the URL, dropped the connection and went STOPPED -
+// the set was watched doing it, in its own log and ours. So `progressive: false`, and
+// everything converted travels in segments.
+//
+// AND IT PLAYS A PLAYLIST, which is the assumption that was wrong. "A renderer plays a
+// FILE and a playlist is not one" is true of the specification and false of this
+// television: handed an HLS VOD playlist it played it and reported its position
+// throughout. So there is no `hls` flag here - the ordinary rule applies.
+//
+// WHAT IS BETTER HERE THAN ANYWHERE ELSE is the direct path. A film that needs no
+// conversion goes as a real file with Range, and the set seeks inside it by byte range -
+// a true seek, nothing re-cut, its own clock the film's by construction. That is what the
+// DLNA feature header on the direct route buys (see _serveDirect).
+//
+// Codecs stay conservative for the reason they are conservative everywhere: this set
+// decodes HEVC and a great many DLNA televisions do not, and the cost of being wrong is a
+// black screen rather than some wasted engine time.
+const DLNA_CAPS = {
+  containers: ['mp4', 'mov', 'matroska', 'mkv'],
+  videoCodecs: ['h264'],
+  audioCodecs: ['aac', 'mp3'],
+  maxAudioChannels: 2,
+  progressive: false,
+  // AND IT DOES NOT HONOUR `#EXT-X-START`, measured within the hour of measuring that a
+  // Roku does (2026-08-20, Tim skipping in Blade): handed the whole playlist with a start
+  // offset, the Samsung began the film again from the top - which is the worst answer
+  // available, a skip that plays the opening credits. So it gets the SLICED playlist,
+  // which is what every television got until today, and its own on-screen clock is wrong
+  // about a converted film as a result. That is the lesser fault by a distance.
+  //
+  // PER TELEVISION, NOT PER HOST. This started as one switch for the whole box, which was
+  // right while there was one kind of receiver to be right about.
+  startOffset: false
 }
 
 function capsFor (entityId) {
-  return /roku/i.test(String(entityId)) ? ROKU_CAPS : CAST_CAPS
+  const id = String(entityId)
+  if (id.startsWith('dlna:')) return DLNA_CAPS
+  return /roku/i.test(id) ? ROKU_CAPS : CAST_CAPS
 }
 
 // Who may light up a television. OWNER only, the donor's phase 1 rule kept
@@ -198,9 +251,10 @@ class CastSessions {
     this.presence = presence
     this.report = report
     this.log = log
-    // Which playlist shape a resume gets - see _servePlaylist. On by default since it
-    // was measured on the real Roku (2026-08-20); the sliced shape stays one env var
-    // away for a receiver that ignores the tag.
+    // The host-wide OFF switch for the offset playlist shape. Which shape a television
+    // actually gets is that television's own capability (see ROKU_CAPS and DLNA_CAPS) -
+    // this only takes it away from all of them, for a network where something turns out
+    // to hate it and there is no time to work out which.
     this.startOffset = startOffset !== false
 
     // token -> { deviceKey, itemId, entityId, mode, at, expiresAt }
@@ -346,7 +400,7 @@ class CastSessions {
     // timeline is the film's - and row.at goes to zero with it, because the poll adds
     // row.at to what the television reports and the television is now reporting the
     // film's own minute.
-    if (skip > 0 && this.startOffset) {
+    if (skip > 0 && this.startOffset && entry.caps?.startOffset === true) {
       const startAt = segmentStart(skip, out)
       // Before the first segment and after every header, wherever they end - a playlist
       // is not a fixed set of lines and matching on one of them would put the tag in
@@ -444,6 +498,14 @@ class CastSessions {
       'content-length': end - start + 1,
       'accept-ranges': 'bytes',
       'cache-control': 'no-store',
+      // WHAT THE FILE SUPPORTS, ANSWERED BEFORE IT IS ASKED FOR. A DLNA television reads
+      // this before deciding which buttons to allow: without it a Samsung refuses Pause
+      // and Seek with 701 while playing perfectly happily, and with it both work and the
+      // set seeks by byte range (measured on a TU7000, 2026-08-20). It costs one header
+      // on a route that already honours Range, so it is sent to everything - a receiver
+      // that does not speak DLNA has never once minded.
+      'contentfeatures.dlna.org': DLNA_FEATURES,
+      'transfermode.dlna.org': 'Streaming',
       ...(range ? { 'content-range': `bytes ${start}-${end}/${size}` } : {})
     })
     if (req.method === 'HEAD') return res.end()
@@ -574,7 +636,11 @@ class CastSessions {
     // It used to be one field, zeroed when the playlist was fetched. Between the skip
     // and that fetch - two or three seconds of re-cutting a stream - the offset was
     // still being added to a clock that already included it.
-    const rowAt = viaHls && this.startOffset ? 0 : startAt
+    // THE SHAPE IS THIS TELEVISION'S, not this host's. A Roku joins the whole playlist in
+    // the middle and reports the film's own minute; a Samsung ignores the tag and starts
+    // from the top, so it gets a sliced playlist and its clock counts from the cut.
+    const offsetShape = viaHls && this.startOffset && caps.startOffset === true
+    const rowAt = offsetShape ? 0 : startAt
     set.set(entityId, {
       token, itemId, mode, at: rowAt, startAt, startedAt: Date.now(),
       // Whether the television has actually reached the new stream. This is a question
@@ -583,7 +649,7 @@ class CastSessions {
       // number about the wrong moment. On the sliced shape its clock is relative to
       // whatever stream it holds and resets with it, so it is right immediately - as is
       // a direct cast, which seeks itself, and anything starting at zero.
-      settled: !(viaHls && this.startOffset) || startAt <= 0,
+      settled: !offsetShape || startAt <= 0,
       sawPlaying: false, lastReportAt: 0
     })
 
@@ -881,4 +947,4 @@ class CastSessions {
   }
 }
 
-module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, TOKEN_TTL_MS, castHost, BIND, capsFor, segmentAt, segmentStart }
+module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, DLNA_CAPS, DLNA_FEATURES, TOKEN_TTL_MS, castHost, BIND, capsFor, segmentAt, segmentStart }

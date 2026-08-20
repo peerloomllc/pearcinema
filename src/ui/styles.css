@@ -1503,6 +1503,17 @@ label.flabel { display: block; margin-top: .6rem; }
 }
 .cover img.poster.in { opacity: 1; }
 .cover img { width: 100%; height: 100%; object-fit: cover; display: block }
+/* A LONG PRESS ON A POSTER IS A LONG PRESS ON THE TILE, not on a picture.
+ *
+ * Tim, 2026-08-20: "I couldn't get the long press menu to appear on Blade. some titles it
+ * works fine, others not. seems inconsistent." The inconsistency is the artwork. Android's
+ * WebView treats a held image as an image - it starts a drag and offers its own callout -
+ * and that steals the pointer sequence, which fires pointercancel, which clears the timer
+ * a beat before it would have opened the menu. A tile with no poster on it has no image to
+ * hold, which is exactly why some titles behaved and others did not.
+ *
+ * The events go to the tile either way: the picture stops being a target at all. */
+.cover img { pointer-events: none; -webkit-user-drag: none; -webkit-touch-callout: none }
 .cover .blank { color: var(--color-text-muted); font-weight: 700; font-size: 1.3rem; text-transform: uppercase }
 .album .t { font-size: .82rem; line-height: 1.25; margin-top: .35rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical }
 .album .sub { font-size: .72rem; color: var(--color-text-muted) }

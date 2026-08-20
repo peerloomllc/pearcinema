@@ -68,6 +68,11 @@ function clean (row) {
     host: str(row?.host, 64),
     // Whatever the backend needs to reach it again - a Roku's media channel id.
     channel: str(row?.channel, 32),
+    // And a DLNA renderer's control URL, which is the same idea and a different shape:
+    // an address plus a path, so it moves with the lease and is refreshed on sighting.
+    // Kept apart from `channel` rather than sharing it - a channel id is four digits and
+    // clamped to thirty-two characters, which would have quietly cut a URL in half.
+    control: str(row?.control, 256),
     hidden: !!row?.hidden,
     firstSeen: Number(row?.firstSeen) || Date.now(),
     lastSeen: Number(row?.lastSeen) || Date.now()

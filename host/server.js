@@ -25,6 +25,7 @@ const remoteDownloads = require('./remote-downloads')
 const blendLib = require('./blend')
 const { Speakers } = require('./speakers')
 const { RokuSpeakers } = require('./roku')
+const { DlnaSpeakers } = require('./dlna')
 const { CastTargets } = require('./cast-targets')
 const { Televisions } = require('./televisions')
 const castLib = require('./cast')
@@ -237,7 +238,11 @@ class PearCinemaHost {
     // one off makes it read as unavailable rather than delete it from the picker.
     this.televisions = new Televisions({ dataDir: this.dataDir, log })
     this.roku = new RokuSpeakers({ log, televisions: this.televisions })
-    this.speakers = new CastTargets({ configured: this.ha, discovered: this.roku, log })
+    // AND THE TELEVISIONS THAT SPEAK DLNA. Tim's Samsung was offered by Home Assistant
+    // and did nothing when a film was sent to it (HA answered 500); the set takes the
+    // film directly. Two discovery backends now, each minting its own kind of id.
+    this.dlna = new DlnaSpeakers({ log, televisions: this.televisions })
+    this.speakers = new CastTargets({ configured: this.ha, discovered: [this.roku, this.dlna], log })
     this.casts = new castLib.CastSessions({
       speakers: this.speakers,
       grants: this.host.grants,

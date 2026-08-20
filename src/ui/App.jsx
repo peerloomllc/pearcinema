@@ -362,7 +362,7 @@ function Cover ({ src, title, onArt = null }) {
       <span className='blank'>{(title || '?').slice(0, 2)}</span>
       {src && (
         <img
-          src={src} loading='lazy' alt='' className={'poster' + (loaded ? ' in' : '')}
+          src={src} loading='lazy' alt='' draggable={false} className={'poster' + (loaded ? ' in' : '')}
           onLoad={() => { setLoaded(true); if (onArt) onArt() }}
           // A poster that 404s or dies mid-transfer leaves the initials showing rather
           // than a broken-image glyph.

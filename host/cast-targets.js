@@ -18,11 +18,19 @@
 // adding a method there and forgetting it here is a failing test rather than a broken
 // remote control.
 
-// A target's id says which backend owns it. `roku:<host>` is minted by the discovery
-// backend; everything else is Home Assistant's own `media_player.*` vocabulary, which it
-// has always been.
+// A target's id says which backend owns it. `roku:<serial>` and `dlna:<udn>` are minted by
+// the discovery backends; everything else is Home Assistant's own `media_player.*`
+// vocabulary, which it has always been.
+//
+// TWO DISCOVERY BACKENDS SINCE 2026-08-20, and the prefix is how a target finds its way
+// home. Tim's Samsung was offered by Home Assistant and did nothing when a film was sent
+// to it - HA's samsungtv integration answered 500 - while the set itself takes the film
+// directly over DLNA. So "found on the wire" is no longer one thing.
+const PREFIXES = ['roku:', 'dlna:']
+
 function isDiscovered (entityId) {
-  return String(entityId || '').startsWith('roku:')
+  const id = String(entityId || '')
+  return PREFIXES.some((p) => id.startsWith(p))
 }
 
 // Names as a person typed them, compared as a machine should: case and punctuation carry
@@ -32,17 +40,26 @@ function normalName (name) {
 }
 
 class CastTargets {
+  // `discovered` is one backend or several. Several is the normal case now: a Roku speaks
+  // ECP and a television speaks DLNA, and neither knows about the other.
   constructor ({ configured, discovered, log = () => {} }) {
     this.configured = configured // Speakers (Home Assistant)
-    this.discovered = discovered // RokuSpeakers
+    this.discovered = Array.isArray(discovered) ? discovered.filter(Boolean) : (discovered ? [discovered] : [])
     this.log = log
+  }
+
+  // Which discovery backend owns an id. Each one declares the prefix it mints, so this is
+  // a lookup rather than a guess about class names.
+  _discoveredFor (entityId) {
+    const id = String(entityId || '')
+    return this.discovered.find((b) => b?.prefix && id.startsWith(b.prefix)) || null
   }
 
   // Casting is available if EITHER can reach something. Kept as "can we look" rather than
   // "did we find" on purpose: the phone's own gate is the length of the target list, and
   // answering false here would stop the search that produces it.
   get enabled () {
-    return !!(this.configured?.enabled || this.discovered?.enabled)
+    return !!(this.configured?.enabled || this.discovered.some((b) => b?.enabled))
   }
 
   // Hiding is the operator's pruning of a house full of media players, and since
@@ -52,20 +69,20 @@ class CastTargets {
   // Rokus can now stop two of them being offered.
   isHidden (entityId) {
     return isDiscovered(entityId)
-      ? !!this.discovered?.isHidden?.(entityId)
+      ? !!this._discoveredFor(entityId)?.isHidden?.(entityId)
       : !!this.configured?.isHidden?.(entityId)
   }
 
   // One switch, either backend. The dashboard sends an entity and a boolean and does
   // not have to know which store the answer lands in.
   setHidden (entityId, hidden) {
-    const backend = isDiscovered(entityId) ? this.discovered : this.configured
+    const backend = isDiscovered(entityId) ? this._discoveredFor(entityId) : this.configured
     if (!backend?.setHidden) throw new Error('that television cannot be hidden')
     return backend.setHidden(entityId, hidden)
   }
 
   _for (entityId) {
-    const backend = isDiscovered(entityId) ? this.discovered : this.configured
+    const backend = isDiscovered(entityId) ? this._discoveredFor(entityId) : this.configured
     if (!backend) throw new Error('no way to reach that television')
     return backend
   }
@@ -74,14 +91,28 @@ class CastTargets {
   // a network that drops multicast each cost their own half and nothing more - a person
   // with one working television should see it.
   async list () {
-    const [conf, disc] = await Promise.all([
+    const [conf, ...found] = await Promise.all([
       this.configured?.enabled ? this.configured.list().catch((e) => { this.log('cast:ha-list-failed', { err: e.message }); return [] }) : [],
-      this.discovered?.enabled ? this.discovered.list().catch((e) => { this.log('cast:discovery-failed', { err: e.message }); return [] }) : []
+      ...this.discovered.map((b) => (b?.enabled
+        ? b.list().catch((e) => { this.log('cast:discovery-failed', { err: e.message }); return [] })
+        : []))
     ])
+    const disc = found.flat()
 
     // A television configured in Home Assistant AND found on the wire is ONE television.
-    // The configured entry wins, because it is the one the operator can hide, rename and
-    // reach through an integration that knows more about it than a multicast answer does.
+    // Which entry survives is a question about which one can actually play a film.
+    //
+    // A DLNA RENDERER WINS OVER HOME ASSISTANT, and Tim's Samsung is why. HA offered it,
+    // the phone showed it casting, and the television never heard a thing: HA's samsungtv
+    // integration answered 500 to play_media (2026-08-20). A device that answers a
+    // MediaRenderer search accepts a film BY DEFINITION - that is what the search asks -
+    // so where both describe the same set, the one that takes the film is the honest row.
+    //
+    // A ROKU DOES NOT, and that is not an inconsistency. Its HA entry works - it goes
+    // through the same Media Assistant channel this host would use - and it is the one an
+    // operator can rename and reach through an integration that knows more about the
+    // device than a multicast answer does. Nothing measured says otherwise, so nothing
+    // changes for it.
     //
     // MATCHED BY NAME AS WELL AS ADDRESS, and the name is the one that actually fires.
     // Measured against Tim's own Home Assistant, 2026-08-18: his Roku is
@@ -101,9 +132,22 @@ class CastTargets {
     // called `roku:<address>` and this line read the address back out of its own name;
     // televisions are remembered by serial number since 2026-08-19, so the address is a
     // field that travels beside it and moves when the lease does.
-    const fresh = disc.filter((t) => !(t.host && ips.has(t.host)) && !names.has(normalName(t.name)))
+    // The renderers first, because they are the ones that displace a configured row.
+    const renderers = disc.filter((t) => String(t.entityId).startsWith('dlna:'))
+    const rendererIps = new Set(renderers.map((t) => t.host).filter(Boolean))
+    const rendererNames = new Set(renderers.map((t) => normalName(t.name)).filter(Boolean))
 
-    return [...conf, ...fresh]
+    const keptConf = conf.filter((t) => {
+      const ip = (/([0-9]{1,3}(?:\.[0-9]{1,3}){3})/.exec(String(t.entityId) + ' ' + String(t.name)) || [])[1]
+      return !(ip && rendererIps.has(ip)) && !rendererNames.has(normalName(t.name))
+    })
+
+    const fresh = disc.filter((t) => {
+      if (String(t.entityId).startsWith('dlna:')) return true
+      return !(t.host && ips.has(t.host)) && !names.has(normalName(t.name))
+    })
+
+    return [...keptConf, ...fresh]
   }
 
   getState (entityId) { return this._for(entityId).getState(entityId) }

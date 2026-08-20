@@ -21,7 +21,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const { Readable, PassThrough } = require('stream')
 
-const { CastSessions, CAST_CAPS, ROKU_CAPS } = require('../host/cast')
+const { CastSessions, CAST_CAPS, ROKU_CAPS, DLNA_CAPS } = require('../host/cast')
 
 const DEVICE = 'device-key-aaa'
 
@@ -617,13 +617,14 @@ test('THE OTHER PLAYLIST SHAPE: the whole film, joined in the middle', async (t)
   // anybody in the room means (Tim, 2026-08-19, watching his TV).
   //
   // With `#EXT-X-START` the receiver holds the WHOLE film and is told where to join it,
-  // so its clock is the film's clock. The tag is optional in the standard - a receiver
-  // may ignore it and start at the beginning - which is why this is a setting measured
-  // per television rather than the default.
-  const { casts, speakers, media } = await build({ mode: 'transcode' })
+  // so its clock is the film's clock. The tag is OPTIONAL in the standard and the two
+  // televisions in this house disagree about it - a Roku joins in the middle, a Samsung
+  // starts from the top - so the shape is that television's own capability. This is the
+  // Roku's.
+  const { casts, speakers, media } = await build({ mode: 'transcode', expectCaps: ROKU_CAPS })
   t.after(() => casts.close())
 
-  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv', at: 13 })
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku', at: 13 })
   const url = urlOf(speakers)
   const body = await (await fetch(url)).text()
 
@@ -638,9 +639,9 @@ test('THE OTHER PLAYLIST SHAPE: the whole film, joined in the middle', async (t)
   // AND row.at GOES TO ZERO WITH IT. The poll adds row.at to what the television
   // reports; the television is now reporting the film's own minute, so adding the
   // offset again would double it.
-  const where = await casts.where({ deviceKey: DEVICE, entityId: 'media_player.tv' })
+  const where = await casts.where({ deviceKey: DEVICE, entityId: 'media_player.living_room_roku' })
   assert.ok(where === null || where.positionMs != null)
-  const row = casts.byDevice.get(DEVICE).get('media_player.tv')
+  const row = casts.byDevice.get(DEVICE).get('media_player.living_room_roku')
   assert.equal(row.at, 0)
   void media
 })
@@ -690,19 +691,20 @@ test('A SKIP OF THIRTY SECONDS IS THIRTY SECONDS, not sixty', async (t) => {
   // own minute, so adding the start to it counts the skip twice. It was zeroed when the
   // playlist was fetched, which left a two or three second window - exactly the length
   // of re-cutting a stream - where every reading was double.
-  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: ROKU_CAPS })
   t.after(() => casts.close())
 
-  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 100 })
+  const TVR = 'media_player.living_room_roku'
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TVR, at: 100 })
   const row = casts.active(DEVICE)[0]
   assert.equal(row.at, 0, 'nothing to add: the television reports the film itself')
 
   // The television, having arrived, reports the film's own minute.
-  speakers.states.set(TV, { state: 'playing', position: 120, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
-  const w = await casts.where({ deviceKey: DEVICE, entityId: TV })
+  speakers.states.set(TVR, { state: 'playing', position: 120, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const w = await casts.where({ deviceKey: DEVICE, entityId: TVR })
   assert.equal(w.positionMs, 120000, 'not 220000 - the offset is not added twice')
 
-  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 })
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TVR, deltaMs: 30000 })
   assert.equal(out.positionMs, 150000, 'thirty seconds on from a hundred and twenty')
 })
 
@@ -711,18 +713,68 @@ test('and until the television gets there, it is asked where it is GOING', async
   // television plays the old one meanwhile - so asking it where the film is gets a
   // truthful answer to a question about the previous stream, and the phone jumped to
   // the right minute and then back to the old one until the next poll.
-  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: ROKU_CAPS })
   t.after(() => casts.close())
 
-  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 600 })
+  const TVR = 'media_player.living_room_roku'
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TVR, at: 600 })
   // Still playing the stream it had, forty seconds back.
-  speakers.states.set(TV, { state: 'playing', position: 560, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
-  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 600000, 'where it is going')
+  speakers.states.set(TVR, { state: 'playing', position: 560, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TVR })).positionMs, 600000, 'where it is going')
 
   // It arrives, and from then on the television is believed - including once the film
   // has legitimately run far away from where it started.
-  speakers.states.set(TV, { state: 'playing', position: 603, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
-  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 603000)
-  speakers.states.set(TV, { state: 'playing', position: 1500, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
-  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 1500000, 'the latch holds: this is playback, not a television that never arrived')
+  speakers.states.set(TVR, { state: 'playing', position: 603, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TVR })).positionMs, 603000)
+  speakers.states.set(TVR, { state: 'playing', position: 1500, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TVR })).positionMs, 1500000, 'the latch holds: this is playback, not a television that never arrived')
+})
+
+test('A DLNA TELEVISION TAKES SEGMENTS, because it will not take a live pipe', async (t) => {
+  // Both halves measured on the Samsung, 2026-08-20, and both contradict what was assumed
+  // first. Handed a length-less chunked stream it fetched the URL, dropped the connection
+  // and went STOPPED - the Roku's failure, on a different make. Handed an HLS playlist it
+  // played it and reported its position throughout, which the specification says a
+  // renderer should not do at all.
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: DLNA_CAPS })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:abc-123', at: 0 })
+  assert.match(urlOf(speakers), /index\.m3u8$/)
+  assert.equal(speakers.calls[0][3].format, 'hls')
+})
+
+test('and the direct route says what the file supports before it is asked', async (t) => {
+  // The header a Samsung reads before deciding which buttons to allow. Without it the set
+  // refuses Pause and Seek with 701 while playing perfectly happily; with it, both work
+  // and it seeks by byte range (measured, 2026-08-20).
+  const { casts, speakers } = await build({ mode: 'direct', expectCaps: DLNA_CAPS })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:abc-123' })
+  const res = await fetch(urlOf(speakers), { method: 'HEAD' })
+  assert.equal(res.status, 200)
+  assert.match(res.headers.get('contentfeatures.dlna.org') || '', /DLNA\.ORG_OP=01/)
+  assert.equal(res.headers.get('transfermode.dlna.org'), 'Streaming')
+  assert.equal(res.headers.get('accept-ranges'), 'bytes', 'and it can actually answer one')
+})
+
+test('A SAMSUNG GETS THE SLICED PLAYLIST, because it ignores the tag the Roku honours', async (t) => {
+  // Tim skipping in Blade, 2026-08-20: handed the whole playlist with a start offset, the
+  // Samsung began the film again from the top - the worst answer available, a skip that
+  // plays the opening credits. Measured within the hour of measuring that his Roku joins
+  // the same playlist in the middle, which is why the shape is a capability of the
+  // TELEVISION and not a setting of the host.
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: DLNA_CAPS })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'dlna:udn-1', at: 13 })
+  const body = await (await fetch(urlOf(speakers))).text()
+  assert.doesNotMatch(body, /#EXT-X-START/, 'not offered a tag it throws away')
+  assert.match(body, /#EXT-X-MEDIA-SEQUENCE:3/, 'the playlist begins where the film resumes')
+
+  // And the arithmetic that goes with the sliced shape: the set counts from the cut, so
+  // the row carries the offset the poll adds back.
+  const row = casts.active(DEVICE)[0]
+  assert.equal(row.at, 12, 'the real boundary, added back to whatever the set reports')
 })
