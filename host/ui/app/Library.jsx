@@ -65,11 +65,17 @@ function Ring () {
 // `<Art>` because as a child of `.poster` it spanned the whole tile - a couple of
 // pixels wider than the ring on each side, and placed vertically by guessing at the
 // caption's height (Tim, 2026-08-13, with a screenshot of it poking out).
-function Art ({ item, started = false, progress = null }) {
+// THE FLAG BELONGS TO THE PICTURE for the same reason (Tim, 2026-08-20, off a
+// screenshot): as a child of the tile it sat top-right, which is where the watched
+// tick and the "3 left" count live - so an episode this browser cannot play wore its
+// warning ON TOP of the tick saying it had been watched, no hover needed. It goes at
+// the foot of the picture now, clear of the resume bar, where nothing else sits.
+function Art ({ item, started = false, progress = null, flag = null }) {
   const [bad, setBad] = useState(false)
   const inner = (
     <>
       {started && <Ring />}
+      {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
       {progress !== null && <span class='resumebar'><i style={`width:${progress}%`} /></span>}
     </>
   )
@@ -250,8 +256,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
       onClick={open}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open() } }}
     >
-      <Art item={item} started={started} progress={progress} />
-      {flag && <span class={'flag ' + flag.cls}>{flag.text}</span>}
+      <Art item={item} started={started} progress={progress} flag={flag} />
       {badge && <span class='next'>{badge}</span>}
 
       {/* THE AUTOMATIC RULE WILL BE WRONG SOMETIMES - a film watched on another
