@@ -83,7 +83,7 @@ function bitrateFor (width) {
 // The ffmpeg argv for one transcode, starting at `at` seconds. The measured
 // invocation from the proposal, plus everything the remux argv already learned the
 // hard way (one video and one audio stream, no chapters, no subtitles, delay_moov).
-function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0, burn = null }) {
+function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0, burn = null, duration = 0 }) {
   const v = codec(media?.videoCodec)
   const hw = HW_DECODE.has(v)
 
@@ -131,6 +131,10 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
   else args.push('-c:a', AUDIO_FALLBACK.codec, '-b:a', AUDIO_FALLBACK.bitrate, '-ac', '2')
 
   args.push('-sn', '-dn')
+  // A BOUNDED RUN, for the measurement below and nothing else: convert this many
+  // seconds of the film and stop. An output option, so it counts encoded time rather
+  // than wall time.
+  if (duration > 0) args.push('-t', String(duration))
   args.push('-movflags', FMP4_FLAGS, '-f', 'mp4', 'pipe:1')
   return args
 }
@@ -195,6 +199,127 @@ function probeTranscode ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, timeoutMs
   })
 }
 
+// --- how much engine is there --------------------------------------------------
+//
+// "this hardware managed about 10 in testing" was on the dashboard of every install,
+// and the 10 was a constant from the N100 this was built against - a number about OUR
+// machine presented as a number about theirs (Tim, 2026-08-19). The claim was removed;
+// this is the number it was standing in for, measured on the machine it is about.
+//
+// WHY IT IS A REAL CONVERSION AND NOT A GUESS FROM THE DEVICE NAME. A table of chips
+// mapped to concurrency would be the same sin at one remove - a number about hardware
+// somebody else measured. This runs the actual pipeline, on a real film out of this
+// library, at increasing concurrency, and reports where the box stops keeping up.
+//
+// REALTIME IS THE BAR. A conversion that runs slower than the film plays cannot be
+// watched: the viewer catches up with the encoder and stalls. So a level passes when
+// EVERY stream in it converts `seconds` of film in less than `seconds` of wall clock,
+// with a tenth of margin - and the answer is the last level that passed.
+//
+// THE LADDER DOUBLES AND STOPS AT THE FIRST FAILURE, which is what keeps this inside
+// the minute of engine time it costs: the passing rounds are fast by definition (a box
+// at 8x realtime does fifteen seconds of film in two), and only the failing one is
+// slow. That one is bounded by a timeout, because a box that has fallen over does not
+// get to hold the operator for as long as it likes.
+
+const MEASURE_SECONDS = 15
+const MEASURE_LEVELS = [1, 2, 4, 8, 12, 16]
+// A stream must beat realtime by this much to count. Exactly 1.0 is a knife edge, and
+// a box measured at its own knife edge stalls the first time anything else runs.
+const MEASURE_MARGIN = 1.1
+
+function runOne (ffmpeg, args, timeoutMs) {
+  return new Promise((resolve) => {
+    const started = Date.now()
+    let proc
+    try {
+      proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch (e) {
+      return resolve({ ok: false, ms: 0, reason: e.message })
+    }
+    let bytes = 0
+    let stderr = ''
+    let settled = false
+    const settle = (out) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve({ ...out, ms: Date.now() - started })
+    }
+    const timer = setTimeout(() => {
+      try { proc.kill('SIGKILL') } catch {}
+      settle({ ok: false, bytes, reason: 'it did not finish in time' })
+    }, timeoutMs)
+    if (timer.unref) timer.unref()
+
+    // The bytes are thrown away - what is being measured is how fast they arrive.
+    proc.stdout.on('data', (c) => { bytes += c.length })
+    proc.stderr.on('data', (c) => { if (stderr.length < 2048) stderr += c.toString() })
+    proc.on('error', (e) => settle({ ok: false, bytes, reason: e.message }))
+    proc.on('close', (code) => settle({
+      ok: code === 0 && bytes > 0,
+      bytes,
+      reason: code === 0 ? null : (stderr.trim().split('\n').pop() || `it exited ${code}`).slice(0, 200)
+    }))
+  })
+}
+
+// THE HARDEST REAL FILM in a list, which is what the measurement should be about: the
+// number is a promise about the operator's own library rather than about a test
+// pattern, and a promise is only worth making about its worst case. Hardest is the
+// engine's worst case - HEVC first, then the biggest picture.
+function hardestFilm (items = []) {
+  const usable = items.filter((i) => i?.media?.videoCodec && (Number(i.media.width) || 0) > 0)
+  if (!usable.length) return null
+  const score = (i) => {
+    const v = codec(i.media.videoCodec)
+    return (v === 'hevc' ? 1e9 : 0) + (Number(i.media.width) || 0) * 1000 + (Number(i.media.height) || 0)
+  }
+  return usable.reduce((best, i) => (score(i) > score(best) ? i : best), usable[0])
+}
+
+async function measureEngine ({
+  ffmpeg = 'ffmpeg',
+  device = DEVICE_DEFAULT,
+  input,
+  headers = null,
+  media = {},
+  at = 0,
+  seconds = MEASURE_SECONDS,
+  levels = MEASURE_LEVELS,
+  onLevel = () => {}
+} = {}) {
+  const ladder = []
+  let cap = 0
+
+  for (const concurrency of levels) {
+    onLevel({ concurrency, of: levels[levels.length - 1] })
+    const args = transcodeArgs({ input, at, audio: 'aac', headers, media, device, duration: seconds })
+    // Every stream in the level gets the SAME work, started together. Not staggered:
+    // what is being measured is what happens when a household presses play at once.
+    const runs = await Promise.all(
+      Array.from({ length: concurrency }, () => runOne(ffmpeg, args, seconds * 2500))
+    )
+
+    const worst = Math.max(...runs.map((r) => r.ms))
+    const failed = runs.find((r) => !r.ok)
+    // The slowest stream is the answer: a level where one of eight stalls is a level
+    // where somebody's film stalls.
+    const speed = worst > 0 ? (seconds * 1000) / worst : 0
+    const ok = !failed && speed >= MEASURE_MARGIN
+    ladder.push({
+      concurrency,
+      speed: Math.round(speed * 100) / 100,
+      ok,
+      reason: failed ? failed.reason : null
+    })
+    if (!ok) break
+    cap = concurrency
+  }
+
+  return { cap, ladder, device, seconds, at: Date.now() }
+}
+
 // The engine wrapper. Everything about session ownership - the cap, the BUSY
 // refusal, kill-with-the-response, killAll on shutdown - is the Remuxer's and is
 // inherited rather than re-implemented, because a second copy of process lifecycle
@@ -217,6 +342,6 @@ class Transcoder extends Remuxer {
 
 module.exports = {
   capBitrate,
-  Transcoder, transcodeArgs, probeTranscode, bitrateFor,
-  HW_DECODE, DEVICE_DEFAULT, renderNodes
+  Transcoder, transcodeArgs, probeTranscode, bitrateFor, measureEngine, hardestFilm,
+  HW_DECODE, DEVICE_DEFAULT, renderNodes, MEASURE_LEVELS, MEASURE_SECONDS
 }

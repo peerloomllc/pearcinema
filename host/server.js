@@ -35,6 +35,12 @@ const subtitles = require('./subtitles')
 const hls = require('./hls')
 const keyframes = require('./keyframes')
 
+// THE FIELD'S CEILING WHEN THIS BOX HAS NEVER BEEN MEASURED. A round number chosen
+// for the machine this was built on: a cap of 200 is a typo rather than a plan, and
+// that is all this constant knows. A box that has measured itself uses its own answer
+// instead (transcodeMax).
+const TRANSCODE_CAP_LIMIT = 16
+
 // How often the host asks whether its library is still on the disk. A minute is
 // often enough that nobody watches a dead grid for long, and cheap enough to be
 // invisible: five stats against files it already knows the paths of.
@@ -84,6 +90,10 @@ class PearCinemaHost {
     // moment it happens, rather than on its next load. Null while nothing is
     // listening, which is the normal state of a host with no browser open.
     this.onevent = null
+
+    // Non-null while the engine is measuring itself, so the dashboard can say which
+    // level it is on rather than spinning. The same shape `scanning` has.
+    this.measuringEngine = null
 
     // The repackaging engine. Concurrency-capped, because remux is I/O bound rather
     // than CPU bound but three films at once on a Pi-class box is still three films
@@ -754,32 +764,119 @@ class PearCinemaHost {
     return this.transcode.available && this.transcoder.maxConcurrent > 0
   }
 
-  // The cap, where it came from and the measured ceiling - what the dashboard
-  // field needs to say something honest.
+  // The cap, where it came from and what this box was measured at - what the
+  // dashboard field needs to say something honest.
+  //
+  // `measured` used to be the constant 10, from the machine this was built on, shown
+  // to every install regardless of what it was running (Tim, 2026-08-19). It is now
+  // either this box's own measurement or nothing at all.
   transcodeCap () {
+    const measured = this._readSettings().transcodeMeasured || null
     return {
       cap: this.transcoder.maxConcurrent,
       source: this._readSettings().transcodeCap !== undefined
         ? 'dashboard'
         : (process.env.PEARCINEMA_MAX_TRANSCODE ? 'environment' : 'default'),
-      measured: 10
+      measured,
+      // WHAT THE FIELD MAY BE SET TO. A measurement bounds it (Tim's call: the answer
+      // lands as the field's maximum rather than as another sentence); without one the
+      // limit is the same round number it always was, which is a guess about nothing
+      // in particular and is labelled as such by the absence of `measured`.
+      max: this.transcodeMax(),
+      measuring: this.measuringEngine || null
     }
+  }
+
+  transcodeMax () {
+    const measured = this._readSettings().transcodeMeasured
+    // At least one: a box measured under realtime can still be told to convert one
+    // film, and refusing to let the operator ask is not our call to make.
+    return measured ? Math.max(1, Number(measured.cap) || 0) : TRANSCODE_CAP_LIMIT
   }
 
   // Open question 1 of the transcode proposal, answered yes: the default of 4
   // is sized for sharing the engine, and a box serving one household member
-  // should not refuse at it. Clamped to the measured order of magnitude - a
-  // cap of 200 is a typo, not a plan - and applied LIVE: the next start obeys
-  // it, running conversions are left to finish.
+  // should not refuse at it. Clamped to what this machine may do - its own
+  // measurement when it has one - and applied LIVE: the next start obeys it,
+  // running conversions are left to finish.
   setTranscodeCap (cap) {
     const n = Math.trunc(Number(cap))
-    if (!Number.isFinite(n) || n < 0 || n > 16) {
-      throw new Error('the cap is a whole number from 0 (conversions off) to 16')
+    const max = this.transcodeMax()
+    if (!Number.isFinite(n) || n < 0 || n > max) {
+      throw new Error(`the cap is a whole number from 0 (conversions off) to ${max}`)
     }
     this._writeSettings({ transcodeCap: n })
     this.transcoder.maxConcurrent = n
     this.log('host:transcode-cap', { cap: n })
     return this.transcodeCap()
+  }
+
+  // THE FILM THE MEASUREMENT USES: the hardest real one in the library, because the
+  // number is about what this box does with the operator's own films rather than
+  // with a test pattern. Hardest means the engine's own worst case - HEVC, the
+  // biggest picture - and the seek lands past the opening, where a black frame would
+  // encode in no time and flatter the result.
+  async _measurementSubject () {
+    const { items = [] } = await this.adapter.list({ type: 'movies', limit: 200 })
+    return transcode.hardestFilm(items)
+  }
+
+  // MEASURE THIS BOX, on this box's own films. Refuses while anything is converting -
+  // sixteen ffmpegs beside somebody's film is a measurement that ruins the thing it
+  // is measuring - and refuses a second run while one is going.
+  async measureEngine () {
+    if (!this.transcode.available) throw new Error('this host has no video engine to measure')
+    if (this.measuringEngine) throw new Error('it is already measuring')
+    if (this.transcoder.running) throw new Error('something is being converted right now - try again when it has finished')
+
+    const item = await this._measurementSubject()
+    if (!item) throw new Error('there is nothing in the library to convert, so there is nothing to measure')
+    const source = this.adapter.ffmpegInput ? await this.adapter.ffmpegInput({ itemId: String(item.id) }) : null
+    if (!source?.input) throw new Error('that film could not be opened')
+
+    const at = Math.min(120, Math.max(0, Math.round((Number(item.runtime) || 0) * 0.1)))
+    this.measuringEngine = { concurrency: 0, of: 0, startedAt: Date.now() }
+    this.onevent?.('engine:measuring', this.measuringEngine)
+    try {
+      const out = await transcode.measureEngine({
+        ffmpeg: ffmpegBin.ffmpeg(),
+        device: this.transcoder.device,
+        input: source.input,
+        headers: source.headers || null,
+        media: item.media,
+        at,
+        onLevel: ({ concurrency, of }) => {
+          this.measuringEngine = { ...this.measuringEngine, concurrency, of }
+          this.onevent?.('engine:measuring', this.measuringEngine)
+        }
+      })
+      // WHICH FILM IT WAS MEASURED ON, kept because the number is meaningless without
+      // it. This box holds four conversions of a 1080p film and two of the 4K HEVC one
+      // (measured 2026-08-20), and the answer is the harder of those - so the row has
+      // to be able to say what it was up against, or a ceiling of 2 on a machine that
+      // manages 4 most of the time reads as PearCinema being timid.
+      this._writeSettings({
+        transcodeMeasured: {
+          ...out,
+          film: item.title || null,
+          codec: item.media?.videoCodec || null,
+          width: Number(item.media?.width) || null
+        }
+      })
+      // A CAP ABOVE WHAT THE BOX CAN DO IS NOT A CAP. If the operator's number is
+      // higher than the measurement, it comes down to it - leaving it would promise
+      // a household more films at once than this machine can actually keep up with.
+      const max = this.transcodeMax()
+      if (this.transcoder.maxConcurrent > max) {
+        this._writeSettings({ transcodeCap: max })
+        this.transcoder.maxConcurrent = max
+      }
+      this.log('host:engine-measured', { cap: out.cap, ladder: out.ladder.length, film: item.title })
+      return this.transcodeCap()
+    } finally {
+      this.measuringEngine = null
+      this.onevent?.('engine:measured', { cap: this._readSettings().transcodeMeasured?.cap ?? null })
+    }
   }
 
   // The chosen image subtitle track's stream index, or null - and null MEANS

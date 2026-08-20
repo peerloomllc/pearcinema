@@ -337,3 +337,113 @@ test('the graphics cards this machine has, read as render nodes', (t) => {
   // card - answers empty rather than throwing on a directory that was never there.
   assert.deepEqual(transcode.renderNodes('/no/such/place'), [])
 })
+
+
+/* ------------------------------------------------- measuring this machine -- */
+//
+// "this hardware managed about 10 in testing" was on the dashboard of every install,
+// quoting the N100 PearCinema was built on (Tim, 2026-08-19). These pin the shape of
+// the number that replaces it. The fake ffmpeg makes the timing deterministic; the
+// real pipeline's verify gate is the Umbrel, as it is for the probe above.
+
+const MEDIA = { container: 'matroska', videoCodec: 'hevc', width: 1920, height: 1080 }
+
+test('THE ANSWER IS THE LAST LEVEL THAT KEPT UP, and the ladder stops at the first that did not', async () => {
+  // Fast up to and including four at once, then a level that takes longer than the
+  // film it is converting - which is the definition of not keeping up.
+  // The counter lives beside the fake binary, so two of these tests running at once
+  // cannot count each other's runs.
+  const bin = await fakeFfmpeg(`
+    printf x >> "$(dirname "$0")/runs"
+    runs=$(wc -c < "$(dirname "$0")/runs")
+    # 1 + 2 + 4 = 7 runs are the levels that pass; everything after is slow.
+    if [ "$runs" -gt 7 ]; then sleep 1.2; fi
+    printf "mp4bytes"; exit 0
+  `)
+
+  const out = await transcode.measureEngine({
+    ffmpeg: bin,
+    input: '/library/film.mkv',
+    media: MEDIA,
+    seconds: 1,
+    levels: [1, 2, 4, 8]
+  })
+
+  assert.equal(out.cap, 4)
+  assert.deepEqual(out.ladder.map(l => l.concurrency), [1, 2, 4, 8], 'every level up to the failure is reported')
+  assert.deepEqual(out.ladder.map(l => l.ok), [true, true, true, false])
+  assert.ok(out.ladder[0].speed > 1, 'and how fast each one was, not just whether')
+})
+
+test('a level where ONE stream stalls is a failed level', async () => {
+  // The slowest stream is the answer: a level where one of eight cannot keep up is a
+  // level where somebody's film stalls, and averaging would hide exactly that.
+  const bin = await fakeFfmpeg(`
+    printf x >> "$(dirname "$0")/runs"
+    runs=$(wc -c < "$(dirname "$0")/runs")
+    if [ "$runs" -eq 3 ]; then sleep 1.2; fi
+    printf "mp4bytes"; exit 0
+  `)
+
+  const out = await transcode.measureEngine({
+    ffmpeg: bin, input: '/library/film.mkv', media: MEDIA, seconds: 1, levels: [1, 2, 4]
+  })
+  assert.equal(out.cap, 1, 'two at once had one slow stream, so two at once is not the answer')
+})
+
+test('an engine that cannot manage ONE conversion says so, rather than a number', async () => {
+  const bin = await fakeFfmpeg('echo "Function not implemented" >&2; exit 1')
+  const out = await transcode.measureEngine({
+    ffmpeg: bin, input: '/library/film.mkv', media: MEDIA, seconds: 1, levels: [1, 2]
+  })
+  assert.equal(out.cap, 0)
+  assert.equal(out.ladder.length, 1, 'and it does not go on to try two')
+  assert.match(out.ladder[0].reason, /Function not implemented/)
+})
+
+test('a run that hangs is bounded, so a broken box cannot hold the operator', async () => {
+  const bin = await fakeFfmpeg('sleep 30; printf "mp4bytes"')
+  const out = await transcode.measureEngine({
+    ffmpeg: bin, input: '/library/film.mkv', media: MEDIA, seconds: 0.2, levels: [1]
+  })
+  assert.equal(out.cap, 0)
+  assert.match(out.ladder[0].reason, /did not finish in time/)
+})
+
+test('the measurement converts a REAL film, bounded, with the sound rebuilt', async () => {
+  // It is the actual pipeline or it is a guess: the same argv the play path builds,
+  // pointed at a film out of this library and cut short.
+  const args = transcode.transcodeArgs({
+    input: '/library/film.mkv', media: MEDIA, at: 90, audio: 'aac', duration: 15
+  })
+  const at = args.indexOf('-t')
+  assert.ok(at > 0, 'bounded')
+  assert.equal(args[at + 1], '15')
+  assert.ok(at < args.indexOf('pipe:1'), 'as an output option, so it counts encoded time')
+  assert.deepEqual(args.slice(args.indexOf('-ss'), args.indexOf('-ss') + 2), ['-ss', '90'])
+  assert.ok(args.includes('h264_vaapi'))
+  // Nothing is bounded when nothing asks for it: the play path is unchanged.
+  assert.equal(transcode.transcodeArgs({ input: '/library/film.mkv', media: MEDIA }).includes('-t'), false)
+})
+
+test('the film it measures with is the library s hardest, not its first', async () => {
+  // A number about this box is a number about what it does with THESE films. Measuring
+  // on the easiest one in the library would be a promise it could not keep on the rest.
+  const film = (id, videoCodec, width, height) => ({ id, media: { videoCodec, width, height } })
+  const items = [
+    film('a', 'h264', 1920, 1080),
+    film('b', 'hevc', 1280, 720),
+    film('c', 'hevc', 3840, 2160),
+    film('d', 'h264', 3840, 2160),
+    { id: 'e', media: null }
+  ]
+  assert.equal(transcode.hardestFilm(items).id, 'c', 'HEVC first, then the biggest picture')
+  assert.equal(transcode.hardestFilm([film('a', 'h264', 1920, 1080), film('d', 'h264', 3840, 2160)]).id, 'd')
+  // The names ffprobe and Jellyfin actually write, through the same alias table the
+  // rest of the host reads codecs with.
+  assert.equal(transcode.hardestFilm([film('a', 'h264', 3840, 2160), film('b', 'hev1', 1920, 1080)]).id, 'b')
+  // Nothing usable is null rather than a guess - a host with no library has nothing
+  // honest to measure.
+  assert.equal(transcode.hardestFilm([]), null)
+  assert.equal(transcode.hardestFilm([{ id: 'x', media: { videoCodec: 'h264' } }]), null, 'no picture size, no measurement')
+})

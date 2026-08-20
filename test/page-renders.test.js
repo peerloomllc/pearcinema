@@ -1654,14 +1654,14 @@ test('THE ENGINE NUMBER SAVES ITSELF, with no button to hunt for', async (t) => 
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
   }
   const asked = []
   const { doc, win, text } = await openHost(t, state, 'host', asked)
 
   const num = doc.querySelector('.setrow input[type=number]')
   assert.equal(num.value, '4')
-  assert.equal(doc.querySelectorAll('.setrow .rowctl button').length, 4, 'Change, Sign out, Sign out, Run again - and no Save')
+  assert.equal(doc.querySelectorAll('.setrow .rowctl button').length, 5, 'Change, Sign out, Sign out, Test, Run again - and no Save')
   assert.equal([...doc.querySelectorAll('.setrow .rowctl button')].some(b => /Save/.test(b.textContent)), false)
   assert.doesNotMatch(text(), /leave the box/, 'and it needs no line explaining itself')
 
@@ -1675,13 +1675,83 @@ test('THE ENGINE NUMBER SAVES ITSELF, with no button to hunt for', async (t) => 
   assert.ok(asked.some(u => String(u).includes('/api/transcode-cap')), 'once the typing settles')
 })
 
+test('A BOX THAT HAS NEVER BEEN MEASURED SAYS SO, and offers to measure itself', async (t) => {
+  // The line this replaces read "this hardware managed about 10 in testing" on every
+  // install, quoting the machine PearCinema was built on (Tim, 2026-08-19). What is on
+  // screen now is either this box's own measurement or an offer to take one.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
+  }
+  const { doc, text } = await openHost(t, state, 'host')
+
+  assert.match(text(), /Never tested/)
+  assert.doesNotMatch(text(), /in testing/, 'no claim about anybody else s hardware')
+  const test_ = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Test')
+  assert.ok(test_, 'and the offer is a button on the row it is about')
+  assert.equal(doc.querySelector('.setrow input[type=number]').getAttribute('max'), '16')
+})
+
+test('THE MEASUREMENT IS THE FIELD S CEILING, not another sentence', async (t) => {
+  // Tim's call, 2026-08-19: the row says what the number means, and the measurement
+  // should bound what you are allowed to type rather than explain itself underneath.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: {
+      cap: 3,
+      source: 'dashboard',
+      measured: { cap: 3, at: 1, device: '/dev/dri/renderD128', seconds: 15, ladder: [], film: 'Sherlock Holmes' },
+      max: 3
+    }
+  }
+  const { doc, text } = await openHost(t, state, 'host')
+
+  assert.match(text(), /it keeps up with 3 at once/)
+  // NAMED, because a ceiling of 3 on a box that manages more with an easier film
+  // otherwise reads as PearCinema being timid.
+  assert.match(text(), /tested on Sherlock Holmes, the hardest film here/)
+  assert.equal(doc.querySelector('.setrow input[type=number]').getAttribute('max'), '3')
+})
+
+test('a machine that could not manage one conversion is told plainly', async (t) => {
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 1, source: 'dashboard', measured: { cap: 0, at: 1, ladder: [] }, max: 1 }
+  }
+  const { doc, text } = await openHost(t, state, 'host')
+
+  assert.match(text(), /did not keep up with even one conversion in real time/)
+  // And it may still be asked for one: refusing to let somebody try is not this
+  // page's call to make.
+  assert.equal(doc.querySelector('.setrow input[type=number]').getAttribute('max'), '1')
+})
+
+test('while it measures, the row says which level it is on', async (t) => {
+  // A minute of engine time behind a button that only says "Testing…" reads as a
+  // page that has hung. The host sends the level it has reached.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16, measuring: { concurrency: 8, of: 16 } }
+  }
+  const { doc, text } = await openHost(t, state, 'host')
+
+  assert.match(text(), /Testing 8 at once of up to 16/)
+  const test_ = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Testing/.test(b.textContent))
+  assert.ok(test_.disabled, 'and it cannot be started twice')
+  assert.ok(doc.querySelector('.setrow input[type=number]').disabled, 'nor the number changed mid-measurement')
+})
+
 test('typing 16 never sets the cap to 1 on the way', async (t) => {
   // Saving per keystroke would put a cap of 1 in force for as long as it stood, and a
   // cap of 1 refuses conversions. Each change cancels the last timer.
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
   }
   const asked = []
   const { doc, win } = await openHost(t, state, 'host', asked)
@@ -1702,7 +1772,7 @@ test('an unusable number puts the real one back rather than sending a guess', as
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
   }
   const asked = []
   const { doc, win } = await openHost(t, state, 'host', asked)
@@ -1760,7 +1830,7 @@ test('THE PAGE IS SAID ONCE AND LOUDLY, and no page of rows carries a chip', asy
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 4, source: 'default', measured: 10 }
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
   }
   const { doc, text } = await openHost(t, state)
 
@@ -1807,7 +1877,7 @@ test('THE ENGINE READS THE CAP TOO, not only the hardware', async (t) => {
   const off = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 0, source: 'dashboard', measured: 10 }
+    transcodeCap: { cap: 0, source: 'dashboard', measured: null, max: 16 }
   }
   const { doc, text } = await openHost(t, off)
   const name = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
@@ -1837,7 +1907,7 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
   const oneCard = {
     ...STATE,
     transcode: { available: true, reason: null, device: '/dev/dri/renderD128', nodes: ['/dev/dri/renderD128'] },
-    transcodeCap: { cap: 3, source: 'dashboard', measured: 10 }
+    transcodeCap: { cap: 3, source: 'dashboard', measured: null, max: 16 }
   }
   const one = await openHost(t, oneCard)
   assert.match(one.text(), /Up to 3 conversions run at once\. Setting it to 0 turns conversions off\./)
