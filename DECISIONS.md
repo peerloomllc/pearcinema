@@ -2,6 +2,48 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-20 - THE OPERATOR'S LABEL IS NOT THE DEVICE'S NAME
+Tier: T2 (identity semantics in the shared grant store). PR #126 here,
+peerloom-host PR #12. Asked for and decided by Tim on 2026-08-20.
+
+Context: rebuilding the People page put a Rename control in front of him and he asked
+"are we sure we want the host dashboard to be able to change the person name? At that
+point it will be out of sync with what the user set on their device." Reading the code
+made it worse than the question: `renamePerson` did not leave the two names disagreeing,
+it OVERWROTE `claimedUser` on every live device the person held - so an operator fixing
+a typo silently rewrote what somebody's own phone called them, in the field they had set
+it in.
+
+It was not careless. "Is this device's claim confirmed" was DERIVED, by comparing the
+person's name with the claim, on three surfaces independently (the dashboard's
+`mismatch`, `identity.get`, and the store's own comment). Under that rule a rename that
+left claims alone would have dropped every device of that person back into "Needs
+confirming", which is worse than the overwrite.
+
+Options put to Tim: leave it (the dashboard is the authority and the rename reaches the
+device); only allow renaming people who hold no devices; drop renaming entirely; or
+separate the two names properly. He chose to separate them.
+
+Decision: CONFIRMATION IS RECORDED, NOT DERIVED. `confirmedUser` on the grant is the
+claim the operator agreed to. `confirmedClaim(row, person)` is the single answer,
+exported from @peerloom/host and carried on `listDevices`, so no surface re-derives it.
+`renamePerson` touches nothing a device wrote.
+
+Three properties that had to survive, and each is a test:
+
+- A device changing its OWN name is pending again. That is the entire checkpoint from
+  proposal 2026-07-14 - "claims to be Sam" must never be enough to sit down beside the
+  real Sam - and it survives because the claim moves while the recorded confirmation
+  does not.
+- A device that was never confirmed is not confirmed by somebody else being renamed.
+- AN EXISTING BOX READS EXACTLY AS IT DID. Grants written before this carry no
+  `confirmedUser` and fall back to the old comparison; a rename backfills them first,
+  while the old name is still there to derive the answer from. There is no migration
+  step and no flag day.
+
+Cost: it is a change in the shared package, so PearTune inherits it. That is the right
+direction rather than a side effect - the same overwrite existed there.
+
 ## 2026-08-19 - A COPIED PICTURE IS CUT ON THE FILM'S OWN KEYFRAMES
 Tier: T2 (a second engine on the cast and phone segment path, and a change to how the
 cast transport is chosen). PR #113.

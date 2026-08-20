@@ -1235,8 +1235,10 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
     ...STATE,
     persons: [{ id: 'p1', name: 'Tim', label: 'Tim' }],
     devices: [{
+      // `confirmed` comes from the host now rather than being worked out on the
+      // page by comparing the person's name with the claim.
       deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true,
-      personId: 'p1', claimedUser: 'Tim', lastSeen: Date.now(), scope: 'full'
+      personId: 'p1', claimedUser: 'Tim', confirmed: true, lastSeen: Date.now(), scope: 'full'
     }]
   }
   const { dom, doc, win, text } = await open(withPerson)
@@ -2637,7 +2639,7 @@ test('THE PEOPLE PAGE IS ROWS NOW, and the reshape did not cost the security cla
     ...STATE,
     persons: [{ id: 'p1', name: 'Tim', label: 'Tim' }],
     devices: [
-      { deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true, personId: 'p1', claimedUser: 'Tim', lastSeenAt: Date.now(), scope: 'owner' },
+      { deviceKey: 'dk1', label: 'A phone', platform: 'android', online: true, personId: 'p1', claimedUser: 'Tim', confirmed: true, lastSeenAt: Date.now(), scope: 'owner' },
       { deviceKey: 'dk2', label: 'A laptop', platform: 'linux', online: false, personId: null, claimedUser: null, lastSeenAt: Date.now(), scope: 'full' }
     ]
   }

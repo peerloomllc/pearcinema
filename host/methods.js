@@ -17,7 +17,7 @@
 const items = require('./items')
 const watch = require('./watch')
 const { siblings } = require('./siblings')
-const { notifyOwners } = require('@peerloom/host')
+const { notifyOwners, confirmedClaim } = require('@peerloom/host')
 
 // The most positions one clear will forget. Far above any real shelf - the
 // point is that it is bounded rather than an unbounded scan somebody could
@@ -663,12 +663,16 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
         // the in-between honestly). The photo comes back so a re-install shows
         // your face again.
         userName: row.claimedUser || null,
-        // Confirmed means the operator confirmed THE CLAIM - the assigned
-        // person carries the claimed name - not merely that the device is
-        // assigned to somebody. A device already filed under Me that claims
-        // to be Timothy is PENDING, and saying "confirmed" there told the
+        // Confirmed means the operator confirmed THIS CLAIM, not merely that the
+        // device is assigned to somebody: a device already filed under Me that
+        // claims to be Timothy is PENDING, and saying "confirmed" there told the
         // person the exact opposite of the truth (caught live on the TCL).
-        confirmed: !!(row.claimedUser && person && person.name === row.claimedUser),
+        //
+        // It used to be worked out here by comparing the person's name with the
+        // claim, which is what forced a dashboard rename to overwrite the name on
+        // somebody's own phone. The package records the answer now and every
+        // surface reads the same one (Tim, 2026-08-20).
+        confirmed: confirmedClaim(row, person),
         avatar: avatars ? avatars.get(ctx.deviceKey) : null,
         deviceName: row.label || null,
         // Disambiguated where two people share a name, so "belongs to Sam" on the

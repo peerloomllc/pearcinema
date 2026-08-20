@@ -204,13 +204,14 @@ export default function People ({ state, reload }) {
   const persons = (state.persons || []).filter(p => !p.revokedAt)
 
   const byPerson = (id) => devices.filter(d => d.personId === id)
-  // A device whose claimed name is not the person it is filed under. Pulled out into
-  // its own group so every ordinary row stays uniform.
-  const mismatch = (d) => {
-    if (d.revokedAt || !d.claimedUser) return false
-    const holder = persons.find(p => p.id === d.personId)
-    return !holder || holder.name.toLowerCase() !== d.claimedUser.toLowerCase()
-  }
+  // A device whose claim nobody has agreed to yet. Pulled out into its own group so
+  // every ordinary row stays uniform.
+  //
+  // THE HOST ANSWERS THIS, the page no longer works it out. It used to compare the
+  // person's name with what the device claimed, which is the same comparison that
+  // forced a rename to overwrite the name on somebody's own phone - one rule, one
+  // place (Tim, 2026-08-20).
+  const mismatch = (d) => !d.revokedAt && !!d.claimedUser && !d.confirmed
   const pending = devices.filter(mismatch)
   const unassigned = devices.filter(d => !d.personId && !d.revokedAt && !mismatch(d))
   const revoked = devices.filter(d => d.revokedAt)
