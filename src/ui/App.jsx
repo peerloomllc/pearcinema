@@ -846,6 +846,11 @@ export default function App () {
   // declaration and the BOX presses it into the picture.
   const [playerSkin, setPlayerSkin] = useState('off')
   const [playerTone, setPlayerTone] = useState('off')
+  // PLAY THE NEXT EPISODE BY ITSELF. The card is drawn by the SHELL, because the
+  // film is a native view covering this page - but the preference belongs here
+  // with every other setting, and rides the same shell.navSet the buttons do.
+  // Absent means on, which is what a television does.
+  const [autoplayNext, setAutoplayNext] = useState(true)
   const [showDisplay, setShowDisplay] = useState(false)
   const setDisplay = (patch) => {
     if ('sortField' in patch) setSortField(patch.sortField)
@@ -1072,6 +1077,14 @@ export default function App () {
       on('player:tick', (d) => {
         if (d?.itemId && d.positionMs > 0) call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
       }),
+      // The autoplay switch, thrown on the card the shell drew. It is saved
+      // HERE so the Settings row and the card are one preference rather than
+      // two that agree until they do not.
+      on('player:autoplay', (d) => {
+        const on = !!d?.on
+        setAutoplayNext(on)
+        call('setSettings', { autoplayNext: on }).catch(() => {})
+      }),
       on('player:closed', async (d) => {
         if (d?.itemId && d.positionMs > 0) await call('resume.set', { itemId: d.itemId, positionMs: d.positionMs }).catch(() => {})
         // Refetch the shelf people are LOOKING at. Nulling alone left You >
@@ -1272,6 +1285,7 @@ export default function App () {
       if (typeof s?.dataSaver === 'boolean') setDataSaver(s.dataSaver)
       if (['off', 'film', 'mst3k'].includes(s?.playerSkin)) setPlayerSkin(s.playerSkin)
       if (['off', 'bw', 'sepia'].includes(s?.playerTone)) setPlayerTone(s.playerTone)
+      if (typeof s?.autoplayNext === 'boolean') setAutoplayNext(s.autoplayNext)
       // Absent means on: a phone that has never opened Settings should still be able to
       // reach its library from a network that cannot punch.
       if (typeof s?.useRelay === 'boolean') setUseRelay(s.useRelay)
@@ -1369,7 +1383,27 @@ export default function App () {
     try {
       const { prev, next } = await call('library.siblings', { id: item.id })
       navRef.current = (prev || next) ? { itemId: item.id, prev, next } : null
-      if (navRef.current) await call('shell.navSet', { itemId: item.id, hasPrev: !!prev, hasNext: !!next })
+      if (navRef.current) {
+        await call('shell.navSet', {
+          itemId: item.id,
+          hasPrev: !!prev,
+          hasNext: !!next,
+          autoplayNext,
+          // WHAT THE CARD AT THE END SAYS, sent WITH the buttons rather than
+          // asked for when the film ends - a card that has to fetch its own
+          // words appears blank at the exact moment somebody is looking at it.
+          next: next
+            ? {
+                title: next.title || '',
+                seriesTitle: next.seriesTitle || '',
+                label: next.episodeNumber != null ? `Episode ${next.episodeNumber}` : '',
+                runtime: next.runtime || null,
+                overview: next.overview || '',
+                artUrl: next.artId && artBase ? `${artBase}${encodeURIComponent(next.artId)}?s=350` : null
+              }
+            : null
+        })
+      }
     } catch { navRef.current = null }
   }
   playRef.current = play
@@ -1922,7 +1956,12 @@ export default function App () {
               {items.map((e) => (
                 <ItemRow
                   key={e.id} item={e} onOpen={open} onLong={longPress}
-                  sub={[e.episode != null ? `Episode ${e.episode}` : null, fmtRuntime(e.runtime)].filter(Boolean).join(' · ')}
+                  // `episodeNumber` is what the item model has always called it
+                  // (items.js). This read `e.episode`, which is a SORT key's
+                  // name and not a field, so no episode row has ever shown its
+                  // number - found writing the next-up card, which needs the
+                  // same words.
+                  sub={[e.episodeNumber != null ? `Episode ${e.episodeNumber}` : null, fmtRuntime(e.runtime)].filter(Boolean).join(' · ')}
                   right={watchedIds.has(e.id) ? <CheckCircle size={18} weight='fill' className='muted' /> : null}
                 />
               ))}
@@ -2462,6 +2501,24 @@ export default function App () {
               on={showRecent}
               label='Recently added row'
               onChange={(next) => setDisplay({ showRecent: next })}
+            />
+          </div>
+
+          <div className='row' style={{ marginTop: '.7rem' }}>
+            <div>
+              <div className='label'>Play the next episode</div>
+              <div className='desc'>
+                When an episode ends, the next one starts after a ten second
+                countdown you can stop.
+              </div>
+            </div>
+            <Switch
+              on={autoplayNext}
+              label='Play the next episode'
+              onChange={(next) => {
+                setAutoplayNext(next)
+                call('setSettings', { autoplayNext: next }).catch(() => {})
+              }}
             />
           </div>
 

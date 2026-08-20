@@ -168,6 +168,38 @@ async function rig (t) {
   return { friend, desktop, base, get, post, lib: paired.libraryId }
 }
 
+// THE SEASON-BOUNDARY NEIGHBOUR CAN LIVE ON THE OTHER HOST, which is the whole
+// reason the blend answers this itself instead of asking the library that owns
+// the id - that library would stop at the half it has. Straight against the
+// index, because the walk is the claim and a two-host testnet proves nothing
+// extra about it.
+test('the blend walks a spanning show for the next episode, not one library', () => {
+  const { Blend } = require('../host/blend')
+  const merge = require('../src/merge')
+
+  const ep = (over) => items.episode({
+    seriesId: 'the-wire', seriesTitle: 'The Wire', seasonId: 'wire-s01',
+    seasonNumber: 1, episodeNumber: 1, title: 'The Target', ...over
+  })
+  const blend = Object.create(Blend.prototype)
+  blend.index = merge.buildIndex([
+    { libraryId: 'A', episodes: [ep({ id: 'a1' }), ep({ id: 'a2', episodeNumber: 2, title: 'The Detail' })] },
+    { libraryId: 'B', episodes: [ep({ id: 'b1', seasonId: 'wire-s02', seasonNumber: 2, episodeNumber: 1, title: 'Ebb Tide' })] }
+  ])
+
+  const last = blend.siblings('a2')
+  assert.equal(last.next.title, 'Ebb Tide', 'the last of season one is followed by the first of season two')
+  assert.equal(last.next.libraryId, 'B', 'even though that season is on the other host')
+  assert.equal(last.prev.title, 'The Target')
+
+  assert.equal(blend.siblings('a1').prev, null)
+  assert.equal(blend.siblings('b1').next, null)
+  // An id the blend does not hold is a null rather than two nulls: the caller
+  // has to be able to tell "not merged" from "no neighbours" so it can fall
+  // through to whichever library owns it.
+  assert.equal(blend.siblings('nothing-here'), null)
+})
+
 test('the blend dedupes across the local disk and the wire, and local wins', { timeout: 120000 }, async (t) => {
   const { desktop, base, get, lib } = await rig(t)
 

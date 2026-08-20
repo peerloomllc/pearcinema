@@ -409,6 +409,33 @@ test('the library reads through the same adapter the phone does', async (t) => {
   assert.equal((await c.req('GET', '/api/library/list?type=episodes')).status, 400)
 })
 
+test('the player can ask what sits on either side of an episode', async (t) => {
+  const { c } = await loggedIn(t)
+
+  // The middle one has both neighbours.
+  const mid = await c.req('GET', '/api/siblings?itemId=wire-s01e02')
+  assert.equal(mid.status, 200)
+  assert.equal(mid.json.prev.id, 'wire-s01e01')
+  assert.equal(mid.json.next.id, 'wire-s01e03')
+  // The card is going to render these, so they have to arrive as whole items
+  // rather than as bare ids.
+  assert.equal(mid.json.next.title, 'Episode 3')
+  assert.equal(mid.json.next.episodeNumber, 3)
+
+  // The ends answer with a null on the side that has nothing, not an error.
+  assert.equal((await c.req('GET', '/api/siblings?itemId=wire-s01e01')).json.prev, null)
+  assert.equal((await c.req('GET', '/api/siblings?itemId=wire-s01e03')).json.next, null)
+
+  // A FILM IS TWO NULLS, not a 400 - the player asks about whatever is playing
+  // and must not have to branch on the type before it can ask.
+  const film = await c.req('GET', '/api/siblings?itemId=' + FILM.id)
+  assert.equal(film.status, 200)
+  assert.deepEqual(film.json, { prev: null, next: null })
+
+  assert.equal((await c.req('GET', '/api/siblings?itemId=nope')).status, 404)
+  assert.equal((await c.req('GET', '/api/siblings')).status, 400)
+})
+
 test('subtitles come back as WebVTT, because a <track> accepts nothing else', async (t) => {
   const { c } = await loggedIn(t)
 

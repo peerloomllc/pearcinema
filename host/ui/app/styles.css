@@ -832,6 +832,78 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 @keyframes fade-in { from { opacity: 0 } }
 @media (prefers-reduced-motion: reduce) { .resumeover { animation: none } }
 
+/* PLAYING NEXT, over the last frame rather than after it. The episode is over,
+ * so this is allowed to cover the picture completely - unlike the resume card,
+ * which is a question about something you are ABOUT to watch.
+ *
+ * Three columns and they are in order of what gets looked at: the clock that is
+ * counting, the name of the thing that is coming, and its picture. On a narrow
+ * screen the picture is the first thing to go, because the words carry the
+ * meaning and the artwork only confirms it. */
+.nextover {
+  position: absolute; inset: 0; z-index: 5;
+  display: grid; place-items: center;
+  background: rgba(0, 0, 0, .82);
+  animation: fade-in .18s ease both;
+}
+/* A THEMED PANEL ON A DARK SCRIM. The scrim is black in both themes because it
+ * is covering a picture; the card is not, or a light-mode page would be reading
+ * dark text against it. */
+.nextcard {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 1.4rem; align-items: start;
+  width: min(52rem, 92%); max-height: 90%; overflow: auto;
+  padding: 1.2rem;
+  background: var(--card); color: var(--fg);
+  border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.nextside { display: grid; justify-items: center; gap: .7rem; width: 9.5rem }
+.nextside .ghost { width: 100% }
+
+/* The dial IS the play button, so the countdown never needs a second control
+ * beside it saying "or now".
+ * NOT `.ring` - that name was already taken by the scanning outline on a poster
+ * tile, whose rule sits further down this file and would simply have won. */
+.nextdial {
+  position: relative; width: 5rem; height: 5rem; padding: 0;
+  background: none; border: 0; border-radius: 999px; cursor: pointer;
+}
+.nextdial svg { width: 100%; height: 100%; transform: rotate(-90deg) }
+.nextdial circle { fill: none; stroke-width: 4 }
+.nextdial .dialtrack { stroke: var(--line-strong) }
+.nextdial .dialfill { stroke: var(--accent); transition: stroke-dashoffset 1s linear }
+.nextdial span {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 1.5rem; font-weight: 600; color: var(--fg);
+}
+.nextdial:hover .dialtrack { stroke: var(--accent) }
+@media (prefers-reduced-motion: reduce) { .nextdial .dialfill { transition: none } }
+
+.autoplay { display: flex; gap: .45rem; align-items: flex-start; font-size: .8rem; color: var(--muted) }
+.autoplay input { margin: .15rem 0 0; accent-color: var(--accent) }
+
+.nextmeta .eyebrow {
+  margin: 0 0 .35rem; font-size: .72rem; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.nextmeta h3 { margin: 0; font-size: 1.4rem }
+.nextline { margin: .2rem 0 .35rem; font-weight: 600; color: var(--fg) }
+.nextmeta .hint { margin: 0 }
+.nextsum { margin: .8rem 0 0; color: var(--muted); line-height: 1.5 }
+
+.nextart {
+  width: 8rem; border-radius: var(--radius);
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+}
+
+@media (max-width: 40rem) {
+  .nextcard { grid-template-columns: auto minmax(0, 1fr); gap: 1rem }
+  .nextart { display: none }
+  .nextside { width: 7rem }
+  .nextsum { display: none }
+}
+
 /* An episode nobody has started yet, on the same shelf as things half-watched. It
  * says so rather than looking like something abandoned in the middle. */
 .poster .next {

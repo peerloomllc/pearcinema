@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
+import { Animated, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -30,6 +30,12 @@ import { probe as probeDecoders } from '../modules/decoder-probe'
 import * as CastRemote from '../modules/cast-remote'
 
 const bundle = require('../assets/bare-universal.bundle')
+
+// HOW LONG THE PLAYING-NEXT CARD WAITS before the next episode starts itself.
+// Ten seconds is what a television does, and it is the number to copy rather
+// than improve on: long enough to read the title and reach the screen, short
+// enough that nobody sits through it.
+const NEXT_SECONDS = 10
 
 // The parked pairing link, MODULE scope on purpose. A warm pear:// link makes
 // expo-router navigate (there is no /pair route, so +not-found redirects home)
@@ -90,7 +96,30 @@ export default function App () {
   // Previous/Next episode availability, set by the UI (shell.navSet) once it
   // has asked the host what sits on either side. The buttons only hand an
   // intent back to the UI - which episode that intent lands on is its call.
-  const [nav, setNav] = useState<{ hasPrev: boolean, hasNext: boolean } | null>(null)
+  const [nav, setNav] = useState<{
+    hasPrev: boolean,
+    hasNext: boolean,
+    autoplay: boolean,
+    next: { title: string, seriesTitle: string, label: string, runtime: number | null, overview: string, artUrl: string | null } | null
+  } | null>(null)
+
+  // PLAYING NEXT. The film is over and the card asks whether to carry on. It is
+  // drawn HERE rather than in the web UI for the same reason the lock-screen
+  // remote is: the video is a native view covering the whole page, so a card in
+  // the WebView would be behind it.
+  //
+  // `left` is the countdown and null means nothing is going to happen on its
+  // own - which is both what the autoplay switch off looks like and what
+  // cancelling leaves. Cancel dismisses the card and leaves the finished
+  // episode on its last frame with the controls, so nothing closes by itself.
+  const [upNext, setUpNext] = useState(false)
+  const [left, setLeft] = useState<number | null>(null)
+  // The bar under the buttons empties SMOOTHLY (Tim, 2026-08-20), which the
+  // per-second number cannot do - it would step ten times and read as a stutter.
+  // One ten-second linear animation on the UI thread instead, so it keeps
+  // running evenly whatever JS is doing, and it is scaleX rather than width
+  // because only a transform can be handed to the native driver.
+  const bar = useRef(new Animated.Value(1)).current
 
   // THE CONTROLS ARE ALL OURS (Tim, 2026-08-15: no mixture of native player
   // buttons and our own). expo-video's native row cannot take custom buttons,
@@ -149,6 +178,10 @@ export default function App () {
     }, 3500)
   }
   const playingRef = useRef<typeof playing>(null)
+  // The neighbours, in a ref as well as in state: the end-of-film listener is
+  // installed once per film and would otherwise hold whatever nav was when the
+  // film started, which is null - shell.navSet always lands a moment later.
+  const navRef = useRef<typeof nav>(null)
   const lastPos = useRef(0)
 
   // SUBTITLES, both kinds behind one picker. Embedded text tracks ride the
@@ -401,6 +434,8 @@ export default function App () {
     }
   }, [!!playing])
 
+  useEffect(() => { navRef.current = nav }, [nav])
+
   // Position ticks flow INTO the UI, which owns every watch-state rule.
   useEffect(() => {
     playingRef.current = playing
@@ -424,14 +459,57 @@ export default function App () {
       })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:error', ${payload})`)
     })
+    // THE FILM RAN OUT. Only ever the card, never the next episode straight
+    // away - a cut from the last frame of one to the first of the next, with
+    // no way to stop it, is the thing everybody turns autoplay off to escape.
+    const endSub = player.addListener('playToEnd', () => {
+      if (!playingRef.current) return
+      const n = navRef.current
+      if (!n?.next) return
+      setUpNext(true)
+      setLeft(n.autoplay ? NEXT_SECONDS : null)
+      // The controls come back with it: cancelling should leave a player that
+      // can be scrubbed or closed, not a bare frame.
+      setControlsOn(true)
+      clearTimeout(hideTimer.current)
+    })
     const tick = setInterval(() => {
       const p = playingRef.current
       if (!p) return
       const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:tick', ${payload})`)
     }, 15000)
-    return () => { sub.remove(); playSub.remove(); errSub.remove(); clearInterval(tick) }
+    return () => { sub.remove(); playSub.remove(); errSub.remove(); endSub.remove(); clearInterval(tick) }
   }, [playing])
+
+  // The countdown, one second at a time. It exists only while `left` is a
+  // number, so cancelling and autoplay-off are the same state rather than two
+  // flags to keep in step.
+  useEffect(() => {
+    if (left === null) return
+    if (left <= 0) { navTo('next'); return }
+    const t = setTimeout(() => setLeft((l) => (l === null ? null : l - 1)), 1000)
+    return () => clearTimeout(t)
+  }, [left])
+
+  // The bar, started once when the countdown starts rather than nudged on each
+  // tick - the dependency is whether one is running at all, not what second it
+  // is on. Stopping it puts the bar back to full, so turning autoplay on again
+  // starts a fresh ten seconds and the bar agrees with the number.
+  useEffect(() => {
+    const running = upNext && left !== null
+    bar.stopAnimation()
+    bar.setValue(1)
+    if (!running) return
+    const anim = Animated.timing(bar, {
+      toValue: 0,
+      duration: NEXT_SECONDS * 1000,
+      easing: Easing.linear,
+      useNativeDriver: true
+    })
+    anim.start()
+    return () => anim.stop()
+  }, [upNext, left !== null])
 
   // The time bar's clock: polled only while the controls are actually on
   // screen - a hidden bar does not need a heartbeat.
@@ -454,6 +532,7 @@ export default function App () {
     try { player.pause() } catch {}
     setPlaying(null)
     setNav(null)
+    setUpNext(false); setLeft(null)
     setSubTracks([]); setSubPicker(false); setActiveSub(null); setCueText('')
     cuesRef.current = []
     clearTimeout(hideTimer.current)
@@ -617,6 +696,9 @@ export default function App () {
       // them. The same item replayed (the lying-chip transcode retry) keeps
       // its buttons - the neighbours have not changed.
       if (itemId !== playingRef.current?.itemId) setNav(null)
+      // Whatever this play is - a fresh film, the next episode, a transcode
+      // retry - the card belongs to the one that just finished.
+      setUpNext(false); setLeft(null)
       // canCast rides the play rather than being asked for here: only the web UI
       // knows whether this device holds owner scope and whether the library it is
       // watching has a television configured at all. A button that opens an empty
@@ -653,7 +735,14 @@ export default function App () {
       // Guarded by item: an answer that arrives after the person already moved
       // on to something else must not put the wrong show's buttons up.
       if (msg.args?.itemId === playingRef.current?.itemId) {
-        setNav({ hasPrev: !!msg.args?.hasPrev, hasNext: !!msg.args?.hasNext })
+        setNav({
+          hasPrev: !!msg.args?.hasPrev,
+          hasNext: !!msg.args?.hasNext,
+          // Absent means on, matching the setting's own default - an older
+          // page that does not send it must not silently turn it off.
+          autoplay: msg.args?.autoplayNext !== false,
+          next: msg.args?.next || null
+        })
       }
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
@@ -999,6 +1088,79 @@ export default function App () {
               </Pressable>
             </Pressable>
           )}
+
+          {/* PLAYING NEXT. Over the last frame, and the only thing on screen
+              that acts by itself - which is why the count is shown the whole
+              time it runs and why Cancel is the same size as Play now. */}
+          {upNext && nav?.next && (
+            <View style={styles.nextWrap}>
+              <View style={styles.nextCard}>
+                <Text style={styles.nextEyebrow}>PLAYING NEXT</Text>
+                <View style={styles.nextRow}>
+                  {!!nav.next.artUrl && (
+                    <Image source={{ uri: nav.next.artUrl }} style={styles.nextArt} resizeMode='cover' />
+                  )}
+                  <View style={styles.nextMeta}>
+                    <Text style={styles.nextTitle} numberOfLines={1}>
+                      {nav.next.seriesTitle || nav.next.title}
+                    </Text>
+                    <Text style={styles.nextSub} numberOfLines={1}>
+                      {[nav.next.label, nav.next.title].filter(Boolean).join(' - ')}
+                    </Text>
+                    {!!nav.next.runtime && (
+                      <Text style={styles.nextHint}>{Math.round(nav.next.runtime / 60)} min</Text>
+                    )}
+                    {!!nav.next.overview && (
+                      <Text style={styles.nextOverview} numberOfLines={3}>{nav.next.overview}</Text>
+                    )}
+                  </View>
+                </View>
+
+                <View style={styles.nextActs}>
+                  <Pressable style={styles.nextBtn} onPress={() => navTo('next')}>
+                    <MaterialIcons name='play-arrow' size={20} color='#1c1305' />
+                    <Text style={styles.nextBtnTxt}>
+                      {left === null ? 'Play now' : `Play now (${Math.max(0, left)})`}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.nextGhost}
+                    onPress={() => { setLeft(null); setUpNext(false); poke() }}
+                  >
+                    <Text style={styles.nextGhostTxt}>Cancel</Text>
+                  </Pressable>
+                </View>
+
+                {/* The countdown, drawn rather than only counted: a number
+                    alone does not say how much of the wait is left at a
+                    glance. Nothing is here at all when nothing is running. */}
+                {left !== null && (
+                  <View style={styles.nextTrack}>
+                    <Animated.View style={[styles.nextFill, { transform: [{ scaleX: bar }] }]} />
+                  </View>
+                )}
+
+                <Pressable
+                  style={styles.nextAuto}
+                  onPress={() => {
+                    const on = !nav.autoplay
+                    setNav((n) => (n ? { ...n, autoplay: on } : n))
+                    setLeft(on ? NEXT_SECONDS : null)
+                    // The web UI saves it, so the card and the Settings switch
+                    // are one preference rather than two that drift.
+                    feedWebView(`window.__pearEvent && window.__pearEvent('player:autoplay', ${JSON.stringify({ on })})`)
+                  }}
+                >
+                  <MaterialIcons
+                    name={nav.autoplay ? 'check-box' : 'check-box-outline-blank'}
+                    size={20}
+                    color={nav.autoplay ? '#e2a13d' : '#a2947d'}
+                  />
+                  <Text style={styles.nextAutoTxt}>Autoplay</Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
         </View>
       )}
     </View>
@@ -1042,6 +1204,42 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center', justifyContent: 'center', padding: 24
   },
+  // PLAYING NEXT. The scrim is nearly opaque - the episode is over, so there is
+  // nothing under it worth seeing through.
+  nextWrap: {
+    ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.88)',
+    alignItems: 'center', justifyContent: 'center', padding: 20
+  },
+  nextCard: {
+    width: '100%', maxWidth: 560,
+    backgroundColor: '#1a1712', borderColor: '#2e2820', borderWidth: 1,
+    borderRadius: 14, padding: 16, gap: 12
+  },
+  nextEyebrow: { color: '#a2947d', fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  nextRow: { flexDirection: 'row', gap: 14 },
+  nextArt: { width: 74, height: 111, borderRadius: 8, backgroundColor: '#0f0d0a' },
+  nextMeta: { flex: 1, gap: 2 },
+  nextTitle: { color: '#efe9df', fontSize: 19, fontWeight: '600' },
+  nextSub: { color: '#efe9df', fontSize: 14, fontWeight: '600' },
+  nextHint: { color: '#a2947d', fontSize: 12 },
+  nextOverview: { color: '#a2947d', fontSize: 13, lineHeight: 18, marginTop: 6 },
+  nextActs: { flexDirection: 'row', gap: 10 },
+  nextBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#e2a13d', borderRadius: 10, paddingVertical: 11
+  },
+  nextBtnTxt: { color: '#1c1305', fontWeight: '700' },
+  nextGhost: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    borderColor: '#2e2820', borderWidth: 1, borderRadius: 10, paddingVertical: 11
+  },
+  nextGhostTxt: { color: '#efe9df', fontWeight: '600' },
+  nextTrack: { height: 3, borderRadius: 2, backgroundColor: 'rgba(239,233,223,0.18)', overflow: 'hidden' },
+  // Full width, emptied by scaling from its LEFT edge - scaleX is about the
+  // centre by default, which would shrink the bar towards its middle.
+  nextFill: { height: 3, width: '100%', backgroundColor: '#e2a13d', transformOrigin: 'left' },
+  nextAuto: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  nextAutoTxt: { color: '#a2947d', fontSize: 13 },
   subCard: {
     backgroundColor: '#1a1712', borderColor: '#2e2820', borderWidth: 1,
     borderRadius: 12, padding: 8, alignSelf: 'stretch', maxWidth: 420,

@@ -33,6 +33,28 @@ import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import { Blocked, Check, Close, Info, Download as DownloadIcon, Trash } from './icons'
 
+// HOW LONG THE CARD WAITS before the next episode starts itself. Ten seconds is
+// Plex's, and it is the number to copy rather than improve on: long enough to
+// read the title and reach the mouse, short enough that nobody sits through it.
+const NEXT_SECONDS = 10
+
+// The countdown dial's circumference, r=28 in a 64-wide box. Held here so the
+// stroke maths and the SVG cannot drift apart.
+const DIAL = 2 * Math.PI * 28
+
+// AUTOPLAY IS A PREFERENCE OF THIS BROWSER, not of the library. It says what
+// this person wants to happen while they are sitting in front of this screen,
+// which is exactly the kind of thing localStorage is for - and it must not
+// travel to somebody else's device on the same host (Tim, 2026-08-20).
+// Absent means on.
+const AUTOPLAY_KEY = 'pearcinema.autoplaynext'
+function readAutoplay () {
+  try { return localStorage.getItem(AUTOPLAY_KEY) !== 'off' } catch { return true }
+}
+function writeAutoplay (on) {
+  try { localStorage.setItem(AUTOPLAY_KEY, on ? 'on' : 'off') } catch {}
+}
+
 export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {}, remote = false }) {
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
@@ -50,6 +72,15 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // The details sheet. Shut by default and shut again on every new film - it is a
   // question somebody asked about THIS one.
   const [details, setDetails] = useState(false)
+  // The episode on either side, walked across the whole show by the host. Null
+  // until it answers, and two nulls for a film.
+  const [sib, setSib] = useState(null)
+  // PLAYING NEXT. `upNext` is the card being up; `left` is the countdown, and
+  // null there means the card is up but nothing is going to happen on its own -
+  // which is both what autoplay-off looks like and what cancelling leaves.
+  const [upNext, setUpNext] = useState(false)
+  const [left, setLeft] = useState(null)
+  const [autoplay, setAutoplay] = useState(readAutoplay)
   const video = useRef(null)
   // HAS THE VIEWER ASKED FOR THIS TO PLAY? Nothing starts on its own (Tim,
   // 2026-08-13): opening a page should not fill a room with sound, and on a
@@ -61,6 +92,14 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // playback. The flag says the viewer already pressed play, and the new element picks
   // up where the old one left off.
   const wantPlay = useRef(false)
+  // THE ONE CASE WHERE A NEW FILM MAY START ITSELF. `wantPlay` is cleared on
+  // every new item on purpose - clicking a second film must not start it - but
+  // the card at the end of an episode IS somebody saying play the next one, by
+  // pressing it or by letting the countdown run out. This ref survives the item
+  // change (the component is not remounted, only re-propped) and hands that
+  // intent across (Tim, 2026-08-20: the browser moved to the next episode and
+  // sat there paused, while the phone played it).
+  const autoStart = useRef(false)
   // The last position WRITTEN, so the fifteen-second heartbeat can skip a write when
   // nothing has moved - a paused film should not keep writing the same number.
   const wrote = useRef(0)
@@ -147,13 +186,23 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     setBurnSub(null)
     wrote.current = 0
     // A different film is a fresh decision. Playing one and clicking another must not
-    // start the second one on its own.
-    wantPlay.current = false
+    // start the second one on its own - unless it arrived off the playing-next
+    // card, which is that decision already made.
+    wantPlay.current = autoStart.current
+    autoStart.current = false
     setDetails(false)
+    setSib(null); setUpNext(false); setLeft(null)
     let live = true
     api('/api/subtitles?itemId=' + encodeURIComponent(item.id)).then(res => {
       if (live) setSubs(res.items || [])
     })
+
+    // The neighbours, asked once per episode. They drive Previous and Next and
+    // they are what the card at the end offers - so this is asked for a film
+    // too and simply comes back empty, rather than being branched on here.
+    api('/api/siblings?itemId=' + encodeURIComponent(item.id))
+      .then(res => { if (live && !res?.error) setSib(res) })
+      .catch(() => {})
 
     // Where this person got to, from the shelf we already have rather than a second
     // round trip. `watch` is a snapshot from when the library last read it, which is
@@ -222,9 +271,24 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     onWatchChange()
   }
 
+  // THE HOST'S ANSWER WINS OVER THE QUEUE. The queue is whatever list this film
+  // was opened from, so on the last episode of a season it ends - while the host
+  // walks the whole show and hands back the first of the next one, which is what
+  // "next" means to a person. The queue stays as the fallback for the moment
+  // before the host answers, and for a list of films.
   const idx = queue.findIndex(q => q.id === item.id)
-  const next = idx >= 0 && idx + 1 < queue.length ? queue[idx + 1] : null
-  const prev = idx > 0 ? queue[idx - 1] : null
+  const next = sib?.next || (idx >= 0 && idx + 1 < queue.length ? queue[idx + 1] : null)
+  const prev = sib?.prev || (idx > 0 ? queue[idx - 1] : null)
+
+  // THE COUNTDOWN, one second at a time, and it exists only while `left` is a
+  // number - cancelling and autoplay-off are both "no number" rather than a
+  // second flag to keep in step.
+  useEffect(() => {
+    if (left === null) return
+    if (left <= 0) { if (next) { autoStart.current = true; onPlay(next) } return }
+    const t = setTimeout(() => setLeft(l => (l === null ? null : l - 1)), 1000)
+    return () => clearTimeout(t)
+  }, [left, next?.id])
 
   const m = item.media || {}
   const heading = item.type === 'episode'
@@ -294,14 +358,29 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   const d = e.currentTarget.duration
                   setElDuration(Number.isFinite(d) && d > 0 ? d : 0)
                   // Only ever resumes something the viewer already started - see
-                  // wantPlay. A first open stays paused.
-                  if (wantPlay.current) e.currentTarget.play().catch(() => {})
+                  // wantPlay. A first open stays paused. And never while the
+                  // resume card is up: an episode carried in by the countdown
+                  // that turns out to be half-watched must not play from zero
+                  // underneath the question about where to start.
+                  if (wantPlay.current && offer === null) e.currentTarget.play().catch(() => {})
                 }}
                 onPlay={() => { wantPlay.current = true }}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
                 onPause={() => savePosition()}
-                onEnded={() => savePosition(true)}
+                onEnded={() => {
+                  savePosition(true)
+                  // A GENERATED STREAM CAN END WITHOUT THE FILM ENDING - the
+                  // host's ffmpeg stopping is an `ended` to the element, and
+                  // offering the next episode forty minutes in would be worse
+                  // than saying nothing. So the card needs the clock to agree
+                  // that this really was the end.
+                  const reallyEnded = !duration || at >= duration * 0.9
+                  if (item.type === 'episode' && next && reallyEnded) {
+                    setUpNext(true)
+                    setLeft(autoplay ? NEXT_SECONDS : null)
+                  }
+                }}
                 onPlaying={() => setBusy(false)}
                 onError={() => {
                   setBusy(false)
@@ -352,6 +431,77 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   if (!generated) video.current?.play().catch(() => {})
                 }}>Start Over</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* PLAYING NEXT (Tim, 2026-08-19, naming Plex's). The episode is over and
+            the question is whether to carry on, so the card answers it with the
+            next one's name, its length and what it is about - not with a bare
+            "Next episode" button that asks somebody to remember what follows
+            what.
+            THE COUNTDOWN IS THE ONLY THING THAT ACTS ON ITS OWN, and it is
+            visible the whole time it runs. Cancel stops it and leaves the
+            finished episode on screen, paused, with the controls - nothing
+            closes, nothing jumps. */}
+        {upNext && next && (
+          <div class='nextover'>
+            <div class='nextcard'>
+              <div class='nextside'>
+                <button
+                  class='nextdial'
+                  onClick={() => { autoStart.current = true; onPlay(next) }}
+                  title='Play it now'
+                  aria-label={'Play ' + (next.title || 'the next episode') + ' now'}
+                >
+                  <svg viewBox='0 0 64 64' aria-hidden='true'>
+                    <circle class='dialtrack' cx='32' cy='32' r='28' />
+                    {left !== null && (
+                      <circle
+                        class='dialfill'
+                        cx='32' cy='32' r='28'
+                        style={`stroke-dasharray:${DIAL};stroke-dashoffset:${DIAL * (1 - Math.max(0, left) / NEXT_SECONDS)}`}
+                      />
+                    )}
+                  </svg>
+                  <span>{left === null ? '▶' : Math.max(0, left)}</span>
+                </button>
+
+                {/* The preference lives on the card because that is the one
+                    moment anybody has an opinion about it. */}
+                <label class='autoplay'>
+                  <input
+                    type='checkbox'
+                    checked={autoplay}
+                    onChange={e => {
+                      const on = e.currentTarget.checked
+                      setAutoplay(on)
+                      writeAutoplay(on)
+                      setLeft(on ? NEXT_SECONDS : null)
+                    }}
+                  />
+                  <span>Autoplay</span>
+                </label>
+
+                <button class='ghost' onClick={() => { setLeft(null); setUpNext(false) }}>Cancel</button>
+              </div>
+
+              <div class='nextmeta'>
+                <p class='eyebrow'>Playing next</p>
+                <h3>{next.seriesTitle || next.title}</h3>
+                <p class='nextline'>
+                  {[episodeCode(next), next.title].filter(Boolean).join(' - ')}
+                </p>
+                <p class='hint'>
+                  {[next.runtime ? fmtRuntime(next.runtime) : null, (watch?.watched || []).includes(next.id) ? 'Watched' : 'Not watched yet']
+                    .filter(Boolean).join(' · ')}
+                </p>
+                {next.overview && <p class='nextsum'>{next.overview}</p>}
+              </div>
+
+              {next.artId && (
+                <img class='nextart' src={withBase('/api/art?id=' + encodeURIComponent(next.artId))} alt='' />
+              )}
             </div>
           </div>
         )}

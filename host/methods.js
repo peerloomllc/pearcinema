@@ -16,6 +16,7 @@
 
 const items = require('./items')
 const watch = require('./watch')
+const { siblings } = require('./siblings')
 const { notifyOwners } = require('@peerloom/host')
 
 // Methods that mutate, refused for a readonly grant at the package's chokepoint
@@ -105,31 +106,15 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     },
 
     // THE EPISODE ON EITHER SIDE, for the player's next and previous buttons
-    // (Tim, 2026-08-15). Structural order across the WHOLE show - seasons in
-    // order, episodes within them - so the last episode of season one answers
-    // with the first of season two, which is what "next" means to a person.
-    //
-    // This is NOT watch.nextEpisode. That rule serves the up-next shelf and
-    // skips everything already watched; a person paging through a season they
-    // are rewatching wants the neighbour, watched or not.
-    //
-    // Anything that is not an episode answers with two nulls rather than an
-    // error, so a client can ask about whatever is playing without branching.
+    // (Tim, 2026-08-15) and for the card that offers the next one when this one
+    // ends. The walk itself lives in `host/siblings.js`, because the dashboard
+    // asks the same question over HTTP and one copy of the season-boundary rule
+    // is one copy that cannot drift.
     'library.siblings': async (ctx) => {
       if (!ctx.params.id) throw ctx.badParams('id required')
-      const ep = await getAdapter().get({ id: String(ctx.params.id) })
-      if (!ep) throw ctx.notFound('no such item')
-      if (ep.type !== 'episode' || !ep.seriesId) return { prev: null, next: null }
-
-      const seasons = (await getAdapter().list({ type: 'seasons', seriesId: ep.seriesId, limit: 500 })).items || []
-      const all = []
-      for (const s of seasons) {
-        const page = await getAdapter().list({ type: 'episodes', seasonId: s.id, limit: 1000 })
-        all.push(...(page.items || []))
-      }
-      const at = all.findIndex((e) => e.id === ep.id)
-      if (at < 0) return { prev: null, next: null }
-      return { prev: all[at - 1] || null, next: all[at + 1] || null }
+      const out = await siblings(getAdapter(), ctx.params.id)
+      if (!out) throw ctx.notFound('no such item')
+      return out
     },
 
     // --- artwork ----------------------------------------------------------
