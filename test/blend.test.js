@@ -200,6 +200,25 @@ test('the blend walks a spanning show for the next episode, not one library', ()
   assert.equal(blend.siblings('nothing-here'), null)
 })
 
+// A POSTER CAN BE MINTED AFTER THE INDEX WAS BUILT. The operator fixes a match
+// from All libraries, the enricher writes a brand new `tmdb:<itemId>` on this box,
+// and the art map - a snapshot of what every library held at build time - has never
+// heard of it. Without a fallback the tile they just corrected shows a broken
+// picture until a rebuild lands.
+test('an art id minted after the build still routes to whoever owns the item', () => {
+  const { Blend } = require('../host/blend')
+
+  const blend = Object.create(Blend.prototype)
+  blend._adopt([
+    { libraryId: 'A', movies: [items.movie({ id: 'a1', title: 'Sunrise', year: 1927 })] },
+    { libraryId: 'B', movies: [items.movie({ id: 'b1', title: 'Solaris', year: 1972, artId: 'sidecar-b1' })] }
+  ])
+  assert.equal(blend.artOwnerOf('sidecar-b1'), 'B', 'an art id the index knows')
+  assert.equal(blend.artOwnerOf('tmdb:a1'), 'A', 'and one it has never seen, off the item it names')
+  assert.equal(blend.artOwnerOf('tmdb:nobody'), null, 'an id nobody owns is still nobody')
+  assert.equal(blend.artOwnerOf('sidecar-unknown'), null)
+})
+
 test('the blend dedupes across the local disk and the wire, and local wins', { timeout: 120000 }, async (t) => {
   const { desktop, base, get, lib } = await rig(t)
 
@@ -247,6 +266,13 @@ test('the blend dedupes across the local disk and the wire, and local wins', { t
   const pick = desktop.blend.pickCopy(sunrise.id)
   assert.equal(pick.local, true)
   assert.equal(pick.id, 'lshared')
+
+  // THE PENCIL'S ROUTES ARE ABOUT THIS BOX ONLY. All libraries offers a fix on the
+  // copies this disk holds and sends the LOCAL id, so a friend's id arriving here
+  // is a bug - refused rather than recorded as a match against an id this library
+  // has never heard of.
+  const foreign = await desktop.fixMetadata({ itemId: 'fonly', tmdbId: 1, type: 'movie' })
+  assert.match(foreign.error, /not on this machine/)
 })
 
 test('watch state reads as one union with ids translated to the shown copy', { timeout: 120000 }, async (t) => {

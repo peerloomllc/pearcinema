@@ -167,8 +167,8 @@ export function TitleActions ({ item, resumeMs = 0, seen = false, onPlay, onResu
       {onFix && (
         <button
           class='icon'
-          title='Fix the artwork'
-          aria-label={'Fix the artwork for ' + item.title}
+          title='Fix the match'
+          aria-label={'Fix the match for ' + item.title}
           onClick={() => onFix(item)}
         ><Pencil size={16} /></button>
       )}
