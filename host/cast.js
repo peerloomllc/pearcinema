@@ -172,9 +172,36 @@ const DLNA_CAPS = {
   startOffset: false
 }
 
-function capsFor (entityId) {
+// WIDENED BY WHAT THE TELEVISION ITSELF SAID, and only widened (host/dlna.js asks it
+// at scan time). The profile above is one Samsung's, measured by hand, and inherited
+// by every DLNA television in the world until now - which is fine for the codecs,
+// where being conservative costs engine time and never a black screen, and wrong for
+// a set that opens more than that one does. The same TU7000 answers with mkv, mov,
+// webm, h.264 AND hevc in its own words, so its own films now travel untouched
+// instead of through a converter that existed because nobody had asked.
+//
+// NOTHING IS EVER TAKEN AWAY. A device that answers nothing keeps this profile whole,
+// and a device whose list is shorter than this profile keeps this profile too: a Sink
+// list is what a renderer chose to publish, not a promise about what it refuses.
+//
+// AUDIO IS DELIBERATELY NOT WIDENED. The TU7000 publishes AAC_MULT5 and AC3 profiles,
+// so it is saying it takes 5.1 - but the cost of being wrong about sound is a film
+// that plays in silence with nothing on screen to say why (the Roku's lesson,
+// 2026-08-19), and mixing down is the cheapest conversion there is. That one waits
+// for somebody who can listen to it.
+function mergeCaps (base, accepts) {
+  if (!accepts) return base
+  const widen = (a, b) => [...new Set([...(a || []), ...(b || [])])]
+  return {
+    ...base,
+    containers: widen(base.containers, accepts.containers),
+    videoCodecs: widen(base.videoCodecs, accepts.videoCodecs)
+  }
+}
+
+function capsFor (entityId, accepts = null) {
   const id = String(entityId)
-  if (id.startsWith('dlna:')) return DLNA_CAPS
+  if (id.startsWith('dlna:')) return mergeCaps(DLNA_CAPS, accepts)
   return /roku/i.test(id) ? ROKU_CAPS : CAST_CAPS
 }
 
@@ -261,6 +288,12 @@ class CastSessions {
     this.tokens = new Map()
     // deviceKey -> Map<entityId, { token, itemId, mode, at, startedAt, sawPlaying, lastReportAt }>
     this.byDevice = new Map()
+
+    // Televisions that ANSWERED AND REFUSED a playlist, so the doomed attempt is made
+    // once rather than before every film. Deliberately in memory: the retry happens
+    // inside the same call and nobody sees it, so the only cost of forgetting on a
+    // restart is one wasted round trip.
+    this.noPlaylist = new Set()
 
     this.server = null
     this.port = 0
@@ -569,7 +602,8 @@ class CastSessions {
     const item = await this.media.getItem(itemId)
     if (!item) throw new Error('no such item')
 
-    const caps = capsFor(entityId)
+    // What this television said it accepts, when it was asked and answered.
+    const caps = capsFor(entityId, this.speakers.accepts?.(entityId) || null)
     const verdict = await this.media.decide({ itemId, capabilities: caps })
     const mode = verdict?.mode
     if (mode !== 'direct' && mode !== 'remux' && mode !== 'transcode') {
@@ -600,7 +634,23 @@ class CastSessions {
     // a re-encode still rides segments there (revoke bites within one segment rather
     // than one film), and a remux still goes down the pipe. Nothing about fixing the
     // Roku wanted to move the Cast family.
-    const viaHls = mode !== 'direct' && (caps.progressive === false || mode === 'transcode')
+    // TWO SHAPES, TRIED IN ORDER, and the second one is the answer to a question no
+    // television can be asked. The DLNA profile sends everything converted as a
+    // PLAYLIST because the one set it was measured on refuses a live progressive
+    // stream and (unusually) plays HLS. A renderer the other way round - takes the
+    // stream, cannot open a playlist, which is the commoner shape - got NOTHING at
+    // all, and there is no reading of `GetProtocolInfo` that would have caught it:
+    // the Samsung advertises no playlist type either and plays one perfectly well.
+    //
+    // So it is tried rather than derived. A television that ANSWERS AND REFUSES gets
+    // the other shape immediately, inside the same call, and is remembered so the
+    // doomed attempt is made once rather than every time. A television that does not
+    // answer at all is not refusing anything - it is off, or gone - and that error
+    // travels straight back rather than being followed by a second doomed request.
+    const preferHls = mode !== 'direct' && (caps.progressive === false || mode === 'transcode')
+    const shapes = preferHls
+      ? (this.noPlaylist.has(entityId) ? [false] : [true, false])
+      : [false]
     const startAt = mode === 'direct' ? 0 : Math.max(0, Number(at) || 0)
 
     // Replace whatever this device had on this entity, rather than stacking
@@ -639,50 +689,72 @@ class CastSessions {
     // THE SHAPE IS THIS TELEVISION'S, not this host's. A Roku joins the whole playlist in
     // the middle and reports the film's own minute; a Samsung ignores the tag and starts
     // from the top, so it gets a sliced playlist and its clock counts from the cut.
-    const offsetShape = viaHls && this.startOffset && caps.startOffset === true
-    const rowAt = offsetShape ? 0 : startAt
-    set.set(entityId, {
-      token, itemId, mode, at: rowAt, startAt, startedAt: Date.now(),
-      // Whether the television has actually reached the new stream. This is a question
-      // ONLY the offset shape can be wrong about: there the television's clock is the
-      // film's, so the one it is still reporting from the old stream is a plausible
-      // number about the wrong moment. On the sliced shape its clock is relative to
-      // whatever stream it holds and resets with it, so it is right immediately - as is
-      // a direct cast, which seeks itself, and anything starting at zero.
-      settled: !offsetShape || startAt <= 0,
-      sawPlaying: false, lastReportAt: 0
-    })
-
     // castHost(), not loopback: the television fetches this URL ITSELF.
     const base = `http://${castHost()}:${this.port}/v/${token}`
-    const url = viaHls ? `${base}/index.m3u8` : base
-    // THE FORMAT HINT DESCRIBES WHAT THE TELEVISION WILL RECEIVE, not what is on the
-    // disk, and those stop being the same thing the moment anything is converted.
-    //
-    // Found on Tim's Roku 2026-08-19, minutes after the 5.1 fix started sending films
-    // down the remux path for the first time: the film is Matroska, the remux output is
-    // always fragmented MP4, and this line still said "mkv" because it read the SOURCE
-    // container. The television dutifully tried to demux an MP4 as Matroska and sat at
-    // 13% forever. It is load-bearing on a Roku specifically - the format hint is what
-    // its player picks a demuxer with.
-    const format = viaHls
-      ? 'hls'
-      : mode !== 'direct'
-        ? 'mp4'
-        : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
-    try {
-      // The title rides along for the receiver's own display - a Roku shows
-      // it on its player, a Cast device on its loading screen.
-      await this.speakers.play(entityId, url, { title: item.title || null, format })
-    } catch (e) {
+
+    let viaHls = shapes[0]
+    let lastErr = null
+    let started = false
+    for (const useHls of shapes) {
+      viaHls = useHls
+      // THE SHAPE IS THIS TELEVISION'S, not this host's. A Roku joins the whole playlist
+      // in the middle and reports the film's own minute; a Samsung ignores the tag and
+      // starts from the top, so it gets a sliced playlist and its clock counts from the
+      // cut.
+      const offsetShape = useHls && this.startOffset && caps.startOffset === true
+      set.set(entityId, {
+        token, itemId, mode, at: offsetShape ? 0 : startAt, startAt, startedAt: Date.now(),
+        // Whether the television has actually reached the new stream. This is a question
+        // ONLY the offset shape can be wrong about: there the television's clock is the
+        // film's, so the one it is still reporting from the old stream is a plausible
+        // number about the wrong moment. On the sliced shape its clock is relative to
+        // whatever stream it holds and resets with it, so it is right immediately - as is
+        // a direct cast, which seeks itself, and anything starting at zero.
+        settled: !offsetShape || startAt <= 0,
+        sawPlaying: false, lastReportAt: 0
+      })
+
+      // THE FORMAT HINT DESCRIBES WHAT THE TELEVISION WILL RECEIVE, not what is on the
+      // disk, and those stop being the same thing the moment anything is converted.
+      //
+      // Found on Tim's Roku 2026-08-19, minutes after the 5.1 fix started sending films
+      // down the remux path for the first time: the film is Matroska, the remux output is
+      // always fragmented MP4, and this line still said "mkv" because it read the SOURCE
+      // container. The television dutifully tried to demux an MP4 as Matroska and sat at
+      // 13% forever. It is load-bearing on a Roku specifically - the format hint is what
+      // its player picks a demuxer with.
+      const format = useHls
+        ? 'hls'
+        : mode !== 'direct'
+          ? 'mp4'
+          : ['matroska', 'mkv'].includes(String(item.media?.container || '').toLowerCase()) ? 'mkv' : 'mp4'
+      try {
+        // The title rides along for the receiver's own display - a Roku shows
+        // it on its player, a Cast device on its loading screen.
+        await this.speakers.play(entityId, useHls ? `${base}/index.m3u8` : base, { title: item.title || null, format })
+        started = true
+        break
+      } catch (e) {
+        lastErr = e
+        // A UPnP fault is the television ANSWERING and refusing - 714 is "illegal
+        // MIME-type", which is precisely a renderer saying it will not open a
+        // playlist. No fault code means it never answered, and trying a second shape
+        // at a set that is switched off just doubles the wait before the same error.
+        if (!useHls || e?.upnpCode == null || shapes.length < 2) break
+        this.noPlaylist.add(entityId)
+        this.log('cast:playlist-refused', { entityId, err: e?.message, code: e.upnpCode })
+      }
+    }
+
+    if (!started) {
       // Do not leave a live token behind for a play that never started.
       this.tokens.delete(token)
       set.delete(entityId)
       if (!set.size) this.byDevice.delete(deviceKey)
-      throw e
+      throw lastErr
     }
 
-    this.log('cast:play', { device: String(deviceKey).slice(0, 8), entityId, itemId, mode, at: startAt })
+    this.log('cast:play', { device: String(deviceKey).slice(0, 8), entityId, itemId, mode, at: startAt, hls: viaHls })
     this._startPolling()
     return { ok: true, mode, at: startAt }
   }
@@ -947,4 +1019,4 @@ class CastSessions {
   }
 }
 
-module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, DLNA_CAPS, DLNA_FEATURES, TOKEN_TTL_MS, castHost, BIND, capsFor, segmentAt, segmentStart }
+module.exports = { CastSessions, CAST_SCOPES, CAST_CAPS, ROKU_CAPS, DLNA_CAPS, DLNA_FEATURES, TOKEN_TTL_MS, castHost, BIND, capsFor, mergeCaps, segmentAt, segmentStart }

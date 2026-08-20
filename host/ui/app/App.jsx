@@ -447,11 +447,39 @@ function readableState (t) {
 
 const isReachable = (t) => !['unavailable', 'off', 'standby'].includes(String(t.state || '').toLowerCase())
 
+// Discovered by this host rather than configured in Home Assistant. Both discovery
+// backends mint their own `via`, and anything else came through HA.
+const isFound = (t) => ['roku', 'dlna'].includes(t.via)
+
 // A television's name says its condition, the same rule This host follows: green when
 // it is ready or playing, amber when it is switched off or asleep and there is nothing
 // to do about it from here, muted when it is hidden and will not be offered at all.
 // COLOUR IS NEVER THE ONLY CARRIER - readableState puts the same fact in words on the
 // line below.
+// A capability profile in words. Containers as somebody would name a file and codecs
+// as the box they bought calls them - "H.264" rather than "h264".
+const CONTAINER_WORDS = { mp4: 'MP4', mov: 'MOV', matroska: 'MKV', mkv: 'MKV', webm: 'WebM' }
+const CODEC_WORDS = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', mpeg4: 'MPEG-4' }
+
+function joinWords (list) {
+  if (list.length < 2) return list[0] || ''
+  return list.slice(0, -1).join(', ') + ' and ' + list[list.length - 1]
+}
+
+function saysItPlays (accepts) {
+  const seen = new Set()
+  const containers = []
+  for (const c of accepts.containers || []) {
+    const w = CONTAINER_WORDS[c] || c.toUpperCase()
+    if (!seen.has(w)) { seen.add(w); containers.push(w) }
+  }
+  const codecs = (accepts.videoCodecs || []).map(c => CODEC_WORDS[c] || c.toUpperCase())
+  const parts = []
+  if (containers.length) parts.push(joinWords(containers))
+  if (codecs.length) parts.push(`in ${joinWords(codecs)}`)
+  return parts.join(', ')
+}
+
 function toneFor (t) {
   if (t.hidden) return 'dim'
   if (!isReachable(t)) return 'warn'
@@ -535,8 +563,12 @@ function CastPanel () {
   }
 
   const rows = targets || []
-  const viaHa = rows.filter(t => t.via !== 'roku')
-  const found = rows.filter(t => t.via === 'roku')
+  // FOUND ON THE WIRE IS TWO ROUTES NOW, not one. Written when a Roku was the only
+  // thing this host discovered by itself, these counted every DLNA television as one
+  // of Home Assistant's - so the network row said "1 television found" over a list of
+  // two it had found, and the Home Assistant row claimed a set it has never heard of.
+  const viaHa = rows.filter(t => !isFound(t))
+  const found = rows.filter(t => isFound(t))
   const anyOff = rows.some(t => !isReachable(t))
   const haStatus = cfg?.tokenSet && cfg?.enabled
     ? `connected${viaHa.length ? `, ${viaHa.length} media player${viaHa.length === 1 ? '' : 's'}` : ''}`
@@ -668,9 +700,19 @@ function CastPanel () {
                     not said at all - the eye beside it is already saying it. */}
                 <span class='rowsub'>
                   {readableState(t)}
-                  {t.via !== 'roku' ? ' · via Home Assistant' : ''}
+                  {/* FOUND ON THE WIRE OR CONFIGURED, and there are two ways to be found
+                      now. This read `via !== 'roku'`, from when there was one, so every
+                      television discovered over DLNA claimed to have come through Home
+                      Assistant - software its owner may not even have. */}
+                  {isFound(t) ? '' : ' · via Home Assistant'}
                   {t.deviceClass && t.deviceClass !== 'tv' ? ` · ${t.deviceClass}` : ''}
                 </span>
+                {/* WHAT THE TELEVISION ITSELF SAID, asked at discovery and answered in
+                    its own words. It is the honest answer to "will my films play on
+                    this", and it is what stops a profile measured on one Samsung being
+                    every DLNA set's profile - so it belongs on screen rather than only
+                    in the decision it feeds. */}
+                {t.accepts && <span class='rowsub'>Says it plays {saysItPlays(t.accepts)}.</span>}
               </span>
               <span class='rowctl'>
                 <button

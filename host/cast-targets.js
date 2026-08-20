@@ -150,6 +150,14 @@ class CastTargets {
     return [...keptConf, ...fresh]
   }
 
+  // What a television said it accepts, for the backend that asked it. Home Assistant
+  // has no equivalent question, so a configured entity answers null and keeps the
+  // profile its family was measured with.
+  accepts (entityId) {
+    const backend = isDiscovered(entityId) ? this._discoveredFor(entityId) : this.configured
+    return backend?.accepts?.(entityId) || null
+  }
+
   getState (entityId) { return this._for(entityId).getState(entityId) }
   pause (entityId) { return this._for(entityId).pause(entityId) }
   resume (entityId) { return this._for(entityId).resume(entityId) }
