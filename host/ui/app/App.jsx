@@ -1038,6 +1038,12 @@ function HostPanel ({ state, reload }) {
   const t = state.transcode || {}
   const c = state.transcodeCap || {}
   const [cap, setCap] = useState(String(c.cap ?? 4))
+  // WHAT THIS BOX MEASURED ABOUT ITSELF, and what it is doing while it measures.
+  // `measuring` comes back on state for a page that arrives mid-run, and over the
+  // live channel while this page is watching, so a minute of engine time is a row
+  // that says which level it is on rather than a spinner.
+  const [measuring, setMeasuring] = useState(c.measuring || null)
+  const capMax = Number(c.max) || 16
 
   const src = state.auth?.passwordSource
   // Only a password this host owns can be changed from here. One set by the platform
@@ -1062,7 +1068,7 @@ function HostPanel ({ state, reload }) {
     // An empty or unusable box is not a request to set anything - put the real value
     // back rather than sending a guess.
     if (cap === '' || !Number.isFinite(n)) return setCap(String(c.cap ?? 4))
-    const clamped = Math.max(0, Math.min(16, n))
+    const clamped = Math.max(0, Math.min(capMax, n))
     setCap(String(clamped))
     if (String(clamped) === String(c.cap)) return
 
@@ -1079,6 +1085,46 @@ function HostPanel ({ state, reload }) {
     reload()
   }
 
+  useEffect(() => setMeasuring(c.measuring || null), [c.measuring?.concurrency, !!c.measuring])
+
+  useEffect(() => {
+    const off = onLive(['engine:measuring', 'engine:measured'], (d) => {
+      // The end of the run carries no level, and that absence IS the news.
+      if (d && d.concurrency !== undefined) setMeasuring(d)
+      else { setMeasuring(null); reload() }
+    })
+    return off
+  }, [])
+
+  // How far through the ladder, as a fraction. The levels are known up front, so this
+  // is a real proportion rather than a bar that moves to look busy - and it stops
+  // short of full while the last level is still running, because it is not done.
+  const measuredPct = measuring && measuring.steps
+    ? Math.round(((measuring.step - 1) / measuring.steps) * 100)
+    : 0
+
+  // THE RUN HAS A WINDOW OF ITS OWN. It takes about a minute of real conversions, and
+  // a button that says "Testing…" for a minute with a settings page behind it reads as
+  // a page that has hung. The window stays up to show the answer, so the thing somebody
+  // waited for is the thing they are looking at when it arrives.
+  const [result, setResult] = useState(null)
+  // A WINDOW SOMEBODY CAN GET OUT OF. It cannot be a trap for a minute - if the box
+  // stalls, the way out has to exist - so closing it hides it and leaves the run
+  // going, and the answer brings it back.
+  const [hidden, setHidden] = useState(false)
+
+  const measure = async () => {
+    setResult(null)
+    setHidden(false)
+    setMeasuring({ step: 0, steps: 0 })
+    const res = await api('/api/transcode-measure', {})
+    setMeasuring(null)
+    if (res?.error) return notify('Not measured', res.error)
+    setHidden(false)
+    setResult(res?.measured || null)
+    reload()
+  }
+
   // AFTER THE TYPING STOPS, not on every keystroke. Saving per keystroke would set the
   // cap to 1 on the way to typing 16, and a cap of 1 refuses conversions for as long as
   // it stands. Each change cancels the last timer, so only the number somebody settled
@@ -1086,7 +1132,7 @@ function HostPanel ({ state, reload }) {
   // a shortcut rather than the only way out.
   useEffect(() => {
     if (!t.available || cap === '') return
-    const n = Math.max(0, Math.min(16, Math.trunc(Number(cap))))
+    const n = Math.max(0, Math.min(capMax, Math.trunc(Number(cap))))
     if (!Number.isFinite(n) || String(n) === String(c.cap)) return
     const timer = setTimeout(commitCap, 700)
     return () => clearTimeout(timer)
@@ -1114,11 +1160,36 @@ function HostPanel ({ state, reload }) {
   // that, and the line that used to claim it was quoting the hardware this was built on.
   // When a host can measure its own engine (TODO), that measurement becomes the field's
   // ceiling rather than another sentence.
+  // AND WHAT THIS MACHINE MEASURED ABOUT ITSELF, once it has. The line this replaces
+  // said "this hardware managed about 10 in testing" on every install, quoting the
+  // machine PearCinema was built on (Tim, 2026-08-19). A measurement is about the box
+  // it ran on, so it can be said plainly - and it is the field's ceiling, so the
+  // sentence explains a limit somebody can already see rather than adding a claim.
+  const measured = c.measured || null
+  // WHILE IT MEASURES THE ROW DOES NOT NARRATE. A minute of levels reported in the
+  // sub-line was three sentences taking turns in a settings row (Tim, 2026-08-20) -
+  // the run has a window of its own now, and the row goes on saying what the setting
+  // means.
   const engineSub = !t.available
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
       : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. Setting it to 0 turns conversions off.`
+
+  // The measurement's own line, under the row's. Kept separate because it is a fact
+  // about the machine rather than about the setting, and because it is the one thing
+  // here nobody has to act on.
+  // NAMED, because the number is meaningless without it. The measurement uses the
+  // HARDEST film in the library - the worst case is the only one worth promising - and
+  // a machine that manages four 1080p films but two 4K ones is capped at two. Without
+  // the title that reads as PearCinema being timid; with it, it is a fact about one
+  // film somebody owns.
+  const onFilm = measured?.film ? ` It was tested on ${measured.film}, the hardest film here.` : ''
+  const measuredSub = measured
+    ? (Number(measured.cap) === 0
+        ? `This machine did not keep up with even one conversion in real time.${onFilm}`
+        : `Tested: it keeps up with ${measured.cap} at once, which is the most you can ask for.${onFilm}`)
+    : 'Never tested. Testing runs real conversions for about a minute and sets the limit above.'
 
   // THE NAME CARRIES THE STATE, not a pill beside it (Tim, 2026-08-19). A chip was one
   // more object on a page whose whole problem was objects, and this row was already the
@@ -1199,19 +1270,77 @@ function HostPanel ({ state, reload }) {
           <span class='rowmain'>
             <span class={`rowname ${engineTone}`}>Video engine</span>
             <span class='rowsub'>{engineSub}</span>
+            {t.available && <span class='rowsub'>{measuredSub}</span>}
           </span>
+          {/* TWO CONTROLS, STACKED, and the number on top. Side by side they read as one
+              wide control of two halves and made the right-hand column of the page ragged
+              (Tim, 2026-08-20, looking at it). The number is the setting; the button is
+              something you do once. */}
           {t.available && (
-            <span class='rowctl'>
+            <span class='rowctl stack'>
               <input
-                type='number' min='0' max='16' step='1' value={cap} disabled={busy}
+                type='number' min='0' max={capMax} step='1' value={cap} disabled={busy || !!measuring}
                 aria-label='How many films this host will convert at once'
                 onInput={e => setCap(e.currentTarget.value)}
                 onBlur={commitCap}
                 onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
+              <button class='ghost' disabled={!!measuring || busy} onClick={measure}>
+                {measuring ? 'Testing…' : 'Test'}
+              </button>
             </span>
           )}
         </div>
+
+        {(measuring || result) && !hidden && (
+          <Modal
+            title={measuring ? 'Testing this machine' : 'What this machine manages'}
+            onClose={() => { setHidden(true); setResult(null) }}
+            closeLabel={measuring ? 'Hide this while it finishes' : 'Close'}
+          >
+            {measuring
+              ? (
+                <>
+                  <p class='hint'>
+                    {measuring.concurrency
+                      ? <>Converting <b>{measuring.concurrency}</b> {measuring.concurrency === 1 ? 'copy' : 'copies'} of a film at once, and timing it.</>
+                      : <>Picking the hardest film in your library.</>}
+                  </p>
+                  <span class={'meter big' + (measuring ? ' busy' : '')}>
+                    <i style={`width:${Math.max(4, measuredPct)}%`} />
+                  </span>
+                  <p class='hint'>
+                    This runs real conversions for about a minute. Nothing is saved and
+                    nothing is changed until it finishes.
+                  </p>
+                </>
+                )
+              : (
+                <>
+                  <p class='hint'>
+                    {Number(result?.cap) === 0
+                      ? <>This machine did not keep up with even one conversion in real time.</>
+                      : <>It keeps up with <b>{result?.cap}</b> at once, which is now the most you can ask it for.</>}
+                    {result?.film ? <> Tested on <b>{result.film}</b>, the hardest film here.</> : null}
+                  </p>
+                  <div class='ladder'>
+                    {(result?.ladder || []).map(l => (
+                      <div class={'ladderrow' + (l.ok ? '' : ' bad')} key={l.concurrency}>
+                        <span class='n'>{l.concurrency} at once</span>
+                        <span class='meter'><i style={`width:${Math.min(100, Math.round((l.speed / 2) * 100))}%`} /></span>
+                        <span class='s'>{l.ok ? `${l.speed}x` : (l.reason || `${l.speed}x - too slow`)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p class='hint'>
+                    Past the mark is faster than the film plays, which is what it has to
+                    be. The last one to manage it is the answer.
+                  </p>
+                  <div class='actions'><button onClick={() => setResult(null)}>Done</button></div>
+                </>
+                )}
+          </Modal>
+        )}
 
         <div class='setrow'>
           <span class='rowmain'>

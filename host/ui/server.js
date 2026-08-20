@@ -2082,6 +2082,17 @@ async function startDashboard ({
         }
       }
 
+      // MEASURE THIS BOX. Runs real conversions of a real film at rising concurrency
+      // and reports where it stops keeping up - a minute of the operator's own engine
+      // in exchange for a number that is about their machine rather than ours.
+      if (req.method === 'POST' && url.pathname === '/api/transcode-measure') {
+        try {
+          return json(res, 200, await host.measureEngine())
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+
       // Log out every OTHER browser - the button people look for after handing
       // a laptop back. The session pressing it survives, so the answer is a
       // count rather than the login page. Changing the password does not do
