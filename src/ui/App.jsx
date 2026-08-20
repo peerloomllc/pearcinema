@@ -1461,7 +1461,7 @@ export default function App () {
       }
       await call('cast.play', { entityId: t.entityId, libraryId: t.libraryId, itemId: item.id, at })
       setCastSheet(null)
-      setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, paused: false })
+      setCasting({ entityId: t.entityId, libraryId: t.libraryId, name: t.name, itemId: item.id, title: item.title, artId: item.artId || null, paused: false })
       haptic('success')
       say(`Playing on ${t.name}`)
     } catch (e) {
@@ -1470,14 +1470,20 @@ export default function App () {
     }
   }
 
-  const toggleCastPause = async () => {
-    const c = casting
-    if (!c) return
+  // ASKED FOR AS A STATE, not as a toggle. The button in the app knows what it is
+  // looking at; a lock-screen Play does not - it is a play button, and answering it by
+  // flipping whatever we last believed would pause a film that was already playing.
+  const setCastPaused = async (want) => {
+    const c = castingRef.current
+    if (!c || !!c.paused === !!want) return
     try {
-      await call(c.paused ? 'cast.resume' : 'cast.pause', { entityId: c.entityId, libraryId: c.libraryId })
-      setCasting({ ...c, paused: !c.paused })
+      await call(want ? 'cast.pause' : 'cast.resume', { entityId: c.entityId, libraryId: c.libraryId })
+      setCasting((s2) => (s2 && s2.entityId === c.entityId ? { ...s2, paused: !!want } : s2))
+      readCastAt()
     } catch (e) { setErr(e.message) }
   }
+
+  const toggleCastPause = () => setCastPaused(!castingRef.current?.paused)
 
   // Where the film is, while this phone is the remote. Asked of the host every
   // few seconds rather than tracked locally: the television is the thing
@@ -1488,6 +1494,25 @@ export default function App () {
   // at should not keep a link busy. The interval is deliberately slower than
   // the host's own 2s poll of Home Assistant: this is a readout, not a
   // stopwatch, and every tick is a round trip over the wire.
+  // ASKED FOR ON DEMAND AS WELL AS ON THE CLOCK. A skip is the one moment the readout
+  // is certainly wrong, and waiting up to five seconds to find out where the film went
+  // is five seconds of a number that is a lie (Tim, 2026-08-19).
+  const readCastAt = useCallback(async () => {
+    const c = castingRef.current
+    if (!c) return
+    try {
+      const r = await call('cast.state', { entityId: c.entityId, libraryId: c.libraryId })
+      if (r?.positionMs == null) return
+      const now = castingRef.current
+      if (!now || now.entityId !== c.entityId) return
+      setCastAt({ positionMs: r.positionMs, durationMs: r.durationMs || null, at: Date.now() })
+      if (r.state === 'paused' || r.state === 'playing') {
+        const want = r.state === 'paused'
+        setCasting((s2) => (s2 && s2.entityId === c.entityId && !!s2.paused !== want && !s2.seeking ? { ...s2, paused: want } : s2))
+      }
+    } catch { /* a television that stops answering just stops updating */ }
+  }, [])
+
   useEffect(() => {
     const c = casting
     setCastAt(null) // a different television, or none, is not where the last one was
@@ -1498,7 +1523,15 @@ export default function App () {
       try {
         const r = await call('cast.state', { entityId: c.entityId, libraryId: c.libraryId })
         if (!live || r?.positionMs == null) return
-        setCastAt({ positionMs: r.positionMs, durationMs: r.durationMs || null })
+        setCastAt({ positionMs: r.positionMs, durationMs: r.durationMs || null, at: Date.now() })
+        // AND WHETHER IT IS PAUSED, from the television rather than from what this
+        // screen last did. Somebody may have paused it with its own remote, or from
+        // the lock screen while this WebView was frozen - both leave the bar in here
+        // showing the wrong button until it asks.
+        if (r.state === 'paused' || r.state === 'playing') {
+          const want = r.state === 'paused'
+          setCasting((s2) => (s2 && s2.entityId === c.entityId && !!s2.paused !== want && !s2.seeking ? { ...s2, paused: want } : s2))
+        }
       } catch { /* a television that stops answering just stops updating */ }
     }
     read()
@@ -1526,6 +1559,11 @@ export default function App () {
       setCasting((s) => (s && s.entityId === c.entityId ? { ...s, seeking: false, paused: false } : s))
       if (r?.restarted) say(deltaMs > 0 ? 'Skipped forward' : 'Skipped back')
       haptic()
+      // WHERE IT ACTUALLY LANDED, now rather than on the next tick. A converted stream
+      // is re-cut from the new point and takes a moment to settle, so ask twice: once
+      // immediately, and once after it has.
+      readCastAt()
+      setTimeout(readCastAt, 1500)
     } catch (e) {
       // A television that cannot be told to jump says so once, and then stops
       // offering - a button that always fails is worse than no button. A Roku
@@ -1535,6 +1573,80 @@ export default function App () {
       setErr(cannot ? 'This TV cannot skip while playing this film' : e.message)
     }
   }
+
+  // THE MINUTE MOVES BETWEEN READINGS, which is what makes this bar and the lock
+  // screen agree (Tim, 2026-08-19: "is there no way to get the onscreen timestamp and
+  // app timestamp to match?"). They could not: the notification advances itself at
+  // playing speed from the last reading, and this bar showed the reading itself - a
+  // number that sat still for five seconds and then jumped, always behind by however
+  // long ago it was asked for. Now both count from the same instant at the same rate,
+  // and every reading re-anchors them together.
+  const [castTick, setCastTick] = useState(0)
+  useEffect(() => {
+    if (!casting || casting.paused || !castAt) return
+    const t = setInterval(() => setCastTick(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [casting?.entityId, casting?.paused, !!castAt])
+  const castShownMs = castAt
+    ? castAt.positionMs + (casting?.paused ? 0 : Math.max(0, (castTick || Date.now()) - (castAt.at || 0)))
+    : null
+
+  // THE REMOTE ON THE LOCK SCREEN. The bar inside the app is unchanged; this is the
+  // same three controls where somebody can actually reach them, because answering a
+  // message meant unlocking, finding the app and waiting for it to come back before
+  // the room could be paused (Tim, 2026-08-19).
+  //
+  // Pushed on every change rather than on a timer: the notification's own scrubber
+  // advances itself between updates, so this only has to say what changed - a pause,
+  // a skip, a different film - and the five-second readout it rides on is the one this
+  // screen was already doing.
+  useEffect(() => {
+    const c = casting
+    if (!c) {
+      call('shell.castRemote', { show: false }).catch(() => {})
+      return
+    }
+    call('shell.castRemote', {
+      show: true,
+      // THE SHELL ACTS ALONE, so it needs everything it takes to act: Android freezes
+      // this WebView with the screen, and a button pressed on the lock screen that
+      // waits for the app to be reopened is a button that does not work. PearTune found
+      // the same thing and moved cast control into its shell for the same reason
+      // (proposal 2026-08-02-cast-control-lives-in-the-shell).
+      entityId: c.entityId,
+      libraryId: c.libraryId,
+      skipMs: SKIP_MS,
+      title: c.title || 'Playing',
+      subtitle: 'on ' + (c.name || 'the television'),
+      artUrl: c.artId && artBase ? `${artBase}${encodeURIComponent(c.artId)}?s=350` : null,
+      paused: !!c.paused,
+      // A television that cannot skip does not get buttons that pretend it can - the
+      // same honesty the in-app bar already keeps.
+      canSkip: !c.noSkip,
+      positionMs: castAt?.positionMs || 0,
+      durationMs: castAt?.durationMs || 0
+    }).catch(() => {})
+  }, [casting?.entityId, casting?.title, casting?.artId, casting?.paused, casting?.noSkip, castAt?.positionMs, castAt?.durationMs, artBase])
+
+  // AND THE PRESS COMES BACK AS NEWS, not as an instruction. The shell has already
+  // told the television - it has to, because this WebView is frozen whenever the screen
+  // is - so acting on it again here would send everything twice, and a skip twice is
+  // sixty seconds when somebody asked for thirty. All this does is keep the bar in the
+  // app agreeing with the room.
+  useEffect(() => on('cast:control', (d) => {
+    const what = d?.action
+    if (what === 'stop') setCasting(null)
+    else if (what === 'play' || what === 'pause') {
+      setCasting((s2) => (s2 ? { ...s2, paused: what === 'pause' } : s2))
+    }
+    if (what !== 'stop') { readCastAt(); setTimeout(readCastAt, 1500) }
+    // A skip changes where the film is, so ask - the shell has already told the
+    // television and this screen may have been asleep when it did.
+    //
+    // 'seek' is never sent at all: the session does not advertise seek-to, because the
+    // host takes a DIRECTION and not a destination, and a scrubber that lands the film
+    // somewhere nobody chose is worse than a scrubber that does not move.
+  }), [])
 
   const stopCast = async () => {
     const c = casting
@@ -2505,7 +2617,7 @@ export default function App () {
                   the total is left to the progress line rather than said twice. */}
               <div className='sub muted sm'>
                 <span className='where'>on {casting.name}</span>
-                {castAt && <span className='at'> · {fmtClock(castAt.positionMs)}</span>}
+                {castShownMs != null && <span className='at'> · {fmtClock(castShownMs)}</span>}
               </div>
             </div>
             <div className='acts'>
@@ -2528,7 +2640,7 @@ export default function App () {
                 reading - it sits on the bar's own bottom edge. */}
             {castAt?.durationMs > 0 && (
               <div className='castprog' aria-hidden='true'>
-                <i style={{ width: `${Math.max(0, Math.min(100, (castAt.positionMs / castAt.durationMs) * 100))}%` }} />
+                <i style={{ width: `${Math.max(0, Math.min(100, (castShownMs / castAt.durationMs) * 100))}%` }} />
               </div>
             )}
           </div>

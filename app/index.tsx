@@ -27,6 +27,7 @@ import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
+import * as CastRemote from '../modules/cast-remote'
 
 const bundle = require('../assets/bare-universal.bundle')
 
@@ -188,6 +189,11 @@ export default function App () {
 
   // Worklet replies routed back to the WebView by id; worklet events forwarded
   // as __pearEvent. One buffer, newline-framed, exactly the suite convention.
+  // What the shell needs to answer a lock-screen press on its own: which television,
+  // which library, and the remote as last drawn. Held here rather than asked of the UI,
+  // which may be frozen behind a locked screen at exactly the moment it is needed.
+  const castRemote = useRef<any>(null)
+
   const feedWebView = (js: string) => {
     webref.current?.injectJavaScript(js + '; true;')
   }
@@ -306,6 +312,52 @@ export default function App () {
     Linking.getInitialURL().then(forward).catch(() => {})
     const sub = Linking.addEventListener('url', (e) => forward(e.url))
     return () => sub.remove()
+  }, [])
+
+  // A BUTTON PRESSED ON THE LOCK SCREEN IS ANSWERED HERE, not by the web UI.
+  //
+  // It was the UI's job for one build, and the controls were on the lock screen and did
+  // nothing until the app was brought back to the front (Tim, 2026-08-19, testing on the
+  // Pixel). Android freezes a backgrounded WebView, so the press sat in a queue behind a
+  // screen that was asleep. PearTune found the identical thing and moved cast control
+  // into its shell for the identical reason (proposal 2026-08-02-cast-control-lives-in-
+  // the-shell); this is that lesson arriving here.
+  //
+  // So the shell holds what it takes to act - which television, which library, how far
+  // a skip goes - and talks to the worklet directly. The UI is TOLD afterwards rather
+  // than asked first, and if it is asleep it catches up from the television's own state
+  // when it wakes.
+  useEffect(() => {
+    const off = CastRemote.onAction((e) => {
+      const held = castRemote.current
+      const send = shellCallRef.current
+      if (!held || !send) return
+      const { entityId, libraryId, skipMs } = held
+      const what = e?.action
+
+      if (what === 'stop') {
+        castRemote.current = null
+        CastRemote.hide()
+        send('cast.stop', { entityId, libraryId })
+      } else if (what === 'play' || what === 'pause') {
+        const paused = what === 'pause'
+        // The notification flips NOW, off the press rather than off the answer: the
+        // round trip to the host and on to the television is a second on a good day,
+        // and a button that looks broken for a second gets pressed twice.
+        held.info = { ...held.info, paused }
+        CastRemote.show(held.info)
+        send(paused ? 'cast.pause' : 'cast.resume', { entityId, libraryId })
+      } else if (what === 'forward' || what === 'back') {
+        send('cast.seek', { entityId, libraryId, deltaMs: what === 'forward' ? skipMs : -skipMs })
+      }
+
+      // And the app hears about it, for whenever it is awake. Best effort by
+      // construction - this is the path that was frozen.
+      feedWebView(`window.__pearEvent && window.__pearEvent('cast:control', ${JSON.stringify(e)})`)
+    })
+    // Nothing is playing on this phone, so a remote left behind after the app goes
+    // is a notification whose buttons answer to nobody.
+    return () => { off(); CastRemote.hide() }
   }, [])
 
   // Android back: a running film closes first; then the UI unwinds its own
@@ -606,6 +658,37 @@ export default function App () {
           else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
         } catch (e: any) { console.log('[shell] haptic failed: ' + e?.message) }
       })()
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
+      return
+    }
+    // THE PHONE AS A REMOTE, on the lock screen. Nothing is playing here - the film
+    // is on a television - so this is not expo-video's now-playing notification but a
+    // media session of our own, published while a cast is live and cancelled with it.
+    // The web UI owns the cast; the shell only draws the remote and hands the buttons
+    // back (Tim, 2026-08-19: answering a message meant unlocking, opening the app and
+    // waiting for it to come back before the room could be paused).
+    if (msg.method === 'shell.castRemote') {
+      const a = msg.args || {}
+      if (a.show) {
+        castRemote.current = {
+          entityId: a.entityId,
+          libraryId: a.libraryId,
+          skipMs: Number(a.skipMs) || 30000,
+          info: {
+            title: a.title || 'Playing',
+            subtitle: a.subtitle || '',
+            artUrl: a.artUrl || null,
+            paused: !!a.paused,
+            canSkip: a.canSkip !== false,
+            positionMs: Number(a.positionMs) || 0,
+            durationMs: Number(a.durationMs) || 0
+          }
+        }
+        CastRemote.show(castRemote.current.info)
+      } else {
+        castRemote.current = null
+        CastRemote.hide()
+      }
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { ok: true }, error: null })})`)
       return
     }
