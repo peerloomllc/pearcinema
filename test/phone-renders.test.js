@@ -501,23 +501,78 @@ test('CASTING PUTS A REMOTE ON THE LOCK SCREEN, and its buttons reach the televi
   assert.match(last.artUrl || '', /art-metro/, 'with the poster, so the lock screen is not a grey box')
   assert.equal(last.paused, false)
 
-  // A press out there is answered here, and explicitly: Pause pauses. A toggle would
-  // pause a film that was already playing whenever the two sides disagreed.
+  // WHAT THE SHELL NEEDS TO ACT ALONE rides with it. The controls were on the lock
+  // screen and did nothing until the app was reopened, because Android freezes a
+  // backgrounded WebView (Tim, 2026-08-19, on the Pixel) - so the shell talks to the
+  // television itself and needs to know which one.
+  assert.equal(last.entityId, 'tv-1')
+  assert.equal(last.libraryId, 'lib-1')
+  assert.equal(last.skipMs, 30000)
+
+  // A press comes back as NEWS, and the app must not act on it a second time: the
+  // television has already been told. Twice would be sixty seconds when somebody asked
+  // for thirty.
   h.win.__pearEvent('cast:control', { action: 'pause' })
   await h.settle(140)
-  assert.equal(h.called('cast.pause').length, 1)
+  assert.equal(h.called('cast.pause').length, 0, 'the shell sent it, not this')
   assert.equal(h.called('cast.resume').length, 0)
+  const afterPause = h.called('shell.castRemote').filter((c) => c.args?.show)
+  assert.equal(afterPause[afterPause.length - 1].args.paused, true, 'but the bar agrees with the room')
 
   h.win.__pearEvent('cast:control', { action: 'back' })
   await h.settle(140)
-  assert.equal(h.called('cast.seek').length, 1, 'and back thirty seconds is a skip on the host')
-  assert.ok(h.called('cast.seek')[0].args.deltaMs < 0)
+  assert.equal(h.called('cast.seek').length, 0, 'a skip is the shell\'s too')
 
   // Stopping takes the remote down with it - a notification whose buttons answer to
   // nothing is worse than no notification.
   h.win.__pearEvent('cast:control', { action: 'stop' })
   await h.settle(160)
-  assert.equal(h.called('cast.stop').length, 1)
   const hidden = h.called('shell.castRemote').filter((c) => c.args?.show === false)
   assert.ok(hidden.length >= 1, 'the remote was taken down')
+
+  // AND THE TELEVISION IS ASKED, rather than believed about. Somebody pausing with the
+  // TV's own remote, or from a lock screen while this was frozen, leaves the bar showing
+  // the wrong button until it asks - so the readout adopts what the television says.
+  const paused = await open({
+    'library.get': LIBRARY[0],
+    'cast.list': { enabled: true, targets: [{ entityId: 'tv-1', libraryId: 'lib-1', name: 'Living Room' }], active: [] },
+    'cast.play': { ok: true },
+    'cast.state': { positionMs: 61000, durationMs: 9180000, state: 'paused' }
+  })
+  t.after(() => paused.dom.window.close())
+  paused.win.__pearEvent('player:cast', { itemId: 'metropolis', title: 'Metropolis', positionMs: 0 })
+  await paused.settle(160)
+  paused.click(paused.button(/Living Room/))
+  await paused.settle(400)
+  const drawn = paused.called('shell.castRemote').filter((c) => c.args?.show)
+  assert.equal(drawn[drawn.length - 1].args.paused, true, 'the television said paused, so the remote says paused')
+})
+
+test('THE BAR COUNTS BETWEEN READINGS, so it agrees with the lock screen', async (t) => {
+  // Tim, 2026-08-19: "is there no way to get the onscreen timestamp and app timestamp to
+  // match?" They could not. The notification advances itself at playing speed from the
+  // last reading; this bar showed the reading itself, so it sat still for five seconds
+  // and then jumped, always behind by however long ago it had been asked for.
+  const h = await open({
+    'library.get': LIBRARY[0],
+    'cast.list': { enabled: true, targets: [{ entityId: 'tv-1', libraryId: 'lib-1', name: 'Living Room' }], active: [] },
+    'cast.play': { ok: true },
+    'cast.state': { positionMs: 61000, durationMs: 9180000, state: 'playing' }
+  })
+  t.after(() => h.dom.window.close())
+
+  h.win.__pearEvent('player:cast', { itemId: 'metropolis', title: 'Metropolis', positionMs: 0 })
+  await h.settle(160)
+  h.click(h.button(/Living Room/))
+  await h.settle(300)
+
+  const clock = () => (h.doc.querySelector('.castbar .at')?.textContent || '').trim()
+  const first = clock()
+  assert.match(first, /1:0[01]/, 'the reading itself, at a minute in')
+
+  // Two seconds later the bar has moved on its own, without asking the television
+  // again - the same thing the lock screen does with the same anchor.
+  await h.settle(2200)
+  const later = clock()
+  assert.notEqual(later, first, 'the minute is still where it was two seconds ago')
 })
