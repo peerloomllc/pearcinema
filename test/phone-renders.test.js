@@ -596,3 +596,68 @@ test('A POSTER CANNOT SWALLOW A LONG PRESS', async (t) => {
   const rules = PAGE.match(/\.cover img\{[^}]*\}/g) || []
   assert.ok(rules.some((r) => /pointer-events:\s*none/.test(r)), 'the press lands on the tile, not the picture')
 })
+
+/* ------------------------------------------------ playing next -- */
+
+test('THE NEXT EPISODE IS HANDED TO THE SHELL WITH ITS WORDS, not just a flag', async (t) => {
+  // The card is drawn by the shell, because the film is a native view covering
+  // this page. A card that had to fetch its own words would be blank at the
+  // exact moment somebody is looking at it, so they ride shell.navSet.
+  const EP = { id: 'wire-s01e02', type: 'episode', title: 'The Detail', seriesTitle: 'The Wire', runtime: 3600, artId: 'art-wire' }
+  const NEXT = {
+    id: 'wire-s01e03',
+    type: 'episode',
+    title: 'The Buys',
+    seriesTitle: 'The Wire',
+    seasonNumber: 1,
+    episodeNumber: 3,
+    runtime: 3600,
+    overview: 'The detail goes up on the wire.',
+    artId: 'art-buys'
+  }
+  const h = await open({
+    'library.list': { items: [EP], total: 1, cursor: null },
+    'stream.url': ({ itemId }) => ({ url: 'http://127.0.0.1:1234/s/' + itemId, mode: 'direct' }),
+    'library.siblings': { prev: null, next: NEXT }
+  })
+  t.after(() => h.dom.window.close())
+  await h.settle(400)
+
+  h.press(h.tile(/The Detail/))
+  await h.settle(200)
+
+  const set = h.called('shell.navSet')
+  assert.equal(set.length, 1, 'the neighbours reached the shell')
+  assert.equal(set[0].args.hasNext, true)
+  assert.equal(set[0].args.autoplayNext, true, 'on by default, the way a television behaves')
+  assert.equal(set[0].args.next.seriesTitle, 'The Wire')
+  assert.equal(set[0].args.next.title, 'The Buys')
+  assert.equal(set[0].args.next.label, 'Episode 3')
+  assert.match(set[0].args.next.overview, /goes up on the wire/)
+  // The picture comes as a finished url off this phone's own shim, because the
+  // shell has no idea where art lives.
+  assert.match(set[0].args.next.artUrl, /^http:\/\/127\.0\.0\.1:1234\/art\/art-buys/)
+})
+
+test('the autoplay switch on the card is the same one in Settings', async (t) => {
+  // Two places to throw it and one preference behind them: the card saves
+  // through the page, so the Settings switch cannot disagree with it.
+  const h = await open({ getSettings: { dataSaver: false, useRelay: true, cols: 2, showRecent: false, autoplayNext: false } })
+  t.after(() => h.dom.window.close())
+  await h.settle(300)
+
+  h.click(h.labelled('Settings'))
+  await h.settle(160)
+  const sw = h.labelled('Play the next episode')
+  assert.ok(sw, 'the setting is on the Settings page')
+  assert.equal(sw.getAttribute('aria-checked'), 'false', 'and it reads what was saved')
+
+  // The card's own checkbox, thrown inside the native player.
+  h.win.__pearEvent('player:autoplay', { on: true })
+  await h.settle(120)
+
+  const wrote = h.called('setSettings').filter((c) => 'autoplayNext' in (c.args || {}))
+  assert.equal(wrote.length, 1)
+  assert.equal(wrote[0].args.autoplayNext, true)
+  assert.equal(h.labelled('Play the next episode').getAttribute('aria-checked'), 'true', 'and the page agrees')
+})

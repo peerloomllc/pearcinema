@@ -2309,3 +2309,119 @@ test('THE SUPPORT PAGE COMES UP AT ALL, which it had stopped doing', async (t) =
   // An arrow was doing nothing a word was not already doing.
   assert.doesNotMatch(text(), /↗/)
 })
+
+/* --------------------------------------------------- playing next -- */
+
+// The next episode's own facts, as the host answers them for the shelf row.
+const NEXT_EP = {
+  type: 'episode',
+  id: 'wire-s01e03',
+  seriesTitle: 'The Wire',
+  seasonNumber: 1,
+  episodeNumber: 3,
+  title: 'The Buys',
+  runtime: 3600,
+  overview: 'A detail is assembled and the wire goes up.',
+  artId: null,
+  media: { container: 'mkv', videoCodec: 'h264', audioCodec: 'aac', size: 4096 }
+}
+
+// Open an episode, force past jsdom's decode-nothing verdict, and hand back the
+// <video> element the player built. jsdom answers '' to canPlayType, so every
+// file lands on the refusal and Try anyway is how a viewer gets past it.
+async function playEpisode (t, routes = { '/api/siblings': { prev: null, next: NEXT_EP } }) {
+  const opened = await open(STATE, routes)
+  t.after(() => opened.dom.window.close())
+  const { doc, win } = opened
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const video = doc.querySelector('video')
+  assert.ok(video, 'the episode is playing')
+  return { ...opened, video }
+}
+
+// The clock reaching the end, which is what tells the card this really was the
+// end rather than a generated stream stopping.
+async function runToEnd (win, video, seconds) {
+  Object.defineProperty(video, 'currentTime', { value: seconds, configurable: true })
+  video.dispatchEvent(new win.Event('timeupdate'))
+  await new Promise(r => setTimeout(r, 20))
+  video.dispatchEvent(new win.Event('ended'))
+  await new Promise(r => setTimeout(r, 40))
+}
+
+test('AN EPISODE THAT ENDS OFFERS THE NEXT ONE, and counts down to it', async (t) => {
+  const { doc, win, video, errors } = await playEpisode(t)
+
+  await runToEnd(win, video, 152)
+
+  assert.deepEqual(errors, [], 'no page error')
+  const card = doc.querySelector('.stage .nextover')
+  assert.ok(card, 'the card is over the last frame')
+  // WHAT IT IS, not "Next episode" - somebody has to be able to decide without
+  // remembering what follows what.
+  assert.match(card.textContent, /Playing next/i)
+  assert.match(card.textContent, /The Wire/)
+  assert.match(card.textContent, /S01E03/)
+  assert.match(card.textContent, /The Buys/)
+  assert.match(card.textContent, /A detail is assembled/, 'and what it is about')
+  assert.match(card.textContent, /1h/, 'and how long it is')
+
+  // THE COUNT IS VISIBLE THE WHOLE TIME IT RUNS. The one thing on this screen
+  // that acts by itself must never do so silently.
+  assert.match(card.querySelector('.nextdial').textContent, /^10$/)
+  await new Promise(r => setTimeout(r, 2200))
+  const now = Number(doc.querySelector('.nextdial').textContent)
+  assert.ok(now < 10 && now > 0, 'the countdown is running: ' + now)
+})
+
+test('CANCELLING LEAVES THE FINISHED EPISODE ON SCREEN, and nothing starts', async (t) => {
+  const { doc, win, video } = await playEpisode(t)
+  await runToEnd(win, video, 152)
+
+  const cancel = [...doc.querySelectorAll('.nextover button')].find(b => b.textContent.trim() === 'Cancel')
+  cancel.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 1400))
+
+  assert.equal(doc.querySelector('.nextover'), null, 'the card is gone')
+  // AND THE PLAYER IS STILL THERE. Cancelling is not closing: the person may
+  // want to scrub back, or leave on their own.
+  assert.ok(doc.querySelector('video'), 'the episode is still on screen')
+  assert.ok(doc.querySelector('.controls'), 'with its controls')
+  assert.match(rootText(doc), /The Detail/, 'still the one that just finished')
+})
+
+test('turning autoplay off on the card stops the countdown, and it stays off', async (t) => {
+  const { doc, win, video } = await playEpisode(t)
+  await runToEnd(win, video, 152)
+
+  const box = doc.querySelector('.nextover input[type=checkbox]')
+  assert.equal(box.checked, true, 'on by default, the way a television behaves')
+  box.checked = false
+  box.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 1400))
+
+  const card = doc.querySelector('.nextover')
+  assert.ok(card, 'the card stays - the next one is still offered')
+  assert.equal(card.querySelector('.dialfill'), null, 'but nothing is counting')
+  assert.equal(win.localStorage.getItem('pearcinema.autoplaynext'), 'off', 'and it is remembered')
+})
+
+test('A GENERATED STREAM THAT DIES MID-FILM OFFERS NOTHING', async (t) => {
+  // The host's ffmpeg stopping is an `ended` to the browser exactly as the end
+  // of the film is. Offering the next episode forty minutes in would be worse
+  // than saying nothing at all, so the clock has to agree it was the end.
+  const { doc, win, video } = await playEpisode(t)
+
+  await runToEnd(win, video, 20)
+
+  assert.equal(doc.querySelector('.nextover'), null)
+})
+
+function rootText (doc) { return doc.getElementById('root').textContent }

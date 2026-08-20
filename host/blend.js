@@ -206,6 +206,22 @@ class Blend {
     return this.index.series.find((s) => s.copies.some((c) => c.id === id)) || null
   }
 
+  // The episode on either side, answered from the blend's own interleaved run
+  // rather than by asking one library - the phone's rule, for the same reason:
+  // a series can SPAN hosts, so the season-boundary neighbour may live on the
+  // other one. Null when this is not a merged episode at all, which is the
+  // caller's signal to fall through to whichever library owns the id.
+  siblings (itemId) {
+    if (!this.index) return null
+    const id = String(itemId || '')
+    const ep = this.index.episodes.find((e) => e.copies.some((c) => c.id === id))
+    if (!ep) return null
+    const run = merge.seriesRun(this.index, ep.seriesKey)
+    const at = run.findIndex((e) => e.key === ep.key)
+    if (at < 0) return { prev: null, next: null }
+    return { prev: run[at - 1] || null, next: run[at + 1] || null }
+  }
+
   entityFor (id) {
     if (!this.index) return null
     const key = String(id || '')

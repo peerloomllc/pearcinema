@@ -58,6 +58,7 @@ function capsFromQuery (url) {
 const watch = require('../watch')
 const { MEDIA_CHANNEL_NAME } = require('../roku')
 const subtitleRules = require('../subtitles')
+const { siblings } = require('../siblings')
 const mergeLib = require('../../src/merge')
 
 // A bounded fan over the wire: the remote rollups ask one episode list per
@@ -523,6 +524,18 @@ async function startDashboard ({
         return stream.pipe(res)
       }
 
+      // THE EPISODE ON EITHER SIDE, the same walk the phone gets over the wire.
+      // The player asks once per episode: it drives Previous and Next, and it is
+      // what the card at the end of an episode offers. Answering with two nulls
+      // for a film is not an error - the player asks about whatever is playing.
+      if (req.method === 'GET' && url.pathname === '/api/siblings') {
+        const itemId = url.searchParams.get('itemId')
+        if (!itemId) return json(res, 400, { error: 'itemId required' })
+        const out = await siblings(host.adapter, String(itemId))
+        if (!out) return json(res, 404, { error: 'no such item' })
+        return json(res, 200, out)
+      }
+
       // --- subtitles -----------------------------------------------------------
       if (req.method === 'GET' && url.pathname === '/api/subtitles') {
         const itemId = url.searchParams.get('itemId')
@@ -898,6 +911,19 @@ async function startDashboard ({
           return redirect(`${baseFor(lib)}${sub}?${url.searchParams.toString()}`)
         }
 
+        // Neighbours across the WHOLE merged run first, and only a film or an
+        // id the blend does not hold falls through to its owner. Asking the
+        // owning library about a spanning show would stop at the half it has.
+        if (req.method === 'GET' && sub === '/api/siblings') {
+          const itemId = url.searchParams.get('itemId')
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          const merged = blend.siblings(itemId)
+          if (merged) return json(res, 200, merged)
+          const lib = blend.ownerOf(itemId)
+          if (!lib) return json(res, 404, { error: 'no such item' })
+          return redirect(`${baseFor(lib)}${sub}?${url.searchParams.toString()}`)
+        }
+
         // Keep a copy HERE: refused for films already on this disk (a copy
         // for nothing), routed to the picked remote copy otherwise.
         if (req.method === 'POST' && sub === '/api/download') {
@@ -1145,6 +1171,13 @@ async function startDashboard ({
           const itemId = url.searchParams.get('itemId')
           if (!itemId) return json(res, 400, { error: 'itemId required' })
           return json(res, 200, await remote.call(lib, 'subtitle.list', { itemId: String(itemId) }))
+        }
+        // The friend's host walks its own show - it is the authority on what
+        // follows what in a library that is not ours.
+        if (req.method === 'GET' && sub === '/api/siblings') {
+          const itemId = url.searchParams.get('itemId')
+          if (!itemId) return json(res, 400, { error: 'itemId required' })
+          return json(res, 200, await remote.call(lib, 'library.siblings', { id: String(itemId) }))
         }
         if (req.method === 'GET' && sub === '/api/subtitle') {
           const itemId = url.searchParams.get('itemId')
