@@ -1198,17 +1198,22 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
  * says the level itself is still running. Anybody who has asked for less movement
  * gets the bar without the stripe, which still carries the whole proportion. */
 .meter.big { height: 10px; margin: .2rem 0 .9rem }
+/* A SEAMLESS LOOP, and the first cut was not one: it slid a three-stop gradient
+ * across 240% of the bar and then jumped back to the start, which reads as the bar
+ * resetting part way through (Tim, 2026-08-20). A repeating gradient moved by EXACTLY
+ * one tile ends where it began, so there is nothing to jump back from. At 45 degrees a
+ * 10px band tiles every 10 * sqrt(2) px horizontally, which is where 28.284 comes
+ * from - get that number wrong by a pixel and the snap comes back. */
 .meter.busy i {
-  background-image: linear-gradient(
-    100deg,
-    color-mix(in srgb, var(--accent) 70%, #000) 25%,
-    var(--accent) 45%,
-    color-mix(in srgb, var(--accent) 70%, #000) 65%
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, .17) 0 10px,
+    rgba(255, 255, 255, 0) 10px 20px
   );
-  background-size: 220% 100%;
-  animation: meterflow 1.4s linear infinite;
+  background-size: 28.284px 28.284px;
+  animation: meterflow 1.1s linear infinite;
 }
-@keyframes meterflow { from { background-position: 120% 0 } to { background-position: -120% 0 } }
+@keyframes meterflow { from { background-position: 0 0 } to { background-position: 28.284px 0 } }
 @media (prefers-reduced-motion: reduce) { .meter.busy i { animation: none } }
 
 /* WHAT EACH LEVEL MANAGED, as a row per level: how many at once, how fast, and
@@ -1551,6 +1556,15 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * thing on the page. Centred, because a lone digit stranded at the left of a wide box
  * looks like a mistake. */
 .setrow .rowctl input[type=number] { width: 7.5rem; text-align: center }
+/* CENTRED MEANS CENTRED. A number input reserves room for its up/down arrows whether
+ * or not they are being shown, so a centred value sits visibly left of centre - which
+ * is what Tim was looking at (2026-08-20). Taking the arrows out is the honest fix
+ * rather than padding the other side by whatever this browser happens to reserve: the
+ * keyboard's own up and down still step the value, so nothing is lost but the pair of
+ * arrows that were invisible most of the time anyway. */
+.setrow .rowctl input[type=number] { appearance: textfield; -moz-appearance: textfield }
+.setrow .rowctl input[type=number]::-webkit-outer-spin-button,
+.setrow .rowctl input[type=number]::-webkit-inner-spin-button { appearance: none; -webkit-appearance: none; margin: 0 }
 /* TWO CONTROLS ON ONE ROW GO ONE ABOVE THE OTHER (Tim, 2026-08-20). Side by side they
  * read as one wide control of two halves, and they made the page's right-hand column
  * ragged - every other row has a single control of one width. */
