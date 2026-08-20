@@ -249,6 +249,36 @@ const MIME_CONTAINERS = {
   'video/webm': ['webm']
 }
 
+// AND WHAT IT TAKES FOR SOUND. Left out of the first cut on purpose: the cost of being
+// wrong about sound is a film that plays in perfect silence with nothing on screen to
+// say why (the Roku, 2026-08-19), so it waited for an ear in the room rather than
+// shipping on a parser's say-so.
+//
+// A raw Dolby mime type is the set naming a decoder, exactly as `video/hevc` is.
+const AUDIO_MIME_CODECS = {
+  'audio/vnd.dolby.dd-raw': 'ac3',
+  'audio/ac3': 'ac3',
+  'audio/x-ac3': 'ac3',
+  'audio/eac3': 'eac3',
+  'audio/vnd.dolby.ddplus': 'eac3',
+  'audio/vnd.dts': 'dts',
+  'audio/vnd.dts.hd': 'dts'
+}
+
+// SPEAKERS, FROM THE PROFILE NAMES. `MULT5` is DLNA's word for 5.1 and `MULT7` for 7.1,
+// and AC3 is 5.1 by definition. Two traps, both live in the TU7000's own list:
+//
+//   - `AAC_ADTS` CONTAINS THE LETTERS DTS. A bare /DTS/ reads 5.1 DTS support off a
+//     stereo AAC profile, so every match here is anchored to a whole `_`-separated word.
+//   - `AAC_LTP_MULT7` IS NOT A PROMISE OF 7.1. Long Term Prediction is a profile almost
+//     nothing is encoded in, and a set publishing 7.1 only for LTP has said nothing about
+//     the 7.1 AAC-LC an actual film carries. So LTP profiles are read for nothing here;
+//     the TU7000 publishes plain `AAC_MULT5_ISO` beside them and gets its 5.1 from that.
+const wholeWord = (word) => new RegExp(`(^|_)${word}(_|$)`, 'i')
+const AC3 = wholeWord('E?-?AC3')
+const EAC3 = wholeWord('E-?AC3')
+const DTS = wholeWord('DTS(-?HD)?')
+
 const PLAYLIST_MIMES = [
   'application/vnd.apple.mpegurl',
   'application/x-mpegurl',
@@ -270,6 +300,8 @@ function sinkProfile (sink) {
 
   const containers = new Set()
   const videoCodecs = new Set()
+  const audioCodecs = new Set()
+  let maxAudioChannels = 0
   let playlist = false
 
   for (const entry of entries) {
@@ -292,12 +324,35 @@ function sinkProfile (sink) {
     // uses: AVC_MP4_MP_HD_AAC is h.264 in mp4, HEVC_TS_MAIN is HEVC.
     if (/^AVC[_-]/i.test(profile)) videoCodecs.add('h264')
     if (/HEVC|H265/i.test(profile)) videoCodecs.add('hevc')
+
+    // And the sound, off the same two statements. A video profile carries its
+    // soundtrack in its own name - `AVC_MP4_MP_SD_AC3` is h.264 in mp4 with Dolby
+    // Digital - so this reads the audio half of a video entry as well as the
+    // audio-only ones.
+    const audio = AUDIO_MIME_CODECS[mime]
+    if (audio) audioCodecs.add(audio)
+    if (EAC3.test(profile)) audioCodecs.add('eac3')
+    else if (AC3.test(profile)) audioCodecs.add('ac3')
+    if (DTS.test(profile)) audioCodecs.add('dts')
+
+    // 5.1 and 7.1, from whichever of those said the most. A Dolby or DTS profile is
+    // five point one by construction; the AAC families say it in the profile name.
+    const multichannel = audio || EAC3.test(profile) || AC3.test(profile) || DTS.test(profile)
+    if (multichannel) maxAudioChannels = Math.max(maxAudioChannels, 6)
+    if (!/LTP/i.test(profile)) {
+      if (/MULT7/i.test(profile)) maxAudioChannels = Math.max(maxAudioChannels, 8)
+      else if (/MULT5/i.test(profile)) maxAudioChannels = Math.max(maxAudioChannels, 6)
+    }
   }
 
-  if (!containers.size && !videoCodecs.size && !playlist) return null
+  if (!containers.size && !videoCodecs.size && !audioCodecs.size && !maxAudioChannels && !playlist) return null
   return {
     containers: [...containers],
     videoCodecs: [...videoCodecs],
+    audioCodecs: [...audioCodecs],
+    // 0 means the set said nothing about speakers, which leaves the conservative
+    // stereo profile standing. Never used to take channels away.
+    maxAudioChannels,
     // TRUE means the device said so; false means it did not say, which is not the
     // same as "cannot" - see the note above. Never used to take a playlist away.
     playlist

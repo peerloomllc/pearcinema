@@ -994,8 +994,9 @@ class PearCinemaHost {
         audio: verdict.audio || 'aac',
         audioCodec: item.media?.audioCodec || null,
         // The client's own speaker count, which is the whole reason a film with
-        // a perfect picture is being touched at all.
-        audioChannels: Number(capabilities.maxAudioChannels) || 2
+        // a perfect picture is being touched at all - held down to the film's own
+        // count, so a stereo soundtrack is never upmixed to fill a television.
+        audioChannels: hls.channelsFor(capabilities.maxAudioChannels, item.media?.audioChannels)
       })
       : hls.segmentArgs({
         input: source.input,
@@ -1007,6 +1008,7 @@ class PearCinemaHost {
         hwDecode: transcode.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
         // The width ladder, capped at the client's stated budget when it gave one.
         bitrate: transcode.capBitrate(transcode.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
+        audioChannels: hls.channelsFor(capabilities.maxAudioChannels, item.media?.audioChannels),
         burn: burn || null,
         tone: ['bw', 'sepia'].includes(capabilities.tone) ? capabilities.tone : null
       })

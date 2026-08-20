@@ -253,6 +253,42 @@ test('THE REAL TELEVISION\'S OWN ANSWER, parsed into what it will take', async (
   // only ever used to widen: read as a complete statement it would have taken HLS
   // away from the one television measured playing it.
   assert.equal(profile.playlist, false)
+
+  // AND THE SOUND. It publishes AAC_MULT5 in two containers and AC3 both as a raw
+  // Dolby mime type and inside its video profiles, which is the set saying in its own
+  // words that it takes 5.1 - and every film in the house was being mixed down to two
+  // channels for it until it was asked.
+  assert.deepEqual(profile.audioCodecs.sort(), ['ac3'])
+  assert.equal(profile.maxAudioChannels, 6)
+})
+
+test('the letters DTS inside AAC_ADTS are not a claim of DTS', async () => {
+  // A LIVE TRAP, not a hypothetical: `AAC_ADTS` is on the TU7000's own list five times
+  // over, and a bare /DTS/ reads 5.1 DTS support off a stereo AAC profile - which is a
+  // silent television, the one failure this whole feature is careful about.
+  const profile = sinkProfile('http-get:*:audio/vnd.dlna.adts:DLNA.ORG_PN=AAC_ADTS,http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_AAC')
+  assert.deepEqual(profile.audioCodecs, [])
+  assert.equal(profile.maxAudioChannels, 0, 'stereo AAC says nothing about extra speakers')
+
+  // A set that means it is believed, in either spelling.
+  assert.deepEqual(sinkProfile('http-get:*:video/vnd.dlna.mpeg-tts:DLNA.ORG_PN=AVC_TS_HD_DTS_T').audioCodecs, ['dts'])
+  assert.deepEqual(sinkProfile('http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_HP_HD_EAC3').audioCodecs, ['eac3'])
+})
+
+test('7.1 is claimed only where a film could actually be encoded that way', async () => {
+  // The TU7000 publishes MULT7 for AAC LTP and nothing else. Long Term Prediction is a
+  // profile almost nothing is encoded in, so a set offering 7.1 ONLY there has said
+  // nothing about the 7.1 a real film carries - and asking for eight channels it cannot
+  // place is the silent-television failure again.
+  const ltp = sinkProfile('http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_SD_AAC_LTP_MULT7')
+  assert.equal(ltp.maxAudioChannels, 0)
+
+  // Said plainly, it is believed.
+  assert.equal(sinkProfile('http-get:*:video/mp4:DLNA.ORG_PN=AVC_MP4_MP_HD_AAC_MULT7').maxAudioChannels, 8)
+  assert.equal(sinkProfile('http-get:*:audio/mp4:DLNA.ORG_PN=AAC_MULT5_ISO').maxAudioChannels, 6)
+
+  // And Dolby is 5.1 by construction, whatever else the entry says.
+  assert.equal(sinkProfile('http-get:*:audio/vnd.dolby.dd-raw:*').maxAudioChannels, 6)
 })
 
 test('a device that says nothing usable keeps the profile it had', async () => {

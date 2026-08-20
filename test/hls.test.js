@@ -270,3 +270,34 @@ test('the encode engine is untouched: an even grid, and its old arithmetic', () 
   assert.equal(hls.playlistFor({ runtime: 10 }), hls.playlistFor({ runtime: 10 }, { plan: grid }))
   assert.equal(hls.segmentCount(grid), 3)
 })
+
+// --- how many speakers to encode for -------------------------------------------
+
+test('the speaker count is the smaller of what the client takes and what the film has', () => {
+  // `-ac 6` against a stereo source does not leave it alone, it UPMIXES: six channels
+  // of a two channel film, at six channels' worth of bitrate, for nothing. So widening
+  // a television to 5.1 must not start inflating the stereo films going to it.
+  assert.equal(hls.channelsFor(6, 2), 2)
+  assert.equal(hls.channelsFor(6, 6), 6)
+  assert.equal(hls.channelsFor(2, 6), 2, 'and a stereo television still gets a mixdown')
+
+  // Absent on either side means the old behaviour: a film scanned before channels were
+  // recorded is not guessed at, and a client that said nothing gets stereo.
+  assert.equal(hls.channelsFor(6, 0), 6)
+  assert.equal(hls.channelsFor(0, 6), 2)
+})
+
+test('a converted picture does not cost a television its surround', () => {
+  // The copy engine already asked for the client's count. The encode engine hardcoded
+  // two, so a film converted for a set that takes 5.1 arrived in stereo - which is the
+  // same fault this work is about, one path along.
+  const args = hls.segmentArgs({
+    input: '/x.mkv', seq: 0, media: { videoCodec: 'hevc' }, device: '/dev/dri/renderD128',
+    hwDecode: true, bitrate: '6M', audioChannels: 6
+  })
+  assert.equal(args[args.indexOf('-ac') + 1], '6')
+
+  // And the default is what it always was.
+  const plain = hls.segmentArgs({ input: '/x.mkv', seq: 0, media: { videoCodec: 'h264' }, device: '/dev/dri/renderD128', hwDecode: true, bitrate: '6M' })
+  assert.equal(plain[plain.indexOf('-ac') + 1], '2')
+})
