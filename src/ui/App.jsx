@@ -576,6 +576,27 @@ function CastSheet ({ sheet, hostCount, onPick, onClose }) {
   )
 }
 
+// WHAT WENT WRONG, IN A SENTENCE SOMEBODY CAN ACT ON. The parser is deliberately
+// strict - a PearTune link, a PearCal join URL and a wifi QR must all fail to parse as
+// a PearCinema pairing link (peerloom-host protocol/link.js) - and it throws in the
+// vocabulary of a parser: "invalid PearCinema pairing link", lower case, no advice.
+// That is right for a log and wrong on a phone, where it is what somebody sees after
+// pointing a camera at the wrong square. Seen 2026-08-20 by scanning a code that was
+// not a pairing code.
+//
+// Only the two failures a person can actually cause are rewritten; anything else keeps
+// the message it came with rather than being flattened into a shrug.
+function pairingProblem (message) {
+  const m = String(message || '')
+  if (/invalid .* pairing link/i.test(m)) {
+    return 'That is not a PearCinema pairing code. Open the dashboard on the server you want to add and press "Pair a device" to show its code.'
+  }
+  if (/unsupported pairing link version/i.test(m)) {
+    return 'That pairing code was made by a newer PearCinema than this phone is running. Update the app and try again.'
+  }
+  return m
+}
+
 function Scanner ({ onScan, onCancel }) {
   const video = useRef(null)
   const canvas = useRef(null)
@@ -669,7 +690,7 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
         }).catch(() => {})
       }
       onPaired(out)
-    } catch (e) { setError(e.message) }
+    } catch (e) { setError(pairingProblem(e.message)) }
     setBusy(false)
   }
 
