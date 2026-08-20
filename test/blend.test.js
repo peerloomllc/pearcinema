@@ -278,6 +278,41 @@ test('watch state reads as one union with ids translated to the shown copy', { t
   assert.equal(state.continue[0].resume.positionMs, 120000)
 })
 
+test('ALL LIBRARIES ASKS WHO IS WATCHING, instead of showing an empty shelf', { timeout: 120000 }, async (t) => {
+  // Tim, 2026-08-20: "there's only a Continue watching when a specific library is
+  // selected, and not on the All Libraries selection". A box with SEVERAL people and
+  // nobody chosen must ask - filing a position under the wrong person is worse than
+  // none - and on one library it did. The merged view answered with an empty
+  // `choose` and an empty shelf instead, which reads as having nothing to carry on
+  // with rather than as a question.
+  const { desktop, get, post } = await rig(t)
+  await (await get('/api/blend')).json()
+
+  // Watching something creates the first person, exactly as it does anywhere.
+  const rows = await (await get('/blend/api/library/list?type=movies&limit=100')).json()
+  const local = rows.items.find((i) => i.title === 'Sunrise')
+  await post('/blend/api/watch/position', { itemId: local.id, positionMs: 300000 })
+
+  const one = await (await get('/blend/api/watch/state')).json()
+  assert.ok(one.watching, 'one person is not a choice, and the merged view says who it is')
+  assert.deepEqual(one.choose, [])
+  assert.equal(one.continue.length, 1, 'and their shelf is there')
+
+  // A second person on the box, and nobody chosen in THIS browser.
+  const sam = await desktop.grants.addPerson('Sam')
+  const asked = await (await get('/blend/api/watch/state')).json()
+  assert.equal(asked.watching, null)
+  assert.deepEqual(asked.choose.map((p) => p.name).sort(), ['Me', 'Sam'])
+  assert.deepEqual(asked.continue, [], 'nothing is shown under a guess')
+
+  // Saying who you are brings the shelf back, on All libraries as anywhere else.
+  const cookie = `pearcinema-person=${encodeURIComponent(one.watching.id)}`
+  const back = await (await get('/blend/api/watch/state', { cookie })).json()
+  assert.equal(back.watching.id, one.watching.id)
+  assert.equal(back.continue.length, 1)
+  assert.equal(sam.name, 'Sam')
+})
+
 test('the write fan and the merged rollups span the disk and the wire', { timeout: 120000 }, async (t) => {
   const { friend, desktop, get, post } = await rig(t)
   const { ownerOf } = require('@peerloom/host')

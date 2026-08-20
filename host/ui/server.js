@@ -1005,6 +1005,27 @@ async function startDashboard ({
           const watched = new Set()
 
           const who = await watcher(req)
+          // SEVERAL PEOPLE AND NOBODY CHOSEN: the page has to be able to ASK, and
+          // this answered with an empty `choose` - so All libraries showed no shelf,
+          // no way to say who you were and no explanation, while the very same box
+          // on one library asked properly (Tim, 2026-08-20). Filing a position under
+          // the wrong person is worse than none, so the rule is the local one's:
+          // never guess, ask.
+          //
+          // NOBODY AT ALL is a different thing and must not ask. A machine that is
+          // only a client has no person of its own and never needed one - its shelf
+          // is entirely the friend's answers, and refusing to draw it until somebody
+          // is invented here would be a blank page on a box that knows perfectly
+          // well where you got to.
+          if (!who.owner && who.persons.length > 0) {
+            return json(res, 200, {
+              watching: null,
+              choose: who.persons.map(p => ({ id: p.id, name: p.name })),
+              watched: [],
+              continue: [],
+              upNext: []
+            })
+          }
           if (who.owner) {
             for (const id of await host.userState.watchedSet(who.owner)) watched.add(blend.primaryIdFor(id))
             for (const r of await host.userState.listResume(who.owner, 20)) {
@@ -1031,7 +1052,37 @@ async function startDashboard ({
           const seenIds = new Set()
           const merged = cont.filter((i) => (seenIds.has(i.id) ? false : (seenIds.add(i.id), true)))
 
-          return json(res, 200, { watching: null, choose: [], watched: [...watched], continue: merged.slice(0, 20) })
+          // AND THE NEXT EPISODE OF ANYTHING RECENTLY FINISHED, over the merged run
+          // rather than one library's - which is the only reading under which a show
+          // whose two halves live on different machines can hand over at all. Same
+          // recency bound as the local route: only shows this person has just
+          // finished something in are walked.
+          const resumed = new Set(merged.map(i => i.id))
+          const seenSeries = new Set()
+          const upNext = []
+          for (const row of who.owner ? await host.userState.recentWatched(who.owner, 12) : []) {
+            const done = blend.index?.episodes.find(e => e.copies.some(c => c.id === row.itemId)) ||
+              await host.adapter.get({ id: row.itemId }).catch(() => null)
+            if (!done || done.type !== 'episode') continue
+            const key = done.seriesKey || done.seriesId
+            if (!key || seenSeries.has(key)) continue
+            seenSeries.add(key)
+
+            const eps = done.seriesKey
+              ? mergeLib.seriesRun(blend.index, done.seriesKey)
+              : ((await host.adapter.list({ type: 'episodes', seriesId: done.seriesId, limit: 500 })).items || [])
+            const next = watch.nextEpisode(eps, watched, resumed)
+            if (next) upNext.push({ ...next, id: blend.primaryIdFor(next.id), upNext: true })
+            if (upNext.length >= 6) break
+          }
+
+          return json(res, 200, {
+            watching: who.person ? { id: who.person.id, name: who.person.name } : null,
+            choose: who.persons.length > 1 ? who.persons.map(p => ({ id: p.id, name: p.name })) : [],
+            watched: [...watched],
+            continue: merged.slice(0, 20),
+            upNext
+          })
         }
         // THE WRITE FAN (phase 2): a position or a mark lands on EVERY library
         // holding the film - one host of two with the mark is a shelf that
