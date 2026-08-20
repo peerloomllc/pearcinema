@@ -797,6 +797,31 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 
 .shelf { margin: 0 0 .6rem }
 
+/* The shelf's heading and its one action on the same line. Clear sits at the far
+ * end rather than beside the words: it empties the row under it, and a
+ * destructive control should not read as part of the label. */
+.shelfhead { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .6rem }
+.shelfhead .shelf { margin: 0; flex: 1 1 auto }
+
+/* The rest of the shelf, one press away rather than gone. Under the row and
+ * centred, so it reads as the end of that row and not as a page control. */
+.showall { display: block; margin: .7rem auto 0 }
+
+/* TAKE THIS OFF THE SHELF. Same weight and behaviour as the fix-the-artwork
+ * pencil in the opposite situation - dim until the card is hovered, so a row of
+ * twelve cards is not twelve crosses competing with the artwork. */
+.poster .forget {
+  position: absolute; top: .4rem; left: .4rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.7);
+  border: 1px solid transparent; opacity: 0; transition: opacity .12s ease;
+}
+.poster:hover .forget, .poster:focus-within .forget { opacity: 1 }
+.poster .forget:hover { color: #fff; background: rgba(0,0,0,.75) }
+.forget svg { display: block }
+
 /* Who this browser is watching as. Only ever rendered once a SECOND person exists,
  * so it is sized as an aside rather than as a control people meet on day one. */
 .watchas { display: flex; align-items: center; gap: .4rem; margin-right: .6rem }

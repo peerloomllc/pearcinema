@@ -16,8 +16,8 @@
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, withBase, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
-import { ArtIcon, Check, List, Grid, Pencil } from './icons'
-import { notify } from './ui'
+import { ArtIcon, Check, Close, List, Grid, Pencil } from './icons'
+import { notify, askConfirm } from './ui'
 import { FixMatch } from './FixMatch'
 
 // How far through, as a percentage, or null when there is nothing to say.
@@ -105,7 +105,7 @@ function flagFor (v) {
 // HOW FAR THROUGH, drawn across the bottom of the poster the way every player of the
 // last decade has drawn it. A number would be exact and useless; the bar is read
 // without being looked at.
-function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null, onFix = null }) {
+function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null, onWatched = null, onFix = null, onForget = null }) {
   const v = item.media ? verdictFor(item, caps) : null
   const flag = flagFor(v)
 
@@ -194,6 +194,19 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
           wearing the wrong poster - not in a queue in Settings. Only offered where
           the artwork CAME from the lookup or where there is none at all: a poster
           sitting beside the file on disk is not this feature's to change. */}
+      {/* TAKE THIS OFF THE SHELF WITHOUT CLAIMING TO HAVE WATCHED IT. Top left,
+          which is free on a shelf card: the up-next badge that also lives there
+          belongs to items with no position, and the fix-the-artwork pencil is
+          not offered on this row at all. */}
+      {onForget && (
+        <button
+          class='forget'
+          title={'Remove ' + item.title + ' from Continue watching'}
+          aria-label={'Remove ' + item.title + ' from Continue watching'}
+          onClick={e => { e.stopPropagation(); onForget(item) }}
+        ><Close size={12} /></button>
+      )}
+
       {onFix && (item.type === 'movie' || item.type === 'series') &&
         (!item.artId || String(item.artId).startsWith('tmdb:')) && (
           <button
@@ -259,20 +272,39 @@ function WatchingAs ({ watch, onChange }) {
   )
 }
 
+// HOW MANY CARDS THE SHELF SHOWS before the rest go behind Show all. Twelve is
+// two full rows on a normal window and comfortably more than anybody is part way
+// through at once.
+const SHELF_MAX = 12
+
 // PICK UP WHERE YOU LEFT OFF. The row people actually use, so it sits above the
 // library rather than inside a tab - and it is only there when it has something in
 // it, because an empty shelf labelled "continue watching" is a reproach.
-function ContinueRow ({ watch, caps, onOpen, onWatched }) {
+function ContinueRow ({ watch, caps, onOpen, onWatched, onForget, onClear }) {
   // MID-FILM FIRST, then what to start next. Both are "carry on", but one is something
   // somebody literally stopped in the middle of and the other is a suggestion - and
   // burying the first under the second would be wrong.
   const list = [...(watch?.continue || []), ...(watch?.upNext || [])]
+  // SHOWN, not held. The shelf keeps every position there is, and a person with a
+  // year of half-started films had the one thing they are actually part way
+  // through pushed off the end of the row (Tim, 2026-08-19). Newest first is
+  // already the store's ordering, so the cap simply cuts the tail - and the tail
+  // is one press away rather than gone.
+  const [all, setAll] = useState(false)
+  useEffect(() => { setAll(false) }, [list.length])
   if (!list.length) return null
+  const shown = all ? list : list.slice(0, SHELF_MAX)
+  const places = (watch?.continue || []).length
   return (
     <>
-      <h2 class='shelf' id='continue-shelf'>Continue watching</h2>
+      <div class='shelfhead'>
+        <h2 class='shelf' id='continue-shelf'>Continue watching</h2>
+        {places > 0 && onClear && (
+          <button class='ghost' onClick={onClear}>Clear</button>
+        )}
+      </div>
       <div class='grid'>
-        {list.map(i => (
+        {shown.map(i => (
           <Poster
             key={i.id}
             item={i}
@@ -285,10 +317,20 @@ function ContinueRow ({ watch, caps, onOpen, onWatched }) {
             // Markable from the shelf too. "I finished this on the telly" is exactly
             // the thought somebody has while looking at a card offering to resume it.
             onWatched={onWatched}
+            // FORGETTING IS NOT FINISHING. Marking something watched already takes
+            // it off the shelf, and for anything abandoned rather than finished it
+            // is a lie that then shows up as a tick everywhere else. Only offered
+            // on a real position - an up-next suggestion has nothing to forget.
+            onForget={i.resume ? onForget : null}
             onOpen={onOpen}
           />
         ))}
       </div>
+      {list.length > SHELF_MAX && (
+        <button class='ghost showall' onClick={() => setAll(a => !a)}>
+          {all ? 'Show fewer' : `Show all ${list.length}`}
+        </button>
+      )}
     </>
   )
 }
@@ -546,6 +588,28 @@ export default function Library ({
     await api('/api/watch/watched', { itemId: item.id, watched: on })
     onWatchChange()
     setSeasonRollups({})
+  }
+
+  // A ZERO POSITION IS THE DELETE, the same write the host uses when a film is
+  // finished - so forgetting one place travels the identical path (and the
+  // identical write fan on a merged library) rather than being a second way to
+  // remove a row that has to be kept honest separately.
+  const forget = async (item) => {
+    await api('/api/watch/position', { itemId: item.id, positionMs: 0 })
+    onWatchChange()
+  }
+
+  const clearShelf = async () => {
+    const ok = await askConfirm({
+      title: 'Clear Continue watching?',
+      message: 'Every place you are part way through will be forgotten, and those films will start from the beginning again. This cannot be undone.',
+      confirmLabel: 'Clear it',
+      danger: true
+    })
+    if (!ok) return
+    const r = await api('/api/watch/clear', {})
+    if (r?.needsPerson) return notify('Nobody is watching', 'Choose who is watching before clearing the shelf.')
+    onWatchChange()
   }
 
   useEffect(() => {
@@ -825,6 +889,8 @@ export default function Library ({
         watch={watch}
         caps={caps}
         onWatched={mark}
+        onForget={forget}
+        onClear={clearShelf}
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 

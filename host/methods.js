@@ -19,6 +19,11 @@ const watch = require('./watch')
 const { siblings } = require('./siblings')
 const { notifyOwners } = require('@peerloom/host')
 
+// The most positions one clear will forget. Far above any real shelf - the
+// point is that it is bounded rather than an unbounded scan somebody could
+// aim at a host.
+const CLEAR_MAX = 5000
+
 // Methods that mutate, refused for a readonly grant at the package's chokepoint
 // rather than inside a handler - so a new mutating method cannot ship without a
 // scope check.
@@ -30,7 +35,7 @@ const { notifyOwners } = require('@peerloom/host')
 // package's chokepoint before a handler runs. Both write only to the caller's OWN
 // per-person rows, keyed by an ownerId the host derives from the connection, so a
 // readonly device is being denied its own history rather than anybody else's.
-const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke', 'cast.play', 'cast.stop', 'cast.pause', 'cast.resume', 'cast.seek']
+const MUTATING = ['resume.set', 'watched.set', 'device.leave', 'fav.set', 'request.add', 'request.remove', 'request.resolve', 'identity.set', 'avatar.set', 'device.revoke', 'cast.play', 'cast.stop', 'cast.pause', 'cast.resume', 'cast.seek', 'resume.clear']
 
 // `library.list` types the client may ask for, and which of them need a parent.
 // Asking for seasons or episodes unscoped is a bad request rather than a
@@ -301,6 +306,25 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
         if (item) out.push({ ...item, resume: { positionMs: r.positionMs, playedAt: r.playedAt } })
       }
       return { items: out }
+    },
+
+    // EMPTY THE SHELF, and emptying it means letting the places go (Tim,
+    // 2026-08-20). The alternative - hide the shelf, keep the positions - reads
+    // as two different answers to one question: a shelf somebody has cleared
+    // that still makes every film offer to resume.
+    //
+    // Per PERSON, off the authenticated connection, so a device cannot empty
+    // anybody's shelf but its owner's. The zero write IS the delete, the same
+    // rule a single row follows, so there is no second deletion path to keep
+    // honest.
+    'resume.clear': async (ctx) => {
+      if (!state) throw ctx.notFound('this host does not keep watch state')
+      const rows = await state.listResume(ctx.owner, CLEAR_MAX)
+      for (const r of rows) await state.setResume(ctx.owner, r.itemId, 0, null)
+      // The person's OTHER devices hear it, same as a single position does -
+      // clearing on a phone must not leave the tablet's shelf full.
+      ctx.pushToOwner('resume:cleared', { cleared: rows.length })
+      return { ok: true, cleared: rows.length }
     },
 
     'watched.set': async (ctx) => {

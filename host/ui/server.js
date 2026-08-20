@@ -223,6 +223,10 @@ function srtToVtt (text) {
 // preference.
 const WATCH_COOKIE = 'pearcinema-person'
 
+// The most positions one Clear will forget, matching the method table's own
+// bound. Far above any real shelf; the point is that it is bounded.
+const WATCH_CLEAR_MAX = 5000
+
 function cookieValue (req, name) {
   const raw = req.headers.cookie || ''
   const hit = raw.split(';').map(s => s.trim()).find(s => s.startsWith(name + '='))
@@ -1038,6 +1042,34 @@ async function startDashboard ({
           return json(res, 200, { ok: ok > 0, landed: ok, of: refs.length })
         }
 
+        // CLEARING THE MERGED SHELF CLEARS EVERY MEMBER, because the shelf it
+        // empties is every member's answers put together - clearing only the
+        // local one would leave the row half full and reading as a failure.
+        // Best effort per library, ok when any landed, exactly as the write fan
+        // above is: an offline member keeps its positions and is honest about
+        // it rather than the whole action refusing.
+        if (req.method === 'POST' && sub === '/api/watch/clear') {
+          let ok = 0
+          let cleared = 0
+          const libs = [localLib, ...host.remote.state.hosts.map((h) => h.libraryId)].filter(Boolean)
+          await Promise.all([...new Set(libs)].map(async (id) => {
+            try {
+              if (id === localLib) {
+                const who = await watcher(req)
+                if (!who.owner) return
+                const rows = await host.userState.listResume(who.owner, WATCH_CLEAR_MAX)
+                for (const r of rows) await host.userState.setResume(who.owner, r.itemId, 0, null)
+                cleared += rows.length
+              } else {
+                const out = await host.remote.call(id, 'resume.clear', {})
+                cleared += Number(out?.cleared) || 0
+              }
+              ok++
+            } catch {}
+          }))
+          return json(res, 200, { ok: ok > 0, cleared })
+        }
+
         if (req.method === 'POST' && sub === '/api/watch/watched') {
           const { itemId, watched: on } = await readBody(req)
           const yes = on !== false
@@ -1221,6 +1253,11 @@ async function startDashboard ({
           const { itemId, watched } = await readBody(req)
           if (!itemId) return json(res, 400, { error: 'itemId required' })
           return json(res, 200, await remoteWatched(remote, lib, String(itemId), watched !== false))
+        }
+        // The friend's host forgets its own places. This machine holds none of
+        // them, so there is nothing local to clear alongside it.
+        if (req.method === 'POST' && sub === '/api/watch/clear') {
+          return json(res, 200, await remote.call(lib, 'resume.clear', {}))
         }
 
         // HOW MUCH OF EACH SHOW IS LEFT, over the wire - one episode list per
@@ -1530,6 +1567,19 @@ async function startDashboard ({
           playedAt: Date.now()
         })
         return json(res, 200, { ok: true, finished: verdict.finished })
+      }
+
+      // EMPTY THE SHELF. Clearing it forgets the places rather than hiding them
+      // (Tim, 2026-08-20) - the shelf IS the list of positions, so a cleared
+      // shelf that still made every film offer to resume would be two answers
+      // to one question. The zero write is the delete, exactly as it is for one
+      // row, so there is no second deletion path.
+      if (req.method === 'POST' && url.pathname === '/api/watch/clear') {
+        const who = await watcher(req)
+        if (!who.owner) return json(res, 200, { ok: false, needsPerson: true })
+        const rows = await host.userState.listResume(who.owner, WATCH_CLEAR_MAX)
+        for (const r of rows) await host.userState.setResume(who.owner, r.itemId, 0, null)
+        return json(res, 200, { ok: true, cleared: rows.length })
       }
 
       if (req.method === 'POST' && url.pathname === '/api/watch/watched') {

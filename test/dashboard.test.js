@@ -846,6 +846,40 @@ test('THE RUNTIME COMES FROM THE LIBRARY, never from the browser', async (t) => 
   assert.deepEqual(state.json.continue, [], 'and it is not also sitting in continue-watching')
 })
 
+test('ONE PLACE CAN BE FORGOTTEN WITHOUT CLAIMING TO HAVE WATCHED IT', async (t) => {
+  // Marking something watched already takes it off the shelf, and for anything
+  // abandoned rather than finished that is a lie which then shows up as a tick
+  // everywhere else. A zero position is the delete, the same write a finished
+  // film makes, so there is no second removal path.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 100_000 } })
+  assert.equal((await c.req('GET', '/api/watch/state')).json.continue.length, 1)
+
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 0 } })
+  const after = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(after.json.continue, [], 'off the shelf')
+  assert.deepEqual(after.json.watched, [], 'and NOT marked as watched')
+})
+
+test('CLEARING THE SHELF FORGETS THE PLACES, it does not merely hide them', async (t) => {
+  // Tim, 2026-08-20. A clear that kept the positions would leave every one of
+  // those films still offering to resume, which is two answers to one question.
+  const { c } = await loggedIn(t)
+  await c.req('POST', '/api/watch/position', { body: { itemId: FILM.id, positionMs: 100_000 } })
+  await c.req('POST', '/api/watch/position', { body: { itemId: 'wire-s01e02', positionMs: 900_000 } })
+  assert.equal((await c.req('GET', '/api/watch/state')).json.continue.length, 2)
+
+  const cleared = await c.req('POST', '/api/watch/clear', { body: {} })
+  assert.equal(cleared.status, 200)
+  assert.equal(cleared.json.cleared, 2)
+
+  const after = await c.req('GET', '/api/watch/state')
+  assert.deepEqual(after.json.continue, [])
+  assert.deepEqual(after.json.watched, [], 'clearing is not marking everything watched')
+  // The places are GONE, not hidden: nothing left to resume.
+  assert.equal((await c.req('POST', '/api/watch/clear', { body: {} })).json.cleared, 0)
+})
+
 test('a minute in is not watching it', async (t) => {
   const { c } = await loggedIn(t)
   await c.req('POST', '/api/watch/position', { body: { itemId: MP4.id, positionMs: 20_000 } })

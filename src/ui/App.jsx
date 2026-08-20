@@ -227,6 +227,10 @@ const LAYOUT_OPTS = [
 
 const SORT_LABEL = { title: 'Title', year: 'Year', added: 'Recently added' }
 
+// HOW MANY PLACES THE CONTINUE LIST SHOWS before the rest go behind Show all.
+// Twelve is comfortably more than anybody is part way through at once.
+const SHELF_MAX = 12
+
 function DonationSheet ({ onClose }) {
   const [hasWallet, setHasWallet] = useState(false)
   const [copied, setCopied] = useState(null)
@@ -885,6 +889,11 @@ export default function App () {
   // bottomsheet idiom, not in a button that changes its words - a WebView's
   // confirm() is still at the shell's mercy, so the sheet is ours.
   const [revoking, setRevoking] = useState(null)
+  // The Continue list keeps every place there is, so a year of half-started
+  // films buried the one thing actually being watched (Tim, 2026-08-19). The
+  // cap is on what is SHOWN; the rest is one press away rather than gone.
+  const [showAllContinue, setShowAllContinue] = useState(false)
+  const [clearAsk, setClearAsk] = useState(false)
   const [themePref, setThemePref] = useState(loadThemePref())
   const [settingsOpen, setSettingsOpen] = useState(null)
   const toggleSection = (id) => setSettingsOpen((cur) => (cur === id ? null : id))
@@ -1453,6 +1462,28 @@ export default function App () {
       setWatchedIds((s) => { const n = new Set(s); on ? n.add(i.id) : n.delete(i.id); return n })
       say(on ? 'Marked watched' : 'Marked unwatched')
       if (youView === 'watched') loadYou('watched')
+    } catch (e) { setErr(e.message) }
+  }
+
+  // A ZERO POSITION IS THE DELETE, the same write the host makes when a film
+  // finishes - so forgetting one place travels the identical path, fan-out to
+  // every library holding a copy included, rather than being a second way to
+  // remove a row that has to be kept honest separately.
+  const forgetPlace = async (i) => {
+    setContinueRows((rows) => (rows || []).filter((r) => r.id !== i.id))
+    try {
+      await call('resume.set', { itemId: i.id, positionMs: 0 })
+      say('Removed from Continue watching')
+    } catch (e) { setErr(e.message); loadYou('continue') }
+  }
+
+  const clearContinue = async () => {
+    setClearAsk(false)
+    try {
+      await call('resume.clear')
+      setContinueRows([])
+      setShowAllContinue(false)
+      say('Continue watching cleared')
     } catch (e) { setErr(e.message) }
   }
 
@@ -2037,15 +2068,31 @@ export default function App () {
           : continueRows.length === 0
             ? <p className='muted center-p'>Nothing in progress. Start a film and your place appears here.</p>
             : (
-              <ul className='tracks'>
-                {continueRows.map((r) => (
-                  <ItemRow
-                    key={r.id} item={r} onOpen={open} onLong={longPress}
-                    sub={`${fmtClock(r.resume?.positionMs || 0)} in${r.runtime ? ` · ${fmtRuntime(r.runtime)}` : ''}`}
-                    right={<Play size={18} className='muted' />}
-                  />
-                ))}
-              </ul>
+              <>
+                <ul className='tracks'>
+                  {(showAllContinue ? continueRows : continueRows.slice(0, SHELF_MAX)).map((r) => (
+                    <ItemRow
+                      key={r.id} item={r} onOpen={open} onLong={longPress}
+                      sub={`${fmtClock(r.resume?.positionMs || 0)} in${r.runtime ? ` · ${fmtRuntime(r.runtime)}` : ''}`}
+                      // FORGETTING IS NOT FINISHING. Marking something watched
+                      // already takes it off this list, and for anything
+                      // abandoned rather than finished that is a lie which then
+                      // shows up as a tick everywhere else.
+                      right={(
+                        <button className='ghost' onClick={(e) => { e.stopPropagation(); forgetPlace(r) }}>Remove</button>
+                      )}
+                    />
+                  ))}
+                </ul>
+                {continueRows.length > SHELF_MAX && (
+                  <button className='ghost' style={{ margin: '0.8rem auto', display: 'block' }} onClick={() => setShowAllContinue((v) => !v)}>
+                    {showAllContinue ? 'Show fewer' : `Show all ${continueRows.length}`}
+                  </button>
+                )}
+                <button className='danger' style={{ margin: '0.2rem auto 1rem', display: 'block' }} onClick={() => setClearAsk(true)}>
+                  Clear this list
+                </button>
+              </>
               )
       )}
 
@@ -2764,6 +2811,26 @@ export default function App () {
                 }}
               ><Prohibit size={18} /> Cut off</button>
               <button className='ghost' onClick={() => setRevoking(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clearing FORGETS the places rather than hiding the list (Tim,
+          2026-08-20), so it says so and asks - the app's own sheet, for the
+          same reason revoke's is: a WebView's confirm() is at the shell's
+          mercy. */}
+      {clearAsk && (
+        <div className='sheetwrap' onClick={() => setClearAsk(false)}>
+          <div className='sheet' onClick={(e) => e.stopPropagation()}>
+            <h3>Clear Continue watching?</h3>
+            <p className='muted sm'>
+              Every place you are part way through will be forgotten, and those films
+              will start from the beginning again. This cannot be undone.
+            </p>
+            <div className='acts'>
+              <button className='danger' onClick={clearContinue}>Clear it</button>
+              <button className='ghost' onClick={() => setClearAsk(false)}>Cancel</button>
             </div>
           </div>
         </div>

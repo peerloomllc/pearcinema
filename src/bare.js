@@ -1177,6 +1177,15 @@ const methods = {
       .sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
     return { items: items.slice(0, Number(args.limit) || 20) }
   },
+  // Emptying the shelf empties EVERY library's, because the shelf it empties is
+  // every library's answers put together - clearing one and leaving the other
+  // would refill the row the moment it reloaded.
+  'resume.clear': async (args) => {
+    if (!mergedOn()) return (await connected()).request('resume.clear', args)
+    const rows = await fanOut((c) => c.request('resume.clear', args))
+    if (!rows.length) throw new Error('no library reachable to clear')
+    return { ok: true, cleared: rows.reduce((n, r) => n + (Number(r?.cleared) || 0), 0) }
+  },
   'watched.set': async (args) => writeToCopies(args.itemId, (c, id) => c.request('watched.set', { ...args, itemId: id })),
   'watched.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('watched.list', args)

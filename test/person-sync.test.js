@@ -16,8 +16,15 @@ function harness () {
   // The dashboard's local channel, which is not a paired device and so hears
   // nothing from either push path.
   const events = []
+  // What a clear actually wrote, so a test can prove it forgot the places
+  // rather than only answering as though it had.
+  const wrote = []
   const state = {
-    setResume: async () => ({ positionMs: 60000 }),
+    listResume: async () => [{ itemId: 'a' }, { itemId: 'b' }, { itemId: 'c' }],
+    setResume: async (owner, itemId, positionMs) => {
+      wrote.push({ owner, itemId, positionMs })
+      return { positionMs: 60000 }
+    },
     setWatched: async () => {},
     setFav: async () => {},
     addRequest: async (requester, { kind, name }) => ({ id: 'r1', kind, name, count: 1, requester }),
@@ -57,13 +64,36 @@ function harness () {
     notFound: (x) => new Error(x),
     forbidden: (x) => new Error(x)
   })
-  return { m, ctx, pushes, owners, devices, events }
+  return { m, ctx, pushes, owners, devices, events, wrote }
 }
 
 test('a position write tells the person s other devices where the film is', async () => {
   const { m, ctx, pushes } = harness()
   await m['resume.set'](ctx({ itemId: 'film1', positionMs: 60000 }))
   assert.deepStrictEqual(pushes[0], { kind: 'resume:changed', data: { itemId: 'film1', finished: false } })
+})
+
+test('CLEARING THE SHELF FORGETS THE PLACES, and tells the other devices', async () => {
+  // Tim, 2026-08-20: emptying the shelf means letting the places go. A clear
+  // that only hid the row would leave every film still offering to resume,
+  // which is two different answers to one question.
+  const { m, ctx, pushes, wrote } = harness()
+  const out = await m['resume.clear'](ctx({}))
+
+  assert.strictEqual(out.cleared, 3)
+  // A ZERO IS THE DELETE, the same write a finished film makes - there is no
+  // second deletion path to keep honest.
+  assert.deepStrictEqual(wrote.map((w) => [w.itemId, w.positionMs]), [['a', 0], ['b', 0], ['c', 0]])
+  assert.ok(wrote.every((w) => w.owner === 'p:ada'), 'and only this person s own places')
+  assert.deepStrictEqual(pushes[0], { kind: 'resume:cleared', data: { cleared: 3 } })
+})
+
+test('clearing is a WRITE, so a readonly device cannot do it', () => {
+  // It only ever touches the caller's own rows, but it is still a mutation and
+  // has to be refused at the package's chokepoint rather than inside the
+  // handler - the rule every mutating method on this table follows.
+  const { MUTATING } = require('../host/methods')
+  assert.ok(MUTATING.includes('resume.clear'))
 })
 
 test('a bookmark travels to the other phones, payload included', async () => {
