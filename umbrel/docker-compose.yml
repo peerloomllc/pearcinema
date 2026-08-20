@@ -95,3 +95,18 @@ services:
     # and everything else keeps working because the probe fails closed.
     devices:
       - /dev/dri:/dev/dri
+
+    # AN NVIDIA CARD IS THE OTHER SHAPE OF THE SAME GRANT, and there is no device path
+    # for it: NVENC reaches the card through the NVIDIA Container Toolkit. Uncomment
+    # this on a box with an NVIDIA card AND that toolkit installed, and delete the
+    # /dev/dri lines above if the box has no Intel or AMD graphics at all. The host
+    # probes each vendor's real encoder at startup and uses whichever answers, so
+    # leaving this off simply means the card is not offered (host/engines.js).
+    #
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video]

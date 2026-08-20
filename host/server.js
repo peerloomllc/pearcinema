@@ -841,6 +841,7 @@ class PearCinemaHost {
       const out = await transcode.measureEngine({
         ffmpeg: ffmpegBin.ffmpeg(),
         device: this.transcoder.device,
+        engine: this.transcoder.engine,
         input: source.input,
         headers: source.headers || null,
         media: item.media,
@@ -1005,6 +1006,7 @@ class PearCinemaHost {
         plan,
         media: item.media || {},
         device: this.transcoder.device,
+        engine: this.transcoder.engine,
         hwDecode: transcode.HW_DECODE.has(remux.codec(item.media?.videoCodec)),
         // The width ladder, capped at the client's stated budget when it gave one.
         bitrate: transcode.capBitrate(transcode.bitrateFor(item.media?.width), Number(capabilities.maxKbps) || 0),
@@ -1047,6 +1049,7 @@ class PearCinemaHost {
       audio: verdict.audio || 'copy',
       media: item.media || {},
       device: this.transcoder.device,
+      engine: this.transcoder.engine,
       maxKbps: Number(capabilities.maxKbps) || 0
     })
     const session = this.transcoder.start({ argv, at: 0, audio: verdict.audio, media: item.media })
@@ -1137,12 +1140,26 @@ class PearCinemaHost {
     // The cards this machine has, so the dashboard can name the one in use only when
     // there is more than one to choose between.
     const nodes = transcode.renderNodes()
-    this.transcode = await transcode.probeTranscode({
+    // WHOSE CARD IT IS, decided by running each vendor's real encoder rather than by
+    // reading a device name. Intel and AMD answer through VAAPI, NVIDIA through NVENC,
+    // and a machine with neither says why (host/engines.js).
+    this.transcode = await transcode.chooseEngine({
       ffmpeg: ffmpegBin.ffmpeg(),
-      device: this.transcoder.device
+      device: this.transcoder.device,
+      only: process.env.PEARCINEMA_ENGINE || null
     })
+    // Every argv built from here on is built for the card that actually answered.
+    if (this.transcode.available) {
+      this.transcoder.engine = transcode.engineFor(this.transcode.engine)
+      if (this.transcode.device) this.transcoder.device = this.transcode.device
+    }
     this.transcode = { ...this.transcode, nodes }
-    this.log('host:transcode', { available: this.transcode.available, reason: this.transcode.reason || undefined })
+    this.log('host:transcode', {
+      available: this.transcode.available,
+      engine: this.transcode.engine || undefined,
+      device: this.transcode.device || undefined,
+      reason: this.transcode.reason || undefined
+    })
     return this.transcode
   }
 
