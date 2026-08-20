@@ -2424,4 +2424,51 @@ test('A GENERATED STREAM THAT DIES MID-FILM OFFERS NOTHING', async (t) => {
   assert.equal(doc.querySelector('.nextover'), null)
 })
 
+test('THE BROWSER PLAYS THE NEXT EPISODE, it does not just load it and sit there', async (t) => {
+  // Tim, 2026-08-20: the phone played the next one and the browser moved to it
+  // paused. `wantPlay` is deliberately cleared on every new item - clicking a
+  // second film must not start it - and the card is the one case where the
+  // person has already said play it.
+  const { doc, win, video } = await playEpisode(t)
+  const played = []
+  win.HTMLMediaElement.prototype.play = function () { played.push(this.src); return Promise.resolve() }
+
+  await runToEnd(win, video, 152)
+  const now = [...doc.querySelectorAll('.nextover button')].find(b => /Play/.test(b.getAttribute('aria-label') || ''))
+  now.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // jsdom decodes nothing, so the next one lands on the refusal like every other
+  // file here. Past it, the element is the real thing.
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const next = doc.querySelector('video')
+  next.dispatchEvent(new win.Event('loadedmetadata'))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(played.length, 1, 'the next episode started on its own')
+})
+
+test('and a film opened by hand still does NOT start on its own', async (t) => {
+  // The rule the one above is an exception to: opening a page must not fill a
+  // room with sound, and on a repackaged film it also spends a process on the
+  // host before anybody has said they want it.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+  const played = []
+  win.HTMLMediaElement.prototype.play = function () { played.push(this.src); return Promise.resolve() }
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  doc.querySelector('video').dispatchEvent(new win.Event('loadedmetadata'))
+  await new Promise(r => setTimeout(r, 40))
+  assert.deepEqual(played, [])
+})
+
 function rootText (doc) { return doc.getElementById('root').textContent }

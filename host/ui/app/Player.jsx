@@ -92,6 +92,14 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // playback. The flag says the viewer already pressed play, and the new element picks
   // up where the old one left off.
   const wantPlay = useRef(false)
+  // THE ONE CASE WHERE A NEW FILM MAY START ITSELF. `wantPlay` is cleared on
+  // every new item on purpose - clicking a second film must not start it - but
+  // the card at the end of an episode IS somebody saying play the next one, by
+  // pressing it or by letting the countdown run out. This ref survives the item
+  // change (the component is not remounted, only re-propped) and hands that
+  // intent across (Tim, 2026-08-20: the browser moved to the next episode and
+  // sat there paused, while the phone played it).
+  const autoStart = useRef(false)
   // The last position WRITTEN, so the fifteen-second heartbeat can skip a write when
   // nothing has moved - a paused film should not keep writing the same number.
   const wrote = useRef(0)
@@ -178,8 +186,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
     setBurnSub(null)
     wrote.current = 0
     // A different film is a fresh decision. Playing one and clicking another must not
-    // start the second one on its own.
-    wantPlay.current = false
+    // start the second one on its own - unless it arrived off the playing-next
+    // card, which is that decision already made.
+    wantPlay.current = autoStart.current
+    autoStart.current = false
     setDetails(false)
     setSib(null); setUpNext(false); setLeft(null)
     let live = true
@@ -275,7 +285,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // second flag to keep in step.
   useEffect(() => {
     if (left === null) return
-    if (left <= 0) { if (next) onPlay(next); return }
+    if (left <= 0) { if (next) { autoStart.current = true; onPlay(next) } return }
     const t = setTimeout(() => setLeft(l => (l === null ? null : l - 1)), 1000)
     return () => clearTimeout(t)
   }, [left, next?.id])
@@ -348,8 +358,11 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   const d = e.currentTarget.duration
                   setElDuration(Number.isFinite(d) && d > 0 ? d : 0)
                   // Only ever resumes something the viewer already started - see
-                  // wantPlay. A first open stays paused.
-                  if (wantPlay.current) e.currentTarget.play().catch(() => {})
+                  // wantPlay. A first open stays paused. And never while the
+                  // resume card is up: an episode carried in by the countdown
+                  // that turns out to be half-watched must not play from zero
+                  // underneath the question about where to start.
+                  if (wantPlay.current && offer === null) e.currentTarget.play().catch(() => {})
                 }}
                 onPlay={() => { wantPlay.current = true }}
                 src={src}
@@ -437,7 +450,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
               <div class='nextside'>
                 <button
                   class='nextdial'
-                  onClick={() => onPlay(next)}
+                  onClick={() => { autoStart.current = true; onPlay(next) }}
                   title='Play it now'
                   aria-label={'Play ' + (next.title || 'the next episode') + ' now'}
                 >
@@ -467,7 +480,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                       setLeft(on ? NEXT_SECONDS : null)
                     }}
                   />
-                  <span>Play the next one automatically</span>
+                  <span>Autoplay</span>
                 </label>
 
                 <button class='ghost' onClick={() => { setLeft(null); setUpNext(false) }}>Cancel</button>

@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { BackHandler, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
+import { Animated, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -114,6 +114,12 @@ export default function App () {
   // episode on its last frame with the controls, so nothing closes by itself.
   const [upNext, setUpNext] = useState(false)
   const [left, setLeft] = useState<number | null>(null)
+  // The bar under the buttons empties SMOOTHLY (Tim, 2026-08-20), which the
+  // per-second number cannot do - it would step ten times and read as a stutter.
+  // One ten-second linear animation on the UI thread instead, so it keeps
+  // running evenly whatever JS is doing, and it is scaleX rather than width
+  // because only a transform can be handed to the native driver.
+  const bar = useRef(new Animated.Value(1)).current
 
   // THE CONTROLS ARE ALL OURS (Tim, 2026-08-15: no mixture of native player
   // buttons and our own). expo-video's native row cannot take custom buttons,
@@ -485,6 +491,25 @@ export default function App () {
     const t = setTimeout(() => setLeft((l) => (l === null ? null : l - 1)), 1000)
     return () => clearTimeout(t)
   }, [left])
+
+  // The bar, started once when the countdown starts rather than nudged on each
+  // tick - the dependency is whether one is running at all, not what second it
+  // is on. Stopping it puts the bar back to full, so turning autoplay on again
+  // starts a fresh ten seconds and the bar agrees with the number.
+  useEffect(() => {
+    const running = upNext && left !== null
+    bar.stopAnimation()
+    bar.setValue(1)
+    if (!running) return
+    const anim = Animated.timing(bar, {
+      toValue: 0,
+      duration: NEXT_SECONDS * 1000,
+      easing: Easing.linear,
+      useNativeDriver: true
+    })
+    anim.start()
+    return () => anim.stop()
+  }, [upNext, left !== null])
 
   // The time bar's clock: polled only while the controls are actually on
   // screen - a hidden bar does not need a heartbeat.
@@ -1111,7 +1136,7 @@ export default function App () {
                     glance. Nothing is here at all when nothing is running. */}
                 {left !== null && (
                   <View style={styles.nextTrack}>
-                    <View style={[styles.nextFill, { width: `${Math.round(100 * Math.max(0, left) / NEXT_SECONDS)}%` }]} />
+                    <Animated.View style={[styles.nextFill, { transform: [{ scaleX: bar }] }]} />
                   </View>
                 )}
 
@@ -1131,7 +1156,7 @@ export default function App () {
                     size={20}
                     color={nav.autoplay ? '#e2a13d' : '#a2947d'}
                   />
-                  <Text style={styles.nextAutoTxt}>Play the next one automatically</Text>
+                  <Text style={styles.nextAutoTxt}>Autoplay</Text>
                 </Pressable>
               </View>
             </View>
@@ -1210,7 +1235,9 @@ const styles = StyleSheet.create({
   },
   nextGhostTxt: { color: '#efe9df', fontWeight: '600' },
   nextTrack: { height: 3, borderRadius: 2, backgroundColor: 'rgba(239,233,223,0.18)', overflow: 'hidden' },
-  nextFill: { height: 3, backgroundColor: '#e2a13d' },
+  // Full width, emptied by scaling from its LEFT edge - scaleX is about the
+  // centre by default, which would shrink the bar towards its middle.
+  nextFill: { height: 3, width: '100%', backgroundColor: '#e2a13d', transformOrigin: 'left' },
   nextAuto: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   nextAutoTxt: { color: '#a2947d', fontSize: 13 },
   subCard: {
