@@ -165,6 +165,23 @@ $SUDO test -s "$DATA/dashboard-password" && HAD_PASSWORD=1
 DRI=""
 [ -e /dev/dri ] && DRI="--device /dev/dri:/dev/dri"
 
+# AND AN NVIDIA CARD RIDES ALONG A DIFFERENT WAY. There is no device path to bind:
+# NVENC reaches the card through the NVIDIA Container Toolkit, which docker spells
+# `--gpus all`. Two things can be missing independently - the driver on the box and the
+# toolkit that lets a container see it - so this ASKS rather than assumes: start a
+# throwaway container with the flag and keep it only if that worked. A box without the
+# toolkit gets a two-second no and a deploy that still succeeds, which is the same
+# fail-closed shape as /dev/dri above.
+GPUS=""
+if [ -e /dev/nvidiactl ]; then
+  if $SUDO docker run --rm --gpus all "$IMAGE" true >/dev/null 2>&1; then
+    GPUS="--gpus all"
+    echo "== NVIDIA card found and reachable from a container =="
+  else
+    echo "== NVIDIA card found, but containers cannot see it (install the NVIDIA Container Toolkit) =="
+  fi
+fi
+
 echo "== starting =="
 $SUDO docker run -d \
   --name pearcinema-host \
@@ -172,6 +189,7 @@ $SUDO docker run -d \
   --network host \
   --security-opt no-new-privileges:true \
   $DRI \
+  $GPUS \
   -e PEARCINEMA_HTTP_HOST=0.0.0.0 \
   -e PEARCINEMA_HTTP_PORT=8751 \
   ${PEARCINEMA_PASSWORD:+-e PEARCINEMA_PASSWORD="$PEARCINEMA_PASSWORD"} \

@@ -22,6 +22,12 @@
 const fs = require('fs')
 const { spawn } = require('child_process')
 const { Remuxer, codec, AUDIO_FALLBACK, FMP4_FLAGS } = require('./remux')
+const { VAAPI, engineFor, tryEngine, pickEngine } = require('./engines')
+
+// WHICH VENDOR'S ENGINE, defaulting to the one every install already runs on. The four
+// places a vendor differs live in engines.js; everything in this file is the same
+// conversion whichever card is doing it.
+const ENGINE_DEFAULT = VAAPI
 
 const DEVICE_DEFAULT = '/dev/dri/renderD128'
 
@@ -83,9 +89,10 @@ function bitrateFor (width) {
 // The ffmpeg argv for one transcode, starting at `at` seconds. The measured
 // invocation from the proposal, plus everything the remux argv already learned the
 // hard way (one video and one audio stream, no chapters, no subtitles, delay_moov).
-function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0, burn = null, duration = 0 }) {
+function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media = {}, device = DEVICE_DEFAULT, maxKbps = 0, burn = null, duration = 0, engine = null }) {
   const v = codec(media?.videoCodec)
   const hw = HW_DECODE.has(v)
+  const eng = (typeof engine === 'string' ? engineFor(engine) : engine) || ENGINE_DEFAULT
 
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
 
@@ -96,9 +103,7 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
   // are input options and must sit before `-i`. BURN-IN always decodes in
   // software - same graph and same reasoning as hls.js segmentArgs, where the
   // measurements and the overlay_vaapi ban live.
-  if (burn) args.push('-vaapi_device', device)
-  else if (hw) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
-  else args.push('-vaapi_device', device)
+  args.push(...eng.inputArgs({ device, software: !!burn || !hw }))
 
   // Input seek, same as remux: jump in the file rather than decoding to the seek
   // point. An encoder's output starts clean at the seek regardless, because it
@@ -114,7 +119,7 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
     const pad = vw && vh && (cw > vw || ch > vh)
       ? `pad=${cw}:${ch}:(ow-iw)/2:(oh-ih)/2[p];[p]`
       : ''
-    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]format=nv12,hwupload[out]`)
+    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]${eng.toEngine}[out]`)
     args.push('-map', '[out]', '-map', '0:a:0?')
   } else {
     args.push('-map', '0:v:0', '-map', '0:a:0?')
@@ -124,8 +129,8 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
   // `format=nv12` is the 10-bit answer: the library's HEVC is Main 10 and H.264
   // encode is 8-bit, so the engine converts as part of the scale. The software-decode
   // path converts on the CPU and uploads, which for SD content is a rounding error.
-  if (!burn) args.push('-vf', hw ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload')
-  args.push('-c:v', 'h264_vaapi', '-b:v', capBitrate(bitrateFor(media?.width), maxKbps))
+  if (!burn) args.push('-vf', hw ? eng.fromHwDecode : eng.toEngine)
+  args.push('-c:v', eng.encoder, ...eng.encoderArgs(device), '-b:v', capBitrate(bitrateFor(media?.width), maxKbps))
 
   if (audio === 'copy') args.push('-c:a', 'copy')
   else args.push('-c:a', AUDIO_FALLBACK.codec, '-b:a', AUDIO_FALLBACK.bitrate, '-ac', '2')
@@ -147,56 +152,32 @@ function transcodeArgs ({ input, at = 0, audio = 'copy', headers = null, media =
 // the real pipeline on synthetic input - generate frames, upload, encode, and demand
 // actual MP4 bytes back. No library file is read: the input is ffmpeg's own test
 // source, so nothing of anybody's is touched before a single grant exists.
-function probeTranscode ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, timeoutMs = 15000 } = {}) {
-  return new Promise((resolve) => {
-    const args = [
-      '-hide_banner', '-loglevel', 'error', '-nostdin',
-      '-vaapi_device', device,
-      '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
-      '-vf', 'format=nv12,hwupload',
-      '-c:v', 'h264_vaapi', '-b:v', '1M',
-      '-an', '-movflags', FMP4_FLAGS, '-f', 'mp4', 'pipe:1'
+function probeTranscode ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, timeoutMs = 15000, engine = ENGINE_DEFAULT } = {}) {
+  const eng = (typeof engine === 'string' ? engineFor(engine) : engine) || ENGINE_DEFAULT
+  return tryEngine({ ffmpeg, engine: eng, device, timeoutMs })
+    .then((out) => ({ ...out, device, engine: out.available ? eng.id : null }))
+}
+
+// AND WHICH ENGINE THIS MACHINE HAS, which is the same question one layer out. Each
+// candidate is probed in turn and the first that returns real bytes wins; a machine
+// with no working card gets the FIRST candidate's complaint, because "no video engine"
+// on a box with a perfectly good card is a question that deserves an answer.
+async function chooseEngine ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, only = null, timeoutMs = 15000 } = {}) {
+  const out = await pickEngine({
+    ffmpeg,
+    only,
+    timeoutMs,
+    candidates: [
+      // The configured render node first, then the rest of them: a two-card box whose
+      // first node is a dead stub still has a second card to find.
+      ...[device, ...renderNodes().filter((n) => n !== device)].map((d) => ({ engine: VAAPI, device: d })),
+      // NVENC counts its own cards, so there is no path to hand it - the encoder finds
+      // the machine's first, and `-gpu` picks another only once somebody has asked for
+      // one by number.
+      { engine: engineFor('nvenc'), device: null }
     ]
-
-    let proc
-    try {
-      proc = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-    } catch (e) {
-      return resolve({ available: false, device, reason: `ffmpeg would not start: ${e.message}` })
-    }
-
-    let bytes = 0
-    let stderr = ''
-    let settled = false
-    const settle = (out) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(out)
-    }
-
-    // A probe that hangs is a fail, not a wait. A broken driver stack can stall
-    // rather than error, and the host must come up either way.
-    const timer = setTimeout(() => {
-      try { proc.kill('SIGKILL') } catch {}
-      settle({ available: false, device, reason: 'the hardware probe timed out' })
-    }, timeoutMs)
-    // The probe must never hold the process open. A host shutting down half a
-    // second after boot should not wait fifteen seconds for a timer nobody needs.
-    if (timer.unref) timer.unref()
-
-    proc.stdout.on('data', (c) => { bytes += c.length })
-    proc.stderr.on('data', (c) => { if (stderr.length < 4096) stderr += c.toString() })
-    proc.on('error', (e) => settle({ available: false, device, reason: `ffmpeg would not start: ${e.message}` }))
-    proc.on('close', (code) => {
-      if (code === 0 && bytes > 0) return settle({ available: true, device, reason: null })
-      settle({
-        available: false,
-        device,
-        reason: (stderr.trim().split('\n').pop() || `probe exited ${code} with ${bytes} bytes`).slice(0, 300)
-      })
-    })
   })
+  return { ...out, label: out.engine ? engineFor(out.engine).label : null }
 }
 
 // --- how much engine is there --------------------------------------------------
@@ -287,6 +268,7 @@ async function measureEngine ({
   at = 0,
   seconds = MEASURE_SECONDS,
   levels = MEASURE_LEVELS,
+  engine = ENGINE_DEFAULT,
   onLevel = () => {}
 } = {}) {
   const ladder = []
@@ -296,7 +278,7 @@ async function measureEngine ({
     // The STEP as well as the level, so a progress bar can be a real proportion of a
     // ladder that is known up front rather than a bar that moves to look busy.
     onLevel({ concurrency, step: i + 1, steps: levels.length })
-    const args = transcodeArgs({ input, at, audio: 'aac', headers, media, device, duration: seconds })
+    const args = transcodeArgs({ input, at, audio: 'aac', headers, media, device, duration: seconds, engine })
     // Every stream in the level gets the SAME work, started together. Not staggered:
     // what is being measured is what happens when a household presses play at once.
     const runs = await Promise.all(
@@ -331,19 +313,22 @@ async function measureEngine ({
 // resources: remux is disk I/O, this is the engine. Default 4 against a measured
 // ceiling of ~10, leaving headroom for whatever else shares /dev/dri.
 class Transcoder extends Remuxer {
-  constructor ({ device = DEVICE_DEFAULT, maxConcurrent = 4, ...opts } = {}) {
+  constructor ({ device = DEVICE_DEFAULT, maxConcurrent = 4, engine = ENGINE_DEFAULT, ...opts } = {}) {
     super({ maxConcurrent, ...opts })
     this.device = device
+    // Set by the startup probe when it finds a vendor, so every argv built afterwards
+    // is built for the card that actually answered.
+    this.engine = (typeof engine === 'string' ? engineFor(engine) : engine) || ENGINE_DEFAULT
     this.what = 'converting'
   }
 
   _args (opts) {
-    return transcodeArgs({ ...opts, device: this.device })
+    return transcodeArgs({ ...opts, device: this.device, engine: this.engine })
   }
 }
 
 module.exports = {
   capBitrate,
-  Transcoder, transcodeArgs, probeTranscode, bitrateFor, measureEngine, hardestFilm,
-  HW_DECODE, DEVICE_DEFAULT, renderNodes, MEASURE_LEVELS, MEASURE_SECONDS
+  Transcoder, transcodeArgs, probeTranscode, chooseEngine, engineFor, bitrateFor, measureEngine, hardestFilm,
+  HW_DECODE, DEVICE_DEFAULT, ENGINE_DEFAULT, renderNodes, MEASURE_LEVELS, MEASURE_SECONDS
 }

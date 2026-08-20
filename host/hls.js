@@ -51,6 +51,8 @@
 // assuming them, and why `boundaries` travels back to the caller: a cast resuming
 // mid-film has to snap to a real cut point rather than to a multiple of four.
 
+const { VAAPI, engineFor } = require('./engines')
+
 const SEGMENT_SECONDS = 4
 
 // HOW FAR INTO A KEYFRAME'S OWN GROUP TO AIM `-ss`, and the single most surprising
@@ -241,7 +243,7 @@ function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', aud
   return args
 }
 
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null, audioChannels = 2 }) {
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null, audioChannels = 2, engine = null }) {
   const at = plan?.starts ? plan.starts[seq] : seq * SEGMENT_SECONDS
   const length = plan?.starts
     ? (seq + 1 < plan.starts.length ? plan.starts[seq + 1] : plan.runtime) - at
@@ -259,9 +261,12 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   // A tone is a software filter, so it takes the software-decode lane the
   // same way burning does.
   const toneStep = TONES[tone] ? TONES[tone] + ',' : ''
-  if (burn || toneStep) args.push('-vaapi_device', device)
-  else if (hwDecode) args.push('-hwaccel', 'vaapi', '-hwaccel_device', device, '-hwaccel_output_format', 'vaapi')
-  else args.push('-vaapi_device', device)
+  // WHOSE CARD THIS IS. The graph above is the same on any vendor; what differs is how
+  // the decoder is named and what the encoder wants handed to it, and those four
+  // answers live in engines.js. Absent means VAAPI, which is what every install ran on
+  // before there was a choice.
+  const eng = (typeof engine === 'string' ? engineFor(engine) : engine) || VAAPI
+  args.push(...eng.inputArgs({ device, software: !!burn || !!toneStep || !hwDecode }))
 
   if (at > 0) args.push('-ss', String(at))
   args.push('-t', String(length))
@@ -286,7 +291,7 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
     const pad = vw && vh && (cw > vw || ch > vh)
       ? `pad=${cw}:${ch}:(ow-iw)/2:(oh-ih)/2[p];[p]`
       : ''
-    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]${toneStep}format=nv12,hwupload[out]`)
+    args.push('-filter_complex', `[0:v:0]${pad}[0:s:${Number(burn.index)}]overlay[ov];[ov]${toneStep}${eng.toEngine}[out]`)
     args.push('-map', '[out]', '-map', '0:a:0?')
   } else {
     args.push('-map', '0:v:0', '-map', '0:a:0?')
@@ -294,10 +299,10 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   args.push('-map_chapters', '-1')
   if (!burn) {
     args.push('-vf', toneStep
-      ? toneStep + 'format=nv12,hwupload'
-      : (hwDecode ? 'scale_vaapi=format=nv12' : 'format=nv12,hwupload'))
+      ? toneStep + eng.toEngine
+      : (hwDecode ? eng.fromHwDecode : eng.toEngine))
   }
-  args.push('-c:v', 'h264_vaapi', '-b:v', bitrate)
+  args.push('-c:v', eng.encoder, ...eng.encoderArgs(device), '-b:v', bitrate)
   // The soundtrack is always rebuilt on this path: TS + AAC is the least
   // surprising pairing for every HLS demuxer, and audio is a rounding error
   // beside the video encode already being paid. Rebuilt at the client's own speaker

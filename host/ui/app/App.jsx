@@ -1166,6 +1166,12 @@ function HostPanel ({ state, reload }) {
   // which one is working, so it appears.
   const manyCards = (t.nodes?.length || 0) > 1
 
+  // WHOSE GRAPHICS ARE DOING IT. Worth a few words because the answer used to be the
+  // same everywhere by omission: converting only ever worked on Intel and AMD, and an
+  // NVIDIA machine reported no video engine at all while holding a card that encodes
+  // H.264 in its sleep (2026-08-20). Naming the vendor is how somebody sees that their
+  // card was found rather than tolerated.
+
   // WHAT THE NUMBER MEANS: how many conversions may run at the same time, and what is
   // doing them. NOT how many this machine could manage - nothing here has ever measured
   // that, and the line that used to claim it was quoting the hardware this was built on.
@@ -1181,11 +1187,17 @@ function HostPanel ({ state, reload }) {
   // sub-line was three sentences taking turns in a settings row (Tim, 2026-08-20) -
   // the run has a window of its own now, and the row goes on saying what the setting
   // means.
+  // The vendor when the host names one, and the card only where there is a choice of
+  // card. A host that predates engines.js names no vendor and keeps the sentence it had.
+  const engineWhere = t.label
+    ? ` on your ${t.label}${manyCards && t.device ? ` (${t.device})` : ''}`
+    : (manyCards && t.device ? `, on ${t.device}` : '')
+
   const engineSub = !t.available
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
-      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. Setting it to 0 turns conversions off.`
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${engineWhere}. Setting it to 0 turns conversions off.`
 
   // The measurement's own line, under the row's. Kept separate because it is a fact
   // about the machine rather than about the setting, and because it is the one thing

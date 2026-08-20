@@ -2000,6 +2000,23 @@ test('the engine line says what the number MEANS, and claims nothing more', asyn
   }
   const two = await openHost(t, twoCards)
   assert.match(two.text(), /Up to 3 conversions run at once, on \/dev\/dri\/renderD128/)
+
+  // AND WHOSE GRAPHICS THEY ARE, once the host says. Converting only ever worked on
+  // Intel and AMD, and an NVIDIA machine reported no video engine at all while holding
+  // a card that encodes H.264 in its sleep (2026-08-20). Naming the vendor is how
+  // somebody sees their card was found rather than tolerated - and the brand is written
+  // the way the brand writes it.
+  const nvidia = await openHost(t, {
+    ...oneCard,
+    transcode: { ...oneCard.transcode, engine: 'nvenc', label: 'NVIDIA graphics', device: null, nodes: [] }
+  })
+  assert.match(nvidia.text(), /Up to 3 conversions run at once on your NVIDIA graphics\. Setting it to 0/)
+
+  const intel = await openHost(t, {
+    ...twoCards,
+    transcode: { ...twoCards.transcode, engine: 'vaapi', label: 'Intel or AMD graphics' }
+  })
+  assert.match(intel.text(), /run at once on your Intel or AMD graphics \(\/dev\/dri\/renderD128\)/)
 })
 
 // --- five pages, down from eight ---------------------------------------------
