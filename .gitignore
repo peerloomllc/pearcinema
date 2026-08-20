@@ -65,6 +65,11 @@ scripts/.env
 # would silently drop it from every commit.
 /android/
 
+# A local module's android/ is SOURCE, but its android/build is gradle's output -
+# a few hundred .dex files that turn up in `git status` after every APK build and
+# have no business in a commit.
+modules/*/android/build/
+
 # UI build intermediates
 src/ui/.phone.bundle
 src/ui/.phone.css
