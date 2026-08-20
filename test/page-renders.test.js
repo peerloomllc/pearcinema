@@ -2741,14 +2741,31 @@ test('A DEVICE THAT RENAMED ITSELF HAS A WAY OUT, and it is not detaching it', a
 
   assert.match(text(), /Needs confirming/)
   const row = [...doc.querySelectorAll('.setrow')].find(r => /TCL/.test(r.textContent))
-  const keep = [...row.querySelectorAll('button')].find(b => /Still Tim Test/.test(b.textContent))
-  assert.ok(keep, 'the row offers to leave it where it is')
-  assert.ok([...row.querySelectorAll('button')].some(b => /It really is Tim TCL2/.test(b.textContent)),
+
+  // ONE CONTROL ON THE ROW, and the question itself opens in a window - two long
+  // word buttons on the line was the shape Tim rejected (2026-08-20).
+  const ask = [...row.querySelectorAll('.rowctl button')]
+    .find(b => /^Say who/.test(b.getAttribute('aria-label') || ''))
+  assert.ok(ask, 'the row asks with one control')
+  ask.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const modal = doc.querySelector('.modal')
+  assert.ok(modal, 'the question is a window')
+  assert.match(modal.textContent, /Who is TCL\?/)
+  assert.match(modal.textContent, /calls itself/)
+  assert.match(modal.textContent, /Tim TCL2/)
+  const keep = [...modal.querySelectorAll('button')].find(b => /Still Tim Test/.test(b.textContent))
+  assert.ok(keep, 'it offers to leave it where it is')
+  assert.ok([...modal.querySelectorAll('button')].some(b => /It really is Tim TCL2/.test(b.textContent)),
     'and to take the new name at its word')
+  // EVERY ANSWER SAYS WHAT IT DOES, which a row had no room for.
+  assert.match(keep.textContent, /stays where it is/)
 
   keep.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
   assert.ok(asked.some(u => String(u).includes('/api/device/claim/keep')))
+  assert.equal(doc.querySelector('.modal'), null, 'and the window closes behind it')
 
   // THE PERSON'S OWN ROW COUNTS IT. Counting only settled devices made somebody
   // whose device had renamed itself read "No devices" while it sat above them - and
@@ -2798,6 +2815,49 @@ test('CHOOSING WHO A DEVICE BELONGS TO ASKS FIRST', async (t) => {
   go.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
   assert.ok(asked.some(u => String(u).includes('/api/assign')))
+})
+
+test('CONFIRMING A NAME SOMEBODY ALREADY HAS OFFERS TO JOIN THEM, not to mint a second', async (t) => {
+  // The row used to pass "make a new person" whenever exactly ONE person already
+  // held the claimed name - so pressing it minted a duplicate instead of joining
+  // them, which is how a household ends up with two people of one name. The window
+  // asks instead, and says what joining costs: their watch history is shared.
+  const asked = []
+  const bodies = []
+  const { dom, doc, win } = await open({
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Jo', label: 'Jo' }],
+    devices: [{
+      deviceKey: 'dk1', label: 'A tablet', platform: 'android', online: false,
+      personId: null, claimedUser: 'Jo', confirmed: false, lastSeenAt: Date.now(), scope: 'full'
+    }]
+  }, {}, asked)
+  t.after(() => dom.window.close())
+  const realFetch = win.fetch
+  win.fetch = async (url, opts) => { if (opts?.body) bodies.push(JSON.parse(opts.body)); return realFetch(url, opts) }
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const ask = [...doc.querySelectorAll('.setrow .rowctl button')]
+    .find(b => /^Say who/.test(b.getAttribute('aria-label') || ''))
+  ask.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const modal = doc.querySelector('.modal')
+  const join = [...modal.querySelectorAll('button')].find(b => /It is Jo/.test(b.textContent))
+  assert.ok(join, 'joining the Jo who is already here is offered')
+  assert.match(join.textContent, /shares their watch history/)
+  assert.ok([...modal.querySelectorAll('button')].some(b => /A different Jo/.test(b.textContent)),
+    'and so is a genuinely different Jo')
+
+  join.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const sent = bodies.find(b => b && 'asNew' in b)
+  assert.ok(sent, 'the claim was confirmed')
+  assert.equal(sent.asNew, false, 'as a JOIN')
+  assert.equal(sent.personId, 'p1', 'of the Jo who is already here')
 })
 
 function rootText (doc) { return doc.getElementById('root').textContent }

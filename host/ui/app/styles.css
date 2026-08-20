@@ -1437,6 +1437,12 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * is a page of Cut off controls, and a column of solid red is the same shouting the
  * video engine row was pulled up for on 2026-08-19. */
 .iconbtn.destructive { color: var(--danger) }
+/* WAITING ON A DECISION, said in the same colour the row's name uses to say it.
+ * The only other icon on the page that is coloured before it is touched, and for
+ * the same reason: it is not an action you take at leisure, it is an answer the
+ * page is waiting for. */
+.iconbtn.pending { color: var(--warn) }
+.iconbtn.pending:hover:not(:disabled) { color: color-mix(in srgb, var(--warn) 70%, #fff) }
 .iconbtn.destructive:hover:not(:disabled) { color: color-mix(in srgb, var(--danger) 70%, #fff) }
 /* Only where a word survives beside it - the wizard, a form's own action row. */
 .setrow .rowctl button.destructive:not(.iconbtn) {
@@ -1482,6 +1488,19 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 }
 .waiting .spin { animation: pc-spin 1s linear infinite }
 @keyframes pc-spin { to { transform: rotate(360deg) } }
+
+/* THE ANSWERS TO A QUESTION, one per line, each saying what it does underneath its
+ * own words. A window has room for that where a row never did - which is the whole
+ * argument for asking here (Tim, 2026-08-20). Left-aligned on purpose: this is a
+ * form's body, not an alert's, and a sentence centred under a button reads as a
+ * caption rather than as the consequence of pressing it. */
+.claimopts { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem }
+.claimopts button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: .15rem;
+  text-align: left; padding: .6rem .8rem; width: 100%;
+}
+.claimopts button .hint { font-size: .78rem; line-height: 1.35 }
+.claimopts button:not(.ghost) .hint { color: color-mix(in srgb, var(--accent-fg) 75%, transparent) }
 
 /* A NOTIFICATION IS CENTRED THROUGHOUT. Its title and its button already were, and the
  * message between them was not - so a one-line answer sat off to the left under a

@@ -33,13 +33,19 @@
 
 import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
-import { askConfirm, notify } from './ui'
-import { Blocked, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
+import { Modal, askConfirm, notify } from './ui'
+import { Blocked, Check, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
 
 // One device, as a row. `nested` is a device sitting under the person who holds it,
 // where the name is already known and the row is one step in.
 function DeviceRow ({ d, persons, reload, nested = false }) {
   const [open, setOpen] = useState(false)
+  // The claim question, asked in a window rather than as two long word buttons on
+  // the row (Tim, 2026-08-20: "a modal pop-up is cleaner than those two text buttons
+  // in the line"). It also has room to say what each answer MEANS, which the row
+  // never did - and joining somebody inherits their watch history, so that is worth
+  // a sentence.
+  const [claimOpen, setClaimOpen] = useState(false)
 
   const revoke = async () => {
     const ok = await askConfirm({
@@ -106,7 +112,35 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
 
   const revoked = !!d.revokedAt
   const guest = !revoked && d.expiresAt
-  const sameName = persons.filter(p => p.name === d.claimedUser)
+  // Everybody who ALREADY holds the claimed name. Joining one of them is a real
+  // choice with a consequence; minting another of the same name is a different one.
+  const holders = persons.filter(p => p.name.toLowerCase() === String(d.claimedUser || '').toLowerCase())
+
+  const claimAnswers = [
+    ...(d.personId && d.belongsTo
+      ? [{
+          label: `Still ${d.belongsTo}`,
+          hint: 'It stays where it is and stops asking. Nothing about it changes.',
+          run: keepWhereItIs
+        }]
+      : []),
+    ...holders.filter(p => p.id !== d.personId).map(p => ({
+      label: `It is ${p.label}`,
+      hint: `It joins ${p.label} and shares their watch history from now on.`,
+      run: () => confirmPerson(false, p.id)
+    })),
+    holders.length
+      ? {
+          label: `A different ${d.claimedUser}`,
+          hint: 'Somebody who happens to have the same name. They get a history of their own.',
+          run: () => confirmPerson(true, null)
+        }
+      : {
+          label: `It really is ${d.claimedUser}`,
+          hint: 'Nobody here has that name, so it becomes a person of their own.',
+          run: () => confirmPerson(false, null)
+        }
+  ]
 
   // THE NAME CARRIES THE STATE and the sub-line says it in words, the rule the
   // televisions row set: colour is never the only carrier. A cut-off row is dim, a
@@ -119,7 +153,14 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
     revoked ? 'Cut off' : d.online ? 'Connected now' : null,
     guest ? `Guest, ${until(d.expiresAt) || 'expired'}` : null,
     d.scope === 'owner' ? 'Owner' : null,
-    nested ? null : (d.belongsTo || (d.claimedUser ? `Says it is ${d.claimedUser}` : 'Nobody yet')),
+    // WHAT IS INTERESTING ABOUT THIS ROW. Filed under somebody, that is who; but a
+    // claim nobody has agreed to yet is the reason the row is being looked at, so it
+    // is said out loud - and said BESIDE the person when there is one, because "the
+    // TCL says it is Tim TCL2 and is filed under Tim" is the whole situation.
+    !d.revokedAt && d.claimedUser && !d.confirmed ? `Says it is ${d.claimedUser}` : null,
+    nested ? null : (d.belongsTo
+      ? (d.claimedUser && !d.confirmed ? `filed under ${d.belongsTo}` : d.belongsTo)
+      : (d.claimedUser ? null : 'Nobody yet')),
     platformLabel(d.platform),
     // The grant row's field is lastSeenAt; reading d.lastSeen here kept every
     // device at "never seen" no matter how much it streamed.
@@ -142,20 +183,18 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
           )}
         </span>
         <span class='rowctl'>
-          {/* WORDS, because these are the two answers to a question and no picture
-              can put a name in them. Offered whenever the claim is unsettled -
-              assigned or not. It used to be hidden the moment a device had a
-              person, so a device that renamed itself was stuck in Needs confirming
-              with nothing on the row that could get it out (Tim, 2026-08-20). */}
+          {/* ONE CONTROL, and the question itself opens in a window. Offered
+              whenever the claim is unsettled - assigned or not. It used to be
+              hidden the moment a device had a person, so a device that renamed
+              itself was stuck in Needs confirming with nothing on the row that
+              could get it out (Tim, 2026-08-20). */}
           {!revoked && d.claimedUser && !d.confirmed && (
-            <>
-              <button class='ghost' onClick={() => confirmPerson(sameName.length === 1, sameName.length === 1 ? sameName[0].id : null)}>
-                It really is {d.claimedUser}
-              </button>
-              {d.personId && d.belongsTo && (
-                <button class='ghost' onClick={keepWhereItIs}>Still {d.belongsTo}</button>
-              )}
-            </>
+            <button
+              class='iconbtn pending'
+              onClick={() => setClaimOpen(true)}
+              title={`Say who ${d.label || 'this device'} is`}
+              aria-label={`Say who ${d.label || 'this device'} is`}
+            ><Check size={17} /></button>
           )}
           {/* CUT OFF STAYS ONE PRESS FROM THE NAME. Everything else about a device
               is behind the chevron; this is not. An icon rather than a word (Tim,
@@ -187,6 +226,38 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
           >{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
         </span>
       </div>
+
+      {claimOpen && (
+        <Modal title={`Who is ${d.label || 'this device'}?`} onClose={() => setClaimOpen(false)}>
+          <p class='hint'>
+            It calls itself <b>{d.claimedUser}</b>
+            {d.belongsTo ? <> and is filed under <b>{d.belongsTo}</b></> : <> and does not belong to anybody yet</>}.
+          </p>
+          {/* EVERY ANSWER SAYS WHAT IT DOES. Joining somebody inherits their watch
+              history, which is the whole reason this is an operator's decision and
+              never the device's (proposal 2026-07-14) - so it is stated rather than
+              implied by a button's name.
+              This also retires a guess that was plainly wrong: the row used to pass
+              "make a new person" whenever exactly ONE person already held the
+              claimed name, which minted a duplicate instead of joining them. The
+              window asks instead. */}
+          <div class='claimopts'>
+            {claimAnswers.map((a, i) => (
+              <button
+                key={a.label}
+                // THE FIRST ANSWER IS THE FILLED ONE, and only the first. Two solid
+                // amber blocks are not a recommendation, they are a pair of shouts -
+                // the same thing the video engine row was pulled up for.
+                class={i === 0 ? '' : 'ghost'}
+                onClick={() => { setClaimOpen(false); a.run() }}
+              >
+                <span>{a.label}</span>
+                <span class='hint'>{a.hint}</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {open && (
         <div class='rowopen'>
