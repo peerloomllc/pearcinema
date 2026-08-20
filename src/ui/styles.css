@@ -1659,6 +1659,21 @@ label.flabel { display: block; margin-top: .6rem; }
  */
 .titlescreen { padding-bottom: 2rem; }
 
+/* THE WAY BACK IS AN ARROW, not a labelled pill (Tim, 2026-08-20). There is exactly
+ * one place to go back to, so the word was saying nothing the arrow does not - and a
+ * bordered box at the top of a screen is chrome sitting above the thing somebody came
+ * to look at.
+ *
+ * The PAINT shrinks, not the target: it keeps a finger-sized box around a 22px glyph,
+ * which is the whole reason this is padding rather than a smaller icon. */
+.backarrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.75rem; height: 2.75rem; margin: 0.15rem 0.35rem 0;
+  padding: 0; background: none; border: none;
+  color: var(--color-text); border-radius: 999px;
+}
+.backarrow:active { background: var(--color-surface-card); }
+
 /* Centred and about half the width: a phone poster at full width is a wall, and
  * everything under it is what the page is for. */
 .titlescreen .tposter { width: 55%; max-width: 15rem; margin: 0.4rem auto 1rem; }

@@ -1897,9 +1897,13 @@ export default function App () {
   // actually in the file.
   const titleScreen = title && (
     <div className='app titlescreen'>
-      <div className='pickrow'>
-        <button className='ghost' onClick={() => setTitle(null)}><CaretLeft size={16} /> Back</button>
-      </div>
+      {/* A BARE ARROW, no box (Tim, 2026-08-20: the pill was large and ugly). There is
+          exactly one place to go back to and the arrow says so - a word and a border
+          around it is chrome above the thing somebody came to look at. The touch
+          target stays finger-sized; only the paint goes. */}
+      <button className='backarrow' onClick={() => setTitle(null)} aria-label='Back to the library'>
+        <CaretLeft size={22} />
+      </button>
 
       {err && <div className='error'>{err}</div>}
 
@@ -2069,10 +2073,14 @@ export default function App () {
         </div>
       )}
 
+      {/* The same arrow inside a show, so leaving a screen looks the same wherever
+          you are. The header above it already names where that is. */}
       {series && (
-        <div className='pickrow'>
-          <button className='ghost' onClick={() => (season ? setSeason(null) : setSeries(null))}><CaretLeft size={16} /> Back</button>
-        </div>
+        <button
+          className='backarrow'
+          onClick={() => (season ? setSeason(null) : setSeries(null))}
+          aria-label={season ? 'Back to the show' : 'Back to Shows'}
+        ><CaretLeft size={22} /></button>
       )}
 
       {err && <div className='error'>{err}</div>}
