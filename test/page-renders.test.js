@@ -2717,4 +2717,87 @@ test('ADDING SOMEBODY SENDS ONE REQUEST, however the field is left', async (t) =
   assert.equal(adds.length, 1, 'one person asked for, not two')
 })
 
+test('A DEVICE THAT RENAMED ITSELF HAS A WAY OUT, and it is not detaching it', async (t) => {
+  // Tim, 2026-08-20, on his TCL: it had renamed itself while filed under somebody,
+  // so it sat in Needs confirming with nothing on the row that could settle it - the
+  // confirm button was hidden the moment a device had a person, and only choosing
+  // "Nobody" in Belongs to brought it back.
+  const renamed = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Tim Test', label: 'Tim Test' }],
+    devices: [{
+      deviceKey: 'dk1', label: 'TCL', platform: 'android', online: false,
+      personId: 'p1', belongsTo: 'Tim Test', claimedUser: 'Tim TCL2', confirmed: false,
+      lastSeenAt: Date.now(), scope: 'full'
+    }]
+  }
+  const asked = []
+  const { dom, doc, win, text } = await open(renamed, {}, asked)
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.match(text(), /Needs confirming/)
+  const row = [...doc.querySelectorAll('.setrow')].find(r => /TCL/.test(r.textContent))
+  const keep = [...row.querySelectorAll('button')].find(b => /Still Tim Test/.test(b.textContent))
+  assert.ok(keep, 'the row offers to leave it where it is')
+  assert.ok([...row.querySelectorAll('button')].some(b => /It really is Tim TCL2/.test(b.textContent)),
+    'and to take the new name at its word')
+
+  keep.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(asked.some(u => String(u).includes('/api/device/claim/keep')))
+
+  // THE PERSON'S OWN ROW COUNTS IT. Counting only settled devices made somebody
+  // whose device had renamed itself read "No devices" while it sat above them - and
+  // offered Delete, which would have orphaned it.
+  const person = [...doc.querySelectorAll('.setrow')].find(r => /Tim Test/.test(r.querySelector('.rowname')?.textContent || ''))
+  assert.match(person.textContent, /1 device/)
+  assert.match(person.textContent, /1 waiting to be confirmed/)
+  assert.ok([...person.querySelectorAll('.rowctl button')].some(b => /^Cut off/.test(b.getAttribute('aria-label') || '')),
+    'and they read as somebody who holds something')
+})
+
+test('CHOOSING WHO A DEVICE BELONGS TO ASKS FIRST', async (t) => {
+  // A chooser that acts the instant it changes gives no way out of a mis-click, and
+  // no sign that anything happened either - which is how it read (Tim, 2026-08-20).
+  const asked = []
+  const { dom, doc, win } = await open({
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Jo', label: 'Jo' }],
+    devices: [{
+      deviceKey: 'dk1', label: 'A tablet', platform: 'android', online: false,
+      personId: null, claimedUser: 'Jo', confirmed: false, lastSeenAt: Date.now(), scope: 'full'
+    }]
+  }, {}, asked)
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const row = [...doc.querySelectorAll('.setrow')].find(r => /A tablet/.test(r.textContent))
+  const btns = row.querySelectorAll('.rowctl .iconbtn')
+  btns[btns.length - 1].dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const pick = doc.querySelector('.rowopen select')
+  assert.ok(pick, 'the chooser is behind the chevron')
+  pick.value = 'p1'
+  pick.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const modal = doc.querySelector('.modal')
+  assert.ok(modal, 'it asks rather than moving somebody else s device on a mis-click')
+  assert.match(modal.textContent, /under Jo/)
+  assert.ok(!asked.some(u => String(u).includes('/api/assign')), 'and nothing has happened yet')
+
+  const go = [...modal.querySelectorAll('button')].find(b => /File it there/.test(b.textContent))
+  go.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(asked.some(u => String(u).includes('/api/assign')))
+})
+
 function rootText (doc) { return doc.getElementById('root').textContent }

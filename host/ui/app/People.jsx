@@ -76,8 +76,30 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
     reload()
   }
 
+  // ASK BEFORE MOVING SOMEBODY ELSE'S DEVICE (Tim, 2026-08-20). A chooser that acts
+  // the instant it changes gives no way to back out of a mis-click, and no sign that
+  // anything happened either - which is how it read.
   const assign = async (personId) => {
+    const to = personId ? persons.find(p => p.id === personId) : null
+    const ok = await askConfirm({
+      title: to ? `File ${d.label || 'this device'} under ${to.label}?` : `Take ${d.label || 'this device'} off ${d.belongsTo || 'its person'}?`,
+      message: to
+        ? `Whoever holds it shares ${to.label}'s watch history from now on, and cutting ${to.label} off cuts this device with it.`
+        : 'It keeps its access and stops belonging to anybody, so what it watches is its own again.',
+      confirmLabel: to ? 'File it there' : 'Take it off'
+    })
+    if (!ok) return
     const res = await api('/api/assign', { deviceKey: d.deviceKey, personId })
+    if (res.error) return notify('Not changed', res.error)
+    reload()
+  }
+
+  // "I have seen the new name, and it is still theirs." The way out of Needs
+  // confirming for a device that renamed ITSELF while already assigned - which had
+  // none: it could be moved to a person of the new name, or detached and started
+  // again, and those are the two things somebody may well not want.
+  const keepWhereItIs = async () => {
+    const res = await api('/api/device/claim/keep', { deviceKey: d.deviceKey })
     if (res.error) return notify('Not changed', res.error)
     reload()
   }
@@ -120,10 +142,20 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
           )}
         </span>
         <span class='rowctl'>
-          {!revoked && !d.personId && d.claimedUser && (
-            <button class='ghost' onClick={() => confirmPerson(sameName.length === 1, sameName.length === 1 ? sameName[0].id : null)}>
-              It really is {d.claimedUser}
-            </button>
+          {/* WORDS, because these are the two answers to a question and no picture
+              can put a name in them. Offered whenever the claim is unsettled -
+              assigned or not. It used to be hidden the moment a device had a
+              person, so a device that renamed itself was stuck in Needs confirming
+              with nothing on the row that could get it out (Tim, 2026-08-20). */}
+          {!revoked && d.claimedUser && !d.confirmed && (
+            <>
+              <button class='ghost' onClick={() => confirmPerson(sameName.length === 1, sameName.length === 1 ? sameName[0].id : null)}>
+                It really is {d.claimedUser}
+              </button>
+              {d.personId && d.belongsTo && (
+                <button class='ghost' onClick={keepWhereItIs}>Still {d.belongsTo}</button>
+              )}
+            </>
           )}
           {/* CUT OFF STAYS ONE PRESS FROM THE NAME. Everything else about a device
               is behind the chevron; this is not. An icon rather than a word (Tim,
@@ -310,7 +342,16 @@ export default function People ({ state, reload }) {
       <div class='setgroup'>People</div>
       <div class='setrows'>
         {ordered.map(p => {
-          const theirs = byPerson(p.id).filter(d => !d.revokedAt && !mismatch(d))
+          // EVERY LIVE DEVICE FILED UNDER THEM, whether its claim is settled or not.
+          // Counting only the settled ones made a person whose device had renamed
+          // itself read "No devices" while that device sat in Needs confirming above
+          // - and, worse, offered Delete, which would have orphaned it (Tim,
+          // 2026-08-20). The pending one is still shown in its own group, because
+          // that is the thing waiting on the operator; it is only the COUNT and the
+          // choice of button that have to know about it.
+          const mine = byPerson(p.id).filter(d => !d.revokedAt)
+          const theirs = mine.filter(d => !mismatch(d))
+          const waiting = mine.length - theirs.length
           const theirGone = byPerson(p.id).filter(d => d.revokedAt)
           const on = theirs.filter(d => d.online).length
           const isOpen = !!open[p.id]
@@ -334,9 +375,11 @@ export default function People ({ state, reload }) {
                       )
                     : <span class={'rowname ' + (on ? 'good' : '')}>{p.label}</span>}
                   <span class='rowsub'>
-                    {theirs.length
-                      ? `${theirs.length} device${theirs.length === 1 ? '' : 's'}${on ? `, ${on} connected now` : ''}`
-                      : 'No devices'}
+                    {[
+                      mine.length ? `${mine.length} device${mine.length === 1 ? '' : 's'}` : 'No devices',
+                      on ? `${on} connected now` : null,
+                      waiting ? `${waiting} waiting to be confirmed` : null
+                    ].filter(Boolean).join(', ')}
                   </span>
                 </span>
                 <span class='rowctl'>
@@ -350,7 +393,7 @@ export default function People ({ state, reload }) {
                       means when they say take Sam off. Somebody holding nothing has
                       nothing to cut, so that row offers Delete instead - a different
                       act and therefore a different picture. */}
-                  {theirs.length > 0
+                  {mine.length > 0
                     ? (
                       <button
                         class='iconbtn destructive'

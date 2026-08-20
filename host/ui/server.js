@@ -2156,6 +2156,15 @@ async function startDashboard ({
         })
       }
 
+      // PICKING A PERSON ANSWERS THE CLAIM TOO. Choosing who a device belongs to is
+      // the operator deciding exactly the thing "Needs confirming" is asking about,
+      // so it must not leave the row sitting in that list afterwards - which is what
+      // it did, and it read as the control having done nothing at all (Tim,
+      // 2026-08-20: "if I select Tim TCL or Tim it doesn't give me any way to
+      // save/confirm, so the TCL stays under the Needs confirming list").
+      //
+      // Detaching does the opposite: with nobody to belong to there is nothing
+      // settled, so the claim goes back to pending and the confirm button returns.
       if (req.method === 'POST' && url.pathname === '/api/assign') {
         const { deviceKey, personId } = await readBody(req)
         if (!deviceKey) return json(res, 400, { error: 'deviceKey required' })
@@ -2164,10 +2173,23 @@ async function startDashboard ({
           // device's LIVE connections and nudges it, so the change is true
           // now rather than at its next reconnect.
           const out = await host.assignDevice(deviceKey, personId || null)
+          if (personId) await host.grants.settleClaim(deviceKey)
           return json(res, 200, { ok: true, grant: out.grant, refreshed: out.refreshed })
         } catch (e) {
           return json(res, 400, { error: e.message })
         }
+      }
+
+      // "I HAVE SEEN THE NEW NAME, AND IT IS STILL THEIRS." A device that renames
+      // ITSELF while already assigned had no way out of Needs confirming except
+      // being moved to a person of the new name or detached and started again - the
+      // two things the operator may not want.
+      if (req.method === 'POST' && url.pathname === '/api/device/claim/keep') {
+        const { deviceKey } = await readBody(req)
+        if (!deviceKey) return json(res, 400, { error: 'deviceKey required' })
+        const row = await host.grants.settleClaim(deviceKey)
+        if (!row) return json(res, 404, { error: 'no such device, or it claims nothing' })
+        return json(res, 200, { ok: true })
       }
 
       // Renaming refuses a name somebody else already has, which is the same
