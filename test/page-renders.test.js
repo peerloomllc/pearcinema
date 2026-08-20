@@ -1251,15 +1251,27 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
   const row = [...doc.querySelectorAll('.setrow')].find(r => /1 device/.test(r.textContent))
   assert.ok(row, 'the person is a row')
   assert.match(row.querySelector('.rowname').textContent, /Tim/)
-  assert.doesNotMatch(text(), /A phone/, 'and their devices are folded away')
+
+  // FOLDED, NOT ABSENT. The panel stays in the page so the fold can animate on the
+  // way out as well as in - a thing that is not there cannot animate away - so what
+  // is asserted is that it is SHUT, and hidden from anything that reads the page
+  // rather than looks at it.
+  const fold = row.nextElementSibling
+  assert.ok(fold.classList.contains('rowfold'), 'their devices are behind a fold')
+  assert.equal(fold.classList.contains('on'), false, 'which starts shut')
+  assert.equal(fold.getAttribute('aria-hidden'), 'true')
 
   // THE CHEVRON IS THE LAST CONTROL IN THE ROW, after the pencil and the cut-off.
   const btns = row.querySelectorAll('.rowctl .iconbtn')
-  btns[btns.length - 1].dispatchEvent(new win.Event('click', { bubbles: true }))
+  const chevron = btns[btns.length - 1]
+  assert.equal(chevron.getAttribute('aria-expanded'), 'false')
+  chevron.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  assert.ok(doc.querySelector('.rowopen'), 'opening them shows what they hold')
-  assert.match(text(), /A phone/)
+  assert.ok(fold.classList.contains('on'), 'opening them shows what they hold')
+  assert.equal(fold.getAttribute('aria-hidden'), 'false')
+  assert.equal(chevron.getAttribute('aria-expanded'), 'true')
+  assert.match(fold.textContent, /A phone/)
   // CUT OFF IS STILL ONE PRESS FROM WHERE THE DEVICE IS NAMED. The reshape was not
   // allowed to cost that (Tim, 2026-08-20). It is an icon rather than a word now, so
   // the label it carries for a screen reader is what this asserts on - and that label
@@ -1392,14 +1404,19 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
   })
 
   assert.match(text(), /Not set up\. Only needed for a television your server cannot find on its own/, 'honest, and only where it applies')
-  // The token field is not on screen until somebody asks for it.
-  assert.equal(doc.querySelector('input[type=password]'), null)
+  // FOLDED, NOT ABSENT (2026-08-20). The panel stays in the page so it can animate
+  // both ways, and the CSS takes it out of the tab order and off the accessibility
+  // tree while it is shut - so what is asserted is that the fold is SHUT.
+  const fold = [...doc.querySelectorAll('.rowfold')].find(f => f.querySelector('input[type=password]'))
+  assert.ok(fold, 'the token form is behind a fold')
+  assert.equal(fold.classList.contains('on'), false, 'which starts shut')
+  assert.equal(fold.getAttribute('aria-hidden'), 'true')
 
   const setUp = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Set up')
   assert.ok(setUp, 'there is a way in')
   setUp.dispatchEvent(new doc.defaultView.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
-  assert.ok(doc.querySelector('input[type=password]'), 'and it opens')
+  assert.ok(fold.classList.contains('on'), 'and it opens')
 })
 
 // --- This host: the first page rebuilt in the Settings row shape --------------
@@ -1963,13 +1980,19 @@ test('artwork with no key says so, refuses to be turned on, and hides its form',
   const on = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Turn on')
   assert.equal(on.disabled, true)
 
-  // The form is not on the page until it is asked for.
-  assert.doesNotMatch(text(), /themoviedb\.org/)
+  // FOLDED, NOT ABSENT (2026-08-20). It stays in the page so it can animate both
+  // ways, and the CSS takes it out of the tab order and off the accessibility tree
+  // while it is shut - so a key field cannot be tabbed into behind a closed fold.
+  const fold = [...doc.querySelectorAll('.rowfold')].find(f => /themoviedb\.org/.test(f.textContent))
+  assert.ok(fold, 'the key form is behind a fold')
+  assert.equal(fold.classList.contains('on'), false, 'shut until it is asked for')
+  assert.equal(fold.getAttribute('aria-hidden'), 'true')
+
   const add = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Add')
   add.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
-  assert.match(text(), /themoviedb\.org/)
-  assert.ok(doc.querySelector('.rowopen input[type=password]'))
+  assert.ok(fold.classList.contains('on'))
+  assert.ok(fold.querySelector('input[type=password]'))
 })
 
 test('a library with no source says so and offers to be pointed at one', async (t) => {
@@ -2800,7 +2823,9 @@ test('CHOOSING WHO A DEVICE BELONGS TO ASKS FIRST', async (t) => {
   btns[btns.length - 1].dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
-  const pick = doc.querySelector('.rowopen select')
+  const fold = row.nextElementSibling
+  assert.ok(fold.classList.contains('on'), 'the chevron opened the fold')
+  const pick = fold.querySelector('select')
   assert.ok(pick, 'the chooser is behind the chevron')
   pick.value = 'p1'
   pick.dispatchEvent(new win.Event('change', { bubbles: true }))
@@ -2858,6 +2883,25 @@ test('CONFIRMING A NAME SOMEBODY ALREADY HAS OFFERS TO JOIN THEM, not to mint a 
   assert.ok(sent, 'the claim was confirmed')
   assert.equal(sent.asNew, false, 'as a JOIN')
   assert.equal(sent.personId, 'p1', 'of the Jo who is already here')
+})
+
+test('THE FOLD ANIMATES A HEIGHT NOBODY KNOWS IN ADVANCE', async () => {
+  // `height: auto` is not an animatable value, so the usual bodge is a max-height
+  // guess - which either clips a person with four devices or spends the whole
+  // transition on empty space. A grid row from 0fr to 1fr animates the real height
+  // with nothing measured. This is a guard rather than a behaviour test: no
+  // assertion about text or structure could ever see it go back.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'host', 'ui', 'dashboard.html'), 'utf8')
+  assert.match(css, /\.rowfold\{[^}]*grid-template-rows:0fr/, 'shut is a zero-height row')
+  assert.match(css, /\.rowfold\{[^}]*transition:grid-template-rows/, 'and the row itself is what moves')
+  assert.match(css, /\.rowfold\.on\{[^}]*grid-template-rows:1fr/)
+  assert.doesNotMatch(css, /\.rowfold\{[^}]*max-height/, 'no guessed height')
+  // AND A SHUT FOLD IS NOT FOCUSABLE. It is still in the page, so without this a
+  // password field sits in the tab order behind a closed panel.
+  assert.match(css, /\.rowfold\{[^}]*visibility:hidden/)
+  assert.match(css, /\.rowfold\.on\{[^}]*visibility:visible/)
+  // AND SOMEBODY WHO ASKED FOR LESS MOVEMENT GETS NONE.
+  assert.match(css, /prefers-reduced-motion:reduce\)\{[^}]*\.rowfold[^}]*transition:none/)
 })
 
 function rootText (doc) { return doc.getElementById('root').textContent }

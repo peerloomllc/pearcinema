@@ -34,7 +34,7 @@
 import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { Modal, askConfirm, notify } from './ui'
-import { Blocked, Check, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
+import { Blocked, Check, ChevronDown, Pencil, Plus, Trash } from './icons'
 
 // One device, as a row. `nested` is a device sitting under the person who holds it,
 // where the name is already known and the row is one step in.
@@ -223,7 +223,7 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
             onClick={() => setOpen(!open)}
             aria-label={open ? `Hide details of ${d.label || 'this device'}` : `Details of ${d.label || 'this device'}`}
             aria-expanded={open}
-          >{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+          ><span class={'turn' + (open ? ' on' : '')}><ChevronDown size={15} /></span></button>
         </span>
       </div>
 
@@ -259,7 +259,12 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
         </Modal>
       )}
 
-      {open && (
+      {/* FOLDED RATHER THAN SWITCHED (Tim, 2026-08-20). The panel stays in the page
+          and the fold animates its height, which is the only way to animate a height
+          nobody knows in advance - a grid row from 0fr to 1fr. It is marked hidden
+          from assistive technology while it is shut, because it is still there. */}
+      <div class={'rowfold' + (open ? ' on' : '')} aria-hidden={!open}>
+       <div class='rowfold-in'>
         <div class='rowopen'>
           <div class='setrows'>
             <div class='setrow'>
@@ -285,7 +290,8 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
             </div>
           </div>
         </div>
-      )}
+       </div>
+      </div>
     </>
   )
 }
@@ -486,14 +492,15 @@ export default function People ({ state, reload }) {
                     onClick={() => setOpen({ ...open, [p.id]: !isOpen })}
                     aria-label={isOpen ? `Hide ${p.label}'s devices` : `Show ${p.label}'s devices`}
                     aria-expanded={isOpen}
-                  >{isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+                  ><span class={'turn' + (isOpen ? ' on' : '')}><ChevronDown size={16} /></span></button>
                 </span>
               </div>
 
               {/* NESTED, AND IT HAS TO LOOK NESTED. Without the indent and the
                   rule down the left, a person's devices read as more people -
                   which is the exact thing the nesting exists to prevent. */}
-              {isOpen && (
+              <div class={'rowfold' + (isOpen ? ' on' : '')} aria-hidden={!isOpen}>
+               <div class='rowfold-in'>
                 <div class='rowopen nested'>
                   <div class='setrows'>
                     {theirs.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} nested />)}
@@ -503,7 +510,8 @@ export default function People ({ state, reload }) {
                     )}
                   </div>
                 </div>
-              )}
+               </div>
+              </div>
             </>
           )
         })}
@@ -571,7 +579,7 @@ export default function People ({ state, reload }) {
                   title={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
                   aria-label={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
                   aria-expanded={showRevoked}
-                >{showRevoked ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+                ><span class={'turn' + (showRevoked ? ' on' : '')}><ChevronDown size={16} /></span></button>
               </span>
             </div>
             {showRevoked && revoked.filter(d => !d.personId).map(d => (

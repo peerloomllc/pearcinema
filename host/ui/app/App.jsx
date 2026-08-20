@@ -585,7 +585,11 @@ function CastPanel () {
         </div>
       </div>
 
-      {haOpen && cfg && (
+      {/* FOLDED, like every other panel a row opens (2026-08-20). It stays in the
+          page so it can animate on the way out as well as in. */}
+      <div class={'rowfold' + (haOpen && cfg ? ' on' : '')} aria-hidden={!(haOpen && cfg)}>
+       <div class='rowfold-in'>
+        {cfg && (
         <div class='rowopen'>
           <p class='hint'>Make a long-lived access token on your Home Assistant profile page.</p>
           <div class='field'>
@@ -621,7 +625,9 @@ function CastPanel () {
             )}
           </div>
         </div>
-      )}
+        )}
+       </div>
+      </div>
 
       {/* WHERE YOU CAN CAST, not "your televisions": the same list holds the speakers
           Home Assistant knows about, and one of those is not a television. */}
@@ -1102,7 +1108,8 @@ function HostPanel ({ state, reload }) {
           )}
         </div>
 
-        {pwOpen && ownPassword && (
+        <div class={'rowfold' + (pwOpen && ownPassword ? ' on' : '')} aria-hidden={!(pwOpen && ownPassword)}>
+         <div class='rowfold-in'>
           <div class='rowopen'>
             <div class='field'>
               <label>The current one</label>
@@ -1116,7 +1123,8 @@ function HostPanel ({ state, reload }) {
               <button onClick={savePassword} disabled={!cur || next.length < 8}>Change it</button>
             </div>
           </div>
-        )}
+         </div>
+        </div>
 
         <div class='setrow'>
           <span class='rowmain'>
