@@ -208,6 +208,10 @@ class RokuSpeakers {
   // does not, which is the entire point of this backend existing.
   get enabled () { return true }
 
+  // The ids this backend mints. There is more than one discovery backend since
+  // 2026-08-20, and the router routes on this rather than on what a class is called.
+  get prefix () { return 'roku:' }
+
   isHidden (entityId) {
     return !!this.televisions?.isHidden(entityId)
   }

@@ -576,3 +576,23 @@ test('THE BAR COUNTS BETWEEN READINGS, so it agrees with the lock screen', async
   const later = clock()
   assert.notEqual(later, first, 'the minute is still where it was two seconds ago')
 })
+
+test('A POSTER CANNOT SWALLOW A LONG PRESS', async (t) => {
+  // Tim, 2026-08-20: "I couldn't get the long press menu to appear on Blade. some titles
+  // it works fine, others not." The inconsistency was the artwork - Android's WebView
+  // treats a held image as an image, starts a drag, and the cancelled pointer sequence
+  // clears the long-press timer a beat before it would have opened the menu. A tile with
+  // no poster has no image to hold, which is why some titles behaved.
+  //
+  // JSDOM cannot reproduce a native drag, so this pins the two things that stop it: the
+  // picture is not a pointer target, and it is not draggable.
+  const h = await open()
+  t.after(() => h.dom.window.close())
+
+  const img = h.doc.querySelector('.cover img.poster')
+  assert.ok(img, 'a tile with artwork')
+  assert.equal(img.getAttribute('draggable'), 'false')
+
+  const rules = PAGE.match(/\.cover img\{[^}]*\}/g) || []
+  assert.ok(rules.some((r) => /pointer-events:\s*none/.test(r)), 'the press lands on the tile, not the picture')
+})

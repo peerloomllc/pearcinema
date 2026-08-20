@@ -538,3 +538,46 @@ test('two DIFFERENT televisions are never collapsed into one', async (t) => {
   const targets = new CastTargets({ configured: ha, discovered: speakersFor(t, roku) })
   assert.equal((await targets.list()).length, 2, 'a speaker in the kitchen is not the Roku in the living room')
 })
+
+test('A RENDERER DISPLACES A HOME ASSISTANT ROW FOR THE SAME TELEVISION', async () => {
+  // Tim's Samsung, 2026-08-20. Home Assistant offered it, the phone showed it casting,
+  // and the set never heard a thing - HA's samsungtv integration answered 500 to
+  // play_media. The television itself takes the film directly over DLNA.
+  //
+  // A device that answers a MediaRenderer search accepts a film BY DEFINITION, so where
+  // both describe the same set, the row that survives is the one that can actually play
+  // it. This is the reverse of the Roku rule, and deliberately: a Roku's HA entry works.
+  const dlna = {
+    enabled: true,
+    prefix: 'dlna:',
+    isHidden: () => false,
+    list: async () => [{ entityId: 'dlna:udn-1', name: 'Samsung TU7000 65 TV', host: '192.168.50.216', state: 'idle', via: 'dlna', supportedFeatures: 2 }]
+  }
+  const ha = {
+    enabled: true,
+    isHidden: () => false,
+    list: async () => [
+      { entityId: 'media_player.samsung_tu7000_65_tv_un65tu7000fxza', name: 'Samsung TU7000 65 TV', state: 'idle' },
+      { entityId: 'media_player.kitchen_speaker', name: 'Kitchen', state: 'idle' }
+    ]
+  }
+
+  const rows = await new CastTargets({ configured: ha, discovered: [dlna] }).list()
+  const ids = rows.map((r) => r.entityId)
+  assert.deepEqual(ids, ['media_player.kitchen_speaker', 'dlna:udn-1'])
+  assert.equal(ids.includes('media_player.samsung_tu7000_65_tv_un65tu7000fxza'), false, 'the row that cannot play is gone')
+})
+
+test('and a Roku keeps its Home Assistant row, because that one works', async () => {
+  // The same television described twice, the other way round. A Roku's HA entry goes
+  // through the very Media Assistant channel this host would use, so nothing measured
+  // says to displace it - and the configured row is the one an operator can rename.
+  const found = {
+    enabled: true,
+    prefix: 'roku:',
+    isHidden: () => false,
+    list: async () => [{ entityId: 'roku:X001', name: 'Living Room TV', host: '192.168.50.13', state: 'idle', via: 'roku', supportedFeatures: 0 }]
+  }
+  const rows = await new CastTargets({ configured: fakeHa(), discovered: [found] }).list()
+  assert.deepEqual(rows.map((r) => r.entityId), ['media_player.living_room'])
+})

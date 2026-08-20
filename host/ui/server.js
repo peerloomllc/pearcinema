@@ -1899,7 +1899,13 @@ async function startDashboard ({
       // want to wait out the roster's own refresh.
       if (req.method === 'POST' && url.pathname === '/api/cast/rescan') {
         try {
-          await host.roku?.scan()
+          // BOTH KINDS OF FOUND TELEVISION, and neither failure loses the other: a Roku
+          // asleep must not stop a Samsung being found, and a network without multicast
+          // costs both of them and nothing else.
+          await Promise.all([
+            host.roku?.scan().catch(() => {}),
+            host.dlna?.scan().catch(() => {})
+          ])
           return json(res, 200, {
             targets: await host.speakers.list(),
             needsChannel: host.roku?.needsChannel || [],
