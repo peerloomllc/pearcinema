@@ -222,7 +222,11 @@ test('clicking a film opens the player, and an MKV lands on the refusal rather t
 
   const nosferatu = [...posters].find(p => p.textContent.includes('Nosferatu'))
   nosferatu.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 30))
+  await new Promise(r => setTimeout(r, 40))
+  // THE PAGE SAYS IT FIRST, before anything is pressed - which is the whole reason
+  // the page exists for a file this browser cannot open.
+  assert.match(text(), /cannot simply be repackaged/)
+  await pressPlay(doc, win)
 
   // jsdom's canPlayType answers '' to everything, so it stands in for a browser that
   // can decode NOTHING - which means even repackaging cannot help it, and the player
@@ -881,6 +885,7 @@ test('THE DETAILS ARE ONE BUTTON AWAY, and cover nothing until asked', async (t)
   const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
   poster.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
+  await pressPlay(doc, win)
 
   const sheet = doc.querySelector('.sheet')
   assert.ok(sheet, 'the sheet exists')
@@ -905,6 +910,7 @@ test('PREVIOUS AND NEXT ARE A TELEVISION IDEA', async (t) => {
   const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
   poster.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
+  await pressPlay(doc, win)
 
   const acts = [...doc.querySelectorAll('.acts button')].map(b => b.textContent.trim())
   assert.equal(acts.some(t => /Previous|Next/.test(t)), false, 'a film gets neither')
@@ -1060,6 +1066,7 @@ test('THE DETAILS SHEET STATES FACTS RATHER THAN BADGING THEM', async (t) => {
   const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
   poster.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
+  await pressPlay(doc, win)
   ;[...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Details')
     .dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 30))
@@ -2902,6 +2909,250 @@ test('THE FOLD ANIMATES A HEIGHT NOBODY KNOWS IN ADVANCE', async () => {
   assert.match(css, /\.rowfold\.on\{[^}]*visibility:visible/)
   // AND SOMEBODY WHO ASKED FOR LESS MOVEMENT GETS NONE.
   assert.match(css, /prefers-reduced-motion:reduce\)\{[^}]*\.rowfold[^}]*transition:none/)
+})
+
+/* ------------------------------------------- three ways to look -- */
+
+test('THE LIBRARY HAS THREE VIEWS, and the choice is remembered', async (t) => {
+  // Plex's three, which Tim asked for with screenshots (2026-08-20): posters,
+  // posters-with-a-summary, and a plain list. They answer different questions -
+  // "what shall I watch", "what is this", "do I have it" - and the third is much the
+  // fastest on a library of 240.
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const chooser = doc.querySelector('.pickrow .viewtoggle')
+  assert.ok(chooser, 'the chooser sits with the library, at the far end')
+  const by = (label) => [...chooser.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label)
+  assert.deepEqual([...chooser.querySelectorAll('button')].map(b => b.getAttribute('aria-label')),
+    ['Posters', 'Details', 'A list'])
+  // ICONS, NOT WORDS - three labelled buttons is a sentence in a toolbar - so every
+  // one of them says its name for anything that cannot see a picture.
+  assert.ok([...chooser.querySelectorAll('button')].every(b => !b.textContent.trim()))
+
+  // POSTERS BY DEFAULT: a shelf of films is what a grid is for.
+  assert.equal(by('Posters').getAttribute('aria-pressed'), 'true')
+  // `.screen` is the library itself - the Continue shelf above it is a grid of
+  // posters too, and it is not what this control governs.
+  assert.ok(doc.querySelector('.screen .grid .poster'))
+
+  by('Details').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const row = [...doc.querySelectorAll('.detailrow')].find(r => /Metropolis/.test(r.textContent))
+  assert.ok(row, 'a row per film')
+  assert.ok(row.querySelector('.art'), 'with its poster, small')
+  assert.match(row.querySelector('.dmeta').textContent, /1927/, 'the year')
+  // The fixture's Metropolis is 153 SECONDS, which is the units the item model uses.
+  assert.match(row.querySelector('.dmeta').textContent, /3m/, 'and how long it is')
+  assert.equal(doc.querySelector('.screen .grid .poster'), null, 'and the wall of posters is gone')
+  assert.ok(doc.querySelector('.grid .poster'), 'while the Continue shelf keeps its own')
+
+  by('A list').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const head = doc.querySelector('.tablev .thead')
+  assert.ok(head, 'the columns are named rather than left to be worked out')
+  assert.match(head.textContent, /Title/)
+  assert.match(head.textContent, /Year/)
+  const line = [...doc.querySelectorAll('.trow')].find(r => /Metropolis/.test(r.textContent))
+  assert.match(line.querySelector('.ts').textContent, /1927/)
+  assert.equal(doc.querySelector('.detailrow'), null)
+
+  // REMEMBERED IN THIS BROWSER. How somebody likes a list to look is not the host's
+  // business and does not belong in its data dir.
+  assert.equal(win.localStorage.getItem('pearcinema.libraryview'), 'table')
+  assert.notEqual(win.localStorage.getItem('pearcinema.episodeview'), 'table',
+    'and a season of episodes is a separate question, answered separately')
+
+  assert.match(text(), /Metropolis/, 'the film is on screen in every one of them')
+})
+
+test('a film opens from any of the three', async (t) => {
+  const { dom, doc, win, text } = await open()
+  t.after(() => dom.window.close())
+
+  const by = (label) => [...doc.querySelectorAll('.pickrow .viewtoggle button')]
+    .find(b => b.getAttribute('aria-label') === label)
+
+  by('A list').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const line = [...doc.querySelectorAll('.trow')].find(r => /Metropolis/.test(r.textContent))
+  line.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  // A LINE IS A PLACE TOO, the same as a poster: the page about the film, then Play.
+  assert.ok(doc.querySelector('.titlehead'), 'pressing a line opens the film s page')
+  assert.match(text(), /Metropolis/)
+  await pressPlay(doc, win)
+  assert.ok(doc.querySelector('.playerwrap'), 'and Play starts it')
+})
+
+test('an episode list offers the same three, and an old choice survives the rename', async (t) => {
+  // The compact one used to be called 'list'. A browser that chose it keeps what it
+  // chose rather than being quietly put back on posters.
+  const { dom, doc, win } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': { items: [{ type: 'series', id: 'show-1', title: 'The Wire', seasonCount: 1, artId: null }], total: 1, cursor: null },
+    '/api/library/list?type=seasons&limit=100': { items: [{ type: 'season', id: 's1', seriesId: 'show-1', seriesTitle: 'The Wire', number: 1, title: 'Season 1', artId: null }], total: 1, cursor: null },
+    '/api/library/list?type=episodes&limit=200': {
+      items: [{
+        type: 'episode', id: 'e1', seriesId: 'show-1', seasonId: 's1', seriesTitle: 'The Wire',
+        seasonNumber: 1, episodeNumber: 1, title: 'The Target', runtime: 3600,
+        overview: 'McNulty watches a case fall apart in court.', artId: null,
+        media: { container: 'mkv', videoCodec: 'h264', audioCodec: 'aac', size: 4096 }
+      }],
+      total: 1,
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+  win.localStorage.setItem('pearcinema.episodeview', 'list')
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Season 1'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const chooser = [...doc.querySelectorAll('.viewtoggle')].slice(-1)[0]
+  const by = (label) => [...chooser.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label)
+  assert.ok(by('Details'), 'episodes get the three as well')
+
+  by('Details').dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const row = doc.querySelector('.detailrow')
+  // AN EPISODE LEADS WITH ITS SLOT, not a year: S01E01 is how anybody refers to one.
+  assert.match(row.querySelector('.dmeta').textContent, /S01E01/)
+  assert.match(row.querySelector('.dsum').textContent, /falls? apart in court/)
+})
+
+// PRESSING A FILM IS TWO STEPS NOW, and it is deliberate (2026-08-20): a grid opens
+// the page ABOUT a film - how long it is, what it is about, whether this browser can
+// play this file at all - and Play on that page starts it. Every test below that
+// wants a running player goes through here rather than repeating the two clicks.
+async function pressPlay (doc, win) {
+  const play = [...doc.querySelectorAll('.titleacts button')]
+    .find(b => /^(Play|Resume)/.test(b.textContent.trim()))
+  assert.ok(play, 'the film has a page, and the page has a Play')
+  play.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+}
+
+/* -------------------------------------------- the page about one thing -- */
+
+test('A FILM HAS A PAGE, and pressing it does not start a room full of sound', async (t) => {
+  // Tim, 2026-08-20, with Plex's screens: clicking a film used to play it. That is
+  // right on a phone in a hurry and wrong everywhere else - it is the only chance
+  // anybody gets to read what a film is, see how long it is, or find out that this
+  // file has no soundtrack their browser can decode.
+  const asked = []
+  const { dom, doc, win, text } = await open(STATE, {}, asked)
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.screen .poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.ok(doc.querySelector('.titlehead'), 'the page about the film')
+  assert.equal(doc.querySelector('video'), null, 'and nothing is playing')
+  assert.ok(!asked.some(u => String(u).includes('/api/stream')), 'nor being fetched')
+
+  assert.equal(doc.querySelector('.titlename').textContent, 'Nosferatu')
+  assert.match(doc.querySelector('.titlefacts').textContent, /1922/)
+
+  // THE WAY BACK IS NAMED. A page you can only leave by the browser's own Back is a
+  // page somebody gets stuck on.
+  const back = [...doc.querySelectorAll('.crumbs button')].map(b => b.textContent)
+  assert.deepEqual(back, ['Films'])
+  back && [...doc.querySelectorAll('.crumbs button')][0].dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.equal(doc.querySelector('.titlehead'), null, 'and it leads back to the library')
+  assert.match(text(), /Metropolis/)
+})
+
+test('THE PAGE SAYS WHAT IS IN THE FILE, which is the thing a grid cannot', async (t) => {
+  // Plex's Video/Audio/Subtitles block, and the one part of that page we can answer
+  // better than they can: we are looking at the operator's own file rather than at a
+  // database entry about the film.
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/subtitles': { items: [{ id: 's1', title: 'English', language: 'eng', playable: true, external: true }] }
+  })
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.screen .poster')].find(p => p.textContent.includes('Nosferatu'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const facts = doc.querySelector('.titlefacts-grid')
+  assert.ok(facts)
+  assert.match(facts.textContent, /Picture/)
+  assert.match(facts.textContent, /1080p/)
+  assert.match(facts.textContent, /Sound/)
+  assert.match(facts.textContent, /Subtitles/)
+  assert.match(facts.textContent, /1 you can turn on/, 'the subtitles are asked for and counted')
+  // AND THE HONEST WARNING, before anybody presses play and gets a black rectangle.
+  assert.match(text(), /How it will play/)
+  assert.match(text(), /cannot simply be repackaged/)
+})
+
+test('HALF WAY THROUGH, THE PAGE OFFERS TO CARRY ON', async (t) => {
+  // Metropolis is 76.5 seconds into a 153-second film in this fixture, so the page
+  // has a place to offer - and it says the exact moment, because somebody deciding
+  // whether to resume is looking for where they stopped.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+
+  const poster = [...doc.querySelectorAll('.screen .poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const acts = [...doc.querySelectorAll('.titleacts button')].map(b => b.textContent.trim())
+  assert.ok(acts.some(a => /Resume at 1:16/.test(a)), 'where you got to: ' + acts.join(' | '))
+  assert.ok(acts.some(a => a === 'Start over'), 'and the other answer')
+})
+
+test('A SHOW HAS A PAGE TOO, with its seasons under it', async (t) => {
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/library/list?type=series&limit=100': {
+      items: [{ type: 'series', id: 'show-1', title: 'The Wire', year: 2002, seasonCount: 2, episodeCount: 25, overview: 'Cops and dealers in Baltimore.', genres: ['Crime', 'Drama'], artId: null }],
+      total: 1,
+      cursor: null
+    },
+    '/api/library/list?type=seasons&limit=100': {
+      items: [
+        { type: 'season', id: 's1', seriesId: 'show-1', seriesTitle: 'The Wire', number: 1, title: 'Season 1', artId: null },
+        { type: 'season', id: 's2', seriesId: 'show-1', seriesTitle: 'The Wire', number: 2, title: 'Season 2', artId: null }
+      ],
+      total: 2,
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const shows = [...doc.querySelectorAll('button')].find(b => b.textContent.startsWith('Shows'))
+  shows.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  ;[...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Wire'))
+    .dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const head = doc.querySelector('.titlehead')
+  assert.ok(head, 'the show gets the same page a film does')
+  assert.equal(doc.querySelector('.titlename').textContent, 'The Wire')
+  // WHAT A SHOW'S FACTS ARE IS NOT WHAT A FILM'S ARE: how much of it there is, not
+  // how long it runs.
+  const facts = doc.querySelector('.titlefacts').textContent
+  assert.match(facts, /2002/)
+  assert.match(facts, /2 seasons/)
+  assert.match(facts, /25 episodes/)
+  assert.match(facts, /Crime, Drama/)
+  assert.match(doc.querySelector('.titlesum').textContent, /Cops and dealers/)
+
+  // AND THE SEASONS UNDER IT, named rather than left as a bare grid.
+  assert.match(text(), /Seasons/)
+  const seasons = [...doc.querySelectorAll('.poster')].filter(p => /Season /.test(p.textContent))
+  assert.equal(seasons.length, 2)
 })
 
 function rootText (doc) { return doc.getElementById('root').textContent }

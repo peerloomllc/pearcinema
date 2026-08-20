@@ -16,9 +16,10 @@
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
 import { api, withBase, fmtRuntime, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
-import { ArtIcon, Check, Close, List, Grid, Pencil } from './icons'
+import { ArtIcon, Check, Close, Detail, List, Grid, Pencil } from './icons'
 import { notify, askConfirm } from './ui'
 import { FixMatch } from './FixMatch'
+import { TitleHead, TitleActions, FilmFacts } from './TitlePage'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -85,6 +86,99 @@ function Art ({ item, started = false, progress = null }) {
     <div class='art'>
       {inner}
       <img src={withBase('/api/art?id=' + encodeURIComponent(item.artId) + (item.artBust ? '&v=' + item.artBust : ''))} alt='' loading='lazy' onError={() => setBad(true)} />
+    </div>
+  )
+}
+
+// ONE ROW OF THE DETAIL VIEW: the poster small, the title, what it is and what it is
+// about. The thing a grid cannot say - a wall of posters is unanswerable about a film
+// nobody recognises the artwork of - and the thing a table has no room for.
+//
+// The same component for a film and for an episode, because they differ only in what
+// their second line says, and that is passed in.
+function DetailRow ({ item, caps, meta, watch = null, onOpen, onWatched = null }) {
+  const flag = flagFor(item.media ? verdictFor(item, caps) : null)
+  const rollup = watch && watch.total !== undefined ? watch : null
+  const seen = rollup ? rollup.complete : !!watch?.watched
+  const started = !!rollup && !!rollup.started && !rollup.complete
+  const progress = rollup
+    ? (started ? Math.max(2, Math.round((rollup.watched / rollup.total) * 100)) : null)
+    : progressOf({ positionMs: watch?.resume?.positionMs, runtime: item.runtime })
+
+  return (
+    <div
+      class='detailrow'
+      role='button'
+      tabIndex={0}
+      onClick={() => onOpen(item)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(item) } }}
+    >
+      <span class='dart'><Art item={item} started={started} progress={progress} /></span>
+      <span class='dmain'>
+        <span class='dtitle'>{item.title}</span>
+        <span class='dmeta'>
+          {meta}
+          {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
+        </span>
+        {/* CLAMPED, NOT CUT. A summary is three lines here and the rest is one click
+            away; letting it run makes the rows different heights, which is the thing
+            that stops a list being scannable at all. */}
+        {item.overview && <span class='dsum'>{item.overview}</span>}
+      </span>
+      {onWatched && (
+        <button
+          class={'mark' + (seen ? ' on' : '')}
+          title={seen ? 'Mark as unwatched' : 'Mark as watched'}
+          aria-label={(seen ? 'Mark as unwatched: ' : 'Mark as watched: ') + item.title}
+          onClick={e => { e.stopPropagation(); onWatched(item, !seen) }}
+        ><Check size={13} /></button>
+      )}
+    </div>
+  )
+}
+
+// THE TABLE. Title and year, one line each, and deliberately nothing else: this view
+// answers "do I have it", which on two hundred and forty films is a different question
+// from "what shall I watch" and a much faster one. A poster would only slow it down.
+//
+// A HEADING ROW, because two bare columns of text with no names is a spreadsheet
+// somebody has to work out. It is not sortable from here - sorting lives in the
+// library's own display options, where it applies to every view.
+function TableRows ({ items, caps, seenOf, resumeOf = null, onOpen, onWatched = null, second = 'Year' }) {
+  return (
+    <div class='tablev' role='table' aria-label='Your library as a list'>
+      <div class='trow thead' role='row'>
+        <span class='tt' role='columnheader'>Title</span>
+        <span class='ts' role='columnheader'>{second}</span>
+      </div>
+      {items.map(i => {
+        const flag = flagFor(i.media ? verdictFor(i, caps) : null)
+        const seen = seenOf(i)
+        const pct = resumeOf ? progressOf({ positionMs: resumeOf.get(i.id)?.positionMs, runtime: i.runtime }) : null
+        return (
+          <div
+            class={'trow' + (seen ? ' seen' : '')}
+            role='row'
+            key={i.id}
+            tabIndex={0}
+            onClick={() => onOpen(i)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(i) } }}
+          >
+            <span class='tt' role='cell'>{i.title}</span>
+            {flag && <span class={'chip ' + flag.cls}>{flag.text}</span>}
+            {pct !== null && <span class='rowbar'><i style={`width:${pct}%`} /></span>}
+            <span class='ts' role='cell'>{second === 'Year' ? (i.year || '') : (i.runtime ? fmtRuntime(i.runtime) : '')}</span>
+            {onWatched && (
+              <button
+                class={'mark' + (seen ? ' on' : '')}
+                title={seen ? 'Mark as unwatched' : 'Mark as watched'}
+                aria-label={(seen ? 'Mark as unwatched: ' : 'Mark as watched: ') + i.title}
+                onClick={e => { e.stopPropagation(); onWatched(i, !seen) }}
+              ><Check size={13} /></button>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -494,21 +588,60 @@ function LoadMore ({ cursor, onMore, busy }) {
   )
 }
 
-const VIEW_KEY = 'pearcinema.episodeview'
-const loadView = () => {
-  try { return localStorage.getItem(VIEW_KEY) === 'grid' ? 'grid' : 'list' } catch { return 'list' }
+// THREE WAYS TO LOOK AT A LIST, Plex's three (Tim, 2026-08-20, with screenshots):
+//
+//   grid   - posters, and nothing but. What a shelf of films is FOR.
+//   detail - a poster beside the title, the year, the length and what it is about.
+//            The one that answers "what is this" without opening anything.
+//   table  - title and year, one line each. The one that answers "do I have it",
+//            which on 240 films is a different question and a much faster one.
+//
+// It is a real choice rather than a preference we could pick for people, and the
+// same choice on a season's episodes: a table reads best when episodes are titled
+// and numbered, which is most television, and a grid reads best when they have
+// thumbnails worth looking at.
+//
+// Remembered in the BROWSER, per list - how somebody likes a list to look is not the
+// host's business and does not belong in its data dir, and the answer for a wall of
+// posters is not the answer for a season of episodes.
+const VIEWS = ['grid', 'detail', 'table']
+const EPISODE_VIEW_KEY = 'pearcinema.episodeview'
+const LIBRARY_VIEW_KEY = 'pearcinema.libraryview'
+const loadView = (key, fallback) => {
+  try {
+    const v = localStorage.getItem(key)
+    // 'list' is what the episode toggle called the compact one before there were
+    // three, so a browser that chose it keeps what it chose.
+    if (v === 'list') return 'table'
+    return VIEWS.includes(v) ? v : fallback
+  } catch { return fallback }
 }
 
-// List or grid for a season's episodes, and it is a real choice rather than a
-// preference we could pick for people: a list reads best when episodes are titled
-// and numbered, which is most television, and a grid reads best when they have
-// thumbnails worth looking at. Remembered in the BROWSER - how somebody likes a list
-// to look is not the host's business and does not belong in its data dir.
-function ViewToggle ({ view, onChange }) {
+// ICONS RATHER THAN WORDS, because three labelled buttons is a sentence sitting in a
+// toolbar - and because these three are exactly the kind of thing a picture says
+// faster than a word does. Each carries its name for anything that cannot see one.
+const VIEW_ICONS = {
+  grid: { icon: Grid, label: 'Posters' },
+  detail: { icon: Detail, label: 'Details' },
+  table: { icon: List, label: 'A list' }
+}
+
+function ViewToggle ({ view, onChange, what = 'this list' }) {
   return (
-    <div class='viewtoggle' role='group' aria-label='How to show episodes'>
-      <button class={view === 'list' ? 'on' : ''} onClick={() => onChange('list')} aria-label='List'><List size={15} /> List</button>
-      <button class={view === 'grid' ? 'on' : ''} onClick={() => onChange('grid')} aria-label='Grid'><Grid size={15} /> Grid</button>
+    <div class='viewtoggle' role='group' aria-label={`How to show ${what}`}>
+      {VIEWS.map(v => {
+        const { icon: Icon, label } = VIEW_ICONS[v]
+        return (
+          <button
+            key={v}
+            class={view === v ? 'on' : ''}
+            onClick={() => onChange(v)}
+            title={label}
+            aria-label={label}
+            aria-pressed={view === v}
+          ><Icon size={15} /></button>
+        )
+      })}
     </div>
   )
 }
@@ -531,6 +664,11 @@ export default function Library ({
   const [root, setRoot] = useState('films')
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
+  // THE FILM YOU ARE LOOKING AT, which is a place now rather than something that
+  // started the moment you touched it (Tim, 2026-08-20). One more level on the same
+  // stack the show tree uses, so it slides in and out the same way and Back means
+  // the same thing.
+  const [film, setFilm] = useState(null)
 
   // WHICH WAY WE WENT, which is the whole point of the movement (Tim, 2026-08-13,
   // choosing it over a plain cross-fade): deeper comes in from the right, back comes in
@@ -561,15 +699,22 @@ export default function Library ({
     onStarted()
   }, [startAt])
   const [hits, setHits] = useState(null)
-  const [view, setView] = useState(loadView)
+  // Two remembered choices, not one: a season of episodes and a wall of films are
+  // different questions and people answer them differently.
+  const [view, setView] = useState(() => loadView(EPISODE_VIEW_KEY, 'table'))
+  const [libView, setLibView] = useState(() => loadView(LIBRARY_VIEW_KEY, 'grid'))
 
   const chooseView = (v) => {
     setView(v)
-    try { localStorage.setItem(VIEW_KEY, v) } catch {}
+    try { localStorage.setItem(EPISODE_VIEW_KEY, v) } catch {}
+  }
+  const chooseLibView = (v) => {
+    setLibView(v)
+    try { localStorage.setItem(LIBRARY_VIEW_KEY, v) } catch {}
   }
 
   const stats = state.stats || {}
-  const depth = hits ? 'search' : season ? 'season' : series ? 'series' : root
+  const depth = hits ? 'search' : film ? 'film' : season ? 'season' : series ? 'series' : root
 
   // An array on the wire, a Set here. A grid asks "has this been watched" once per
   // poster and a linear scan per poster is the kind of thing that only bites on
@@ -594,6 +739,19 @@ export default function Library ({
   // finished - so forgetting one place travels the identical path (and the
   // identical write fan on a merged library) rather than being a second way to
   // remove a row that has to be kept honest separately.
+  // THE EPISODE YOU ARE UP TO. Asked for only when somebody presses Play on a show,
+  // because answering it means listing the whole show's episodes - free on a folder
+  // source and one HTTP call on a Jellyfin one, which is why nothing else on this
+  // page does it. The rule itself is the shelf's: the first one not finished, skipping
+  // nothing, so a gap in the middle is where you go rather than the end.
+  const playNextEpisode = async () => {
+    const res = await api('/api/library/list?type=episodes&seriesId=' + encodeURIComponent(series.id) + '&limit=1000')
+    const eps = res.items || []
+    if (!eps.length) return notify('Nothing to play', 'This show has no episodes on the disk.')
+    const next = eps.find(e => !seen.has(e.id) || resumeOf.get(e.id)?.positionMs > 0) || eps[0]
+    onPlay(next, eps)
+  }
+
   const forget = async (item) => {
     await api('/api/watch/position', { itemId: item.id, positionMs: 0 })
     onWatchChange()
@@ -754,7 +912,10 @@ export default function Library ({
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
             <Poster key={h.id} item={h} caps={caps} onFix={canFix ? setFixItem : null} onOpen={i => {
+              // A RESULT IS A PLACE TOO. Searching for a film and having it start
+              // is the same surprise the grid used to give, one screen further in.
               if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
+              else if (i.type === 'movie') go(() => { setHits(null); setRoot('films'); setFilm(i) })
               else onPlay(i, hits.filter(x => x.type === i.type))
             }} />
           ))}
@@ -768,6 +929,47 @@ export default function Library ({
       </div>
       {fixModal}
       </>
+    )
+  }
+
+  // --- one film ---
+  //
+  // Everything a grid cannot say, before anything starts: how long it is, what it is
+  // about, whether this browser can actually play this file, and whether you are
+  // already forty minutes into it.
+  if (film) {
+    const r = resumeOf.get(film.id)
+    const start = () => { setFilm(null); onPlay(film, films.items) }
+    return (
+      <div class={'screen ' + dir} key={depth}>
+        <div class='crumbs'>
+          <button onClick={() => go(() => setFilm(null), 'back')}>Films</button>
+          <span>/</span>
+          <span>{film.title}</span>
+        </div>
+
+        <TitleHead
+          item={film}
+          actions={
+            <TitleActions
+              item={film}
+              resumeMs={r?.positionMs || 0}
+              seen={seen.has(film.id)}
+              onPlay={start}
+              // RESUMING IS THE PLAYER'S OWN QUESTION, and it asks it: the card over
+              // the picture is where "carry on from 41 minutes?" belongs, and asking
+              // it twice would be one question too many. Pressing Resume here simply
+              // opens the film, which then offers the same position.
+              onResume={start}
+              onWatched={mark}
+              onFix={canFix && (!film.artId || String(film.artId).startsWith('tmdb:')) ? setFixItem : null}
+            />
+          }
+        >
+          <FilmFacts item={film} caps={caps} />
+        </TitleHead>
+        {fixModal}
+      </div>
     )
   }
 
@@ -785,9 +987,23 @@ export default function Library ({
 
         {!season && (
           <>
-            <h2>{series.title}</h2>
-            {series.overview && <p class='hint'>{series.overview}</p>}
-            <div class='grid' style='margin-top:1rem'>
+            <TitleHead
+              item={series}
+              actions={
+                <TitleActions
+                  item={series}
+                  seen={!!shows_[series.id]?.complete}
+                  // A SHOW'S PLAY IS THE EPISODE YOU ARE UP TO, not its first: on a
+                  // show three seasons in, starting at the pilot is never what
+                  // anybody meant. Off the same rule the up-next shelf uses.
+                  onPlay={playNextEpisode}
+                  onWatched={mark}
+                  onFix={canFix && (!series.artId || String(series.artId).startsWith('tmdb:')) ? setFixItem : null}
+                />
+              }
+            />
+            <h3 class='setgroup' style='margin-top:1.4rem'>Seasons</h3>
+            <div class='grid'>
               {seasons.items.map(s => (
                 <Poster
                   key={s.id}
@@ -807,28 +1023,47 @@ export default function Library ({
           <>
             <div class='row' style='justify-content:space-between'>
               <h2>{season.title}</h2>
-              <ViewToggle view={view} onChange={chooseView} />
+              <ViewToggle view={view} onChange={chooseView} what='these episodes' />
             </div>
             <CompatLine list={episodes.items} caps={caps} />
             <ArtNote list={episodes.items} source={remote ? 'remote' : state.source?.kind} />
 
-            {view === 'grid'
-              ? (
-                <div class='grid' style='margin-top:.8rem'>
-                  {episodes.items.map(e => (
-                    <Poster
-                      key={e.id}
-                      item={e}
-                      caps={caps}
-                      label={episodeCode(e)}
-                      watch={badge(e)}
-                      onWatched={mark}
-                      onOpen={() => onPlay(e, episodes.items)}
-                    />
-                  ))}
-                </div>
-                )
-              : (
+            {view === 'grid' && (
+              <div class='grid' style='margin-top:.8rem'>
+                {episodes.items.map(e => (
+                  <Poster
+                    key={e.id}
+                    item={e}
+                    caps={caps}
+                    label={episodeCode(e)}
+                    watch={badge(e)}
+                    onWatched={mark}
+                    onOpen={() => onPlay(e, episodes.items)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* AN EPISODE'S DETAIL ROW LEADS WITH ITS SLOT, not its year. S01E03 is
+                how anybody refers to one, and the summary underneath is the thing
+                the compact list has never had room for. */}
+            {view === 'detail' && (
+              <div class='rows' style='margin-top:.8rem'>
+                {episodes.items.map(e => (
+                  <DetailRow
+                    key={e.id}
+                    item={e}
+                    caps={caps}
+                    watch={badge(e)}
+                    meta={[episodeCode(e), fmtRuntime(e.runtime)].filter(Boolean).join(' · ')}
+                    onWatched={mark}
+                    onOpen={() => onPlay(e, episodes.items)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {view === 'table' && (
                 <div class='rows' style='margin-top:.8rem'>
                   {episodes.items.map(e => {
                     const flag = flagFor(verdictFor(e, caps))
@@ -867,7 +1102,7 @@ export default function Library ({
                     )
                   })}
                 </div>
-                )}
+            )}
             {episodes.busy && !episodes.items.length && <div class='empty'>Loading…</div>}
             <LoadMore cursor={episodes.cursor} onMore={episodes.more} busy={episodes.busy} />
           </>
@@ -891,6 +1126,9 @@ export default function Library ({
         onWatched={mark}
         onForget={forget}
         onClear={clearShelf}
+        // THE SHELF STILL PLAYS STRAIGHT AWAY, and that is the point of it: a row
+        // called Continue watching is somebody saying carry on, not somebody asking
+        // what a film is. The library grid is where the question gets asked.
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
@@ -915,6 +1153,11 @@ export default function Library ({
         )}
         <button class={root === 'films' ? '' : 'ghost'} onClick={() => go(() => setRoot('films'), 'back')}>Films</button>
         <button class={root === 'shows' ? '' : 'ghost'} onClick={() => go(() => setRoot('shows'))}>Shows</button>
+        {/* FAR RIGHT, away from the categories: which films you are looking at and
+            how they are drawn are two different questions, and putting them side by
+            side reads as five things to press (Plex's placement too). */}
+        <span class='grow' />
+        <ViewToggle view={libView} onChange={chooseLibView} what='your library' />
       </div>
 
       <div class={'screen ' + dir} key={root}>
@@ -935,14 +1178,58 @@ export default function Library ({
 
       {showing.err && <div class='banner bad'>{showing.err}</div>}
 
-      <div class='grid' style='margin-top:.8rem'>
-        {showing.items.map(i => (
-          <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={canFix ? setFixItem : null} onOpen={item => {
-            if (item.type === 'series') go(() => setSeries(item))
-            else onPlay(item, films.items)
-          }} />
-        ))}
-      </div>
+      {(() => {
+        const open = (item) => {
+          if (item.type === 'series') go(() => setSeries(item))
+          // A FILM GETS A PAGE. An episode does not: it is reached from its season,
+          // where the list around it already says what it is, and the thing somebody
+          // wants from an episode row is the episode.
+          else if (item.type === 'movie') go(() => setFilm(item))
+          else onPlay(item, films.items)
+        }
+        if (libView === 'grid') {
+          return (
+            <div class='grid' style='margin-top:.8rem'>
+              {showing.items.map(i => (
+                <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={canFix ? setFixItem : null} onOpen={open} />
+              ))}
+            </div>
+          )
+        }
+        if (libView === 'detail') {
+          return (
+            <div class='rows' style='margin-top:.8rem'>
+              {showing.items.map(i => (
+                <DetailRow
+                  key={i.id}
+                  item={i}
+                  caps={caps}
+                  watch={i.type === 'series' ? shows_[i.id] : badge(i)}
+                  // A SHOW'S SECOND LINE IS NOT A FILM'S. How many seasons it has is
+                  // the useful fact about a show; a film has a year and a length.
+                  meta={i.type === 'series'
+                    ? `${i.seasonCount || 0} season${i.seasonCount === 1 ? '' : 's'}`
+                    : [i.year, fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}
+                  onWatched={mark}
+                  onOpen={open}
+                />
+              ))}
+            </div>
+          )
+        }
+        return (
+          <div style='margin-top:.8rem'>
+            <TableRows
+              items={showing.items}
+              caps={caps}
+              seenOf={i => (i.type === 'series' ? !!shows_[i.id]?.complete : seen.has(i.id))}
+              resumeOf={resumeOf}
+              onWatched={mark}
+              onOpen={open}
+            />
+          </div>
+        )
+      })()}
 
       {showing.busy && !showing.items.length && <div class='empty'>Loading…</div>}
       {!showing.busy && !showing.items.length && (
