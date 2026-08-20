@@ -1370,6 +1370,33 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 /* What a row opens: a form that was not worth showing until asked for. */
 .rowopen { padding: .2rem 0 .6rem; border-bottom: 1px solid var(--line) }
 
+/* THE FOLD, and the grid trick is the point of it (Tim, 2026-08-20: could the
+ * expand and collapse be smooth). A height cannot be transitioned from nothing to
+ * "however tall this turns out to be" - `auto` is not an animatable value - so the
+ * panel is a grid row that goes from 0fr to 1fr instead, which IS animatable and
+ * needs no measuring, no ResizeObserver and no hard-coded max-height that clips a
+ * person with four devices.
+ *
+ * It also means the panel STAYS IN THE PAGE while it is shut, rather than being
+ * added and removed - a thing that is not there cannot animate on its way out. So
+ * it is marked hidden from assistive technology in the markup, and the inner
+ * wrapper clips it. */
+.rowfold {
+  display: grid; grid-template-rows: 0fr;
+  transition: grid-template-rows .24s ease;
+}
+.rowfold.on { grid-template-rows: 1fr }
+.rowfold-in { overflow: hidden; min-height: 0 }
+
+/* The chevron turns rather than being swapped for its mirror image - a swap is a
+ * jump, and the two icons are the same icon. */
+.turn { display: inline-flex; transition: transform .24s ease }
+.turn.on { transform: rotate(180deg) }
+
+@media (prefers-reduced-motion: reduce) {
+  .rowfold, .turn { transition: none }
+}
+
 @media (max-width: 560px) {
   .setrow { flex-wrap: wrap }
   .setrow .rowctl { width: 100%; justify-content: flex-end }
