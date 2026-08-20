@@ -74,7 +74,9 @@ export function ConfirmHost () {
       <div class='modal' role='alertdialog' aria-modal='true'>
         <h3>{c.title}</h3>
         {c.message && <p class='hint' style='white-space:pre-wrap'>{c.message}</p>}
-        <div class={'confirm-actions' + (c.info ? ' center' : '')}>
+        {/* No `center` variant any more: every window centres its buttons, so
+            the one-button case needs no class of its own. */}
+        <div class='confirm-actions'>
           {!c.info && <button class='ghost' onClick={() => close(false)}>{c.cancelLabel || 'Cancel'}</button>}
           <button class={c.danger ? 'destructive' : ''} onClick={() => close(true)} autofocus>{c.confirmLabel || 'Confirm'}</button>
         </div>

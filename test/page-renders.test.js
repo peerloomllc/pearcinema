@@ -2553,6 +2553,19 @@ test('CLEARING THE SHELF ASKS FIRST, and says the places will be forgotten', asy
   assert.ok(modal, 'it asks rather than doing it')
   assert.match(modal.textContent, /will be forgotten/)
   assert.match(modal.textContent, /cannot be undone/)
+
+  // CENTRED AND EQUAL, the app's own rule for buttons in a window (Tim,
+  // 2026-08-19, and again on this very dialog on 2026-08-20 - the centring had
+  // been written as a class that only the ONE-button case ever asked for, so
+  // every two-button window in the app was still ragged and right-aligned).
+  // No assertion about text or structure could have seen that, which is why
+  // this one is about the computed style.
+  const acts = modal.querySelector('.confirm-actions')
+  assert.equal(win.getComputedStyle(acts).justifyContent, 'center')
+  const widths = [...acts.querySelectorAll('button')].map(b => win.getComputedStyle(b).minWidth)
+  assert.equal(widths.length, 2)
+  assert.equal(widths[0], widths[1], 'and the same width as each other')
+  assert.ok(widths[0] && widths[0] !== 'auto' && widths[0] !== '0px', 'a real width: ' + widths[0])
   assert.ok(!asked.some(u => String(u).includes('/api/watch/clear')), 'and nothing has happened yet')
 
   const cancel = [...modal.querySelectorAll('button')].find(b => /Cancel/.test(b.textContent))
