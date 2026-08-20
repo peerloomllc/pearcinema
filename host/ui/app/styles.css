@@ -775,6 +775,97 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   padding: .2rem .5rem; border-radius: 6px; font-size: .85rem; line-height: 1;
 }
 .viewtoggle button.on { background: var(--accent); color: var(--accent-fg) }
+/* THREE ICONS, no words. Three labelled buttons is a sentence sitting in a toolbar,
+ * and these three are exactly the kind of thing a picture says faster (Tim,
+ * 2026-08-20). Square, so the group does not change width as the choice moves. */
+.viewtoggle button { display: grid; place-items: center; width: 1.9rem; height: 1.6rem; padding: 0 }
+.viewtoggle button:hover:not(.on) { color: var(--fg) }
+.pickrow .grow { flex: 1 1 auto }
+
+/* ---- the detail view -------------------------------------------------------
+ *
+ * The poster small, the title, what it is, and what it is about. What a grid cannot
+ * say - a wall of posters is unanswerable about a film nobody recognises the artwork
+ * of - and what a table has no room for.
+ */
+.detailrow {
+  display: flex; gap: 1rem; align-items: flex-start;
+  padding: .8rem .2rem; border-bottom: 1px solid var(--line);
+  cursor: pointer; position: relative;
+}
+.detailrow:hover { background: var(--card-2) }
+.detailrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px }
+/* The poster keeps a film's 2:3 and is the one fixed thing in the row, so every row
+ * is the same height whatever its summary does.
+ * The picture's own look lives on `.poster .art`, which does not reach here - so the
+ * few parts that are about being a PICTURE rather than about being in a grid are
+ * restated, and nothing else is. */
+.detailrow .dart { flex: 0 0 auto; width: 3.6rem }
+.detailrow .dart .art {
+  width: 3.6rem; aspect-ratio: 2 / 3; position: relative;
+  border-radius: 7px; overflow: hidden;
+  background: linear-gradient(160deg, var(--card-2), var(--card));
+  border: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: center; color: var(--muted);
+}
+.detailrow .dart .art img { width: 100%; height: 100%; object-fit: cover; display: block }
+.detailrow .dart .art svg { width: 20px; height: 20px }
+.detailrow:hover .dart .art { border-color: var(--accent) }
+.detailrow .dmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: .2rem }
+.detailrow .dtitle { font-size: 1.02rem; font-weight: 600; line-height: 1.25 }
+.detailrow .dmeta { display: flex; align-items: center; gap: .45rem; color: var(--muted); font-size: .82rem }
+/* CLAMPED, NOT CUT. Three lines and the rest is one click away; letting a summary run
+ * makes every row a different height, which is the thing that stops a list being
+ * scannable at all. */
+.detailrow .dsum {
+  color: var(--muted); font-size: .86rem; line-height: 1.5; margin-top: .15rem;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* THE TICK IS THE SAME TICK, and it needed saying: every rule that makes it round and
+ * quiet is written against `.poster .mark`, so in a row it fell back to being an
+ * ordinary filled button - a solid amber blob at the end of every line (caught by
+ * looking at the rendered page, 2026-08-20). Always visible here rather than
+ * appearing on hover: a row has room for it and there is no artwork for it to sit on
+ * top of. */
+.detailrow .mark, .trow .mark {
+  position: static; flex: 0 0 auto; opacity: 1;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: transparent; color: var(--muted);
+  border: 1px solid var(--line);
+}
+.detailrow .mark { align-self: center }
+.detailrow .mark:hover, .trow .mark:hover { color: var(--fg); border-color: var(--line-strong) }
+.detailrow .mark.on, .trow .mark.on { background: var(--accent); color: #fff; border-color: transparent }
+
+/* ---- the table view --------------------------------------------------------
+ *
+ * Title and year, one line each, and deliberately nothing else: this answers "do I
+ * have it", which on two hundred and forty films is a different question from "what
+ * shall I watch" and a much faster one.
+ */
+.tablev { display: flex; flex-direction: column }
+.trow {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .45rem .6rem; border-bottom: 1px solid var(--line);
+  cursor: pointer; position: relative;
+}
+.trow:hover:not(.thead) { background: var(--card-2) }
+.trow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px }
+.trow .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.trow .ts { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums; width: 4.5rem; text-align: right }
+.trow.seen .tt { opacity: .62 }
+/* The heading is a label rather than a row you can press. */
+.thead {
+  cursor: default; color: var(--muted); font-size: .72rem; font-weight: 700;
+  letter-spacing: .09em; text-transform: uppercase; border-bottom-color: var(--line-strong);
+}
+.trow .rowbar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(0, 0, 0, .35) }
+.trow .rowbar i { display: block; height: 100%; background: var(--accent) }
+
+@media (max-width: 560px) {
+  .detailrow .dsum { -webkit-line-clamp: 2 }
+}
 
 /* ---- where you stopped, and what you have finished ------------------------ */
 

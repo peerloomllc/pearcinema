@@ -105,6 +105,18 @@ export const Blocked = (p) => <S {...p}><circle cx='12' cy='12' r='8.5' /><path 
 
 export const List = (p) => <S {...p}><path d='M4 7h16M4 12h16M4 17h16' /></S>
 
+// A picture with words beside it, twice - the shape of a row that carries a
+// poster, a title and a line about the film. It has to be tellable apart from the
+// plain rules of the table view at 15px, which is why the thumbnails are solid.
+export const Detail = (p) => (
+  <S {...p}>
+    <rect x='3' y='4.5' width='6' height='6' rx='1.2' />
+    <path d='M12 6.5h9M12 9.5h6' />
+    <rect x='3' y='13.5' width='6' height='6' rx='1.2' />
+    <path d='M12 15.5h9M12 18.5h6' />
+  </S>
+)
+
 export const Grid = (p) => (
   <S {...p}><rect x='4' y='4' width='7' height='7' rx='1.4' /><rect x='13' y='4' width='7' height='7' rx='1.4' /><rect x='4' y='13' width='7' height='7' rx='1.4' /><rect x='13' y='13' width='7' height='7' rx='1.4' /></S>
 )
