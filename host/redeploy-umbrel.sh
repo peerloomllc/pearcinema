@@ -16,6 +16,16 @@
 #                                               # must be re-paired afterwards.
 #   SKIP_BUILD=1 bash host/redeploy-umbrel.sh   # reuse the image already built
 #
+#   PEARCINEMA_HLS_SLICE=1 ...                    # go back to handing a resuming
+#                                                 # television a SLICED playlist. The
+#                                                 # default gives it the whole film plus
+#                                                 # #EXT-X-START, so its own on-screen
+#                                                 # clock is the film's - measured as
+#                                                 # honoured on the living room Roku,
+#                                                 # 2026-08-20. The tag is optional in
+#                                                 # the standard, so a receiver that
+#                                                 # ignores it needs this.
+#
 # Non-destructive by default: /home/umbrel/pearcinema-data is reused, so paired
 # devices need no re-pair and the scan cache survives - which matters here far more
 # than it does for music, because re-probing 2,922 films and episodes with ffprobe is
@@ -168,6 +178,7 @@ $SUDO docker run -d \
   -e PEARCINEMA_DATA=/data \
   -e PEARCINEMA_NAME="$LIBRARY_NAME" \
   -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" \
+  ${PEARCINEMA_HLS_SLICE:+-e PEARCINEMA_HLS_SLICE="$PEARCINEMA_HLS_SLICE"} \
   -v "$DATA:/data" \
   --mount "type=bind,source=$LIBRARY,target=/library,bind-propagation=rslave" \
   "$IMAGE"

@@ -121,11 +121,11 @@ function fakeMedia ({ mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS
   return m
 }
 
-async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null, boundaries = null } = {}) {
+async function build ({ grantRows = { [DEVICE]: okGrant() }, mode = 'direct', container = 'mp4', expectCaps = CAST_CAPS, report = null, boundaries = null, startOffset = true } = {}) {
   const speakers = fakeSpeakers()
   const grants = fakeGrants(grantRows)
   const media = fakeMedia({ mode, container, expectCaps, boundaries })
-  const casts = new CastSessions({ speakers, grants, media, report })
+  const casts = new CastSessions({ speakers, grants, media, report, startOffset })
   const port = await casts.start()
   return { casts, speakers, grants, media, port }
 }
@@ -163,7 +163,10 @@ test('a converted cast travels as HLS, sliced to start at the resume point', asy
   // A Roku REFUSES an unbounded progressive stream (measured on the living
   // room stick: "Full-content response on a range request"), so transcode
   // mode serves the same playlist-and-segments the phone rides.
-  const { casts, speakers, media } = await build({ mode: 'transcode' })
+  //
+  // THE SLICED SHAPE, which is no longer the default but is still what a receiver that
+  // ignores #EXT-X-START gets - see the two shapes at the end of this file.
+  const { casts, speakers, media } = await build({ mode: 'transcode', startOffset: false })
   t.after(() => casts.close())
 
   const out = await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv', at: 13 })
@@ -270,6 +273,7 @@ test('a readonly grant cannot fetch even with a valid token', async (t) => {
 test('the poll writes the television\'s position and reports the ending', async (t) => {
   const reports = []
   const { casts, speakers } = await build({
+    startOffset: false,
     mode: 'transcode',
     report: async (r) => { reports.push(r) }
   })
@@ -376,7 +380,7 @@ test('a television that cannot seek is told so, rather than restarted from zero'
 })
 
 test('a converted cast skips by starting the stream again at the new point', async (t) => {
-  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  const { casts, speakers } = await build({ startOffset: false, mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
   t.after(() => casts.close())
   await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 100 })
 
@@ -429,7 +433,7 @@ test('skipping a television that is playing nothing of ours is refused', async (
 // the wrong minute on the remote.
 
 test('the remote is told the film s clock, not the television s', async (t) => {
-  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska' })
+  const { casts, speakers } = await build({ startOffset: false, mode: 'transcode', container: 'matroska' })
   t.after(() => casts.close())
   await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 1800 })
 
@@ -555,7 +559,10 @@ test('A RESUME SNAPS TO A REAL CUT POINT, and the position report follows it', a
   const { casts, speakers } = await build({
     mode: 'remux',
     expectCaps: ROKU_CAPS,
-    boundaries: [0, 4.859, 10.74, 19.874, 26.339, 31.386]
+    boundaries: [0, 4.859, 10.74, 19.874, 26.339, 31.386],
+    // The sliced shape: this test is about row.at carrying the real cut point, which is
+    // the arithmetic that shape depends on.
+    startOffset: false
   })
   t.after(() => casts.close())
 
@@ -601,4 +608,121 @@ test('an even grid still divides, so a re-encoded cast is unchanged', async (t) 
   assert.equal(segmentAt(1e9, out), 3, 'past the end is the last segment, never off the end')
   assert.equal(segmentStart(2, out), 10.74)
   assert.equal(segmentStart(99, out), 19.874)
+})
+
+test('THE OTHER PLAYLIST SHAPE: the whole film, joined in the middle', async (t) => {
+  // What the television's OWN clock says depends on which shape it was handed. Sliced,
+  // the receiver holds only what is left, so its display reads zero at a resume and
+  // resets to zero on every skip - true about the stream it was given, and not what
+  // anybody in the room means (Tim, 2026-08-19, watching his TV).
+  //
+  // With `#EXT-X-START` the receiver holds the WHOLE film and is told where to join it,
+  // so its clock is the film's clock. The tag is optional in the standard - a receiver
+  // may ignore it and start at the beginning - which is why this is a setting measured
+  // per television rather than the default.
+  const { casts, speakers, media } = await build({ mode: 'transcode' })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv', at: 13 })
+  const url = urlOf(speakers)
+  const body = await (await fetch(url)).text()
+
+  // NOTHING IS DROPPED. Every segment is still there, which is what makes the
+  // receiver's timeline the film's timeline.
+  assert.ok(body.includes('\n0.ts'), 'the film still begins at its beginning')
+  assert.ok(body.includes('3.ts'))
+  assert.match(body, /#EXT-X-START:TIME-OFFSET=12\.000,PRECISE=YES/)
+  assert.match(body, /#EXT-X-VERSION:6/, 'the tag needs version 6')
+  assert.doesNotMatch(body, /#EXT-X-MEDIA-SEQUENCE:3/, 'nothing was cut, so nothing re-sequenced')
+
+  // AND row.at GOES TO ZERO WITH IT. The poll adds row.at to what the television
+  // reports; the television is now reporting the film's own minute, so adding the
+  // offset again would double it.
+  const where = await casts.where({ deviceKey: DEVICE, entityId: 'media_player.tv' })
+  assert.ok(where === null || where.positionMs != null)
+  const row = casts.byDevice.get(DEVICE).get('media_player.tv')
+  assert.equal(row.at, 0)
+  void media
+})
+
+test('and the sliced shape is still there for a receiver that ignores the tag', async (t) => {
+  // Measured as honoured on the living room Roku (2026-08-20), so the offset shape is
+  // the default - but a receiver that ignores EXT-X-START would start a resumed film
+  // from the beginning, which is a worse thing to be wrong about than a clock. One env
+  // var goes back.
+  const { casts, speakers } = await build({ mode: 'transcode', startOffset: false })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.tv', at: 13 })
+  const body = await (await fetch(urlOf(speakers))).text()
+  assert.doesNotMatch(body, /#EXT-X-START/)
+  assert.match(body, /#EXT-X-MEDIA-SEQUENCE:3/)
+})
+
+test('on the offset shape the television reports the film itself, so nothing is added', async (t) => {
+  // The mirror of the snap-to-a-real-cut-point test above. There, the playlist is cut
+  // and the television counts from zero, so row.at is the boundary and the poll adds
+  // it. Here the television holds the whole film and joins it in the middle, so its own
+  // clock IS the film's minute - and adding anything to it would double the offset.
+  const { casts, speakers } = await build({
+    mode: 'remux',
+    expectCaps: ROKU_CAPS,
+    boundaries: [0, 4.859, 10.74, 19.874, 26.339, 31.386]
+  })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: 'media_player.living_room_roku', at: 24 })
+  const body = await (await fetch(urlOf(speakers))).text()
+  assert.match(body, /#EXT-X-START:TIME-OFFSET=19\.874/)
+
+  speakers.states.set('media_player.living_room_roku', { state: 'playing', position: 25.874, duration: 40, positionUpdatedAt: new Date().toISOString() })
+  const where = await casts.where({ deviceKey: DEVICE, entityId: 'media_player.living_room_roku' })
+  assert.equal(Math.round(where.positionMs / 100), Math.round(25.874 * 10), 'the television\'s own clock, untouched')
+})
+
+test('A SKIP OF THIRTY SECONDS IS THIRTY SECONDS, not sixty', async (t) => {
+  // Tim, 2026-08-20, on the real Roku: skipping ahead jumped about a minute, and the
+  // phone read twenty or thirty seconds ahead of the television before settling back.
+  //
+  // Both came from one field doing two jobs. `row.at` was what the poll ADDS to the
+  // television's clock AND where the playlist was told to begin, and on the offset
+  // shape those are different numbers - the television is already reporting the film's
+  // own minute, so adding the start to it counts the skip twice. It was zeroed when the
+  // playlist was fetched, which left a two or three second window - exactly the length
+  // of re-cutting a stream - where every reading was double.
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 100 })
+  const row = casts.active(DEVICE)[0]
+  assert.equal(row.at, 0, 'nothing to add: the television reports the film itself')
+
+  // The television, having arrived, reports the film's own minute.
+  speakers.states.set(TV, { state: 'playing', position: 120, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  const w = await casts.where({ deviceKey: DEVICE, entityId: TV })
+  assert.equal(w.positionMs, 120000, 'not 220000 - the offset is not added twice')
+
+  const out = await casts.seek({ deviceKey: DEVICE, entityId: TV, deltaMs: 30000 })
+  assert.equal(out.positionMs, 150000, 'thirty seconds on from a hundred and twenty')
+})
+
+test('and until the television gets there, it is asked where it is GOING', async (t) => {
+  // The other half of the same two or three seconds. A skip re-cuts the stream and the
+  // television plays the old one meanwhile - so asking it where the film is gets a
+  // truthful answer to a question about the previous stream, and the phone jumped to
+  // the right minute and then back to the old one until the next poll.
+  const { casts, speakers } = await build({ mode: 'transcode', container: 'matroska', expectCaps: CAST_CAPS })
+  t.after(() => casts.close())
+
+  await casts.play({ deviceKey: DEVICE, itemId: 'film1', entityId: TV, at: 600 })
+  // Still playing the stream it had, forty seconds back.
+  speakers.states.set(TV, { state: 'playing', position: 560, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 600000, 'where it is going')
+
+  // It arrives, and from then on the television is believed - including once the film
+  // has legitimately run far away from where it started.
+  speakers.states.set(TV, { state: 'playing', position: 603, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 603000)
+  speakers.states.set(TV, { state: 'playing', position: 1500, duration: 7200, positionUpdatedAt: null, supportedFeatures: SEEKABLE })
+  assert.equal((await casts.where({ deviceKey: DEVICE, entityId: TV })).positionMs, 1500000, 'the latch holds: this is playback, not a television that never arrived')
 })

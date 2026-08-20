@@ -254,6 +254,12 @@ class PearCinemaHost {
       },
       presence: this.host.presence,
       report: (p) => this.reportCastProgress(p),
+      // WHICH PLAYLIST SHAPE A RESUME GETS. See Casts._servePlaylist: the offset one
+      // makes the television's OWN clock the film's clock, and it rests on a tag a
+      // receiver is allowed to ignore - measured as honoured on the living room Roku,
+      // 2026-08-20, so it is the default. An env var rather than a setting on a page,
+      // because it is a measurement about a television and not a preference.
+      startOffset: process.env.PEARCINEMA_HLS_SLICE !== '1',
       log
     })
 

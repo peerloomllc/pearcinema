@@ -348,7 +348,17 @@ export default function App () {
         CastRemote.show(held.info)
         send(paused ? 'cast.pause' : 'cast.resume', { entityId, libraryId })
       } else if (what === 'forward' || what === 'back') {
+        // The answer carries where the film is going, so the card can say it without
+        // asking a television that has not started the new stream yet.
         send('cast.seek', { entityId, libraryId, deltaMs: what === 'forward' ? skipMs : -skipMs })
+          .then((r: any) => {
+            const at = r?.result?.positionMs
+            const still = castRemote.current
+            if (at == null || !still) return
+            still.info = { ...still.info, positionMs: at }
+            CastRemote.show(still.info)
+          })
+          .catch(() => {})
       }
 
       // And the app hears about it, for whenever it is awake. Best effort by
