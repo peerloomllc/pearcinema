@@ -661,3 +661,76 @@ test('the autoplay switch on the card is the same one in Settings', async (t) =>
   assert.equal(wrote[0].args.autoplayNext, true)
   assert.equal(h.labelled('Play the next episode').getAttribute('aria-checked'), 'true', 'and the page agrees')
 })
+
+/* --------------------------------------- the continue list -- */
+
+const HALF = (n) => ({
+  id: 'old-' + n,
+  type: 'movie',
+  title: 'Half watched ' + n,
+  year: 1960 + n,
+  runtime: 5400,
+  resume: { positionMs: 900_000, playedAt: Date.now() - n * 1000 }
+})
+
+test('THE CONTINUE LIST IS CAPPED, with the rest one press away', async (t) => {
+  const h = await open({ 'resume.list': { items: Array.from({ length: 14 }, (_, n) => HALF(n)) } })
+  t.after(() => h.dom.window.close())
+  await h.settle(300)
+
+  h.click(h.labelled('You'))
+  await h.settle(220)
+
+  assert.match(h.text(), /Half watched 0/)
+  assert.doesNotMatch(h.text(), /Half watched 12/, 'the tail is behind Show all')
+  const more = h.button(/Show all 14/)
+  assert.ok(more, 'and it says how many there are')
+  h.click(more)
+  await h.settle(80)
+  assert.match(h.text(), /Half watched 13/)
+})
+
+test('A PLACE CAN BE REMOVED WITHOUT CLAIMING TO HAVE WATCHED IT', async (t) => {
+  // Marking it watched already takes it off this list, and for something
+  // abandoned rather than finished that is a lie which shows up as a tick
+  // everywhere else.
+  const h = await open({ 'resume.list': { items: [HALF(0), HALF(1)] } })
+  t.after(() => h.dom.window.close())
+  await h.settle(300)
+  h.click(h.labelled('You'))
+  await h.settle(220)
+
+  h.click(h.button(/^Remove$/))
+  await h.settle(120)
+
+  const zeroed = h.called('resume.set')
+  assert.equal(zeroed.length, 1)
+  assert.equal(zeroed[0].args.positionMs, 0, 'a zero position IS the delete')
+  assert.equal(h.called('watched.set').length, 0, 'and nothing was marked watched')
+  assert.doesNotMatch(h.text(), /Half watched 0/, 'the row goes at once')
+})
+
+test('CLEARING THE LIST ASKS FIRST, and says the places will be forgotten', async (t) => {
+  const h = await open({ 'resume.list': { items: [HALF(0), HALF(1)] }, 'resume.clear': { ok: true, cleared: 2 } })
+  t.after(() => h.dom.window.close())
+  await h.settle(300)
+  h.click(h.labelled('You'))
+  await h.settle(220)
+
+  h.click(h.button(/Clear this list/))
+  await h.settle(100)
+  assert.match(h.text(), /will be forgotten/)
+  assert.match(h.text(), /cannot be undone/)
+  assert.equal(h.called('resume.clear').length, 0, 'nothing has happened yet')
+
+  h.click(h.button(/^Cancel$/))
+  await h.settle(80)
+  assert.equal(h.called('resume.clear').length, 0, 'still nothing')
+
+  h.click(h.button(/Clear this list/))
+  await h.settle(80)
+  h.click(h.button(/Clear it/))
+  await h.settle(150)
+  assert.equal(h.called('resume.clear').length, 1)
+  assert.match(h.text(), /Nothing in progress/)
+})

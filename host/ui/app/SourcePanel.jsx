@@ -146,7 +146,7 @@ function FolderPicker ({ onPick, onClose }) {
       {/* Centred and the SAME WIDTH. The path lives in the header rather than inside
           the button, which was a button that changed width at every step - and two
           buttons of different widths side by side was the next thing Tim saw. */}
-      <div class='confirm-actions center'>
+      <div class='confirm-actions'>
         <button class='ghost' onClick={onClose}>Cancel</button>
         <button disabled={busy || !data || !!why} onClick={() => { onPick(at); onClose() }}>
           Use folder

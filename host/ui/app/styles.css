@@ -537,11 +537,14 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem }
 .modal-head h3 { margin: 0 }
-.confirm-actions { display: flex; gap: .5rem; justify-content: flex-end; margin-top: 1rem }
-/* Centred AND equal (Tim, 2026-08-19): two buttons of different widths side by side
- * is the same ragged edge the settings rows exist to stop, one window further in. */
-.confirm-actions.center { justify-content: center }
-.confirm-actions.center button { min-width: 9rem; justify-content: center }
+/* CENTRED AND EQUAL, ALWAYS (Tim, 2026-08-19, and again 2026-08-20 when the
+ * Clear confirm showed the rule had only ever been half applied). Two buttons of
+ * different widths pushed to the right edge is the same ragged edge the settings
+ * rows exist to stop, one window further in - and it was the shape every
+ * two-button window in the app still had, because the centring was written as a
+ * class only the single-button case ever asked for. */
+.confirm-actions { display: flex; gap: .5rem; justify-content: center; margin-top: 1rem }
+.confirm-actions button { min-width: 9rem; justify-content: center }
 
 /* ---- pairing -------------------------------------------------------------
  *
@@ -653,7 +656,9 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
    cards around it, so the prose breathes on a desktop screen. */
 .wizard { max-width: 46rem; margin-left: auto; margin-right: auto }
 .wizard h2, .wizard > .hint, .wizard p.hint { text-align: center }
-.wizard .confirm-actions { justify-content: center }
+/* The wizard's are wider and share the row equally - a first-run window has more
+ * space and longer labels. The centring itself is now the rule everywhere, so
+ * only the sizing is left here. */
 .wizard .confirm-actions button { flex: 1 1 0; max-width: 14rem; white-space: nowrap }
 .steps { display: flex; gap: .3rem; margin-bottom: 1rem }
 .steps i { flex: 1; height: 3px; border-radius: 2px; background: var(--line) }
@@ -796,6 +801,31 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .eprow.seen .t { opacity: .65 }
 
 .shelf { margin: 0 0 .6rem }
+
+/* The shelf's heading and its one action on the same line. Clear sits at the far
+ * end rather than beside the words: it empties the row under it, and a
+ * destructive control should not read as part of the label. */
+.shelfhead { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .6rem }
+.shelfhead .shelf { margin: 0; flex: 1 1 auto }
+
+/* The rest of the shelf, one press away rather than gone. Under the row and
+ * centred, so it reads as the end of that row and not as a page control. */
+.showall { display: block; margin: .7rem auto 0 }
+
+/* TAKE THIS OFF THE SHELF. Same weight and behaviour as the fix-the-artwork
+ * pencil in the opposite situation - dim until the card is hovered, so a row of
+ * twelve cards is not twelve crosses competing with the artwork. */
+.poster .forget {
+  position: absolute; top: .4rem; left: .4rem;
+  width: 1.5rem; height: 1.5rem; padding: 0; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: rgba(0,0,0,.55); color: rgba(255,255,255,.7);
+  border: 1px solid transparent; opacity: 0; transition: opacity .12s ease;
+}
+.poster:hover .forget, .poster:focus-within .forget { opacity: 1 }
+.poster .forget:hover { color: #fff; background: rgba(0,0,0,.75) }
+.forget svg { display: block }
 
 /* Who this browser is watching as. Only ever rendered once a SECOND person exists,
  * so it is sized as an aside rather than as a control people meet on day one. */

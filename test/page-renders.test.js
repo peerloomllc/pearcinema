@@ -2471,4 +2471,115 @@ test('and a film opened by hand still does NOT start on its own', async (t) => {
   assert.deepEqual(played, [])
 })
 
+/* ------------------------------------------ the continue shelf -- */
+
+// Fourteen half-watched films, so the cap has something to cut.
+function crowdedShelf () {
+  return {
+    ...ROUTES['/api/watch/state'],
+    continue: Array.from({ length: 14 }, (_, n) => ({
+      ...FILM,
+      id: 'old-' + n,
+      title: 'Half watched ' + n,
+      resume: { positionMs: 60_000, playedAt: Date.now() - n * 1000 }
+    })),
+    upNext: []
+  }
+}
+
+test('THE SHELF IS CAPPED, and the rest is one press away rather than gone', async (t) => {
+  // A year of half-started films used to push the one thing somebody is
+  // actually part way through off the end of the row (Tim, 2026-08-19).
+  const { dom, doc, win } = await open(STATE, { '/api/watch/state': crowdedShelf() })
+  t.after(() => dom.window.close())
+
+  const shelf = () => [...doc.querySelectorAll('.grid')][0].querySelectorAll('.poster')
+  assert.equal(shelf().length, 12, 'twelve shown of fourteen')
+  // NEWEST FIRST, which is the store's own ordering - the cap cuts the tail.
+  assert.match(shelf()[0].textContent, /Half watched 0/)
+
+  const more = [...doc.querySelectorAll('button')].find(b => /Show all 14/.test(b.textContent))
+  assert.ok(more, 'and it says how many there are')
+  more.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(shelf().length, 14)
+  assert.ok([...doc.querySelectorAll('button')].find(b => /Show fewer/.test(b.textContent)))
+})
+
+test('a shelf that fits carries no Show all at all', async (t) => {
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+  assert.equal([...doc.querySelectorAll('button')].filter(b => /Show all/.test(b.textContent)).length, 0)
+})
+
+test('ONE CARD CAN BE TAKEN OFF THE SHELF WITHOUT CLAIMING TO HAVE WATCHED IT', async (t) => {
+  const asked = []
+  const { dom, doc, win } = await open(STATE, {}, asked)
+  t.after(() => dom.window.close())
+
+  const card = [...doc.querySelectorAll('.grid')][0].querySelectorAll('.poster')[0]
+  const forget = card.querySelector('.forget')
+  assert.ok(forget, 'the card offers it')
+  assert.match(forget.getAttribute('aria-label'), /Remove Metropolis from Continue watching/)
+  forget.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // A ZERO POSITION IS THE DELETE, the same write a finished film makes - and
+  // pointedly NOT /api/watch/watched, which would put a tick on it everywhere.
+  assert.ok(asked.some(u => String(u).includes('/api/watch/position')))
+  assert.ok(!asked.some(u => String(u).includes('/api/watch/watched')))
+})
+
+test('AN UP-NEXT CARD HAS NOTHING TO FORGET', async (t) => {
+  // It is a suggestion, not a place somebody stopped.
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+  const next = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('The Detail'))
+  assert.ok(next.querySelector('.next'), 'it is the up-next card')
+  assert.equal(next.querySelector('.forget'), null)
+})
+
+test('CLEARING THE SHELF ASKS FIRST, and says the places will be forgotten', async (t) => {
+  const asked = []
+  const { dom, doc, win } = await open(STATE, {}, asked)
+  t.after(() => dom.window.close())
+
+  const clear = [...doc.querySelectorAll('.shelfhead button')].find(b => b.textContent.trim() === 'Clear')
+  assert.ok(clear, 'the shelf carries its own Clear')
+  clear.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const modal = doc.querySelector('.modal')
+  assert.ok(modal, 'it asks rather than doing it')
+  assert.match(modal.textContent, /will be forgotten/)
+  assert.match(modal.textContent, /cannot be undone/)
+
+  // CENTRED AND EQUAL, the app's own rule for buttons in a window (Tim,
+  // 2026-08-19, and again on this very dialog on 2026-08-20 - the centring had
+  // been written as a class that only the ONE-button case ever asked for, so
+  // every two-button window in the app was still ragged and right-aligned).
+  // No assertion about text or structure could have seen that, which is why
+  // this one is about the computed style.
+  const acts = modal.querySelector('.confirm-actions')
+  assert.equal(win.getComputedStyle(acts).justifyContent, 'center')
+  const widths = [...acts.querySelectorAll('button')].map(b => win.getComputedStyle(b).minWidth)
+  assert.equal(widths.length, 2)
+  assert.equal(widths[0], widths[1], 'and the same width as each other')
+  assert.ok(widths[0] && widths[0] !== 'auto' && widths[0] !== '0px', 'a real width: ' + widths[0])
+  assert.ok(!asked.some(u => String(u).includes('/api/watch/clear')), 'and nothing has happened yet')
+
+  const cancel = [...modal.querySelectorAll('button')].find(b => /Cancel/.test(b.textContent))
+  cancel.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(doc.querySelector('.modal'), null)
+  assert.ok(!asked.some(u => String(u).includes('/api/watch/clear')), 'still nothing')
+
+  clear.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const go = [...doc.querySelectorAll('.modal button')].find(b => /Clear it/.test(b.textContent))
+  go.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(asked.some(u => String(u).includes('/api/watch/clear')))
+})
+
 function rootText (doc) { return doc.getElementById('root').textContent }
