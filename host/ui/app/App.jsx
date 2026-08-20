@@ -52,6 +52,11 @@ const CAPS = probeCapabilities()
 const SETTINGS_SECTIONS = [
   ['library', 'Library'],
   ['sharing', 'Sharing'],
+  // WHO CAN REACH THIS LIBRARY, beside who else's libraries this machine reaches -
+  // the two pages about other people sit together (Tim, 2026-08-20). It was its own
+  // tab until then; the topbar keeps its icon as a shortcut straight here, so the
+  // live dot and one-press revoke both survive the move.
+  ['people', 'People'],
   ['casting', 'Casting'],
   ['host', 'This host'],
   ['support', 'Support development']
@@ -63,6 +68,9 @@ const SETTINGS_SECTIONS = [
 // this is load-bearing inside the app and not only for bookmarks.
 const MOVED_SECTIONS = {
   security: 'host',
+  // '#who' was a TAB rather than a section, so this entry is what keeps an old
+  // bookmark - or the topbar icon of an older build - landing on the page it names.
+  who: 'people',
   source: 'library',
   artwork: 'library',
   televisions: 'casting',
@@ -934,6 +942,8 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
           </>
         )}
 
+        {sec === 'people' && <People state={state} reload={reload} />}
+
         {sec === 'casting' && <CastPanel />}
 
         {sec === 'support' && <SupportPanel />}
@@ -1254,7 +1264,10 @@ export default function App () {
   const [state, setState] = useState(null)
   const [tab, setTab] = useState(() => {
     const [t] = hashParts()
-    return ['watch', 'who', 'settings'].includes(t) ? t : 'watch'
+    // '#who' used to be a tab of its own. It is a Settings page now, so the old
+    // address opens Settings there rather than silently landing on the library.
+    if (t === 'who') { location.hash = 'settings/people'; return 'settings' }
+    return ['watch', 'settings'].includes(t) ? t : 'watch'
   })
   const [search, setSearch] = useState('')
   const [playing, setPlaying] = useState(null)
@@ -1548,10 +1561,10 @@ export default function App () {
             </button>
           )}
           <button
-            class={'iconbtn' + (tab === 'who' ? ' on' : '')}
-            onClick={() => { setTab('who'); setPlaying(null) }}
-            aria-label='User access'
-            title={online ? `User access - ${online} online` : 'User access'}
+            class='iconbtn'
+            onClick={() => { location.hash = 'settings/people'; setTab('settings'); setPlaying(null) }}
+            aria-label='People and devices'
+            title={online ? `People and devices - ${online} online` : 'People and devices'}
           >
             <PeopleIcon size={18} />
             {online > 0 && <span class='dot' aria-hidden='true' />}
@@ -1626,7 +1639,6 @@ export default function App () {
               )
         )}
 
-        {!wizard && tab === 'who' && <People state={state} reload={reload} />}
         {!wizard && tab === 'settings' && <Settings state={state} reload={reload} remotes={remotes} onSource={pickSource} source={source} onPlayDownload={playDownload} />}
       </div>
 

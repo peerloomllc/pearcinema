@@ -15,14 +15,37 @@
 // PERSON is the thing a human recognises. Revoking a person cuts every device they
 // hold at once, which is the action somebody actually wants when they say "take
 // Sam off".
+//
+// THE LEDGER SHAPE (Tim, 2026-08-20). This was the last screen still wearing the
+// old one - a card with a heading and nested lists inside it - while every Settings
+// page had moved to rows: what it is on the left, the control on the right, a
+// sub-line only where the control needs one. It is now a Settings page like the
+// others, reached from the nav or straight from the topbar's people icon, which
+// keeps its dot and keeps cutting a device off one press away.
+//
+// WHAT THE RESHAPE WAS NOT ALLOWED TO COST, and this is the whole reason to write it
+// down: revoke stays one press from where a device is named, and it keeps saying how
+// many live connections it cut. That sentence is the app's central security claim and
+// it is displayed, not assumed.
+//
+// The nesting stays, because the nesting IS the model: a person is one row until you
+// open them, so a household of four is four rows rather than a wall of keys.
 
-import { useState } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
-import { askConfirm, notify } from './ui'
-import { ChevronDown, ChevronUp } from './icons'
+import { Modal, askConfirm, notify } from './ui'
+import { Blocked, Check, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
 
-function DeviceRow ({ d, persons, reload }) {
+// One device, as a row. `nested` is a device sitting under the person who holds it,
+// where the name is already known and the row is one step in.
+function DeviceRow ({ d, persons, reload, nested = false }) {
   const [open, setOpen] = useState(false)
+  // The claim question, asked in a window rather than as two long word buttons on
+  // the row (Tim, 2026-08-20: "a modal pop-up is cleaner than those two text buttons
+  // in the line"). It also has room to say what each answer MEANS, which the row
+  // never did - and joining somebody inherits their watch history, so that is worth
+  // a sentence.
+  const [claimOpen, setClaimOpen] = useState(false)
 
   const revoke = async () => {
     const ok = await askConfirm({
@@ -34,6 +57,8 @@ function DeviceRow ({ d, persons, reload }) {
     if (!ok) return
     const res = await api('/api/revoke', { deviceKey: d.deviceKey })
     await reload()
+    // THE NUMBER, ALWAYS. "Revoked" that left a film playing would not be revoked,
+    // so the count of connections actually cut is reported rather than assumed.
     notify('Done', res.killed
       ? `Access removed, and ${res.killed} live connection${res.killed === 1 ? '' : 's'} cut.`
       : 'Access removed. It had nothing connected at the time.')
@@ -57,110 +82,242 @@ function DeviceRow ({ d, persons, reload }) {
     reload()
   }
 
+  // ASK BEFORE MOVING SOMEBODY ELSE'S DEVICE (Tim, 2026-08-20). A chooser that acts
+  // the instant it changes gives no way to back out of a mis-click, and no sign that
+  // anything happened either - which is how it read.
   const assign = async (personId) => {
+    const to = personId ? persons.find(p => p.id === personId) : null
+    const ok = await askConfirm({
+      title: to ? `File ${d.label || 'this device'} under ${to.label}?` : `Take ${d.label || 'this device'} off ${d.belongsTo || 'its person'}?`,
+      message: to
+        ? `Whoever holds it shares ${to.label}'s watch history from now on, and cutting ${to.label} off cuts this device with it.`
+        : 'It keeps its access and stops belonging to anybody, so what it watches is its own again.',
+      confirmLabel: to ? 'File it there' : 'Take it off'
+    })
+    if (!ok) return
     const res = await api('/api/assign', { deviceKey: d.deviceKey, personId })
     if (res.error) return notify('Not changed', res.error)
     reload()
   }
 
+  // "I have seen the new name, and it is still theirs." The way out of Needs
+  // confirming for a device that renamed ITSELF while already assigned - which had
+  // none: it could be moved to a person of the new name, or detached and started
+  // again, and those are the two things somebody may well not want.
+  const keepWhereItIs = async () => {
+    const res = await api('/api/device/claim/keep', { deviceKey: d.deviceKey })
+    if (res.error) return notify('Not changed', res.error)
+    reload()
+  }
+
   const revoked = !!d.revokedAt
-  const sameName = persons.filter(p => p.name === d.claimedUser)
+  const guest = !revoked && d.expiresAt
+  // Everybody who ALREADY holds the claimed name. Joining one of them is a real
+  // choice with a consequence; minting another of the same name is a different one.
+  const holders = persons.filter(p => p.name.toLowerCase() === String(d.claimedUser || '').toLowerCase())
+
+  const claimAnswers = [
+    ...(d.personId && d.belongsTo
+      ? [{
+          label: `Still ${d.belongsTo}`,
+          hint: 'It stays where it is and stops asking. Nothing about it changes.',
+          run: keepWhereItIs
+        }]
+      : []),
+    ...holders.filter(p => p.id !== d.personId).map(p => ({
+      label: `It is ${p.label}`,
+      hint: `It joins ${p.label} and shares their watch history from now on.`,
+      run: () => confirmPerson(false, p.id)
+    })),
+    holders.length
+      ? {
+          label: `A different ${d.claimedUser}`,
+          hint: 'Somebody who happens to have the same name. They get a history of their own.',
+          run: () => confirmPerson(true, null)
+        }
+      : {
+          label: `It really is ${d.claimedUser}`,
+          hint: 'Nobody here has that name, so it becomes a person of their own.',
+          run: () => confirmPerson(false, null)
+        }
+  ]
+
+  // THE NAME CARRIES THE STATE and the sub-line says it in words, the rule the
+  // televisions row set: colour is never the only carrier. A cut-off row is dim, a
+  // guest pass about to run out is amber, a connected device is green.
+  const tone = revoked ? 'dim' : guest ? 'warn' : d.online ? 'good' : ''
+
+  // ONE LINE OF FACTS, in the order somebody reads them: what state it is in, whose
+  // it is, what kind of machine, when it was last here.
+  const facts = [
+    revoked ? 'Cut off' : d.online ? 'Connected now' : null,
+    guest ? `Guest, ${until(d.expiresAt) || 'expired'}` : null,
+    d.scope === 'owner' ? 'Owner' : null,
+    // WHAT IS INTERESTING ABOUT THIS ROW. Filed under somebody, that is who; but a
+    // claim nobody has agreed to yet is the reason the row is being looked at, so it
+    // is said out loud - and said BESIDE the person when there is one, because "the
+    // TCL says it is Tim TCL2 and is filed under Tim" is the whole situation.
+    !d.revokedAt && d.claimedUser && !d.confirmed ? `Says it is ${d.claimedUser}` : null,
+    nested ? null : (d.belongsTo
+      ? (d.claimedUser && !d.confirmed ? `filed under ${d.belongsTo}` : d.belongsTo)
+      : (d.claimedUser ? null : 'Nobody yet')),
+    platformLabel(d.platform),
+    // The grant row's field is lastSeenAt; reading d.lastSeen here kept every
+    // device at "never seen" no matter how much it streamed.
+    `seen ${ago(d.lastSeenAt)}`
+  ].filter(Boolean).join(' · ')
 
   return (
-    <div class='dev'>
-      <span class={'dot' + (d.online ? ' on' : '')} title={d.online ? 'connected now' : 'not connected'} />
-      <div class='who'>
-        <b>{d.label || 'A device'}</b>
-        {d.scope === 'owner' && <span class='chip accent' style='margin-left:.4rem'>owner</span>}
-        {revoked && <span class='chip bad' style='margin-left:.4rem'>cut off</span>}
-        {!revoked && d.expiresAt && <span class='chip warn' style='margin-left:.4rem'>guest · {until(d.expiresAt) || 'expired'}</span>}
-        <div>
-          {[
-            d.belongsTo ? `${d.belongsTo}` : (d.claimedUser ? `says it is ${d.claimedUser}` : 'nobody yet'),
-            platformLabel(d.platform),
-            // The grant row's field is lastSeenAt; reading d.lastSeen here kept
-            // every device at "never seen" no matter how much it streamed.
-            `seen ${ago(d.lastSeenAt)}`
-          ].filter(Boolean).join(' · ')}
-        </div>
-        {/* What this device is watching RIGHT NOW - the host's own certainty,
-            from the bytes it is serving (Tim, 2026-08-15). */}
-        {d.watching && (
-          <div class='nowrow'>
-            {d.watching.artId && <img src={'/api/art?id=' + encodeURIComponent(d.watching.artId)} alt='' loading='lazy' />}
-            <span>Watching <b>{d.watching.title}</b></span>
-          </div>
-        )}
-        <div class='mono' title={d.deviceKey}>{shortKey(d.deviceKey)}</div>
+    <>
+      <div class='setrow'>
+        <span class='rowmain'>
+          <span class={'rowname ' + tone}>{d.label || 'A device'}</span>
+          <span class='rowsub'>{facts}</span>
+          {/* What this device is watching RIGHT NOW - the host's own certainty,
+              from the bytes it is serving (Tim, 2026-08-15). */}
+          {d.watching && (
+            <span class='rowsub nowrow'>
+              {d.watching.artId && <img src={'/api/art?id=' + encodeURIComponent(d.watching.artId)} alt='' loading='lazy' />}
+              <span>Watching <b>{d.watching.title}</b></span>
+            </span>
+          )}
+        </span>
+        <span class='rowctl'>
+          {/* ONE CONTROL, and the question itself opens in a window. Offered
+              whenever the claim is unsettled - assigned or not. It used to be
+              hidden the moment a device had a person, so a device that renamed
+              itself was stuck in Needs confirming with nothing on the row that
+              could get it out (Tim, 2026-08-20). */}
+          {!revoked && d.claimedUser && !d.confirmed && (
+            <button
+              class='iconbtn pending'
+              onClick={() => setClaimOpen(true)}
+              title={`Say who ${d.label || 'this device'} is`}
+              aria-label={`Say who ${d.label || 'this device'} is`}
+            ><Check size={17} /></button>
+          )}
+          {/* CUT OFF STAYS ONE PRESS FROM THE NAME. Everything else about a device
+              is behind the chevron; this is not. An icon rather than a word (Tim,
+              2026-08-20), and the one icon on the page that carries the danger
+              colour without being hovered - the act it starts is the one act here
+              that cannot be undone, so it is the one control that should be
+              tellable apart at a glance. It still asks before it does anything. */}
+          {!revoked && (
+            <button
+              class='iconbtn destructive'
+              onClick={revoke}
+              title={`Cut off ${d.label || 'this device'}`}
+              aria-label={`Cut off ${d.label || 'this device'}`}
+            ><Blocked size={17} /></button>
+          )}
+          {revoked && (
+            <button
+              class='iconbtn danger'
+              onClick={forget}
+              title='Remove this row'
+              aria-label={`Remove the row for ${d.label || 'this device'}`}
+            ><Trash size={17} /></button>
+          )}
+          <button
+            class='iconbtn'
+            onClick={() => setOpen(!open)}
+            aria-label={open ? `Hide details of ${d.label || 'this device'}` : `Details of ${d.label || 'this device'}`}
+            aria-expanded={open}
+          >{open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</button>
+        </span>
       </div>
 
-      <div class='row'>
-        {!revoked && !d.personId && d.claimedUser && (
-          <button class='small ghost' onClick={() => confirmPerson(sameName.length === 1, sameName.length === 1 ? sameName[0].id : null)}>
-            It really is {d.claimedUser}
-          </button>
-        )}
-        {!revoked && <button class='small destructive' onClick={revoke}>Cut off</button>}
-        {revoked && <button class='small ghost' onClick={forget}>Remove row</button>}
-        <button class='iconbtn' onClick={() => setOpen(!open)} aria-label='More'>
-          {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-        </button>
-      </div>
+      {claimOpen && (
+        <Modal title={`Who is ${d.label || 'this device'}?`} onClose={() => setClaimOpen(false)}>
+          <p class='hint'>
+            It calls itself <b>{d.claimedUser}</b>
+            {d.belongsTo ? <> and is filed under <b>{d.belongsTo}</b></> : <> and does not belong to anybody yet</>}.
+          </p>
+          {/* EVERY ANSWER SAYS WHAT IT DOES. Joining somebody inherits their watch
+              history, which is the whole reason this is an operator's decision and
+              never the device's (proposal 2026-07-14) - so it is stated rather than
+              implied by a button's name.
+              This also retires a guess that was plainly wrong: the row used to pass
+              "make a new person" whenever exactly ONE person already held the
+              claimed name, which minted a duplicate instead of joining them. The
+              window asks instead. */}
+          <div class='claimopts'>
+            {claimAnswers.map((a, i) => (
+              <button
+                key={a.label}
+                // THE FIRST ANSWER IS THE FILLED ONE, and only the first. Two solid
+                // amber blocks are not a recommendation, they are a pair of shouts -
+                // the same thing the video engine row was pulled up for.
+                class={i === 0 ? '' : 'ghost'}
+                onClick={() => { setClaimOpen(false); a.run() }}
+              >
+                <span>{a.label}</span>
+                <span class='hint'>{a.hint}</span>
+              </button>
+            ))}
+          </div>
+        </Modal>
+      )}
 
       {open && (
-        <div style='flex-basis:100%;border-top:1px solid var(--line);margin-top:.5rem;padding-top:.5rem'>
-          <label>Belongs to</label>
-          <select value={d.personId || ''} onChange={e => assign(e.currentTarget.value || null)} disabled={revoked}>
-            <option value=''>nobody</option>
-            {persons.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
-          <p class='hint'>
-            A device only becomes a person when you say so. What it calls itself is only
-            what it said.
-          </p>
+        <div class='rowopen'>
+          <div class='setrows'>
+            <div class='setrow'>
+              <span class='rowmain'>
+                <span class='rowname'>Belongs to</span>
+                <span class='rowsub'>
+                  A device only becomes a person when you say so. What it calls itself
+                  is only what it said.
+                </span>
+              </span>
+              <span class='rowctl'>
+                <select value={d.personId || ''} onChange={e => assign(e.currentTarget.value || null)} disabled={revoked}>
+                  <option value=''>Nobody</option>
+                  {persons.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </span>
+            </div>
+            <div class='setrow'>
+              <span class='rowmain'>
+                <span class='rowname'>Its key</span>
+                <span class='rowvalue' title={d.deviceKey}>{shortKey(d.deviceKey)}</span>
+              </span>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
-// PEARTUNE'S SHAPE: people first, their devices nested underneath (Tim, 2026-08-13).
-//
-// The old page was two flat lists - every person, then every device - which makes the
-// dashboard's own model invisible. A DEVICE is a key; a PERSON is the thing a human
-// recognises, and revoking a person cuts off everything they hold. Nesting the devices
-// under the person they belong to is what makes that legible without a paragraph
-// explaining it.
-//
-// What that buys, in order of how often it matters:
-//
-//   - somebody who needs confirming is at the TOP, in their own card, because an
-//     unconfirmed claim is the only thing here that is waiting on the operator
-//   - a person is one row until you open them, so a household of four is four rows
-//     rather than a wall
-//   - devices belonging to nobody are their own section rather than mixed in
-//   - devices that were cut off are hidden until asked for. They are kept, not
-//     deleted: a phone that comes back finds its own history again.
 export default function People ({ state, reload }) {
   const [open, setOpen] = useState({})
   const [showRevoked, setShowRevoked] = useState(false)
   const [renaming, setRenaming] = useState(null)
+  const [adding, setAdding] = useState(null)
+  // ONE SUBMIT PER FIELD, and this is a real bug Tim found by using it (2026-08-20:
+  // adding "Asa" made two of them). A field that saves on Enter AND on blur saves
+  // twice, because removing the focused input fires the blur - and Preact's state
+  // update has not landed yet, so the second call still sees the name. It bit the
+  // add field rather than the rename one only because renaming to the same name
+  // twice is invisible.
+  const sent = useRef(false)
 
   const devices = state.devices || []
   const persons = (state.persons || []).filter(p => !p.revokedAt)
 
   const byPerson = (id) => devices.filter(d => d.personId === id)
-  // A device whose claimed name is not the person it is filed under. Pulled out into
-  // its own card so every ordinary row stays uniform.
-  const mismatch = (d) => {
-    if (d.revokedAt || !d.claimedUser) return false
-    const holder = persons.find(p => p.id === d.personId)
-    return !holder || holder.name.toLowerCase() !== d.claimedUser.toLowerCase()
-  }
+  // A device whose claim nobody has agreed to yet. Pulled out into its own group so
+  // every ordinary row stays uniform.
+  //
+  // THE HOST ANSWERS THIS, the page no longer works it out. It used to compare the
+  // person's name with what the device claimed, which is the same comparison that
+  // forced a rename to overwrite the name on somebody's own phone - one rule, one
+  // place (Tim, 2026-08-20).
+  const mismatch = (d) => !d.revokedAt && !!d.claimedUser && !d.confirmed
   const pending = devices.filter(mismatch)
   const unassigned = devices.filter(d => !d.personId && !d.revokedAt && !mismatch(d))
   const revoked = devices.filter(d => d.revokedAt)
-  const online = devices.filter(d => d.online && !d.revokedAt).length
 
   // People holding nothing sink below the ones who do. They are kept rather than
   // tidied away: a device that leaves and comes back returns to the SAME person and
@@ -202,6 +359,8 @@ export default function People ({ state, reload }) {
   // unchanged name just closes it; the host refuses one that collides with somebody
   // else, and that comes back as a notice rather than as silence.
   const saveRename = async () => {
+    if (sent.current) return
+    sent.current = true
     const r = renaming
     setRenaming(null)
     if (!r) return
@@ -213,8 +372,14 @@ export default function People ({ state, reload }) {
     reload()
   }
 
-  const addPerson = async () => {
-    const name = window.prompt('What is their name?')
+  // ADDING SOMEBODY IS A FIELD ON THE PAGE, not a window.prompt. The browser's own
+  // box is unstyled, suppressible and looks like the page has been hijacked - the
+  // same objection that took confirm() out of this file long ago (2026-08-20).
+  const saveAdd = async () => {
+    if (sent.current) return
+    sent.current = true
+    const name = String(adding || '').trim()
+    setAdding(null)
     if (!name) return
     const res = await api('/api/person', { name })
     if (res.error) return notify('Not added', res.error)
@@ -224,108 +389,197 @@ export default function People ({ state, reload }) {
   const nobody = !ordered.length && !unassigned.length && !pending.length
 
   return (
-    <div class='card access'>
-      <div class='access-head'>
-        <h3>People &amp; devices</h3>
-        <span class='hint'>{online ? `${online} online` : ''}</span>
-        <div class='spacer' />
-        <button class='small ghost' onClick={addPerson}>Add a person</button>
-      </div>
+    <>
+      <div class='setpage'><span class='setpagename'>People</span></div>
 
       {nobody && (
         <p class='hint'>
-          Nobody yet. Use <b>Pair a device</b> to let a phone in, or add a person here,
+          Nobody yet. Use <b>Pair a device</b> to let a phone in, or add somebody here,
           so what they watch is kept separately from what you do.
         </p>
       )}
 
+      {/* FIRST, BECAUSE IT IS THE ONLY THING WAITING ON THE OPERATOR. An unconfirmed
+          claim is a device saying who it is and nobody having agreed yet. */}
       {pending.length > 0 && (
         <>
-          <div class='access-sub warn'>Needs confirming</div>
-          {pending.map(d => (
-            <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />
-          ))}
+          <div class='setgroup'>Needs confirming</div>
+          <div class='setrows'>
+            {pending.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />)}
+          </div>
         </>
       )}
 
-      {ordered.map(p => {
-        const theirs = byPerson(p.id).filter(d => !d.revokedAt && !mismatch(d))
-        const theirGone = byPerson(p.id).filter(d => d.revokedAt)
-        const on = theirs.filter(d => d.online).length
-        const isOpen = !!open[p.id]
-        const editing = renaming?.id === p.id
+      <div class='setgroup'>People</div>
+      <div class='setrows'>
+        {ordered.map(p => {
+          // EVERY LIVE DEVICE FILED UNDER THEM, whether its claim is settled or not.
+          // Counting only the settled ones made a person whose device had renamed
+          // itself read "No devices" while that device sat in Needs confirming above
+          // - and, worse, offered Delete, which would have orphaned it (Tim,
+          // 2026-08-20). The pending one is still shown in its own group, because
+          // that is the thing waiting on the operator; it is only the COUNT and the
+          // choice of button that have to know about it.
+          const mine = byPerson(p.id).filter(d => !d.revokedAt)
+          const theirs = mine.filter(d => !mismatch(d))
+          const waiting = mine.length - theirs.length
+          const theirGone = byPerson(p.id).filter(d => d.revokedAt)
+          const on = theirs.filter(d => d.online).length
+          const isOpen = !!open[p.id]
+          const editing = renaming?.id === p.id
 
-        return (
-          <div class={'prow' + (isOpen ? ' open' : '')} key={p.id}>
-            <div class='prow-head'>
-              <span class={'dot' + (on ? ' on' : '')} title={on ? `${on} online` : 'nothing connected'} />
+          return (
+            <>
+              <div class='setrow' key={p.id}>
+                <span class='rowmain'>
+                  {editing
+                    ? (
+                      <input
+                        type='text'
+                        class='renamefield'
+                        value={renaming.draft}
+                        autofocus
+                        onInput={e => setRenaming({ id: p.id, draft: e.currentTarget.value })}
+                        onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setRenaming(null) }}
+                        onBlur={saveRename}
+                      />
+                      )
+                    : <span class={'rowname ' + (on ? 'good' : '')}>{p.label}</span>}
+                  <span class='rowsub'>
+                    {[
+                      mine.length ? `${mine.length} device${mine.length === 1 ? '' : 's'}` : 'No devices',
+                      on ? `${on} connected now` : null,
+                      waiting ? `${waiting} waiting to be confirmed` : null
+                    ].filter(Boolean).join(', ')}
+                  </span>
+                </span>
+                <span class='rowctl'>
+                  <button
+                    class='iconbtn'
+                    onClick={() => { sent.current = false; setRenaming({ id: p.id, draft: p.name }) }}
+                    title={`Rename ${p.label}`}
+                    aria-label={`Rename ${p.label}`}
+                  ><Pencil size={16} /></button>
+                  {/* CUT OFF CUTS EVERY DEVICE THEY HOLD, which is the action somebody
+                      means when they say take Sam off. Somebody holding nothing has
+                      nothing to cut, so that row offers Delete instead - a different
+                      act and therefore a different picture. */}
+                  {mine.length > 0
+                    ? (
+                      <button
+                        class='iconbtn destructive'
+                        onClick={() => revokePerson(p)}
+                        title={`Cut off ${p.label} and every device they hold`}
+                        aria-label={`Cut off ${p.label} and every device they hold`}
+                      ><Blocked size={17} /></button>
+                      )
+                    : (
+                      <button
+                        class='iconbtn danger'
+                        onClick={() => removePerson(p)}
+                        title={`Delete ${p.label}`}
+                        aria-label={`Delete ${p.label}`}
+                      ><Trash size={17} /></button>
+                      )}
+                  <button
+                    class='iconbtn'
+                    onClick={() => setOpen({ ...open, [p.id]: !isOpen })}
+                    aria-label={isOpen ? `Hide ${p.label}'s devices` : `Show ${p.label}'s devices`}
+                    aria-expanded={isOpen}
+                  >{isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+                </span>
+              </div>
 
-              {editing
-                ? (
-                  <input
-                    type='text'
-                    value={renaming.draft}
-                    autofocus
-                    onInput={e => setRenaming({ id: p.id, draft: e.currentTarget.value })}
-                    onKeyDown={e => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setRenaming(null) }}
-                    onBlur={saveRename}
-                  />
-                  )
-                : (
-                  <button class='pname' onClick={() => setOpen({ ...open, [p.id]: !isOpen })}>
-                    <b>{p.label}</b>
-                    <span class='hint'>
-                      {theirs.length
-                        ? `${theirs.length} device${theirs.length === 1 ? '' : 's'}${on ? ` · ${on} online` : ''}`
-                        : 'no devices'}
-                    </span>
-                  </button>
-                  )}
+              {/* NESTED, AND IT HAS TO LOOK NESTED. Without the indent and the
+                  rule down the left, a person's devices read as more people -
+                  which is the exact thing the nesting exists to prevent. */}
+              {isOpen && (
+                <div class='rowopen nested'>
+                  <div class='setrows'>
+                    {theirs.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} nested />)}
+                    {showRevoked && theirGone.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} nested />)}
+                    {!theirs.length && !(showRevoked && theirGone.length) && (
+                      <p class='hint'>Nothing of theirs has access. Pair a device to give them one.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })}
 
-              <div class='row'>
-                <button class='small ghost' onClick={() => setRenaming({ id: p.id, draft: p.name })}>Rename</button>
-                {theirs.length > 0
-                  ? <button class='small destructive' onClick={() => revokePerson(p)}>Cut off</button>
-                  : <button class='small ghost' onClick={() => removePerson(p)}>Delete</button>}
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Add somebody</span>
+            <span class='rowsub'>
+              What they watch is then kept separately from what you watch.
+            </span>
+          </span>
+          <span class='rowctl'>
+            {adding === null
+              ? (
                 <button
                   class='iconbtn'
-                  onClick={() => setOpen({ ...open, [p.id]: !isOpen })}
-                  aria-label={isOpen ? 'Hide their devices' : 'Show their devices'}
-                  aria-expanded={isOpen}
-                >{isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-              </div>
-            </div>
-
-            {isOpen && (
-              <div class='prow-devices'>
-                {theirs.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />)}
-                {showRevoked && theirGone.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />)}
-                {!theirs.length && !(showRevoked && theirGone.length) && (
-                  <p class='hint'>Nothing of theirs has access. Pair a device to give them one.</p>
+                  onClick={() => { sent.current = false; setAdding('') }}
+                  title='Add somebody'
+                  aria-label='Add somebody'
+                ><Plus size={17} /></button>
+                )
+              : (
+                <input
+                  type='text'
+                  autofocus
+                  placeholder='Their name'
+                  value={adding}
+                  onInput={e => setAdding(e.currentTarget.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveAdd(); if (e.key === 'Escape') setAdding(null) }}
+                  onBlur={saveAdd}
+                />
                 )}
-              </div>
-            )}
-          </div>
-        )
-      })}
+          </span>
+        </div>
+      </div>
 
       {unassigned.length > 0 && (
         <>
-          <div class='access-sub'>Not assigned to anybody</div>
-          {unassigned.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />)}
+          <div class='setgroup'>Not assigned to anybody</div>
+          <div class='setrows'>
+            {unassigned.map(d => <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />)}
+          </div>
         </>
       )}
 
+      {/* KEPT, NOT DELETED: a phone that comes back finds its own history again. Out
+          of the way until asked for, because a list of things that no longer have
+          access is not what anybody opened this page to read. */}
       {revoked.length > 0 && (
         <>
-          <button class='small ghost showrev' onClick={() => setShowRevoked(!showRevoked)}>
-            {showRevoked ? 'Hide' : 'Show'} {revoked.length} cut off
-          </button>
-          {showRevoked && revoked.filter(d => !d.personId).map(d => (
-            <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />
-          ))}
+          <div class='setgroup'>Cut off</div>
+          <div class='setrows'>
+            <div class='setrow'>
+              <span class='rowmain'>
+                <span class='rowname'>{revoked.length} cut off</span>
+                <span class='rowsub'>
+                  Kept rather than deleted, so a device let back in finds what it
+                  watched before.
+                </span>
+              </span>
+              <span class='rowctl'>
+                <button
+                  class='iconbtn'
+                  onClick={() => setShowRevoked(!showRevoked)}
+                  title={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
+                  aria-label={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
+                  aria-expanded={showRevoked}
+                >{showRevoked ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
+              </span>
+            </div>
+            {showRevoked && revoked.filter(d => !d.personId).map(d => (
+              <DeviceRow key={d.deviceKey} d={d} persons={persons} reload={reload} />
+            ))}
+          </div>
         </>
       )}
-    </div>
+    </>
   )
 }

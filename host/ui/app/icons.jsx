@@ -83,6 +83,7 @@ export const Search = (p) => (
 )
 
 export const Close = (p) => <S {...p}><path d='M6 6l12 12M18 6L6 18' /></S>
+export const Plus = (p) => <S {...p}><path d='M12 5v14M5 12h14' /></S>
 
 export const Check = (p) => <S {...p}><path d='m4.5 12.5 5 5 10-11' /></S>
 

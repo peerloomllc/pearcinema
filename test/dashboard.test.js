@@ -409,6 +409,128 @@ test('the library reads through the same adapter the phone does', async (t) => {
   assert.equal((await c.req('GET', '/api/library/list?type=episodes')).status, 400)
 })
 
+test('A DEVICE THAT RENAMES ITSELF GETS OUT OF NEEDS CONFIRMING', async (t) => {
+  // The exact sequence Tim walked, 2026-08-20. His TCL was confirmed as "Tim Test",
+  // he renamed it to "Tim TCL2" on the phone, and the dashboard then offered him
+  // nothing that worked: picking a person in Belongs to left the row in Needs
+  // confirming, and only detaching it brought a confirm button back.
+  const { c, host } = await loggedIn(t)
+
+  const dev = await host.grants.grant({ deviceKey: b4a.alloc(32, 9), label: 'TCL' })
+  await host.grants.setIdentity(dev.deviceKey, { userName: 'Tim Test' })
+  await host.grants.confirmClaim(dev.deviceKey)
+  const personId = (await host.grants.get(dev.deviceKey)).personId
+
+  // The phone renames itself. Pending again, which is the checkpoint working.
+  await host.grants.setIdentity(dev.deviceKey, { userName: 'Tim TCL2' })
+  const pending = (await host.listDevices()).find(d => d.deviceKey === dev.deviceKey)
+  assert.equal(pending.confirmed, false)
+  assert.equal(pending.personId, personId, 'still filed under them, just unsettled')
+
+  // "Still Tim Test": it stops asking without moving anything.
+  const kept = await c.req('POST', '/api/device/claim/keep', { body: { deviceKey: dev.deviceKey } })
+  assert.equal(kept.status, 200)
+  const after = (await host.listDevices()).find(d => d.deviceKey === dev.deviceKey)
+  assert.equal(after.confirmed, true)
+  assert.equal(after.personId, personId, 'and it did not move')
+  assert.equal(after.claimedUser, 'Tim TCL2', 'and it still calls itself what it said')
+})
+
+test('PICKING A PERSON ANSWERS THE CLAIM, so the row stops asking', async (t) => {
+  // Tim: "if I select Tim TCL or Tim it doesn't give me any way to save/confirm, so
+  // the TCL stays under the Needs confirming list". Choosing who a device belongs to
+  // IS the decision that list is asking for, so it has to settle it.
+  const { c, host } = await loggedIn(t)
+
+  const jo = await host.grants.addPerson('Jo')
+  const dev = await host.grants.grant({ deviceKey: b4a.alloc(32, 11), label: 'a tablet' })
+  // Claiming a name somebody ALREADY holds is the pending case: joining an existing
+  // person inherits their history, so it is the operator's decision and never the
+  // device's. (A brand-new name mints its own person and needs no click.)
+  await host.grants.setIdentity(dev.deviceKey, { userName: 'Jo' })
+  assert.equal((await host.listDevices()).find(d => d.deviceKey === dev.deviceKey).confirmed, false)
+
+  const moved = await c.req('POST', '/api/assign', { body: { deviceKey: dev.deviceKey, personId: jo.id } })
+  assert.equal(moved.status, 200)
+  const after = (await host.listDevices()).find(d => d.deviceKey === dev.deviceKey)
+  assert.equal(after.personId, jo.id)
+  assert.equal(after.confirmed, true, 'and it is out of Needs confirming')
+
+  // TAKING IT OFF SOMEBODY DOES THE OPPOSITE: with nobody to belong to there is
+  // nothing settled, so the question comes back.
+  await c.req('POST', '/api/assign', { body: { deviceKey: dev.deviceKey, personId: null } })
+  const detached = (await host.listDevices()).find(d => d.deviceKey === dev.deviceKey)
+  assert.equal(detached.personId, null)
+  assert.equal(detached.confirmed, false)
+})
+
+test('RENAMING SOMEBODY DOES NOT RENAME THEM ON THEIR OWN PHONE', async (t) => {
+  // Tim, 2026-08-20, reading the rebuilt People page: "are we sure we want the host
+  // dashboard to be able to change the person name? At that point it will be out of
+  // sync with what the user set on their device." He was righter than the question
+  // implied - the rename did not merely disagree with the device, it OVERWROTE the
+  // name on it, in the field that person had set it in. It did that because
+  // confirmation was inferred from the two names matching, so leaving the claim
+  // alone would have dropped every device of theirs back into Needs confirming.
+  // The confirmation is recorded now, so the operator's label and the device's own
+  // name are free to differ.
+  const { c, host } = await loggedIn(t)
+
+  const dev = await host.grants.grant({ deviceKey: b4a.alloc(32, 7), label: 'a phone' })
+  await host.grants.setIdentity(dev.deviceKey, { userName: 'Tim' })
+  await host.grants.confirmClaim(dev.deviceKey)
+  const personId = (await host.grants.get(dev.deviceKey)).personId
+
+  const renamed = await c.req('POST', '/api/person/rename', { body: { personId, name: 'Timothy' } })
+  assert.equal(renamed.status, 200)
+  assert.equal(renamed.json.person.name, 'Timothy')
+
+  const row = await host.grants.get(dev.deviceKey)
+  assert.equal(row.claimedUser, 'Tim', 'the device still calls itself what its owner set')
+  assert.equal(row.personId, personId, 'and it is still theirs')
+
+  // AND IT DOES NOT FALL BACK INTO NEEDS CONFIRMING, which is the whole reason the
+  // overwrite existed.
+  const listed = (await host.listDevices()).find(d => d.deviceKey === row.deviceKey)
+  assert.equal(listed.confirmed, true)
+  assert.equal(listed.belongsTo, 'Timothy', 'the dashboard shows the new label')
+})
+
+test('TWO ADDS OF ONE NAME AT ONCE MAKE ONE PERSON, not two', async (t) => {
+  // Tim, 2026-08-20: one press of Add created "Asa #kb1u" and "Asa #smcy". The page
+  // sent the request twice (fixed there too), but the refusal that exists precisely
+  // to stop two people of one name did not fire - because reading the list, deciding
+  // the name is free and writing it are three awaits apart, so both requests read a
+  // list without the other's person in it. A rule that only holds when nobody asks
+  // twice at once is not a rule.
+  const { c, host } = await loggedIn(t)
+
+  const [a, b] = await Promise.all([
+    c.req('POST', '/api/person', { body: { name: 'Asa' } }),
+    c.req('POST', '/api/person', { body: { name: 'Asa' } })
+  ])
+
+  const codes = [a.status, b.status].sort()
+  assert.deepEqual(codes, [200, 400], 'one lands, one is refused')
+  const refused = a.status === 400 ? a : b
+  assert.match(refused.json.error, /already somebody called Asa/)
+
+  const named = (await host.grants.listPersons()).filter(p => p.name === 'Asa')
+  assert.equal(named.length, 1, 'and the box holds ONE Asa')
+})
+
+test('a different name added at the same moment is not blocked by the queue', async (t) => {
+  // Serialising the check must not turn two unrelated adds into one refusal.
+  const { c, host } = await loggedIn(t)
+
+  const both = await Promise.all([
+    c.req('POST', '/api/person', { body: { name: 'Ada' } }),
+    c.req('POST', '/api/person', { body: { name: 'Grace' } })
+  ])
+  assert.deepEqual(both.map(r => r.status), [200, 200])
+  assert.equal((await host.grants.listPersons()).length, 2)
+})
+
 test('the player can ask what sits on either side of an episode', async (t) => {
   const { c } = await loggedIn(t)
 
