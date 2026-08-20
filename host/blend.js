@@ -241,8 +241,15 @@ class Blend {
     return this.owners.get(String(id)) || null
   }
 
+  // AN ART ID THE INDEX HAS NEVER SEEN is not necessarily nobody's. The operator
+  // can fix a match from the merged view, and the poster that lands is a brand new
+  // `tmdb:<itemId>` on this box - minted after the index was built, so the map
+  // misses it and the tile shows a broken picture until a rebuild lands. The
+  // enricher's art ids are the item's own id with a prefix, so whoever owns the
+  // item owns the picture.
   artOwnerOf (artId) {
-    return this.artOwners.get(String(artId)) || null
+    const key = String(artId || '')
+    return this.artOwners.get(key) || (key.startsWith('tmdb:') ? this.ownerOf(key.slice(5)) : null)
   }
 
   // Every library holding a copy, each with its own id - the write fan's

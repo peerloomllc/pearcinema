@@ -1155,8 +1155,13 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .fixbody { text-align: center }
 .fixsearch { justify-content: center; margin: .9rem 0 1rem }
 .fixsearch input { flex: 1; max-width: 24rem }
-.candgrid { justify-items: center }
-.cand { align-items: center; text-align: center }
+.candgrid { justify-items: stretch }
+/* STRETCH, NOT CENTRE. Centring the flex items takes each one down to the width of
+ * its own contents, and then the poster's `width: 100%` is a percentage of that -
+ * so a candidate with NO artwork came out as an icon-sized box while the one beside
+ * it was full height. Only visible on a TMDB entry with no poster, which is exactly
+ * the candidate somebody most needs to read the title of. */
+.cand { align-items: stretch; text-align: center }
 
 /* The Films/Shows picker, frozen to the top of the scroller. Sticky rather than
  * fixed, so it takes its place in the flow and only pins once scrolled to - and it

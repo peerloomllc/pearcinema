@@ -155,8 +155,11 @@ async function open (state = STATE, extraRoutes = {}, asked = null, delay = 0) {
   })
 
   const win = dom.window
-  win.fetch = async (url) => {
-    if (asked) asked.push(String(url))
+  win.fetch = async (url, opts) => {
+    // The BODY goes into the log as well as the url. Every assertion on this list
+    // is a substring match, and a POST route's whole meaning is in its body - which
+    // id a fix is being applied to, for one.
+    if (asked) asked.push(String(url) + (opts && opts.body ? ' ' + opts.body : ''))
     if (delay) await new Promise(r => setTimeout(r, delay))
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
     const routes = { ...ROUTES, ...extraRoutes }
@@ -328,7 +331,7 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
   t.after(() => dom.window.close())
 
   // Metropolis has no artwork of its own, so its tile offers the fix control.
-  const pencil = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the artwork for Metropolis')
+  const pencil = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the match for Metropolis')
   assert.ok(pencil, 'the fix control is on the tile')
   pencil.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
@@ -344,6 +347,91 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
   assert.match(cards[0].querySelector('img').getAttribute('src'), /^\/api\/metadata\/preview\?p=/, 'the thumbnail comes from the HOST, never from TMDB directly')
   // And pressing the pencil did NOT open the film - the tile click was stopped.
   assert.equal(doc.querySelector('video'), null)
+})
+
+// A FILM WITH ITS OWN POSTER CAN STILL BE MATCHED TO THE WRONG FILM (Tim,
+// 2026-08-20: "I can edit Annihilation but not 300"). The pencil hid itself on
+// anything wearing artwork off the disk, on the rule that a picture somebody put
+// there is not ours to replace - which is right about the PICTURE and took the only
+// way to correct the MATCH with it.
+test('the pencil is offered on a film with a poster on the disk, and says the disk keeps winning', async (t) => {
+  const DISK = { ...FILM, id: 'film-3', title: '300', year: 2006, artId: 'folder:300' }
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/library/list?type=movies&limit=100': { items: [FILM, MKV, DISK], total: 3, cursor: null },
+    '/api/metadata/search': {
+      candidates: [{ tmdbId: 1271, title: '300', year: 2006, poster: '/3.jpg', overview: 'Sparta' }],
+      matched: { tmdbId: 999, title: 'Meet the Spartans', year: 2008, how: 'auto', uncertain: true }
+    }
+  })
+  t.after(() => dom.window.close())
+
+  const pencil = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the match for 300')
+  assert.ok(pencil, 'a poster on the disk no longer hides the control')
+  pencil.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.match(text(), /Fix the match: 300/)
+  // It says which half it is changing rather than silently changing neither.
+  assert.match(text(), /poster of its own on disk and that picture stays/)
+  assert.match(text(), /fixes the summary and the year/)
+  // AND WHAT IT IS MATCHED TO NOW, which is the one thing the tile cannot show: the
+  // picture on screen came off the disk and says nothing about the match behind it.
+  assert.match(text(), /Matched to/)
+  assert.match(text(), /Meet the Spartans/)
+  assert.ok(
+    [...doc.querySelectorAll('button')].some(b => /forget the match/.test(b.textContent)),
+    'and a match that is simply wrong can be forgotten'
+  )
+})
+
+// ALL LIBRARIES IS THIS LIBRARY PLUS OTHERS, not somebody else's (Tim, 2026-08-20:
+// "in merged library view I don't seem to have the ability to edit title
+// metadata/artwork"). The whole merged view was treated as remote, so the pencil was
+// off for everything in it - including the films sitting on this very disk.
+test('the merged view offers the pencil on the copies this box owns, and on no others', async (t) => {
+  const MINE = {
+    ...FILM,
+    title: 'Metropolis',
+    copies: [{ libraryId: 'lib', id: 'local-1' }, { libraryId: 'lib-2', id: 'rem-9' }]
+  }
+  const THEIRS = {
+    ...FILM,
+    id: 'rem-2',
+    title: 'Solaris',
+    copies: [{ libraryId: 'lib-2', id: 'rem-2' }]
+  }
+  const asked = []
+  const { dom, doc, win, text } = await open(STATE, {
+    '/api/remote/list': { remotes: [{ hostKey: 'k2', libraryId: 'lib-2', libraryName: 'The Loft', online: true }] },
+    '/api/blend': { available: true, builtAt: 1, libraries: ['lib', 'lib-2'], movies: 2, series: 0 },
+    '/blend/api/library/list?type=movies&limit=100': { items: [MINE, THEIRS], total: 2, cursor: null },
+    '/blend/api/library/list?type=series&limit=100': { items: [], total: 0, cursor: null },
+    '/blend/api/watch/state': { watching: null, choose: [], watched: [], continue: [], upNext: [] },
+    '/blend/api/watch/shows': { shows: {} }
+  }, asked)
+  t.after(() => dom.window.close())
+
+  // The page opens on All libraries by default when there is a blend to open on.
+  await new Promise(r => setTimeout(r, 80))
+  assert.match(text(), /Solaris/, 'the merged grid is what is on screen')
+
+  const pencil = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the match for Metropolis')
+  assert.ok(pencil, 'a film this box holds a copy of is correctable from the merged view')
+  assert.equal(
+    [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Fix the match for Solaris'),
+    undefined,
+    "a friend's film is not ours to correct"
+  )
+
+  // AND IT ASKS ABOUT THE LOCAL COPY. A merged row wears the PRIMARY copy's id,
+  // which can be the friend's - fixing that id would record a match against an id
+  // this library has never heard of.
+  pencil.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const search = asked.filter(u => u.includes('/api/metadata/search')).pop()
+  assert.ok(search, 'the dialog looked the title up')
+  assert.match(search, /"itemId":"local-1"/)
+  assert.doesNotMatch(search, /film-1/)
 })
 
 // THE PICKER LIVES BEHIND ONE BUTTON NOW. It is a folder browser, a roots editor, a
@@ -2743,7 +2831,8 @@ test('ADDING SOMEBODY SENDS ONE REQUEST, however the field is left', async (t) =
   field.dispatchEvent(new win.Event('blur', { bubbles: true }))
   await new Promise(r => setTimeout(r, 80))
 
-  const adds = asked.filter(u => String(u) === '/api/person')
+  // The log carries "<url> <body>" for a POST, so the url is the first field.
+  const adds = asked.filter(u => String(u).split(' ')[0] === '/api/person')
   assert.equal(adds.length, 1, 'one person asked for, not two')
 })
 

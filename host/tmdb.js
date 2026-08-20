@@ -225,10 +225,29 @@ class Enricher {
   // came. Only a gap is filled, and with a copy rather than a mutation, because
   // adapters cache their item objects and a decorated cache would survive the
   // feature being turned off.
+  // TWO GAPS, ASKED SEPARATELY. A file can have a poster beside it on disk and no
+  // summary anywhere, so one answer for both would have said "this one has
+  // artwork, leave it alone" and left the summary empty for good.
   decorate (item) {
-    if (!item || item.artId) return item
-    if (!this.matched[item.id]?.poster && !this.art[item.id]) return item
-    return { ...item, artId: 'tmdb:' + item.id }
+    if (!item) return item
+    const m = this.matched[item.id]
+    const art = !item.artId && (m?.poster || this.art[item.id]) ? 'tmdb:' + item.id : null
+    const overview = !item.overview && m?.overview ? m.overview : null
+    if (!art && !overview) return item
+    return {
+      ...item,
+      ...(art ? { artId: art } : {}),
+      ...(overview ? { overview } : {})
+    }
+  }
+
+  // What this item is currently matched to, for the fix dialog - which has to be
+  // able to say "matched to Crash (2004)" and offer to forget it, on a film whose
+  // artwork came off the disk and so says nothing about the match at all.
+  matchFor (itemId) {
+    const m = this.matched[String(itemId)]
+    if (!m) return null
+    return { tmdbId: m.tmdbId, title: m.title, year: m.year ?? null, how: m.how || null, uncertain: !!m.uncertain }
   }
 
   // Bytes for a tmdb: art id, same contract as adapter.art.
@@ -249,6 +268,13 @@ class Enricher {
       tmdbId: candidate.tmdbId,
       title: candidate.title,
       year: candidate.year,
+      // THE SUMMARY, which was fetched on every lookup and thrown away. The title
+      // page tells anybody with no summary to turn artwork on and PearCinema will
+      // ask TMDB for one - and it did ask, kept the picture and dropped the words
+      // (Tim, 2026-08-20, following the pencil). It is also what makes a WRONG
+      // match visible on a film whose poster sits on the disk: the picture is
+      // right and the words are about a different film.
+      overview: candidate.overview || '',
       poster: !!bytes,
       how,
       ...(uncertain ? { uncertain: true } : {}),
@@ -272,8 +298,10 @@ class Enricher {
 
     const client = new TmdbClient({ key, fetch: this.fetch })
     const work = []
+    const seen = new Map()
     for (const type of ['movies', 'series']) {
       for (const it of await listAll(adapter, { type })) {
+        seen.set(it.id, it)
         if (it.artId) continue
         if (this.matched[it.id]) continue
         if (this.missed[it.id] && !retryMissed) continue
@@ -281,8 +309,19 @@ class Enricher {
       }
     }
 
-    this.running = { done: 0, total: work.length, startedAt: Date.now() }
-    this.log('tmdb:run', { items: work.length })
+    // THE MATCHES MADE BEFORE THE SUMMARY WAS KEPT have a picture and no words -
+    // 264 of them on the real library the day this landed. Asking again by the id
+    // already stored is not re-guessing: the match does not change, only what was
+    // kept of it. One call each, once, and then never again.
+    const fillIn = []
+    for (const [id, m] of Object.entries(this.matched)) {
+      if (m.overview !== undefined || !m.tmdbId) continue
+      const it = seen.get(id)
+      if (it) fillIn.push({ id, item: it, tmdbId: m.tmdbId })
+    }
+
+    this.running = { done: 0, total: work.length + fillIn.length, startedAt: Date.now() }
+    this.log('tmdb:run', { items: work.length, summaries: fillIn.length })
 
     try {
       for (const item of work) {
@@ -299,6 +338,18 @@ class Enricher {
           // the same way. Anything else (one flaky lookup) costs that item only.
           if (e.code === 'BAD_KEY') throw e
           this.missed[item.id] = { title: item.title, error: e.message, at: Date.now() }
+        }
+        this.running.done++
+      }
+
+      for (const f of fillIn) {
+        try {
+          const d = await client.details({ type: f.item.type, tmdbId: f.tmdbId })
+          // An empty string, not undefined: TMDB genuinely has nothing to say about
+          // some titles, and that answer has to stick or this asks again every pass.
+          this.matched[f.id].overview = d?.overview || ''
+        } catch (e) {
+          if (e.code === 'BAD_KEY') throw e
         }
         this.running.done++
       }

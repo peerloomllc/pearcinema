@@ -215,6 +215,11 @@ const ROUTES = [
     poster_path: '/sp.jpg',
     episodes: [{ episode_number: 1, still_path: '/st1.jpg' }, { episode_number: 2, still_path: null }]
   })],
+  // Details BY ID, which is how a fix applies a pick - and how a match made before
+  // summaries were kept goes back for its words without re-guessing anything.
+  [/\/movie\/11\b/, respond({ id: 11, title: 'Uncovered', release_date: '2001-01-01', poster_path: '/u.jpg', overview: 'what it is about' })],
+  [/\/movie\/21\b/, respond({ id: 21, title: 'Crash', release_date: '1996-01-01', poster_path: '/c1.jpg' })],
+  [/\/tv\/31\b(?!\/season)/, respond({ id: 31, name: 'A Show', first_air_date: '2010-01-01', poster_path: '/s.jpg', overview: 'a show about things' })],
   [/image\.tmdb\.org/, respond({})]
 ]
 
@@ -321,6 +326,80 @@ test('THE FIX FLOW: the operator corrects a guess from the tile, or drops the ar
   assert.equal(en.decorate({ id: 'vague', artId: null }).artId, null)
   const out = await en.run(fakeAdapter(), { key: 'k' })
   assert.equal(out.looked, 0, 'the unmatched item is not re-guessed')
+})
+
+// THE SUMMARY WAS FETCHED AND THROWN AWAY on every lookup, while the title page
+// told anybody without one to turn artwork on and PearCinema would ask TMDB for it
+// (found 2026-08-20, working on the pencil). It is the other half of what a match
+// IS: the picture and the words.
+test('a match brings the summary with it, and a summary already there wins', async () => {
+  const dir = await tmpdir()
+  const en = new tmdb.Enricher({ dataDir: dir, fetch: fakeFetch(ROUTES) })
+  await en.run(fakeAdapter(), { key: 'k' })
+
+  // The fix flow's candidate is fetched by id and carries TMDB's own words.
+  await en.fix({ itemId: 'vague', tmdbId: 22, type: 'movie', key: 'k' })
+  assert.equal(en.decorate({ id: 'vague', artId: null, overview: null }).overview, 'the other one')
+
+  // TWO GAPS, ASKED SEPARATELY. A file can have its own poster and no summary at
+  // all, which is exactly the film that started this - one answer for both would
+  // have left it with nothing.
+  const own = en.decorate({ id: 'vague', artId: 'poster-on-disk', overview: null })
+  assert.equal(own.artId, 'poster-on-disk', 'the disk still wins the picture')
+  assert.equal(own.overview, 'the other one', 'and it still gets the words')
+
+  // A summary of its own is a sidecar like any other and is never overwritten.
+  assert.equal(en.decorate({ id: 'vague', artId: null, overview: 'from the nfo' }).overview, 'from the nfo')
+
+  // Nothing to add is nothing done - the same object comes back.
+  const untouched = { id: 'nobody', artId: null, overview: null }
+  assert.equal(en.decorate(untouched), untouched)
+
+  // And forgetting the match takes the words with the picture.
+  await en.unmatch('vague')
+  assert.equal(en.decorate({ id: 'vague', artId: null, overview: null }).overview, null)
+})
+
+// EVERY MATCH ALREADY MADE has a picture and no words - 264 of them on the real
+// library the day the summary started being kept. Without this the change would have
+// done nothing at all on a library that had already had its pass.
+test('a match made before summaries were kept goes back for its words, once', async () => {
+  const dir = await tmpdir()
+  const f = fakeFetch(ROUTES)
+  const en = new tmdb.Enricher({ dataDir: dir, fetch: f })
+  await en.run(fakeAdapter(), { key: 'k' })
+
+  // What a state file written by the older build looks like.
+  for (const m of Object.values(en.matched)) delete m.overview
+  const out = await en.run(fakeAdapter(), { key: 'k' })
+  assert.equal(out.looked, 0, 'nothing is re-guessed - the matches themselves do not change')
+  assert.equal(en.decorate({ id: 'bare', artId: null, overview: null }).overview, 'what it is about')
+  assert.equal(en.decorate({ id: 'show', artId: null, overview: null }).overview, 'a show about things')
+
+  // A title TMDB says nothing about answers nothing, and that answer sticks - or
+  // every pass from here would ask about it again.
+  assert.equal(en.matched.vague.overview, '')
+  const asks = () => f.asked.filter(u => /\/movie\/21\b/.test(u)).length
+  const before = asks()
+  await en.run(fakeAdapter(), { key: 'k' })
+  assert.equal(asks(), before, 'the second pass asks nothing more')
+})
+
+// The dialog cannot work out whether a match exists by looking at the item: a
+// poster off the disk wins the picture and says nothing about what is behind it.
+test('the host can say what a title is currently matched to', async () => {
+  const dir = await tmpdir()
+  const en = new tmdb.Enricher({ dataDir: dir, fetch: fakeFetch(ROUTES) })
+  await en.run(fakeAdapter(), { key: 'k' })
+
+  assert.equal(en.matchFor('nobody'), null)
+  const m = en.matchFor('vague')
+  assert.equal(m.tmdbId, 21)
+  assert.equal(m.title, 'Crash')
+  assert.equal(m.uncertain, true, 'and whether it was a guess')
+
+  await en.unmatch('vague')
+  assert.equal(en.matchFor('vague'), null)
 })
 
 test('no key refuses loudly, and a key TMDB rejects fails the pass rather than one item', async () => {

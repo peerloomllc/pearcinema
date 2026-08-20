@@ -12,55 +12,90 @@
 //
 // The dialog reruns the lookup - with the operator's own words if they retype the
 // title, which is usually the whole problem, since a filename is not always what a
-// film is called - and applies the pick, or drops the fetched artwork entirely. The
-// host fetches the chosen poster fresh by TMDB id; nothing from this page is trusted
+// film is called - and applies the pick, or forgets the match entirely. The host
+// fetches the chosen poster fresh by TMDB id; nothing from this page is trusted
 // beyond the id itself.
+//
+// WHAT IT FIXES IS THE MATCH, not only the picture (Tim, 2026-08-20). A film with a
+// poster.jpg beside it on disk keeps that poster - artwork somebody put there is
+// not this feature's to change - but it can still be matched to the wrong TMDB
+// entry, and then its summary and its year are about a different film. That is the
+// case this dialog now covers, and it says which half it is changing.
 
 import { useState, useEffect } from 'preact/hooks'
 import { api } from './api'
 import { Modal } from './ui'
 import { ArtIcon } from './icons'
 
-export function FixMatchBody ({ item, onFixed, onDone }) {
+// `targetId` is the id THIS box knows the title by, which is not always the id on
+// the tile: All libraries shows a merged row wearing the primary copy's id, and
+// that copy can live on a friend's machine. The metadata routes are about this
+// library only, so they are always asked about the local copy.
+export function FixMatchBody ({ item, targetId = null, onFixed, onDone }) {
+  const id = targetId || item.id
   const [q, setQ] = useState(item.title || '')
   const [cands, setCands] = useState(null)
+  const [matched, setMatched] = useState(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
 
+  // A PICTURE BESIDE THE FILE ALWAYS WINS, and that used to be expressed by hiding
+  // this dialog altogether - which also removed the only way to correct a wrong
+  // MATCH, and a wrong match is a wrong summary and a wrong year however good the
+  // picture is (Tim, 2026-08-20: "I can edit Annihilation but not 300"). So the
+  // rule is said out loud instead.
+  const diskArt = !!item.artId && !String(item.artId).startsWith('tmdb:')
+
   const search = async (query = null) => {
     setBusy(true); setErr('')
-    const r = await api('/api/metadata/search', { itemId: item.id, ...(query ? { q: query } : {}) })
+    const r = await api('/api/metadata/search', { itemId: id, ...(query ? { q: query } : {}) })
     setBusy(false)
     if (r?.error) return setErr(r.error)
     setCands(r.candidates || [])
+    setMatched(r.matched || null)
   }
-  useEffect(() => { setCands(null); setQ(item.title || ''); search() }, [item.id])
+  useEffect(() => { setCands(null); setMatched(null); setQ(item.title || ''); search() }, [id])
 
-  // What changed, handed back for an IN-PLACE patch of the tile: the new artId
-  // (deterministic - the poster route is keyed by item), and a cache-buster,
-  // because the URL does not change when the poster behind it does.
+  // WHAT THE HOST SAYS IT NOW IS, handed back for an in-place patch of the tile.
+  // Read off the host's own answer rather than assumed here: a fix does not always
+  // change the picture, and the version of this that assumed it did would have
+  // blanked the poster sitting on the disk.
+  const patch = (it) => ({
+    artId: it?.artId || null,
+    artBust: Date.now(),
+    overview: it?.overview ?? null
+  })
+
   const use = async (c) => {
     setBusy(true)
-    const r = await api('/api/metadata/fix', { itemId: item.id, tmdbId: c.tmdbId, type: item.type })
+    const r = await api('/api/metadata/fix', { itemId: id, tmdbId: c.tmdbId, type: item.type })
     setBusy(false)
     if (r?.error) return setErr(r.error)
-    onFixed?.({ artId: 'tmdb:' + item.id, artBust: Date.now() })
+    onFixed?.(patch(r?.item))
     onDone?.()
   }
 
   const drop = async () => {
-    await api('/api/metadata/unmatch', { itemId: item.id })
-    onFixed?.({ artId: null })
+    const r = await api('/api/metadata/unmatch', { itemId: id })
+    onFixed?.(patch(r?.item))
     onDone?.()
   }
 
   return (
     <div class='fixbody'>
       <p class='hint'>
-        Pick the right one and its poster replaces the guess. If the name on the file is
-        not what the {item.type === 'series' ? 'show' : 'film'} is really called, search
-        by the real name.
+        {diskArt
+          ? <>This {item.type === 'series' ? 'show' : 'film'} has a poster of its own on
+            disk and that picture stays. What you pick here fixes the summary and the year.</>
+          : <>Pick the right one and its poster replaces the guess.</>}
+        {' '}If the name on the file is not what the {item.type === 'series' ? 'show' : 'film'} is
+        really called, search by the real name.
       </p>
+      {matched && (
+        <p class='hint'>
+          Matched to <b>{matched.title}</b>{matched.year ? ` (${matched.year})` : ''}.
+        </p>
+      )}
       <div class='row fixsearch'>
         <input
           type='text'
@@ -89,19 +124,22 @@ export function FixMatchBody ({ item, onFixed, onDone }) {
           </button>
         ))}
       </div>
-      {String(item.artId || '').startsWith('tmdb:') && (
+      {/* OFFERED WHEN THERE IS A MATCH TO FORGET, which the host answers rather than
+          the tile: a film wearing its own poster off the disk says nothing about
+          whether anything was ever matched behind it. */}
+      {matched && (
         <button class='ghost' style='margin-top:.8rem' disabled={busy} onClick={drop}>
-          None of these - remove the fetched artwork
+          None of these - forget the match
         </button>
       )}
     </div>
   )
 }
 
-export function FixMatch ({ item, onClose, onFixed }) {
+export function FixMatch ({ item, targetId = null, onClose, onFixed }) {
   return (
     <Modal title={'Fix the match: ' + item.title} onClose={onClose} wide>
-      <FixMatchBody item={item} onFixed={onFixed} onDone={onClose} />
+      <FixMatchBody item={item} targetId={targetId} onFixed={onFixed} onDone={onClose} />
     </Modal>
   )
 }

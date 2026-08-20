@@ -594,17 +594,45 @@ class PearCinemaHost {
   async searchMetadata ({ itemId, q = null }) {
     const item = await this._inner.get({ id: String(itemId) })
     if (!item) return null
-    return this.enricher.search({ item, q, key: this._metadataKey() })
+    const candidates = await this.enricher.search({ item, q, key: this._metadataKey() })
+    // What it is matched to RIGHT NOW rides back with the candidates. The dialog
+    // cannot work it out from the item: artwork off the disk wins the picture and
+    // so says nothing about whether a match exists behind it.
+    return { candidates, matched: this.enricher.matchFor(itemId) }
   }
 
+  // ONLY A FILM THIS BOX HOLDS. All libraries now offers the pencil, and the id it
+  // sends is the local copy's - but a merged view is one bad rule away from
+  // handing over a friend's id, and matching a stranger's film would record a
+  // match against an id this library has never heard of.
   async fixMetadata ({ itemId, tmdbId, type }) {
+    const item = await this._inner.get({ id: String(itemId) })
+    if (!item) return { error: 'that one is not on this machine' }
     // The inner adapter rides along so re-matching a show can refresh its seasons'
     // pictures in the same breath.
-    return this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey(), adapter: this._inner })
+    const match = await this.enricher.fix({ itemId, tmdbId, type, key: this._metadataKey(), adapter: this._inner })
+    if (!match) return null
+    this._artworkChanged()
+    // THE ITEM AS IT NOW READS, so the page can patch the tile in place rather than
+    // guess at what changed. Guessing is what the old dialog did - it assumed a fix
+    // always swaps the picture - and it is wrong on the film that made this whole
+    // item: one with a poster.jpg beside it, where the match changes and the
+    // picture deliberately does not.
+    return { match, item: this.enricher.decorate(item) }
   }
 
   async unmatchMetadata ({ itemId }) {
-    return this.enricher.unmatch(String(itemId))
+    const ok = await this.enricher.unmatch(String(itemId))
+    if (ok) this._artworkChanged()
+    const item = await this._inner.get({ id: String(itemId) }).catch(() => null)
+    return { ok, item: item ? this.enricher.decorate(item) : null }
+  }
+
+  // A MATCH CHANGED, so the merged index is out of date about this library - it
+  // holds the art ids and summaries as they were when it was built. Cheap, and
+  // debounced by buildSoon.
+  _artworkChanged () {
+    this.blend?.buildSoon('metadata-fixed')
   }
 
   // Whether the write-into-the-library button should exist at all: only a

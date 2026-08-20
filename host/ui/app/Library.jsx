@@ -284,13 +284,15 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
       {started && left > 0 && <span class='left' title={left + ' still to watch'}>{left} left</span>}
 
       {/* FIX THE MATCH WHERE THE MISTAKE IS VISIBLE (Tim, 2026-08-14, Plex's shape).
-          Fetched artwork is a best guess, and the correction belongs on the tile
-          wearing the wrong poster - not in a queue in Settings. Only offered where
-          the artwork CAME from the lookup or where there is none at all: a poster
-          sitting beside the file on disk is not this feature's to change. */}
+          A fetched match is a best guess, and the correction belongs on the tile
+          wearing the wrong poster - not in a queue in Settings. WHETHER to offer it
+          is the caller's question and not this component's: it is about who owns
+          the file, which a tile cannot see (see fixIdOf). This used to hide itself
+          on anything with a poster of its own, which took the only way to correct a
+          wrong match with it. */}
       {/* TAKE THIS OFF THE SHELF WITHOUT CLAIMING TO HAVE WATCHED IT. Top left,
           which is free on a shelf card: the up-next badge that also lives there
-          belongs to items with no position, and the fix-the-artwork pencil is
+          belongs to items with no position, and the fix-the-match pencil is
           not offered on this row at all. */}
       {onForget && (
         <button
@@ -301,14 +303,13 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
         ><Close size={12} /></button>
       )}
 
-      {onFix && (item.type === 'movie' || item.type === 'series') &&
-        (!item.artId || String(item.artId).startsWith('tmdb:')) && (
-          <button
-            class='fixmatch'
-            title={'Fix the artwork for ' + item.title}
-            aria-label={'Fix the artwork for ' + item.title}
-            onClick={e => { e.stopPropagation(); onFix(item) }}
-          ><Pencil size={13} /></button>
+      {onFix && (
+        <button
+          class='fixmatch'
+          title={'Fix the match for ' + item.title}
+          aria-label={'Fix the match for ' + item.title}
+          onClick={e => { e.stopPropagation(); onFix(item) }}
+        ><Pencil size={13} /></button>
       )}
 
       <div class='t'>{item.title}</div>
@@ -656,8 +657,10 @@ export default function Library ({
   // Browsing somebody ELSE's library through the /remote twins. The reads are
   // already rewritten by the api layer; what this flag governs is everything
   // that is about THIS box and would be wrong or dishonest on a friend's -
-  // the local source's empty/scanning/error states, and the metadata pencil,
-  // whose fix routes only know the local library.
+  // the local source's empty/scanning/error states. The metadata pencil used to be
+  // one of those and is not any more: it asks per title whether THIS box holds a
+  // copy, which is false throughout a friend's library and true of some of the
+  // merged one (see fixIdOf).
   remote = false
 }) {
   // 'films' | 'shows', and where we are inside the show tree.
@@ -806,7 +809,35 @@ export default function Library ({
   // THE TILE IS THE PLACE A MATCH GETS FIXED. `fixItem` is the tile whose pencil
   // was pressed.
   const [fixItem, setFixItem] = useState(null)
-  const canFix = !remote && !!(state.metadata?.enabled && state.metadata?.hasKey)
+
+  // WHOSE FILM IS IT, which is the whole question the pencil turns on - and two
+  // older rules were answering a different one, so it was missing everywhere it
+  // was most wanted (Tim, 2026-08-20: "in merged library view I don't seem to have
+  // the ability to edit title metadata/artwork. If I switch to Tim's Umbrel then I
+  // only have it on some, not all, titles - I can edit Annihilation but not 300").
+  //
+  //  1. ALL LIBRARIES OFFERED IT ON NOTHING, because it is a remote view and the
+  //     fix routes only know this box. True of a friend's library and false of the
+  //     blend, which is this library plus others: the copies on this disk are as
+  //     correctable there as anywhere. What is NOT ours is a friend's copy.
+  //  2. A FILM WITH A POSTER ON THE DISK OFFERED IT ON NOTHING EITHER, on the rule
+  //     that artwork beside the file is not this feature's to change. Right about
+  //     the picture, wrong about the MATCH: a film matched to the wrong TMDB entry
+  //     has the wrong summary and year whatever is on the disk. The dialog says
+  //     the disk still wins the picture rather than the control disappearing.
+  //
+  // So: this box holds a copy, and the answer is the id THIS library knows it by -
+  // which in the blend is not the id on the tile, because a merged row wears the
+  // primary copy's id and that copy can be a friend's.
+  const metadataOn = !!(state.metadata?.enabled && state.metadata?.hasKey)
+  const fixIdOf = (item) => {
+    if (!metadataOn || !item) return null
+    if (item.type !== 'movie' && item.type !== 'series') return null
+    if (!remote) return item.id
+    const mine = (item.copies || []).find(c => c.libraryId === state.libraryId)
+    return mine ? mine.id : null
+  }
+  const fixOn = (item) => (fixIdOf(item) ? setFixItem : null)
   const artRunning = remote ? null : (state.metadata?.running || null)
 
   const films = useList('/api/library/list?type=movies&limit=100', [root])
@@ -900,7 +931,14 @@ export default function Library ({
   // was centring on the tall scrolled list rather than on the viewport. Outside
   // the .screen there is no transformed ancestor and fixed means the viewport
   // again.
-  const fixModal = fixItem && <FixMatch item={fixItem} onClose={() => setFixItem(null)} onFixed={(changes) => patchItem(fixItem.id, changes)} />
+  const fixModal = fixItem && (
+    <FixMatch
+      item={fixItem}
+      targetId={fixIdOf(fixItem)}
+      onClose={() => setFixItem(null)}
+      onFixed={(changes) => patchItem(fixItem.id, changes)}
+    />
+  )
 
   // --- search wins over everything, because that is what the box is for ---
   if (hits) {
@@ -911,7 +949,7 @@ export default function Library ({
         <CompatLine list={hits.filter(h => h.media)} caps={caps} />
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
-            <Poster key={h.id} item={h} caps={caps} onFix={canFix ? setFixItem : null} onOpen={i => {
+            <Poster key={h.id} item={h} caps={caps} onFix={fixOn(h)} onOpen={i => {
               // A RESULT IS A PLACE TOO. Searching for a film and having it start
               // is the same surprise the grid used to give, one screen further in.
               if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
@@ -962,7 +1000,7 @@ export default function Library ({
               // opens the film, which then offers the same position.
               onResume={start}
               onWatched={mark}
-              onFix={canFix && (!film.artId || String(film.artId).startsWith('tmdb:')) ? setFixItem : null}
+              onFix={fixOn(film)}
             />
           }
         >
@@ -998,7 +1036,7 @@ export default function Library ({
                   // anybody meant. Off the same rule the up-next shelf uses.
                   onPlay={playNextEpisode}
                   onWatched={mark}
-                  onFix={canFix && (!series.artId || String(series.artId).startsWith('tmdb:')) ? setFixItem : null}
+                  onFix={fixOn(series)}
                 />
               }
             />
@@ -1191,7 +1229,7 @@ export default function Library ({
           return (
             <div class='grid' style='margin-top:.8rem'>
               {showing.items.map(i => (
-                <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={canFix ? setFixItem : null} onOpen={open} />
+                <Poster key={i.id} item={i} caps={caps} watch={i.type === 'series' ? shows_[i.id] : badge(i)} onWatched={mark} onFix={fixOn(i)} onOpen={open} />
               ))}
             </div>
           )

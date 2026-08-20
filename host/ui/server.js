@@ -1878,13 +1878,14 @@ async function startDashboard ({
         if (!itemId) return json(res, 400, { error: 'itemId required' })
         const out = await host.searchMetadata({ itemId: String(itemId), q: q ? String(q) : null })
         if (!out) return json(res, 404, { error: 'no such item' })
-        return json(res, 200, { candidates: out })
+        return json(res, 200, out)
       }
 
       if (req.method === 'POST' && url.pathname === '/api/metadata/fix') {
         const { itemId, tmdbId, type } = await readBody(req)
         if (!itemId || !tmdbId) return json(res, 400, { error: 'itemId and tmdbId required' })
         const out = await host.fixMetadata({ itemId: String(itemId), tmdbId, type: String(type || 'movie') })
+        if (out?.error) return json(res, 404, { error: out.error })
         if (!out) return json(res, 404, { error: 'TMDB does not know that id' })
         return json(res, 200, out)
       }
@@ -1904,7 +1905,7 @@ async function startDashboard ({
       if (req.method === 'POST' && url.pathname === '/api/metadata/unmatch') {
         const { itemId } = await readBody(req)
         if (!itemId) return json(res, 400, { error: 'itemId required' })
-        return json(res, 200, { ok: await host.unmatchMetadata({ itemId: String(itemId) }) })
+        return json(res, 200, await host.unmatchMetadata({ itemId: String(itemId) }))
       }
 
       if (req.method === 'POST' && url.pathname === '/api/source/test') {
