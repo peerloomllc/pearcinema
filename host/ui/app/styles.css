@@ -782,6 +782,60 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .viewtoggle button:hover:not(.on) { color: var(--fg) }
 .pickrow .grow { flex: 1 1 auto }
 
+/* ---- the page about one thing ----------------------------------------------
+ *
+ * Plex's shape, because it is the right shape and everybody already reads it: the
+ * poster on the left at the size it was drawn for, and to the right the title, one
+ * line of facts, the actions and the summary.
+ */
+.titlehead { display: flex; gap: 1.8rem; align-items: flex-start; margin-top: .6rem }
+.titleart { flex: 0 0 auto; width: 15rem; max-width: 34vw }
+.bigart {
+  width: 100%; aspect-ratio: 2 / 3;
+  border-radius: 12px; overflow: hidden;
+  background: linear-gradient(160deg, var(--card-2), var(--card));
+  border: 1px solid var(--line); box-shadow: var(--shadow);
+  display: flex; align-items: center; justify-content: center; color: var(--muted);
+}
+.bigart img { width: 100%; height: 100%; object-fit: cover; display: block }
+
+.titlemain { flex: 1 1 0; min-width: 0 }
+/* THE TITLE IS THE BIGGEST THING ON THE PAGE, which is the one place in this app
+ * that is true - everywhere else a heading competes with a hundred posters. */
+.titlename { margin: 0; font-size: 1.9rem; line-height: 1.15 }
+.titlefacts { margin: .35rem 0 0; color: var(--muted); font-size: .88rem }
+/* Play is a real button; everything else beside it is quiet and reversible - and it
+ * needed saying, because the rules that make an icon button outlined are written
+ * against the player's own action row and do not reach here, so a tick came out as a
+ * second filled amber block beside Play (caught by looking at the rendered page). */
+.titleacts { display: flex; align-items: center; gap: .5rem; margin: 1.1rem 0 0; flex-wrap: wrap }
+.titleacts button.icon {
+  min-width: 2.6rem; padding: .45rem 0;
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.titleacts button.icon:hover { color: var(--fg); border-color: var(--line-strong) }
+.titleacts button.icon.on { background: var(--accent); color: var(--accent-fg); border-color: transparent }
+.titleacts button { display: inline-flex; align-items: center; gap: .4rem }
+.titlesum { margin: 1.1rem 0 0; line-height: 1.6; max-width: 46rem }
+
+/* WHAT IS ACTUALLY INSIDE THE FILE - Plex's Video/Audio/Subtitles block, and the one
+ * part of that page we can answer better than they can, because we are looking at the
+ * operator's own file rather than at a database entry about the film. */
+.titlefacts-grid {
+  display: grid; grid-template-columns: 7.5rem 1fr; gap: .45rem 1rem;
+  margin: 1.6rem 0 0; max-width: 46rem;
+}
+.titlefacts-grid dt { color: var(--muted); font-size: .82rem }
+.titlefacts-grid dd { margin: 0; font-size: .88rem; line-height: 1.45 }
+.titlefacts-grid dd.bad { color: var(--danger) }
+
+@media (max-width: 700px) {
+  .titlehead { gap: 1.1rem }
+  .titleart { width: 9rem }
+  .titlename { font-size: 1.4rem }
+}
+
 /* ---- the detail view -------------------------------------------------------
  *
  * The poster small, the title, what it is, and what it is about. What a grid cannot

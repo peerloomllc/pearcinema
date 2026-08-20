@@ -19,6 +19,7 @@ import { verdictFor, tally } from './playback'
 import { ArtIcon, Check, Close, Detail, List, Grid, Pencil } from './icons'
 import { notify, askConfirm } from './ui'
 import { FixMatch } from './FixMatch'
+import { TitleHead, TitleActions, FilmFacts } from './TitlePage'
 
 // How far through, as a percentage, or null when there is nothing to say.
 //
@@ -663,6 +664,11 @@ export default function Library ({
   const [root, setRoot] = useState('films')
   const [series, setSeries] = useState(null)
   const [season, setSeason] = useState(null)
+  // THE FILM YOU ARE LOOKING AT, which is a place now rather than something that
+  // started the moment you touched it (Tim, 2026-08-20). One more level on the same
+  // stack the show tree uses, so it slides in and out the same way and Back means
+  // the same thing.
+  const [film, setFilm] = useState(null)
 
   // WHICH WAY WE WENT, which is the whole point of the movement (Tim, 2026-08-13,
   // choosing it over a plain cross-fade): deeper comes in from the right, back comes in
@@ -708,7 +714,7 @@ export default function Library ({
   }
 
   const stats = state.stats || {}
-  const depth = hits ? 'search' : season ? 'season' : series ? 'series' : root
+  const depth = hits ? 'search' : film ? 'film' : season ? 'season' : series ? 'series' : root
 
   // An array on the wire, a Set here. A grid asks "has this been watched" once per
   // poster and a linear scan per poster is the kind of thing that only bites on
@@ -733,6 +739,19 @@ export default function Library ({
   // finished - so forgetting one place travels the identical path (and the
   // identical write fan on a merged library) rather than being a second way to
   // remove a row that has to be kept honest separately.
+  // THE EPISODE YOU ARE UP TO. Asked for only when somebody presses Play on a show,
+  // because answering it means listing the whole show's episodes - free on a folder
+  // source and one HTTP call on a Jellyfin one, which is why nothing else on this
+  // page does it. The rule itself is the shelf's: the first one not finished, skipping
+  // nothing, so a gap in the middle is where you go rather than the end.
+  const playNextEpisode = async () => {
+    const res = await api('/api/library/list?type=episodes&seriesId=' + encodeURIComponent(series.id) + '&limit=1000')
+    const eps = res.items || []
+    if (!eps.length) return notify('Nothing to play', 'This show has no episodes on the disk.')
+    const next = eps.find(e => !seen.has(e.id) || resumeOf.get(e.id)?.positionMs > 0) || eps[0]
+    onPlay(next, eps)
+  }
+
   const forget = async (item) => {
     await api('/api/watch/position', { itemId: item.id, positionMs: 0 })
     onWatchChange()
@@ -893,7 +912,10 @@ export default function Library ({
         <div class='grid' style='margin-top:1rem'>
           {hits.map(h => (
             <Poster key={h.id} item={h} caps={caps} onFix={canFix ? setFixItem : null} onOpen={i => {
+              // A RESULT IS A PLACE TOO. Searching for a film and having it start
+              // is the same surprise the grid used to give, one screen further in.
               if (i.type === 'series') go(() => { setHits(null); setRoot('shows'); setSeries(i) })
+              else if (i.type === 'movie') go(() => { setHits(null); setRoot('films'); setFilm(i) })
               else onPlay(i, hits.filter(x => x.type === i.type))
             }} />
           ))}
@@ -907,6 +929,47 @@ export default function Library ({
       </div>
       {fixModal}
       </>
+    )
+  }
+
+  // --- one film ---
+  //
+  // Everything a grid cannot say, before anything starts: how long it is, what it is
+  // about, whether this browser can actually play this file, and whether you are
+  // already forty minutes into it.
+  if (film) {
+    const r = resumeOf.get(film.id)
+    const start = () => { setFilm(null); onPlay(film, films.items) }
+    return (
+      <div class={'screen ' + dir} key={depth}>
+        <div class='crumbs'>
+          <button onClick={() => go(() => setFilm(null), 'back')}>Films</button>
+          <span>/</span>
+          <span>{film.title}</span>
+        </div>
+
+        <TitleHead
+          item={film}
+          actions={
+            <TitleActions
+              item={film}
+              resumeMs={r?.positionMs || 0}
+              seen={seen.has(film.id)}
+              onPlay={start}
+              // RESUMING IS THE PLAYER'S OWN QUESTION, and it asks it: the card over
+              // the picture is where "carry on from 41 minutes?" belongs, and asking
+              // it twice would be one question too many. Pressing Resume here simply
+              // opens the film, which then offers the same position.
+              onResume={start}
+              onWatched={mark}
+              onFix={canFix && (!film.artId || String(film.artId).startsWith('tmdb:')) ? setFixItem : null}
+            />
+          }
+        >
+          <FilmFacts item={film} caps={caps} />
+        </TitleHead>
+        {fixModal}
+      </div>
     )
   }
 
@@ -924,9 +987,23 @@ export default function Library ({
 
         {!season && (
           <>
-            <h2>{series.title}</h2>
-            {series.overview && <p class='hint'>{series.overview}</p>}
-            <div class='grid' style='margin-top:1rem'>
+            <TitleHead
+              item={series}
+              actions={
+                <TitleActions
+                  item={series}
+                  seen={!!shows_[series.id]?.complete}
+                  // A SHOW'S PLAY IS THE EPISODE YOU ARE UP TO, not its first: on a
+                  // show three seasons in, starting at the pilot is never what
+                  // anybody meant. Off the same rule the up-next shelf uses.
+                  onPlay={playNextEpisode}
+                  onWatched={mark}
+                  onFix={canFix && (!series.artId || String(series.artId).startsWith('tmdb:')) ? setFixItem : null}
+                />
+              }
+            />
+            <h3 class='setgroup' style='margin-top:1.4rem'>Seasons</h3>
+            <div class='grid'>
               {seasons.items.map(s => (
                 <Poster
                   key={s.id}
@@ -1049,6 +1126,9 @@ export default function Library ({
         onWatched={mark}
         onForget={forget}
         onClear={clearShelf}
+        // THE SHELF STILL PLAYS STRAIGHT AWAY, and that is the point of it: a row
+        // called Continue watching is somebody saying carry on, not somebody asking
+        // what a film is. The library grid is where the question gets asked.
         onOpen={i => onPlay(i, [...(watch.continue || []), ...(watch.upNext || [])])}
       />
 
@@ -1101,6 +1181,10 @@ export default function Library ({
       {(() => {
         const open = (item) => {
           if (item.type === 'series') go(() => setSeries(item))
+          // A FILM GETS A PAGE. An episode does not: it is reached from its season,
+          // where the list around it already says what it is, and the thing somebody
+          // wants from an episode row is the episode.
+          else if (item.type === 'movie') go(() => setFilm(item))
           else onPlay(item, films.items)
         }
         if (libView === 'grid') {
