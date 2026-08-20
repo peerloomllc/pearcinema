@@ -114,8 +114,11 @@ console.log('wrote desktop/build/icon.ico (256 down to 16)')
 // taller than it is wide, so a resize fits it to the canvas HEIGHT, and these
 // fractions are of that height after trimming. The reel sits on the artwork's
 // centre line, so its across-position is simply the middle.
-const HOLE_Y = 0.6209 // down the artwork, the reel's own centre
-const HOLE_R = 0.155 // a little inside the silver rim, so a ring of pear survives
+// Re-measured 2026-08-20 for the sibling mark (the pear is PearTune's now, so the
+// reel sits lower and larger): the reel's centre is 71.1% down the artwork's own
+// bounding box and its silver disc is 20.8% of that height across.
+const HOLE_Y = 0.711 // down the artwork, the reel's own centre
+const HOLE_R = 0.17 // a little inside the silver rim, so a ring of pear survives
 
 const silhouette = ['-background', 'none', ART, '-resize', '512x512', '-trim', '+repage']
 
