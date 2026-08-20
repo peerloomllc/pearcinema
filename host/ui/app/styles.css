@@ -1383,9 +1383,18 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * wrapper clips it. */
 .rowfold {
   display: grid; grid-template-rows: 0fr;
-  transition: grid-template-rows .24s ease;
+  /* VISIBILITY, NOT JUST HEIGHT. A clipped panel is still focusable and still read
+   * aloud, so a shut fold would put a password field in the tab order. It flips to
+   * visible the instant the fold opens and back to hidden only once it has finished
+   * closing, which is what the zero-duration delay is for. */
+  visibility: hidden;
+  transition: grid-template-rows .24s ease, visibility 0s .24s;
 }
-.rowfold.on { grid-template-rows: 1fr }
+.rowfold.on {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows .24s ease, visibility 0s;
+}
 .rowfold-in { overflow: hidden; min-height: 0 }
 
 /* The chevron turns rather than being swapped for its mirror image - a swap is a

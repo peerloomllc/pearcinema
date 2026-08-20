@@ -170,7 +170,8 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
               presses and a decision for something with one possible outcome - so Save
               tests first and refuses out loud with TMDB's own reason. Nothing is saved
               by a button that says it tested. */}
-          {keyOpen && (
+          <div class={'rowfold' + (keyOpen ? ' on' : '')} aria-hidden={!keyOpen}>
+           <div class='rowfold-in'>
             <div class='rowopen'>
               <p class='hint'>
                 It is free and it takes a minute: create one at{' '}
@@ -192,7 +193,8 @@ export default function Metadata ({ embedded = false, rows = false, onEnabled = 
                 </button>
               </div>
             </div>
-          )}
+           </div>
+          </div>
 
           {/* SAID ONLY WHERE IT APPLIES. A row about titles that found nothing is noise
               on a library where everything did. */}
