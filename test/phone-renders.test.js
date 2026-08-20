@@ -866,3 +866,47 @@ test('A CACHED POSTER STILL SHOWS, even when it finished before anyone was liste
   // `in` is what takes it from invisible to visible.
   assert.ok(poster.classList.contains('in'), 'and it is actually showing')
 })
+
+test('A CODE THAT IS NOT A PAIRING CODE SAYS WHAT TO DO INSTEAD', async (t) => {
+  // FOUND BY SCANNING ONE (2026-08-20, on the TCL with a camera frame fed into the
+  // scanner's own video element): the parser is deliberately strict - a PearTune link, a
+  // PearCal join URL and a wifi QR all have to fail to parse as a PearCinema pairing link
+  // - and it throws in the vocabulary of a parser. "invalid PearCinema pairing link",
+  // lower case, no advice, was what somebody saw after pointing a camera at the wrong
+  // square. That is right for a log and wrong on a phone.
+  const { text, doc, click, win } = await open({
+    'app.state': { ...defaultAnswers()['app.state'], active: null, hosts: [], paired: false },
+    pair: () => { throw new Error('invalid PearCinema pairing link') }
+  })
+  t.after(() => win.close())
+
+  const byText = (re) => [...doc.querySelectorAll('button')].find((b) => re.test(b.textContent.trim()))
+  const step = async (re) => {
+    const b = byText(re)
+    assert.ok(b, `a button matching ${re}`)
+    click(b)
+    await new Promise((r) => setTimeout(r, 80))
+  }
+
+  // The paste path, which is the same pairWith the scanner feeds and needs no camera.
+  await step(/^Get started$/)
+  const name = doc.querySelector('input')
+  name.value = 'Tim'
+  name.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Continue$/)
+  await step(/^It's mine$/)
+  await step(/^Continue$/)
+
+  const box = doc.querySelector('input[placeholder^="pear://"]')
+  assert.ok(box, 'the paste box is there for anybody without a camera')
+  box.value = 'https://example.com/not-a-pairing-link'
+  box.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Pair$/)
+
+  // A full sentence, and the next thing to do - naming the button that shows the code.
+  assert.match(text(), /That is not a PearCinema pairing code\./)
+  assert.match(text(), /Pair a device/)
+  assert.doesNotMatch(text(), /invalid PearCinema pairing link/, "the parser's words stay in the log")
+})
