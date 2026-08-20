@@ -324,6 +324,26 @@ async function startDashboard ({
     }
   }
 
+  // MINTING A PERSON IS ONE AT A TIME, per host.
+  //
+  // Every route that creates or renames one is check-then-write: read the list, see
+  // the name is free, write it. Those are three awaits apart, so two requests
+  // arriving together both read a list without the other's person in it and both
+  // pass the check - and the refusal that exists precisely to stop two people of one
+  // name never fires. It is not theoretical: one press of Add sent two requests and
+  // Tim got "Asa #kb1u" and "Asa #smcy" (2026-08-20).
+  //
+  // A promise chain rather than a lock library: the work is a handful of bee reads
+  // and one write, it never blocks a stream, and the queue is per host object so two
+  // libraries in one process do not wait on each other. Failures do not poison it -
+  // the next in line runs either way.
+  let personQueue = Promise.resolve()
+  const onePersonAtATime = (fn) => {
+    const run = personQueue.then(fn, fn)
+    personQueue = run.then(() => {}, () => {})
+    return run
+  }
+
   // The person this browser is watching as, as an ownerId the state store accepts.
   //
   // LAZY, and that matters: a host nobody has ever watched anything on holds no
@@ -2105,23 +2125,35 @@ async function startDashboard ({
         const clean = String(name || '').trim()
         if (!clean) return json(res, 400, { error: 'name required' })
 
-        // The same rule confirming a claim follows: two people of one name is a
-        // dashboard nobody can read, and it makes "revoke Sam" ambiguous.
-        const existing = (await host.grants.listPersons())
-          .find(p => !p.revokedAt && p.name.toLowerCase() === clean.toLowerCase())
-        if (existing) return json(res, 400, { error: `there is already somebody called ${existing.name}` })
+        // THE CHECK AND THE WRITE ARE ONE ACT, or they are not a check at all.
+        // Reading the list, deciding the name is free and then writing is three
+        // awaits apart, so two requests arriving together both read a list without
+        // the other's person in it and both pass - which is exactly what Tim got
+        // when one press sent two adds and "Asa" became "Asa #kb1u" and "Asa
+        // #smcy" (2026-08-20). The page's double-send is fixed too, but a rule
+        // that only holds when nobody asks twice at once is not a rule.
+        return onePersonAtATime(async () => {
+          const existing = (await host.grants.listPersons())
+            .find(p => !p.revokedAt && p.name.toLowerCase() === clean.toLowerCase())
+          if (existing) return json(res, 400, { error: `there is already somebody called ${existing.name}` })
 
-        return json(res, 200, await host.grants.addPerson(clean))
+          return json(res, 200, await host.grants.addPerson(clean))
+        })
       }
 
+      // Confirming a claim MINTS a person when the name is new, so it is the same
+      // check-then-write and shares the same queue: two phones both claiming Tim,
+      // confirmed in the same second, must land on one Tim.
       if (req.method === 'POST' && url.pathname === '/api/person/confirm') {
         const { deviceKey, asNew, personId } = await readBody(req)
         if (!deviceKey) return json(res, 400, { error: 'deviceKey required' })
-        try {
-          return json(res, 200, await host.grants.confirmClaim(deviceKey, { asNew: !!asNew, personId: personId || null }))
-        } catch (e) {
-          return json(res, 400, { error: e.message })
-        }
+        return onePersonAtATime(async () => {
+          try {
+            return json(res, 200, await host.grants.confirmClaim(deviceKey, { asNew: !!asNew, personId: personId || null }))
+          } catch (e) {
+            return json(res, 400, { error: e.message })
+          }
+        })
       }
 
       if (req.method === 'POST' && url.pathname === '/api/assign') {
@@ -2138,14 +2170,18 @@ async function startDashboard ({
         }
       }
 
+      // Renaming refuses a name somebody else already has, which is the same
+      // check-then-write again.
       if (req.method === 'POST' && url.pathname === '/api/person/rename') {
         const { personId, name } = await readBody(req)
         if (!personId) return json(res, 400, { error: 'personId required' })
-        try {
-          return json(res, 200, { person: await host.grants.renamePerson(personId, name) })
-        } catch (e) {
-          return json(res, 400, { error: e.message })
-        }
+        return onePersonAtATime(async () => {
+          try {
+            return json(res, 200, { person: await host.grants.renamePerson(personId, name) })
+          } catch (e) {
+            return json(res, 400, { error: e.message })
+          }
+        })
       }
 
       if (req.method === 'POST' && url.pathname === '/api/person/revoke') {

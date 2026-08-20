@@ -2681,4 +2681,38 @@ test('THE PEOPLE PAGE IS ROWS NOW, and the reshape did not cost the security cla
   assert.ok(doc.querySelector('.setrow .rowctl input[type=text]'), 'a field on the page instead')
 })
 
+test('ADDING SOMEBODY SENDS ONE REQUEST, however the field is left', async (t) => {
+  // Tim, 2026-08-20: adding "Asa" made two of them. A field that saves on Enter AND
+  // on blur saves twice - removing the focused input fires the blur, and Preact's
+  // state update has not landed yet, so the second call still sees the name. It bit
+  // the add field rather than the rename one only because renaming to the same name
+  // twice is invisible.
+  const asked = []
+  const { dom, doc, win } = await open(STATE, {}, asked)
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  const add = [...doc.querySelectorAll('.setrow button')].find(b => b.getAttribute('aria-label') === 'Add somebody')
+  add.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  const field = doc.querySelector('.setrow .rowctl input[type=text]')
+  field.value = 'Asa'
+  field.dispatchEvent(new win.Event('input', { bubbles: true }))
+  // A beat, so the typed name is in state before Enter is pressed - which is what
+  // typing actually looks like, and without it the Enter handler is still the one
+  // from the render before the first keystroke.
+  await new Promise(r => setTimeout(r, 40))
+  field.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+  // What the browser does next: the input goes away, and going away blurs it.
+  field.dispatchEvent(new win.Event('blur', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const adds = asked.filter(u => String(u) === '/api/person')
+  assert.equal(adds.length, 1, 'one person asked for, not two')
+})
+
 function rootText (doc) { return doc.getElementById('root').textContent }

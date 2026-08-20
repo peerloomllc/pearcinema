@@ -409,6 +409,41 @@ test('the library reads through the same adapter the phone does', async (t) => {
   assert.equal((await c.req('GET', '/api/library/list?type=episodes')).status, 400)
 })
 
+test('TWO ADDS OF ONE NAME AT ONCE MAKE ONE PERSON, not two', async (t) => {
+  // Tim, 2026-08-20: one press of Add created "Asa #kb1u" and "Asa #smcy". The page
+  // sent the request twice (fixed there too), but the refusal that exists precisely
+  // to stop two people of one name did not fire - because reading the list, deciding
+  // the name is free and writing it are three awaits apart, so both requests read a
+  // list without the other's person in it. A rule that only holds when nobody asks
+  // twice at once is not a rule.
+  const { c, host } = await loggedIn(t)
+
+  const [a, b] = await Promise.all([
+    c.req('POST', '/api/person', { body: { name: 'Asa' } }),
+    c.req('POST', '/api/person', { body: { name: 'Asa' } })
+  ])
+
+  const codes = [a.status, b.status].sort()
+  assert.deepEqual(codes, [200, 400], 'one lands, one is refused')
+  const refused = a.status === 400 ? a : b
+  assert.match(refused.json.error, /already somebody called Asa/)
+
+  const named = (await host.grants.listPersons()).filter(p => p.name === 'Asa')
+  assert.equal(named.length, 1, 'and the box holds ONE Asa')
+})
+
+test('a different name added at the same moment is not blocked by the queue', async (t) => {
+  // Serialising the check must not turn two unrelated adds into one refusal.
+  const { c, host } = await loggedIn(t)
+
+  const both = await Promise.all([
+    c.req('POST', '/api/person', { body: { name: 'Ada' } }),
+    c.req('POST', '/api/person', { body: { name: 'Grace' } })
+  ])
+  assert.deepEqual(both.map(r => r.status), [200, 200])
+  assert.equal((await host.grants.listPersons()).length, 2)
+})
+
 test('the player can ask what sits on either side of an episode', async (t) => {
   const { c } = await loggedIn(t)
 

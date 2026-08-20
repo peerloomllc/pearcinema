@@ -31,7 +31,7 @@
 // The nesting stays, because the nesting IS the model: a person is one row until you
 // open them, so a household of four is four rows rather than a wall of keys.
 
-import { useState } from 'preact/hooks'
+import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { askConfirm, notify } from './ui'
 import { Blocked, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
@@ -192,6 +192,13 @@ export default function People ({ state, reload }) {
   const [showRevoked, setShowRevoked] = useState(false)
   const [renaming, setRenaming] = useState(null)
   const [adding, setAdding] = useState(null)
+  // ONE SUBMIT PER FIELD, and this is a real bug Tim found by using it (2026-08-20:
+  // adding "Asa" made two of them). A field that saves on Enter AND on blur saves
+  // twice, because removing the focused input fires the blur - and Preact's state
+  // update has not landed yet, so the second call still sees the name. It bit the
+  // add field rather than the rename one only because renaming to the same name
+  // twice is invisible.
+  const sent = useRef(false)
 
   const devices = state.devices || []
   const persons = (state.persons || []).filter(p => !p.revokedAt)
@@ -248,6 +255,8 @@ export default function People ({ state, reload }) {
   // unchanged name just closes it; the host refuses one that collides with somebody
   // else, and that comes back as a notice rather than as silence.
   const saveRename = async () => {
+    if (sent.current) return
+    sent.current = true
     const r = renaming
     setRenaming(null)
     if (!r) return
@@ -263,6 +272,8 @@ export default function People ({ state, reload }) {
   // box is unstyled, suppressible and looks like the page has been hijacked - the
   // same objection that took confirm() out of this file long ago (2026-08-20).
   const saveAdd = async () => {
+    if (sent.current) return
+    sent.current = true
     const name = String(adding || '').trim()
     setAdding(null)
     if (!name) return
@@ -330,7 +341,7 @@ export default function People ({ state, reload }) {
                 <span class='rowctl'>
                   <button
                     class='iconbtn'
-                    onClick={() => setRenaming({ id: p.id, draft: p.name })}
+                    onClick={() => { sent.current = false; setRenaming({ id: p.id, draft: p.name }) }}
                     title={`Rename ${p.label}`}
                     aria-label={`Rename ${p.label}`}
                   ><Pencil size={16} /></button>
@@ -394,7 +405,7 @@ export default function People ({ state, reload }) {
               ? (
                 <button
                   class='iconbtn'
-                  onClick={() => setAdding('')}
+                  onClick={() => { sent.current = false; setAdding('') }}
                   title='Add somebody'
                   aria-label='Add somebody'
                 ><Plus size={17} /></button>
