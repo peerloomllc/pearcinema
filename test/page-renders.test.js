@@ -315,10 +315,12 @@ test('THE ARTWORK PANEL SAYS THE PRIVACY SENTENCE, and admits which matches were
   // "Off by default" was a claim about defaults on a page that can now just say what
   // this host is actually doing. The row's own name carries the state in colour and
   // its sub-line says it in words.
-  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters and summaries')
   assert.ok(posters, 'artwork is a row now, not a card with a paragraph')
   assert.ok(posters.className.includes('good'), 'on, and the name says so')
-  assert.match(posters.parentElement.textContent, /On · 5 titles have artwork/)
+  // IDENTIFIED rather than "have artwork": a match is a poster and a summary, and
+  // on a library whose films have their own posters it fetches only the words.
+  assert.match(posters.parentElement.textContent, /On · 5 titles are identified/)
   // Nobody is quizzed: the guesses are counted and the correction is pointed at,
   // on the tile, where the mistake is visible (Tim, 2026-08-14).
   assert.match(text(), /matched from several possibilities/)
@@ -1867,7 +1869,7 @@ test('a merged page names itself once and labels what it holds', async (t) => {
   const rows = [...doc.querySelectorAll('.setrow .rowname')].map(n => n.textContent.trim())
   assert.deepEqual(rows, [
     'Name', 'Where the films are', 'Rescan', 'Automatic rescan',
-    'Posters', 'TMDB key', 'Titles with no artwork'
+    'Posters and summaries', 'TMDB key', 'Titles nothing was found for'
   ])
 
   // The row says what it is and what was found in it, so the counts are not something
@@ -2020,7 +2022,7 @@ test('the titles that found nothing are shown, and fixed in the same window', as
   show.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Titles with no artwork')
+  assert.equal(doc.querySelector('.modal-head h3').textContent.trim(), 'Titles nothing was found for')
   assert.match(text(), /K05/, 'the title itself, not just how many')
 
   const find = [...doc.querySelectorAll('.overlay .setrow .rowctl button')].find(b => b.textContent.trim() === 'Find it')
@@ -2066,7 +2068,7 @@ test('artwork with no key says so, refuses to be turned on, and hides its form',
   tab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters')
+  const posters = [...doc.querySelectorAll('.setrow .rowname')].find(n => n.textContent.trim() === 'Posters and summaries')
   assert.ok(posters.className.includes('dim'), 'off, and the name says so')
   // COLOUR IS NEVER THE ONLY CARRIER, and the reason it cannot be turned on yet is in
   // the words rather than only in a greyed-out button.
