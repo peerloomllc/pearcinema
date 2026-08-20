@@ -1576,8 +1576,8 @@ test('Home Assistant is folded away when it is not set up', async (t) => {
 // consolidation - because a page that moves and takes its links with it is worse than
 // a page that was ugly - and the rule that a rare action keeps its words.
 
-async function openHost (t, state = STATE, section = 'host', asked = null) {
-  const opened = await open(state, {}, asked)
+async function openHost (t, state = STATE, section = 'host', asked = null, routes = {}) {
+  const opened = await open(state, routes, asked)
   t.after(() => opened.dom.window.close())
   const { doc, win } = opened
 
@@ -1729,20 +1729,88 @@ test('a machine that could not manage one conversion is told plainly', async (t)
   assert.equal(doc.querySelector('.setrow input[type=number]').getAttribute('max'), '1')
 })
 
-test('while it measures, the row says which level it is on', async (t) => {
-  // A minute of engine time behind a button that only says "Testing…" reads as a
-  // page that has hung. The host sends the level it has reached.
+test('THE TEST GETS A WINDOW, because a minute of it in a settings row reads as a hang', async (t) => {
+  // Tim, 2026-08-20, looking at the first cut: the row narrated the run in its sub-line
+  // and the button sat to the left of the number, which made the right-hand column of
+  // the page ragged. The run has a window of its own now, with a bar that is a real
+  // proportion of a ladder known up front.
   const state = {
     ...STATE,
     transcode: { available: true, reason: null },
-    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16, measuring: { concurrency: 8, of: 16 } }
+    transcodeCap: {
+      cap: 4,
+      source: 'default',
+      measured: null,
+      max: 16,
+      measuring: { concurrency: 8, step: 4, steps: 6 }
+    }
   }
   const { doc, text } = await openHost(t, state, 'host')
 
-  assert.match(text(), /Testing 8 at once of up to 16/)
+  const dialog = doc.querySelector(".modal[role='dialog']")
+  assert.ok(dialog, 'the run is a window')
+  assert.match(dialog.textContent, /Converting 8 copies of a film at once/)
+  const bar = dialog.querySelector('.meter.busy i')
+  assert.ok(bar, 'with a bar that shows it is still going')
+  assert.match(bar.getAttribute('style'), /width:\s*50%/, 'three of six levels behind it')
+
+  // THE ROW ITSELF GOES ON SAYING WHAT THE SETTING MEANS rather than taking turns
+  // with the progress.
+  const engine = [...doc.querySelectorAll('.setrow .rowname')].find(n => /Video engine/.test(n.textContent))
+  assert.match(engine.parentElement.textContent, /Up to 4 conversions run at once/)
+
   const test_ = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => /Testing/.test(b.textContent))
   assert.ok(test_.disabled, 'and it cannot be started twice')
   assert.ok(doc.querySelector('.setrow input[type=number]').disabled, 'nor the number changed mid-measurement')
+
+  // THE NUMBER IS ABOVE THE BUTTON, not beside it: one width down the column.
+  const ctl = doc.querySelector('.setrow .rowctl.stack')
+  assert.ok(ctl, 'the two controls stack')
+  assert.equal(ctl.firstElementChild.tagName, 'INPUT')
+  assert.equal(ctl.lastElementChild.tagName, 'BUTTON')
+})
+
+test('the window stays up to show what the machine managed', async (t) => {
+  // The thing somebody waited a minute for should be the thing they are looking at
+  // when it arrives - not a notification over a settings page.
+  const state = {
+    ...STATE,
+    transcode: { available: true, reason: null },
+    transcodeCap: { cap: 4, source: 'default', measured: null, max: 16 }
+  }
+  const { doc, win } = await openHost(t, state, 'host', null, {
+    '/api/transcode-measure': {
+      cap: 2,
+      max: 2,
+      source: 'dashboard',
+      measured: {
+        cap: 2,
+        film: 'Sherlock Holmes - A Game of Shadows',
+        ladder: [
+          { concurrency: 1, speed: 2.77, ok: true, reason: null },
+          { concurrency: 2, speed: 1.45, ok: true, reason: null },
+          { concurrency: 4, speed: 0.73, ok: false, reason: null }
+        ]
+      }
+    }
+  })
+
+  const test_ = [...doc.querySelectorAll('.setrow .rowctl button')].find(b => b.textContent.trim() === 'Test')
+  test_.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+
+  const dialog = doc.querySelector(".modal[role='dialog']")
+  assert.ok(dialog, 'the answer arrives in the window that was already open')
+  assert.match(dialog.textContent, /keeps up with/)
+  assert.match(dialog.textContent, /Sherlock Holmes/, 'and says which film it was up against')
+
+  // EVERY LEVEL IS SHOWN, not only the answer: 6.29x against 0.85x is a shape before
+  // it is a pair of numbers, and it is what makes the ceiling believable.
+  const rows = [...dialog.querySelectorAll('.ladderrow')]
+  assert.equal(rows.length, 3)
+  assert.match(rows[0].textContent, /1 at once/)
+  assert.match(rows[0].textContent, /2\.77x/)
+  assert.ok(rows[2].className.includes('bad'), 'and the level that did not keep up reads as the exception')
 })
 
 test('typing 16 never sets the cap to 1 on the way', async (t) => {

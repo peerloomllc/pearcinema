@@ -292,8 +292,10 @@ async function measureEngine ({
   const ladder = []
   let cap = 0
 
-  for (const concurrency of levels) {
-    onLevel({ concurrency, of: levels[levels.length - 1] })
+  for (const [i, concurrency] of levels.entries()) {
+    // The STEP as well as the level, so a progress bar can be a real proportion of a
+    // ladder that is known up front rather than a bar that moves to look busy.
+    onLevel({ concurrency, step: i + 1, steps: levels.length })
     const args = transcodeArgs({ input, at, audio: 'aac', headers, media, device, duration: seconds })
     // Every stream in the level gets the SAME work, started together. Not staggered:
     // what is being measured is what happens when a household presses play at once.

@@ -1193,6 +1193,42 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
   border-radius: 999px; transition: width .6s ease;
 }
 
+/* THE ENGINE TEST'S OWN BAR, which is a minute long and has to look alive between
+ * levels: the width steps once per level, and the stripe moving through it is what
+ * says the level itself is still running. Anybody who has asked for less movement
+ * gets the bar without the stripe, which still carries the whole proportion. */
+.meter.big { height: 10px; margin: .2rem 0 .9rem }
+.meter.busy i {
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--accent) 70%, #000) 25%,
+    var(--accent) 45%,
+    color-mix(in srgb, var(--accent) 70%, #000) 65%
+  );
+  background-size: 220% 100%;
+  animation: meterflow 1.4s linear infinite;
+}
+@keyframes meterflow { from { background-position: 120% 0 } to { background-position: -120% 0 } }
+@media (prefers-reduced-motion: reduce) { .meter.busy i { animation: none } }
+
+/* WHAT EACH LEVEL MANAGED, as a row per level: how many at once, how fast, and
+ * whether that kept up. A bar per row because the numbers are a comparison - 6.29x
+ * against 0.85x is a shape before it is a pair of numbers. */
+.ladder { display: flex; flex-direction: column; gap: .45rem; margin: .2rem 0 .9rem }
+.ladderrow { display: flex; align-items: center; gap: .6rem; font-size: .85rem }
+.ladderrow .n { flex: 0 0 6.5rem; color: var(--muted) }
+/* THE 1x MARK, which is the only number on this bar that means anything: past it the
+ * conversion keeps up with the film, short of it the viewer catches up with the
+ * encoder and stalls. The scale is two-times full width, so the mark is the middle. */
+.ladderrow .meter { flex: 1 1 auto; position: relative }
+.ladderrow .meter::after {
+  content: ''; position: absolute; top: -2px; bottom: -2px; left: 50%;
+  width: 1px; background: var(--fg); opacity: .45;
+}
+.ladderrow .s { flex: 0 0 auto; color: var(--muted); font-variant-numeric: tabular-nums }
+.ladderrow.bad .meter i { background: var(--warn) }
+.ladderrow.bad .s { color: var(--warn) }
+
 .eprow .mark {
   margin-left: .4rem; padding: .1rem .45rem; border-radius: 999px;
   font-size: .75rem; background: transparent; color: var(--muted);
@@ -1515,6 +1551,11 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * thing on the page. Centred, because a lone digit stranded at the left of a wide box
  * looks like a mistake. */
 .setrow .rowctl input[type=number] { width: 7.5rem; text-align: center }
+/* TWO CONTROLS ON ONE ROW GO ONE ABOVE THE OTHER (Tim, 2026-08-20). Side by side they
+ * read as one wide control of two halves, and they made the page's right-hand column
+ * ragged - every other row has a single control of one width. */
+.setrow .rowctl.stack { flex-direction: column; align-items: stretch; gap: .35rem }
+.setrow .rowctl.stack button { width: 7.5rem }
 .setrow .rowctl button { min-width: 0 }
 /* A value too long to sit beside its label - a host key, an address - takes the line
    under it and keeps the copy button up beside the name. */

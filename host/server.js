@@ -835,7 +835,7 @@ class PearCinemaHost {
     if (!source?.input) throw new Error('that film could not be opened')
 
     const at = Math.min(120, Math.max(0, Math.round((Number(item.runtime) || 0) * 0.1)))
-    this.measuringEngine = { concurrency: 0, of: 0, startedAt: Date.now() }
+    this.measuringEngine = { concurrency: 0, step: 0, steps: 0, startedAt: Date.now() }
     this.onevent?.('engine:measuring', this.measuringEngine)
     try {
       const out = await transcode.measureEngine({
@@ -845,8 +845,8 @@ class PearCinemaHost {
         headers: source.headers || null,
         media: item.media,
         at,
-        onLevel: ({ concurrency, of }) => {
-          this.measuringEngine = { ...this.measuringEngine, concurrency, of }
+        onLevel: ({ concurrency, step, steps }) => {
+          this.measuringEngine = { ...this.measuringEngine, concurrency, step, steps }
           this.onevent?.('engine:measuring', this.measuringEngine)
         }
       })

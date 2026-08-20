@@ -1096,19 +1096,33 @@ function HostPanel ({ state, reload }) {
     return off
   }, [])
 
+  // How far through the ladder, as a fraction. The levels are known up front, so this
+  // is a real proportion rather than a bar that moves to look busy - and it stops
+  // short of full while the last level is still running, because it is not done.
+  const measuredPct = measuring && measuring.steps
+    ? Math.round(((measuring.step - 1) / measuring.steps) * 100)
+    : 0
+
+  // THE RUN HAS A WINDOW OF ITS OWN. It takes about a minute of real conversions, and
+  // a button that says "Testing…" for a minute with a settings page behind it reads as
+  // a page that has hung. The window stays up to show the answer, so the thing somebody
+  // waited for is the thing they are looking at when it arrives.
+  const [result, setResult] = useState(null)
+  // A WINDOW SOMEBODY CAN GET OUT OF. It cannot be a trap for a minute - if the box
+  // stalls, the way out has to exist - so closing it hides it and leaves the run
+  // going, and the answer brings it back.
+  const [hidden, setHidden] = useState(false)
+
   const measure = async () => {
-    setMeasuring({ concurrency: 0, of: 0 })
+    setResult(null)
+    setHidden(false)
+    setMeasuring({ step: 0, steps: 0 })
     const res = await api('/api/transcode-measure', {})
-    if (res?.error) {
-      setMeasuring(null)
-      return notify('Not measured', res.error)
-    }
     setMeasuring(null)
+    if (res?.error) return notify('Not measured', res.error)
+    setHidden(false)
+    setResult(res?.measured || null)
     reload()
-    const n = res?.measured?.cap ?? 0
-    notify('Measured', n === 0
-      ? 'This machine did not keep up with even one conversion in real time. You can still turn conversions on, but a film that needs one may stall.'
-      : `This machine keeps up with ${n} conversion${n === 1 ? '' : 's'} at once. That is now the most you can ask it for.`)
   }
 
   // AFTER THE TYPING STOPS, not on every keystroke. Saving per keystroke would set the
@@ -1152,15 +1166,15 @@ function HostPanel ({ state, reload }) {
   // it ran on, so it can be said plainly - and it is the field's ceiling, so the
   // sentence explains a limit somebody can already see rather than adding a claim.
   const measured = c.measured || null
+  // WHILE IT MEASURES THE ROW DOES NOT NARRATE. A minute of levels reported in the
+  // sub-line was three sentences taking turns in a settings row (Tim, 2026-08-20) -
+  // the run has a window of its own now, and the row goes on saying what the setting
+  // means.
   const engineSub = !t.available
     ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
-    : measuring
-      ? (measuring.concurrency
-          ? `Testing ${measuring.concurrency} at once${measuring.of ? ` of up to ${measuring.of}` : ''}…`
-          : 'Getting ready to test this machine.')
-      : Number(c.cap) === 0
-        ? 'Nothing is converted while this is 0.'
-        : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. Setting it to 0 turns conversions off.`
+    : Number(c.cap) === 0
+      ? 'Nothing is converted while this is 0.'
+      : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${manyCards && t.device ? `, on ${t.device}` : ''}. Setting it to 0 turns conversions off.`
 
   // The measurement's own line, under the row's. Kept separate because it is a fact
   // about the machine rather than about the setting, and because it is the one thing
@@ -1258,11 +1272,12 @@ function HostPanel ({ state, reload }) {
             <span class='rowsub'>{engineSub}</span>
             {t.available && <span class='rowsub'>{measuredSub}</span>}
           </span>
+          {/* TWO CONTROLS, STACKED, and the number on top. Side by side they read as one
+              wide control of two halves and made the right-hand column of the page ragged
+              (Tim, 2026-08-20, looking at it). The number is the setting; the button is
+              something you do once. */}
           {t.available && (
-            <span class='rowctl'>
-              <button class='ghost' disabled={!!measuring || busy} onClick={measure}>
-                {measuring ? 'Testing…' : 'Test'}
-              </button>
+            <span class='rowctl stack'>
               <input
                 type='number' min='0' max={capMax} step='1' value={cap} disabled={busy || !!measuring}
                 aria-label='How many films this host will convert at once'
@@ -1270,9 +1285,62 @@ function HostPanel ({ state, reload }) {
                 onBlur={commitCap}
                 onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
+              <button class='ghost' disabled={!!measuring || busy} onClick={measure}>
+                {measuring ? 'Testing…' : 'Test'}
+              </button>
             </span>
           )}
         </div>
+
+        {(measuring || result) && !hidden && (
+          <Modal
+            title={measuring ? 'Testing this machine' : 'What this machine manages'}
+            onClose={() => { setHidden(true); setResult(null) }}
+            closeLabel={measuring ? 'Hide this while it finishes' : 'Close'}
+          >
+            {measuring
+              ? (
+                <>
+                  <p class='hint'>
+                    {measuring.concurrency
+                      ? <>Converting <b>{measuring.concurrency}</b> {measuring.concurrency === 1 ? 'copy' : 'copies'} of a film at once, and timing it.</>
+                      : <>Picking the hardest film in your library.</>}
+                  </p>
+                  <span class={'meter big' + (measuring ? ' busy' : '')}>
+                    <i style={`width:${Math.max(4, measuredPct)}%`} />
+                  </span>
+                  <p class='hint'>
+                    This runs real conversions for about a minute. Nothing is saved and
+                    nothing is changed until it finishes.
+                  </p>
+                </>
+                )
+              : (
+                <>
+                  <p class='hint'>
+                    {Number(result?.cap) === 0
+                      ? <>This machine did not keep up with even one conversion in real time.</>
+                      : <>It keeps up with <b>{result?.cap}</b> at once, which is now the most you can ask it for.</>}
+                    {result?.film ? <> Tested on <b>{result.film}</b>, the hardest film here.</> : null}
+                  </p>
+                  <div class='ladder'>
+                    {(result?.ladder || []).map(l => (
+                      <div class={'ladderrow' + (l.ok ? '' : ' bad')} key={l.concurrency}>
+                        <span class='n'>{l.concurrency} at once</span>
+                        <span class='meter'><i style={`width:${Math.min(100, Math.round((l.speed / 2) * 100))}%`} /></span>
+                        <span class='s'>{l.ok ? `${l.speed}x` : (l.reason || `${l.speed}x - too slow`)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p class='hint'>
+                    Past the mark is faster than the film plays, which is what it has to
+                    be. The last one to manage it is the answer.
+                  </p>
+                  <div class='actions'><button onClick={() => setResult(null)}>Done</button></div>
+                </>
+                )}
+          </Modal>
+        )}
 
         <div class='setrow'>
           <span class='rowmain'>
