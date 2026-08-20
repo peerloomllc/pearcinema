@@ -835,3 +835,34 @@ test('an EPISODE still plays from its season, because the list already says what
   await h.settle(220)
   assert.equal(h.called('stream.url').length, 1, 'it plays rather than opening a page')
 })
+
+test('A CACHED POSTER STILL SHOWS, even when it finished before anyone was listening', async (t) => {
+  // Tim, 2026-08-20: 300 had its poster in the library grid and a placeholder on its
+  // title page. The first request for a cover crosses P2P and takes long enough that
+  // the element is listening by the time it lands; the shim then holds it in RAM, on
+  // disk and behind a day of cache-control, so every later request is answered
+  // instantly - and instantly beats the listener, so `load` never fires and the
+  // poster sat at opacity 0 over its own initials.
+  //
+  // The grid is almost always somebody's FIRST sight of a poster and the title page
+  // almost always their second, which is why it read as the page being broken.
+  const FILM = { id: 'f300', type: 'movie', title: '300', year: 2007, runtime: 7020, artId: 'art-300' }
+  const h = await open({ 'library.list': { items: [FILM], total: 1, cursor: null }, 'subtitle.list': { items: [] } })
+  t.after(() => h.dom.window.close())
+
+  // JSDOM loads no images, so this is what "already complete" looks like to the
+  // component: the browser answering yes before a handler could ever run.
+  const proto = h.win.HTMLImageElement.prototype
+  Object.defineProperty(proto, 'complete', { configurable: true, get () { return true } })
+  Object.defineProperty(proto, 'naturalWidth', { configurable: true, get () { return 600 } })
+
+  await h.settle(400)
+  h.press(h.tile(/300/))
+  await h.settle(220)
+
+  const poster = h.doc.querySelector('.tposter img.poster')
+  assert.ok(poster, 'the page put the poster in the page')
+  assert.match(poster.getAttribute('src'), /art-300/, 'and pointed it at the right cover')
+  // `in` is what takes it from invisible to visible.
+  assert.ok(poster.classList.contains('in'), 'and it is actually showing')
+})

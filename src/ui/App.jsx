@@ -357,7 +357,30 @@ function NavBar ({ active, onTab, saved = 0, busy = 0 }) {
 // which on a big library over a relay is minutes of nothing.
 function Cover ({ src, title, onArt = null }) {
   const [loaded, setLoaded] = useState(false)
-  useEffect(() => { setLoaded(false) }, [src])
+  const img = useRef(null)
+  // A CACHED IMAGE CAN FINISH BEFORE THE HANDLER IS ATTACHED, and then `load` never
+  // fires for it - so the poster sat at opacity 0 over its own initials and the tile
+  // read as artwork-less (Tim, 2026-08-20: 300 had its poster in the library and a
+  // placeholder on its title page).
+  //
+  // WHY IT ONLY SHOWED UP ON THE SECOND SCREEN. The first request for a cover crosses
+  // P2P and takes long enough that the element is listening by the time it lands. The
+  // shim then holds it in RAM, on disk and behind a day of `cache-control`, so every
+  // later request for that exact URL is answered instantly - and instantly is what
+  // beats the listener. The library grid is almost always somebody's first sight of a
+  // poster and the title page is almost always their second, which is why it looked
+  // like the page was broken rather than the component.
+  //
+  // Asking the element whether it is already done is the fix, and it costs one check
+  // per render of a tile.
+  useEffect(() => {
+    setLoaded(false)
+    const el = img.current
+    if (el && el.complete && el.naturalWidth > 0) {
+      setLoaded(true)
+      if (onArt) onArt()
+    }
+  }, [src])
   // `onArt` fires on SETTLED, not on success: a tile with no artwork at all, or one whose
   // poster fails, has finished as far as a screen waiting on it is concerned.
   useEffect(() => { if (onArt && !src) onArt() }, [src])
@@ -366,6 +389,7 @@ function Cover ({ src, title, onArt = null }) {
       <span className='blank'>{(title || '?').slice(0, 2)}</span>
       {src && (
         <img
+          ref={img}
           src={src} loading='lazy' alt='' draggable={false} className={'poster' + (loaded ? ' in' : '')}
           onLoad={() => { setLoaded(true); if (onArt) onArt() }}
           // A poster that 404s or dies mid-transfer leaves the initials showing rather
