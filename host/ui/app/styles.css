@@ -1429,16 +1429,20 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * button width the most visible thing on the page. The same minimum the card action
  * rows have used since 2026-08-15, for the same reason and now in a second place. */
 .setrow .rowctl button:not(.iconbtn) { min-width: 7.5rem }
-/* A DESTRUCTIVE CONTROL IN A ROW IS OUTLINED, not filled. Filled is right in the
- * window that finally commits the act - there is one of it and it is the point of
- * the screen - but a page of people is a page of Cut off buttons, and a column of
- * solid red is the same shouting the video engine row was pulled up for on
- * 2026-08-19. It keeps the danger colour, so it is never mistaken for an ordinary
- * control, and it fills on approach. */
-.setrow .rowctl button.destructive {
+/* THE ONE ICON THAT WEARS ITS COLOUR WITHOUT BEING HOVERED. Every other control in
+ * a row is a muted pictogram; cutting somebody off is the one act on the page that
+ * cannot be undone, so it has to be tellable apart at a glance rather than on
+ * approach. Filled red is still reserved for the window that finally commits it -
+ * there is one of that and it is the point of the screen - because a page of people
+ * is a page of Cut off controls, and a column of solid red is the same shouting the
+ * video engine row was pulled up for on 2026-08-19. */
+.iconbtn.destructive { color: var(--danger) }
+.iconbtn.destructive:hover:not(:disabled) { color: color-mix(in srgb, var(--danger) 70%, #fff) }
+/* Only where a word survives beside it - the wizard, a form's own action row. */
+.setrow .rowctl button.destructive:not(.iconbtn) {
   background: transparent; color: var(--danger); border-color: var(--danger);
 }
-.setrow .rowctl button.destructive:hover:not(:disabled) {
+.setrow .rowctl button.destructive:not(.iconbtn):hover:not(:disabled) {
   background: var(--danger); color: #fff;
 }
 /* And a field or a chooser is a control like any other: the SAME width, not a minimum.

@@ -251,11 +251,13 @@ test('the devices tab shows the phone and a way to cut it off', async (t) => {
   assert.ok([...doc.querySelectorAll('.setnav button.on')].some(b => b.textContent === 'People'),
     'and the nav says which page you are on')
   // This phone CLAIMS a name nobody has confirmed, which is the one thing on the page
-  // waiting on the operator - so it gets its own card at the top rather than being
-  // mixed in with devices that are simply unassigned.
+  // waiting on the operator - so it heads the page rather than being mixed in with
+  // devices that are simply unassigned.
   assert.match(text(), /Needs confirming/)
   assert.match(text(), /A phone/)
-  assert.match(text(), /Cut off/)
+  // The way to cut it off is a picture now, so its label is where the words live.
+  assert.ok([...doc.querySelectorAll('.setrow .rowctl button')]
+    .some(b => b.getAttribute('aria-label') === 'Cut off A phone'))
 })
 
 test('EVERY FILM GETS THE SAME CONTROLS, whether it is repackaged or not', async (t) => {
@@ -1249,15 +1251,23 @@ test('A PERSON IS ONE ROW UNTIL YOU OPEN THEM', async (t) => {
   assert.match(row.querySelector('.rowname').textContent, /Tim/)
   assert.doesNotMatch(text(), /A phone/, 'and their devices are folded away')
 
-  row.querySelector('.rowctl .iconbtn').dispatchEvent(new win.Event('click', { bubbles: true }))
+  // THE CHEVRON IS THE LAST CONTROL IN THE ROW, after the pencil and the cut-off.
+  const btns = row.querySelectorAll('.rowctl .iconbtn')
+  btns[btns.length - 1].dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
 
   assert.ok(doc.querySelector('.rowopen'), 'opening them shows what they hold')
   assert.match(text(), /A phone/)
   // CUT OFF IS STILL ONE PRESS FROM WHERE THE DEVICE IS NAMED. The reshape was not
-  // allowed to cost that (Tim, 2026-08-20).
+  // allowed to cost that (Tim, 2026-08-20). It is an icon rather than a word now, so
+  // the label it carries for a screen reader is what this asserts on - and that label
+  // has to NAME the device, or a page of identical pictograms is unusable without a
+  // pointer.
   const dev = [...doc.querySelectorAll('.rowopen .setrow')].find(r => /A phone/.test(r.textContent))
-  assert.ok([...dev.querySelectorAll('.rowctl button')].some(b => b.textContent.trim() === 'Cut off'))
+  const cut = [...dev.querySelectorAll('.rowctl button')].find(b => /^Cut off/.test(b.getAttribute('aria-label') || ''))
+  assert.ok(cut, 'the device row still cuts off in one press')
+  assert.equal(cut.getAttribute('aria-label'), 'Cut off A phone')
+  assert.ok(cut.classList.contains('destructive'), 'and it is the one control wearing the danger colour')
 })
 
 
@@ -2648,11 +2658,23 @@ test('THE PEOPLE PAGE IS ROWS NOW, and the reshape did not cost the security cla
   assert.match(text(), /Not assigned to anybody/)
   assert.match(text(), /A laptop/)
 
+  // ICONS, NOT WORDS (Tim, 2026-08-20). Every one of them still says what it does
+  // out loud for anything that cannot see a picture, and every label names the thing
+  // it acts on - a page of identical pictograms is unusable otherwise.
+  const labels = [...doc.querySelectorAll('.setrow .rowctl button')]
+    .map(b => b.getAttribute('aria-label')).filter(Boolean)
+  assert.ok(labels.includes('Rename Tim'))
+  assert.ok(labels.includes('Cut off Tim and every device they hold'))
+  assert.ok(labels.includes('Cut off A laptop'))
+  assert.ok(labels.includes('Add somebody'))
+  assert.ok([...doc.querySelectorAll('.setrow .rowctl button')].every(b => !/^(Rename|Cut off|Delete|Add|Show)$/.test(b.textContent.trim())),
+    'and none of them is a bare word button any more')
+
   // ADDING SOMEBODY IS A FIELD ON THE PAGE, not the browser's own prompt box -
   // which is unstyled, suppressible and looks like the page has been hijacked.
   let prompted = 0
   win.prompt = () => { prompted++; return null }
-  const add = [...doc.querySelectorAll('.setrow button')].find(b => b.textContent.trim() === 'Add')
+  const add = [...doc.querySelectorAll('.setrow button')].find(b => b.getAttribute('aria-label') === 'Add somebody')
   add.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 40))
   assert.equal(prompted, 0, 'no window.prompt')

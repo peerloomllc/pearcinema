@@ -34,7 +34,7 @@
 import { useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { askConfirm, notify } from './ui'
-import { ChevronDown, ChevronUp } from './icons'
+import { Blocked, ChevronDown, ChevronUp, Pencil, Plus, Trash } from './icons'
 
 // One device, as a row. `nested` is a device sitting under the person who holds it,
 // where the name is already known and the row is one step in.
@@ -126,9 +126,27 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
             </button>
           )}
           {/* CUT OFF STAYS ONE PRESS FROM THE NAME. Everything else about a device
-              is behind the chevron; this is not. */}
-          {!revoked && <button class='destructive' onClick={revoke}>Cut off</button>}
-          {revoked && <button class='ghost' onClick={forget}>Remove row</button>}
+              is behind the chevron; this is not. An icon rather than a word (Tim,
+              2026-08-20), and the one icon on the page that carries the danger
+              colour without being hovered - the act it starts is the one act here
+              that cannot be undone, so it is the one control that should be
+              tellable apart at a glance. It still asks before it does anything. */}
+          {!revoked && (
+            <button
+              class='iconbtn destructive'
+              onClick={revoke}
+              title={`Cut off ${d.label || 'this device'}`}
+              aria-label={`Cut off ${d.label || 'this device'}`}
+            ><Blocked size={17} /></button>
+          )}
+          {revoked && (
+            <button
+              class='iconbtn danger'
+              onClick={forget}
+              title='Remove this row'
+              aria-label={`Remove the row for ${d.label || 'this device'}`}
+            ><Trash size={17} /></button>
+          )}
           <button
             class='iconbtn'
             onClick={() => setOpen(!open)}
@@ -310,13 +328,33 @@ export default function People ({ state, reload }) {
                   </span>
                 </span>
                 <span class='rowctl'>
-                  <button class='ghost' onClick={() => setRenaming({ id: p.id, draft: p.name })}>Rename</button>
+                  <button
+                    class='iconbtn'
+                    onClick={() => setRenaming({ id: p.id, draft: p.name })}
+                    title={`Rename ${p.label}`}
+                    aria-label={`Rename ${p.label}`}
+                  ><Pencil size={16} /></button>
                   {/* CUT OFF CUTS EVERY DEVICE THEY HOLD, which is the action somebody
                       means when they say take Sam off. Somebody holding nothing has
-                      nothing to cut, so that row offers Delete instead. */}
+                      nothing to cut, so that row offers Delete instead - a different
+                      act and therefore a different picture. */}
                   {theirs.length > 0
-                    ? <button class='destructive' onClick={() => revokePerson(p)}>Cut off</button>
-                    : <button class='ghost' onClick={() => removePerson(p)}>Delete</button>}
+                    ? (
+                      <button
+                        class='iconbtn destructive'
+                        onClick={() => revokePerson(p)}
+                        title={`Cut off ${p.label} and every device they hold`}
+                        aria-label={`Cut off ${p.label} and every device they hold`}
+                      ><Blocked size={17} /></button>
+                      )
+                    : (
+                      <button
+                        class='iconbtn danger'
+                        onClick={() => removePerson(p)}
+                        title={`Delete ${p.label}`}
+                        aria-label={`Delete ${p.label}`}
+                      ><Trash size={17} /></button>
+                      )}
                   <button
                     class='iconbtn'
                     onClick={() => setOpen({ ...open, [p.id]: !isOpen })}
@@ -353,7 +391,14 @@ export default function People ({ state, reload }) {
           </span>
           <span class='rowctl'>
             {adding === null
-              ? <button class='ghost' onClick={() => setAdding('')}>Add</button>
+              ? (
+                <button
+                  class='iconbtn'
+                  onClick={() => setAdding('')}
+                  title='Add somebody'
+                  aria-label='Add somebody'
+                ><Plus size={17} /></button>
+                )
               : (
                 <input
                   type='text'
@@ -394,9 +439,13 @@ export default function People ({ state, reload }) {
                 </span>
               </span>
               <span class='rowctl'>
-                <button class='ghost' onClick={() => setShowRevoked(!showRevoked)}>
-                  {showRevoked ? 'Hide' : 'Show'}
-                </button>
+                <button
+                  class='iconbtn'
+                  onClick={() => setShowRevoked(!showRevoked)}
+                  title={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
+                  aria-label={showRevoked ? 'Hide the ones cut off' : 'Show the ones cut off'}
+                  aria-expanded={showRevoked}
+                >{showRevoked ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
               </span>
             </div>
             {showRevoked && revoked.filter(d => !d.personId).map(d => (
