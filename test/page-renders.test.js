@@ -356,6 +356,25 @@ test('THE PENCIL IS ON THE TILE, and pressing it opens the fix dialog with candi
 // anything wearing artwork off the disk, on the rule that a picture somebody put
 // there is not ours to replace - which is right about the PICTURE and took the only
 // way to correct the MATCH with it.
+// A WARNING SAT ON TOP OF THE TICK (Tim, 2026-08-20, off a screenshot). Both were
+// positioned at the top right of a tile, so a file this browser cannot play covered
+// its own "you have watched this" - no hover needed, since the tick is solid once set.
+test('the cannot-play flag is on the picture, not in the corner the watched tick owns', async (t) => {
+  const { dom, doc } = await open()
+  t.after(() => dom.window.close())
+
+  // jsdom plays nothing, so every tile is flagged; Nosferatu is the watched one.
+  const grid = [...doc.querySelectorAll('.grid')].slice(-1)[0]
+  const tile = [...grid.querySelectorAll('.poster')].find(p => p.textContent.includes('Nosferatu'))
+  const flag = tile.querySelector('.flag')
+  assert.ok(flag, 'the file is flagged')
+  assert.ok(flag.closest('.art'), 'the flag belongs to the picture')
+  const mark = tile.querySelector('.mark')
+  assert.ok(mark, 'and the tile still carries its watched control')
+  assert.equal(mark.closest('.art'), null, 'which is a tile control, in the corner')
+  assert.equal(flag.parentElement, tile.querySelector('.art'), 'so the two cannot share a corner')
+})
+
 test('the pencil is offered on a film with a poster on the disk, and says the disk keeps winning', async (t) => {
   const DISK = { ...FILM, id: 'film-3', title: '300', year: 2006, artId: 'folder:300' }
   const { dom, doc, win, text } = await open(STATE, {

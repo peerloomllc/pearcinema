@@ -357,14 +357,19 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .poster:hover .art { border-color: var(--accent) }
 .poster .t { margin-top: .4rem; font-size: .86rem; font-weight: 560; line-height: 1.25 }
 .poster .s { color: var(--muted); font-size: .76rem }
-.poster .flag {
-  position: absolute; top: .4rem; right: .4rem;
+/* AT THE FOOT OF THE PICTURE, not its top right corner - that corner belongs to the
+ * watched tick and the "3 left" count, and an unplayable episode covered its own tick
+ * with this (Tim, 2026-08-20, in a screenshot). Above the resume bar rather than
+ * beside it, in percent so it clears the bar at every tile size. */
+.art .flag {
+  position: absolute; left: 4%; bottom: 9%; z-index: 3;
+  max-width: 92%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   background: rgba(0, 0, 0, .62); color: #fff;
   border-radius: 999px; font-size: .66rem; font-weight: 700;
   padding: .1rem .4rem; letter-spacing: .02em;
 }
-.poster .flag.bad { background: color-mix(in srgb, var(--danger) 85%, #000) }
-.poster .flag.warn { background: color-mix(in srgb, var(--warn) 85%, #000) }
+.art .flag.bad { background: color-mix(in srgb, var(--danger) 85%, #000) }
+.art .flag.warn { background: color-mix(in srgb, var(--warn) 85%, #000) }
 
 .rows { display: flex; flex-direction: column; gap: .35rem }
 .eprow {
