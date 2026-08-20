@@ -189,8 +189,11 @@ const DLNA_CAPS = {
 // every film in the house was still being mixed down to stereo for it. The reason it
 // waited is the Roku's lesson (2026-08-19): a film that plays in perfect silence has
 // nothing on screen to say why, which is the worst failure available, and a mixdown is
-// the cheapest conversion there is. So this shipped only once Tim had cast a 5.1 film
-// and heard it.
+// the cheapest conversion there is. So this shipped only once it had been HEARD: Tim
+// cast a 5.1 AAC film and a Dolby Digital one to the TU7000 on 2026-08-20 and both came
+// back with sound. Two films rather than one because two separate claims are believed
+// here - the speaker count and the codec - and only 3 films in a 2,986 title library
+// carry AC3, so the codec half would otherwise have gone untested by accident.
 //
 // SPEAKERS ARE ONLY EVER RAISED, on exactly the reasoning above: a set that says
 // nothing, or says less than this profile, keeps the stereo mixdown it had.
