@@ -815,9 +815,15 @@ test('WHAT A TELEVISION SAYS IT ACCEPTS WIDENS THE PROFILE, and never narrows it
   assert.deepEqual(terse.containers.sort(), [...DLNA_CAPS.containers].sort())
   assert.deepEqual(terse.videoCodecs, DLNA_CAPS.videoCodecs)
 
-  // AUDIO IS DELIBERATELY NOT WIDENED: a film that plays in silence has nothing on
-  // screen to say why, which is the worst failure available (the Roku, 2026-08-19).
+  // AND SPEAKERS ARE ONLY EVER RAISED, on the same reasoning: a set that says nothing
+  // about sound keeps the stereo mixdown, because a film that plays in silence has
+  // nothing on screen to say why (the Roku, 2026-08-19).
   assert.equal(mergeCaps(DLNA_CAPS, { containers: [], videoCodecs: [], playlist: true }).maxAudioChannels, 2)
+  assert.equal(mergeCaps(DLNA_CAPS, { maxAudioChannels: 0 }).maxAudioChannels, 2)
+  assert.equal(mergeCaps(DLNA_CAPS, { maxAudioChannels: 1 }).maxAudioChannels, 2, 'never lowered')
+  const surround = mergeCaps(DLNA_CAPS, { audioCodecs: ['ac3'], maxAudioChannels: 6 })
+  assert.equal(surround.maxAudioChannels, 6)
+  assert.deepEqual(surround.audioCodecs.sort(), ['aac', 'ac3', 'mp3'], 'widened, and nothing lost')
 
   // And a television that said nothing keeps exactly what it had.
   assert.equal(mergeCaps(DLNA_CAPS, null), DLNA_CAPS)

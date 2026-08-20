@@ -460,6 +460,10 @@ const isFound = (t) => ['roku', 'dlna'].includes(t.via)
 // as the box they bought calls them - "H.264" rather than "h264".
 const CONTAINER_WORDS = { mp4: 'MP4', mov: 'MOV', matroska: 'MKV', mkv: 'MKV', webm: 'WebM' }
 const CODEC_WORDS = { h264: 'H.264', hevc: 'HEVC', av1: 'AV1', mpeg4: 'MPEG-4' }
+// Sound in the words on the box rather than the words in the file. Nobody bought a
+// television that plays "eac3".
+const AUDIO_WORDS = { ac3: 'Dolby Digital', eac3: 'Dolby Digital Plus', dts: 'DTS', aac: 'AAC', mp3: 'MP3' }
+const CHANNEL_WORDS = { 6: '5.1 surround', 8: '7.1 surround' }
 
 function joinWords (list) {
   if (list.length < 2) return list[0] || ''
@@ -474,9 +478,16 @@ function saysItPlays (accepts) {
     if (!seen.has(w)) { seen.add(w); containers.push(w) }
   }
   const codecs = (accepts.videoCodecs || []).map(c => CODEC_WORDS[c] || c.toUpperCase())
+  // The sound it published, if it published any. A set that said nothing about
+  // speakers gets no clause at all rather than a claim of stereo it never made.
+  const sound = []
+  const channels = CHANNEL_WORDS[Number(accepts.maxAudioChannels) || 0]
+  if (channels) sound.push(channels)
+  for (const a of accepts.audioCodecs || []) sound.push(AUDIO_WORDS[a] || a.toUpperCase())
   const parts = []
   if (containers.length) parts.push(joinWords(containers))
   if (codecs.length) parts.push(`in ${joinWords(codecs)}`)
+  if (sound.length) parts.push(`with ${joinWords(sound)}`)
   return parts.join(', ')
 }
 

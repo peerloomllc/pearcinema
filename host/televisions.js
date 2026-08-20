@@ -57,9 +57,14 @@ function cleanAccepts (a) {
     : [])
   const containers = list(a.containers)
   const videoCodecs = list(a.videoCodecs)
+  const audioCodecs = list(a.audioCodecs)
+  // Two to eight, or nothing said. A speaker count off a network answer is the one
+  // field here that is a number, so it is clamped as one rather than as a word.
+  const ch = Math.floor(Number(a.maxAudioChannels) || 0)
+  const maxAudioChannels = ch >= 2 ? Math.min(ch, 8) : 0
   const playlist = !!a.playlist
-  if (!containers.length && !videoCodecs.length && !playlist) return null
-  return { containers, videoCodecs, playlist }
+  if (!containers.length && !videoCodecs.length && !audioCodecs.length && !maxAudioChannels && !playlist) return null
+  return { containers, videoCodecs, audioCodecs, maxAudioChannels, playlist }
 }
 
 function clean (row) {

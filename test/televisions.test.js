@@ -118,6 +118,14 @@ test('values off the network are clamped before they are written', () => {
   assert.equal(row.host.length, 64)
   assert.equal(clean({ id: '   ' }), null, 'a blank id is not an id')
   assert.equal(clean(null), null)
+
+  // The speaker count is the one number in here, and it came off the same answer.
+  const ch = (v) => clean({ id: 'tv', accepts: { audioCodecs: ['ac3'], maxAudioChannels: v } }).accepts.maxAudioChannels
+  assert.equal(ch(6), 6)
+  assert.equal(ch(64), 8, 'nobody has sixty-four speakers')
+  assert.equal(ch(1.5), 0)
+  assert.equal(ch('lots'), 0)
+  assert.equal(ch(-2), 0)
 })
 
 test('the roster forgets what nobody has seen for a season, and stays bounded', async (t) => {

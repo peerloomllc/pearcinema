@@ -397,6 +397,19 @@ test('a client that says nothing about speakers is unconstrained, as before', (t
   assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 6 }, phone).mode, 'direct')
 })
 
+test('a television that says it takes 5.1 keeps its 5.1', (t) => {
+  // THE OTHER HALF OF THE SAME LESSON (Tim, 2026-08-20). The Roku's silence made every
+  // television stereo, including the Samsung publishing AAC_MULT5 and AC3 - so a 5.1
+  // film was rebuilt as two channels for a set with six speakers wired to it. Widened
+  // by the set's own answer, the same film is now exactly itself.
+  const samsung = { containers: ['mp4', 'matroska', 'mkv'], videoCodecs: ['h264', 'hevc'], audioCodecs: ['aac', 'mp3', 'ac3'], maxAudioChannels: 6 }
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 6 }, samsung).mode, 'direct')
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'hevc', audioCodec: 'ac3', audioChannels: 6 }, samsung).mode, 'direct')
+
+  // And the line is still a line: 7.1 into six speakers is still mixed down.
+  assert.equal(remux.decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 8 }, samsung).mode, 'remux')
+})
+
 test('an unknown channel count is not treated as too many', (t) => {
   // Older scans have no audioChannels at all. Absent must mean "no reason to convert",
   // or every film scanned before tonight would suddenly take the long way round.

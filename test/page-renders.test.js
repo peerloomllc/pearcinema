@@ -1495,7 +1495,13 @@ test('A FOUND TELEVISION SAYS WHAT IT PLAYS, and does not claim Home Assistant f
         hidden: false,
         host: '192.168.50.216',
         via: 'dlna',
-        accepts: { containers: ['mp4', 'matroska', 'mkv', 'mov', 'webm'], videoCodecs: ['h264', 'hevc'], playlist: false }
+        accepts: {
+          containers: ['mp4', 'matroska', 'mkv', 'mov', 'webm'],
+          videoCodecs: ['h264', 'hevc'],
+          audioCodecs: ['ac3'],
+          maxAudioChannels: 6,
+          playlist: false
+        }
       }],
       needsChannel: [],
       mediaChannel: 'Media Assistant'
@@ -1504,8 +1510,10 @@ test('A FOUND TELEVISION SAYS WHAT IT PLAYS, and does not claim Home Assistant f
 
   assert.match(text(), /Samsung TU7000/)
   assert.doesNotMatch(text(), /via Home Assistant/, 'nobody found this through software they may not own')
-  // In words the owner of a television would use, and with MKV said once.
-  assert.match(text(), /Says it plays MP4, MKV, MOV and WebM, in H\.264 and HEVC\./)
+  // In words the owner of a television would use, and with MKV said once. The sound is
+  // named too, because "it says it takes 5.1" is the whole reason a film reaches it
+  // with its surround intact - and the line on screen is where somebody checks that.
+  assert.match(text(), /Says it plays MP4, MKV, MOV and WebM, in H\.264 and HEVC, with 5\.1 surround and Dolby Digital\./)
 
   // And the counting above the list follows the same correction: a DLNA television is
   // one this host found, not one Home Assistant supplied.

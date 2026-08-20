@@ -204,6 +204,17 @@ const TS_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3'])
 // Verified on two films by counting: the segments hold every source frame in their
 // span exactly once - 2,683 of 2,683 and 3,316 of 3,316, no overlap at any join,
 // with the sound meeting within a millisecond.
+// HOW MANY SPEAKERS TO ENCODE FOR, which is not simply the client's number. `-ac 6`
+// against a STEREO source does not leave it alone, it UPMIXES - six channels of a two
+// channel film, at six channels' worth of bitrate, for nothing. So the answer is the
+// smaller of what the client takes and what the film actually has, and a film whose
+// channel count is unknown is left at the client's number rather than guessed at.
+function channelsFor (clientMax, sourceChannels) {
+  const want = Number(clientMax) || 2
+  const have = Number(sourceChannels) || 0
+  return have ? Math.min(want, have) : want
+}
+
 function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', audioCodec = null, audioChannels = 2 }) {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
   if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
@@ -230,7 +241,7 @@ function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', aud
   return args
 }
 
-function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null }) {
+function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null, audioChannels = 2 }) {
   const at = plan?.starts ? plan.starts[seq] : seq * SEGMENT_SECONDS
   const length = plan?.starts
     ? (seq + 1 < plan.starts.length ? plan.starts[seq + 1] : plan.runtime) - at
@@ -289,8 +300,10 @@ function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode
   args.push('-c:v', 'h264_vaapi', '-b:v', bitrate)
   // The soundtrack is always rebuilt on this path: TS + AAC is the least
   // surprising pairing for every HLS demuxer, and audio is a rounding error
-  // beside the video encode already being paid.
-  args.push('-c:a', 'aac', '-b:a', '192k', '-ac', '2')
+  // beside the video encode already being paid. Rebuilt at the client's own speaker
+  // count, though - a picture converted for a television it fits is no reason to take
+  // that television's surround away.
+  args.push('-c:a', 'aac', '-b:a', '192k', '-ac', String(Math.max(1, Number(audioChannels) || 2)))
   args.push('-sn', '-dn')
   // Timestamps continue from the segment's true position, so the player's clock
   // and the film agree across independently-generated segments.
@@ -305,6 +318,7 @@ module.exports = {
   segmentCount,
   segmentArgs,
   copySegmentArgs,
+  channelsFor,
   gridPlan,
   copyPlan,
   durationsOf,

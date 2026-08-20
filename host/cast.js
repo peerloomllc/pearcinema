@@ -184,18 +184,28 @@ const DLNA_CAPS = {
 // and a device whose list is shorter than this profile keeps this profile too: a Sink
 // list is what a renderer chose to publish, not a promise about what it refuses.
 //
-// AUDIO IS DELIBERATELY NOT WIDENED. The TU7000 publishes AAC_MULT5 and AC3 profiles,
-// so it is saying it takes 5.1 - but the cost of being wrong about sound is a film
-// that plays in silence with nothing on screen to say why (the Roku's lesson,
-// 2026-08-19), and mixing down is the cheapest conversion there is. That one waits
-// for somebody who can listen to it.
+// AND THE SOUND, which waited for an ear rather than a parser. The TU7000 publishes
+// AAC_MULT5 and AC3 profiles - it is saying in its own words that it takes 5.1 - and
+// every film in the house was still being mixed down to stereo for it. The reason it
+// waited is the Roku's lesson (2026-08-19): a film that plays in perfect silence has
+// nothing on screen to say why, which is the worst failure available, and a mixdown is
+// the cheapest conversion there is. So this shipped only once it had been HEARD: Tim
+// cast a 5.1 AAC film and a Dolby Digital one to the TU7000 on 2026-08-20 and both came
+// back with sound. Two films rather than one because two separate claims are believed
+// here - the speaker count and the codec - and only 3 films in a 2,986 title library
+// carry AC3, so the codec half would otherwise have gone untested by accident.
+//
+// SPEAKERS ARE ONLY EVER RAISED, on exactly the reasoning above: a set that says
+// nothing, or says less than this profile, keeps the stereo mixdown it had.
 function mergeCaps (base, accepts) {
   if (!accepts) return base
   const widen = (a, b) => [...new Set([...(a || []), ...(b || [])])]
   return {
     ...base,
     containers: widen(base.containers, accepts.containers),
-    videoCodecs: widen(base.videoCodecs, accepts.videoCodecs)
+    videoCodecs: widen(base.videoCodecs, accepts.videoCodecs),
+    audioCodecs: widen(base.audioCodecs, accepts.audioCodecs),
+    maxAudioChannels: Math.max(Number(base.maxAudioChannels) || 0, Number(accepts.maxAudioChannels) || 0)
   }
 }
 
