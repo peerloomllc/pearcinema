@@ -1032,16 +1032,16 @@ export default function App () {
               )
             })()}
             {/* RIFF MODE, Tim's own drawing (2026-08-21) rather than the drawn
-                approximation that shipped in #58. The asset is 3200x533 and is drawn at
+                approximation that shipped in #58. The asset is 3200x682 and is drawn at
                 the picture's full width, so the ratio below IS the asset - change one and
                 change the other.
                 TRACED, NOT RESAMPLED, and shipped at twice the width it needs: at 1600 an
                 upscale to a fullscreen window frayed every edge.
-                AND IT IS #0d0c0c RATHER THAN BLACK, which is a HINT off black and no more:
-                a letterboxed film's bars are pure black and a black silhouette disappears
-                into them, while the first attempts at fixing that (#22201e, then #141312)
-                read as grey people rather than silhouettes. Judged on Tim's screen against
-                a real film each time, 2026-08-21.
+                AND IT IS BLACK AGAIN. Three shades were tried to stop it disappearing
+                into a letterboxed film's black bars (#22201e, #141312, #0d0c0c) and every
+                one read as grey people rather than silhouettes on a real film. Tim's
+                answer is better than a shade: keep it black and make the SEATS TALLER, so
+                more of the row falls on the picture where it can be seen at all.
                 THE SEAT ROW IS CUT ON ONE CONTOUR. Extending the drawing by tiling a seat
                 left a step wherever a tile met the drawing, because the drawing's own
                 valleys are not all the same depth - Tim's arrows found two of them. Every
@@ -1052,20 +1052,21 @@ export default function App () {
                 between the two deepest valleys, which meets itself - was repeated three
                 times at each end. The figures keep their size and the row still reaches
                 both edges. */}
-            {playing.skin === 'mst3k' && pict && (
-              <Image
-                pointerEvents='none'
-                source={require('../assets/mst3k-silhouettes.png')}
-                style={{
-                  position: 'absolute',
-                  left: pict.left,
-                  width: pict.w,
-                  height: pict.w * (533 / 3200),
-                  top: pict.top + pict.h - pict.w * (533 / 3200)
-                }}
-                resizeMode='stretch'
-              />
-            )}
+            {playing.skin === 'mst3k' && pict && (() => {
+              // A hair wider and lower than the picture, for the same reason the browser
+              // does it: the box is arithmetic on rounded sizes, and landing a pixel
+              // inside shows a line of film under the seats.
+              const w = pict.w + 4
+              const h = w * (682 / 3200)
+              return (
+                <Image
+                  pointerEvents='none'
+                  source={require('../assets/mst3k-silhouettes.png')}
+                  style={{ position: 'absolute', left: pict.left - 2, width: w, height: h, top: pict.top + pict.h + 2 - h }}
+                  resizeMode='stretch'
+                />
+              )
+            })()}
 
             {!!cueText && (
               <View pointerEvents='none' style={[styles.cueWrap, { bottom: cueBottom }]}>

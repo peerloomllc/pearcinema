@@ -19,18 +19,20 @@
 import { useState, useEffect, useRef } from 'preact/hooks'
 import silhouettes from '../../../assets/mst3k-silhouettes.png'
 
-// The asset is 3200x533 and is drawn at the picture's full width. Change one, change the
+// The asset is 3200x682 and is drawn at the picture's full width. Change one, change the
 // other; the phone carries the same pair of numbers for the same reason.
 //
 // WHY IT IS 3200 WIDE for a row a few hundred pixels tall: fullscreen. At 1600 the
 // upscale to a 4K-ish window frayed every edge, which is what Tim was looking at
 // (2026-08-21). It is traced from the drawing rather than resampled from it, so the
 // curves are curves at any size.
-const ROW_RATIO = 533 / 3200
+const ROW_RATIO = 682 / 3200
 
 // One perforation per this many pixels of picture width, and four perforations to a frame
 // - 35mm's own arithmetic, and the same numbers the phone uses so the two look alike.
 const PITCH_PX = 46
+// How far past the picture's edges a dressing is drawn. See the note where it is used.
+const BLEED = 2
 const PERFS_PER_FRAME = 4
 
 function pictureBox (video) {
@@ -89,11 +91,17 @@ export default function Skin ({ video, skin = 'off', running = false }) {
   if (skin === 'off' || !box) return null
 
   if (skin === 'mst3k') {
-    const h = box.w * ROW_RATIO
+    // A HAIR WIDER AND LOWER THAN THE PICTURE. The box is arithmetic on rounded pixel
+    // sizes, so at some window widths it lands a pixel inside the painted picture and a
+    // line of film shows past the seats - which is what Tim's arrow found on a 4:3
+    // episode. Overhanging costs nothing: what is beyond the picture is the player's own
+    // black, and the stage clips anything past that.
+    const w = box.w + BLEED * 2
+    const h = w * ROW_RATIO
     return (
       <img
         class='skinrow' src={silhouettes} alt='' aria-hidden='true'
-        style={{ left: box.left + 'px', top: (box.top + box.h - h) + 'px', width: box.w + 'px', height: h + 'px' }}
+        style={{ left: (box.left - BLEED) + 'px', top: (box.top + box.h + BLEED - h) + 'px', width: w + 'px', height: h + 'px' }}
       />
     )
   }
@@ -111,14 +119,14 @@ export default function Skin ({ video, skin = 'off', running = false }) {
     animationPlayState: running ? 'running' : 'paused'
   }
   const strip = (top) => (
-    <div class='fstrip' style={{ left: box.left + 'px', top: top + 'px', width: box.w + 'px', height: stripH + 'px' }}>
+    <div class='fstrip' style={{ left: (box.left - BLEED) + 'px', top: top + 'px', width: (box.w + BLEED * 2) + 'px', height: stripH + 'px' }}>
       <div class='fstrip-run' style={style} />
     </div>
   )
   return (
     <>
-      {strip(box.top)}
-      {strip(box.top + box.h - stripH)}
+      {strip(box.top - BLEED)}
+      {strip(box.top + box.h + BLEED - stripH)}
     </>
   )
 }

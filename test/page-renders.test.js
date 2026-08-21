@@ -3547,7 +3547,12 @@ test('A DRESSING SITS ON THE PICTURE, not on the player', async (t) => {
   // 1920x800 inside 960x540 scales to 960x400, so the picture starts 70px down and the
   // bottom strip sits at its lower edge rather than the element's.
   const top = (el) => Math.round(parseFloat(el.style.top))
-  assert.equal(top(strips[0]), 70, 'the top strip is at the top of the PICTURE')
+  // 68 rather than 70: a strip overhangs the picture by two pixels on every side, because
+  // the box is arithmetic on rounded sizes and landing a pixel inside shows a line of film
+  // past the dressing (Tim, 2026-08-21, on a 4:3 episode). What is beyond the picture is
+  // the player's own black and the stage clips it.
+  assert.equal(top(strips[0]), 68, 'the top strip is at the top of the PICTURE, with a hair of overhang')
   assert.ok(top(strips[1]) > 400 && top(strips[1]) < 470, 'and the bottom one at the bottom of it')
+  assert.equal(Math.round(parseFloat(strips[0].style.left)), -2, 'and past both ends')
   assert.ok(strips[0].querySelector('.fstrip-run'), 'with the sliding row of perforations')
 })
