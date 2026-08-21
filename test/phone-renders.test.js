@@ -913,6 +913,105 @@ test('A CODE THAT IS NOT A PAIRING CODE SAYS WHAT TO DO INSTEAD', async (t) => {
   assert.doesNotMatch(text(), /invalid PearCinema pairing link/, "the parser's words stay in the log")
 })
 
+test('A HOST THAT NEVER ANSWERS SAYS SO, WITHOUT PRETENDING TO KNOW WHY', async (t) => {
+  // THE OTHER HALF OF THE WINDOWS FIREWALL BUG (PR #152). The host end learned to say it
+  // cannot accept connections; the phone end still said nothing, so pointing a phone at a
+  // blocked machine looked identical to a tap that did nothing, and the real cause took a
+  // firewall audit to find rather than a glance.
+  //
+  // The message must NOT diagnose. peerloom-client cannot tell a firewall deny from a
+  // machine that is switched off from a code that ran out - all three are a dial that
+  // never opens - so the assertions below check that all three are named and none is
+  // claimed.
+  const { text, doc, click, win } = await open({
+    'app.state': { ...defaultAnswers()['app.state'], active: null, hosts: [], paired: false },
+    pair: () => { throw new Error('no answer from the host (unreachable, or not accepting pair requests)') }
+  })
+  t.after(() => win.close())
+
+  const byText = (re) => [...doc.querySelectorAll('button')].find((b) => re.test(b.textContent.trim()))
+  const step = async (re) => {
+    const b = byText(re)
+    assert.ok(b, `a button matching ${re}`)
+    click(b)
+    await new Promise((r) => setTimeout(r, 80))
+  }
+
+  await step(/^Get started$/)
+  const name = doc.querySelector('input')
+  name.value = 'Tim'
+  name.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Continue$/)
+  await step(/^It's mine$/)
+  await step(/^Continue$/)
+
+  const box = doc.querySelector('input[placeholder^="pear://"]')
+  box.value = 'pear://pearcinema/pair?k=whatever'
+  box.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Pair$/)
+
+  const said = text()
+  assert.match(said, /No answer from that computer/, 'it says nobody picked up')
+  assert.match(said, /asleep or switched off/, 'and names the machine being off')
+  assert.match(said, /run out/, 'and names the code expiring')
+  assert.match(said, /refusing connections/, 'and names the firewall case')
+  assert.match(said, /Windows/, 'and points at where Windows explains itself')
+  assert.doesNotMatch(said, /unreachable, or not accepting pair requests/, "the client's words stay in the log")
+})
+
+test('A LIBRARY THAT IS NOT ANSWERING SAYS SO, INSTEAD OF LOOKING EMPTY', async (t) => {
+  // FOUND ON THE TCL (2026-08-21) pointing at a switched-off Windows VM. The merged shelf
+  // leaves an unreachable host's films out, library.list answers with an empty page and no
+  // error, so the screen drew a library with nothing in it - which reads as "this library
+  // is empty", a lie about somebody's films. The titles were even there on the first paint
+  // from the catalog cache, and vanished on the rebuild without a word.
+  const state = {
+    platform: 'android',
+    deviceKey: 'dev-key',
+    paired: true,
+    active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
+    hosts: [
+      { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema', online: true },
+      { hostKey: 'host-2', libraryId: 'lib-2', libraryName: 'Windows VM', online: false, absent: true }
+    ],
+    merged: { on: true, ready: true, filter: '_all' },
+    live: ['lib-1']
+  }
+  const { text, win } = await open({
+    'app.state': state,
+    'library.list': { items: [], total: 0, cursor: null }
+  })
+  t.after(() => win.close())
+
+  const said = text()
+  assert.match(said, /Windows VM cannot be reached right now/, 'it names the library')
+  assert.match(said, /films are\s+not showing/, 'and says why the shelf is bare')
+  assert.doesNotMatch(said, /The Cinema cannot be reached/, 'the library that IS answering is not accused')
+})
+
+test('AN UNREACHABLE LIBRARY IS ONLY MENTIONED WHILE IT IS BEING LOOKED AT', async (t) => {
+  // The chip picks one library. Naming a DIFFERENT one that happens to be asleep is noise
+  // on a screen that is showing exactly what it was asked for.
+  const state = {
+    platform: 'android',
+    deviceKey: 'dev-key',
+    paired: true,
+    active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
+    hosts: [
+      { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema', online: true },
+      { hostKey: 'host-2', libraryId: 'lib-2', libraryName: 'Windows VM', online: false, absent: true }
+    ],
+    merged: { on: true, ready: true, filter: 'lib-1' },
+    live: ['lib-1']
+  }
+  const { text, win } = await open({ 'app.state': state })
+  t.after(() => win.close())
+
+  assert.doesNotMatch(text(), /Windows VM cannot be reached/, 'not while the chip is on the other library')
+})
+
 // --- the You tab, which had no coverage at all until its buttons changed ------
 
 // What the worklet answers for a You tab with something in every list.
