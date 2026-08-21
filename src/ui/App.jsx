@@ -1272,7 +1272,12 @@ export default function App () {
       // An error ends the skeleton - a placeholder that never resolves reads
       // as a hang, and the error line says what actually happened.
       setItems((prev) => prev || [])
-      setErr(e.message)
+      // With ONE library there is no merged index to answer from, so this throw is the
+      // only thing that reaches the screen - and "could not reach the host" is the
+      // client's vocabulary, not a sentence. Same words as the merged case above.
+      setErr(/could not reach the host|no answer from the host/i.test(String(e.message || ''))
+        ? 'That computer is not answering, so its films are not showing. It may be asleep, switched off or off the internet.'
+        : e.message)
     }
   }, [])
 
@@ -1333,6 +1338,20 @@ export default function App () {
     call('library.sources')
       .then((r) => setLostLibs(r?.items || []))
       .catch(() => setLostLibs([]))
+  }, [state?.active?.hostKey, mergedFilter, mergedTick, items])
+
+  // A LIBRARY THAT IS NOT ANSWERING IS NOT AN EMPTY LIBRARY. The merged shelf leaves an
+  // unreachable host's films out and library.list answers with an empty page and no error,
+  // so pointing the phone at a machine that is switched off drew a library with nothing in
+  // it and said nothing at all (Tim, on the TCL against a stopped Windows VM, 2026-08-21).
+  // The worklet now records which libraries it tried and could not reach; this reads that
+  // on the same beats the drive-missing line does.
+  const [offlineLibs, setOfflineLibs] = useState([])
+  useEffect(() => {
+    if (!state?.active) return setOfflineLibs([])
+    call('app.state')
+      .then((s) => setOfflineLibs((s.hosts || []).filter((h) => h.absent && !h.online)))
+      .catch(() => setOfflineLibs([]))
   }, [state?.active?.hostKey, mergedFilter, mergedTick, items])
 
   // The chip is a persisted preference the worklet applies server-side of the
@@ -2133,6 +2152,19 @@ export default function App () {
           <b>{l.libraryName} cannot reach its films.</b> {l.sourceError}
         </div>
       ))}
+
+      {/* Scoped to what is being looked at: the chip picks one library, so naming a
+          different one that is also asleep would be noise. The causes are named without
+          claiming one, the same honesty the pairing screen needs - a machine that does not
+          answer looks identical whether it is off, asleep or off the internet. */}
+      {offlineLibs
+        .filter((l) => mergedFilter === '_all' || l.libraryId === mergedFilter)
+        .map((l) => (
+          <div className='error' key={l.libraryId}>
+            <b>{l.libraryName || 'That library'} cannot be reached right now.</b> Its films are
+            not showing. That computer may be asleep, switched off or off the internet.
+          </div>
+        ))}
 
       {/* The marker. Nobody should discover after the fact that their films took the
           long way round, and the quality drop is a fact worth explaining before it is

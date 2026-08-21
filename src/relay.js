@@ -148,6 +148,32 @@ function relayStillOn (firstAddr, nowAddr) {
   return firstAddr === nowAddr
 }
 
+// AND THE OTHER HALF OF THE SAME SIGNAL, found on the TCL 2026-08-21. `relayStillOn` only
+// notices a connection that MOVES, so it can never clear a connection that was direct from
+// its first byte - and one of those is exactly what a phone at home gets. The phone marks a
+// library relayed the moment it OFFERS the relay (peerloom-client sets relayOffered while
+// building the dial options, before anything is known about the outcome), so one aborted
+// hole-punch on the LAN was enough to flag all three libraries at home, cap the picture at
+// 2.5 Mbps and tell Tim his films were coming through a relay. They were not.
+//
+// A relay is a machine on the public internet. So a stream pointing at a private address is
+// proof of a DIRECT connection, whatever was offered. That is the one-way test this is:
+// true means certainly direct, false means unknown rather than relayed.
+//
+// 100.64/10 is deliberately NOT here. It is carrier-grade NAT and it is also every
+// Tailscale address, so somebody's own relay could legitimately live there.
+function directByAddress (host) {
+  const h = String(host || '')
+  if (!h) return false
+  if (h === '::1' || h.startsWith('127.')) return true                 // loopback
+  if (h.startsWith('10.') || h.startsWith('192.168.')) return true     // RFC1918
+  if (/^172\.(1[6-9]|2[0-9]|3[01])\./.test(h)) return true             // RFC1918
+  if (h.startsWith('169.254.')) return true                            // link-local
+  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true                       // IPv6 link-local
+  if (/^f[cd][0-9a-f][0-9a-f]:/i.test(h)) return true                  // IPv6 unique-local
+  return false
+}
+
 // The counter's shape, bumped when a stored total stops meaning what it says. Version 1
 // counted every byte on a connection that had EVER been relayed, including the ones that
 // flowed after a late punch moved the stream onto a direct path - which on Tim's phone
@@ -208,6 +234,7 @@ const RELAY_PLAY_REFUSAL =
 
 module.exports = {
   relayStillOn,
+  directByAddress,
   USAGE_VERSION,
   RELAY_WARN_BYTES,
   monthKey,

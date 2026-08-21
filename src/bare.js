@@ -83,6 +83,14 @@ function relayPolicy ({ force, randomized }) {
 // Which libraries we OFFERED the relay for, on the connection we currently hold. Offered,
 // not used - see relayOffered in @peerloom/client. Cleared on disconnect, so a library
 // that reconnects on wifi stops being labelled and stops being throttled.
+// WHICH LIBRARIES WE TRIED AND COULD NOT REACH. Absence used to be invisible: the merged
+// build simply left an unreachable host's catalog out, library.list answered with an empty
+// page and no error, and the shelf drew an empty library - which reads as "there is nothing
+// in here" rather than "this machine is not answering". Tim hit it on the TCL pointing at a
+// switched-off Windows VM (2026-08-21): the titles were there on the first paint, from the
+// catalog cache, and vanished on the rebuild without a word.
+const absentLibs = new Map() // libraryId -> the message the failed attempt carried
+
 const relayedLibs = new Set()
 
 function libraryForId (id) {
@@ -154,7 +162,16 @@ function sampleRelayUsage () {
     // and a sample every 30s is fine granularity for a monthly figure.
     const addr = raw.remoteHost ? `${raw.remoteHost}:${raw.remotePort}` : null
     const first = relayAddr.get(libraryId) || null
-    if (!first && addr) relayAddr.set(libraryId, addr)
+    // The connect-time check again, because a stream may have had no address yet when it
+    // ran - and a first sample that recorded a PRIVATE address as "where the relay put it"
+    // would then compare equal to itself forever and never clear.
+    if (relay.directByAddress(raw.remoteHost)) {
+      log('relay:offered-but-direct', { libraryId, host: raw.remoteHost })
+      relayedLibs.delete(libraryId)
+      relayBytesSeen.delete(libraryId)
+      relayAddr.delete(libraryId)
+      emit('relay:changed', { libraryId, relayed: false })
+    } else if (!first && addr) relayAddr.set(libraryId, addr)
     else if (!relay.relayStillOn(first, addr)) {
       // The punch landed late and hyperdht moved the live stream across. This connection
       // is direct now, so the ceiling lifts, the marker goes and nothing more is counted.
@@ -328,7 +345,15 @@ async function connectedLib (libraryId) {
     // Recorded per library the moment the dial lands, because everything that has to
     // behave differently on a relayed link - the ceiling, the marker, the byte count -
     // asks by library rather than by connection.
-    if (c.relayOffered) {
+    // OFFERED IS NOT USED. peerloom-client raises relayOffered while it builds the dial
+    // options, so it says only that the relay was on the table for this attempt - and one
+    // aborted hole-punch is enough to put it there. A stream pointing at a private address
+    // is a direct connection whatever was offered, and that is the case a phone at home
+    // hits: all three libraries on Tim's LAN were marked relayed and capped at 2.5 Mbps
+    // over a link that never touched a relay (TCL, 2026-08-21).
+    const dialedDirect = relay.directByAddress(c.conn?.rawStream?.remoteHost)
+    if (c.relayOffered && dialedDirect) log('relay:offered-but-direct', { libraryId, host: c.conn?.rawStream?.remoteHost || null })
+    if (c.relayOffered && !dialedDirect) {
       relayedLibs.add(libraryId)
       // A fresh UDX stream counts from zero, so the baseline is zero. Set explicitly
       // rather than left over from the previous connection, which would swallow this
@@ -355,7 +380,8 @@ async function connectedLib (libraryId) {
       emit('host:disconnected', { hostKey: row.hostKey, libraryId })
     })
     slot.client = c
-    emit('host:connected', { hostKey: row.hostKey, libraryId, libraryName: row.libraryName, relayed: !!c.relayOffered })
+    absentLibs.delete(libraryId)
+    emit('host:connected', { hostKey: row.hostKey, libraryId, libraryName: row.libraryName, relayed: relayedLibs.has(libraryId) })
     // A host coming online that the merged index has not heard from yet is
     // catalog we are not showing - rebuild (debounced, and a no-op single-host).
     if (mergedOn() && !contributedLibs.has(libraryId)) buildSoon('host-online')
@@ -364,6 +390,11 @@ async function connectedLib (libraryId) {
 
   try {
     return await slot.connecting
+  } catch (e) {
+    // Recorded rather than only thrown: the shelf has to be able to SAY which library it
+    // could not reach, and by the time an empty page reaches it the throw is long gone.
+    absentLibs.set(libraryId, e.message)
+    throw e
   } finally {
     slot.connecting = null
   }
@@ -941,7 +972,9 @@ const methods = {
   }),
 
   // Which libraries this phone is currently talking to through a relay, for the marker
-  // and for the settings rows that reverse a deny. `relayed` is OFFERED, the honest word.
+  // and for the settings rows that reverse a deny. `relayed` used to mean OFFERED, which
+  // read as honest and was not: it flagged every library on a LAN whose first punch
+  // aborted. It now means offered AND not provably direct by the stream's own address.
   'relay.status': async () => ({
     useRelay: readSettings().useRelay !== false,
     ownRelayKey: readSettings().ownRelayKey || '',
@@ -963,6 +996,12 @@ const methods = {
       libraryId: h.libraryId,
       libraryName: h.libraryName || null,
       relayed: relayedLibs.has(h.libraryId),
+      // WHERE THIS LINK ACTUALLY POINTS, so the claim above can be CHECKED rather than
+      // believed. A private address here is a direct connection; the relay is a machine on
+      // the public internet. Not drawn anywhere - it exists because "is this relayed?" was
+      // unanswerable from outside the phone, and a marker nobody can check is how three
+      // libraries on a LAN came to be labelled relayed for a week.
+      remote: hostConns.get(h.libraryId)?.client?.conn?.rawStream?.remoteHost || null,
       consent: relayConsentFor(h.libraryId)
     }))
   }),
@@ -978,6 +1017,9 @@ const methods = {
         ...h,
         active: h.hostKey === hostsState.activeHostKey,
         online: live.has(h.libraryId),
+        // Tried and failed, as opposed to merely not connected yet - which is what every
+        // host looks like for the first few seconds after a cold start.
+        absent: absentLibs.has(h.libraryId),
         inMerge: contributedLibs.has(h.libraryId)
       })),
       active: active ? { hostKey: active.hostKey, libraryName: active.libraryName } : null,

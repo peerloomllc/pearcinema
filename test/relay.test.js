@@ -165,6 +165,33 @@ test('nothing to compare yet is treated as still relayed', () => {
   assert.equal(relay.relayStillOn('1.2.3.4:5000', null), true)
 })
 
+test('a private address is proof of a direct connection, whatever was offered', () => {
+  // FOUND ON THE TCL (2026-08-21). relayStillOn only notices a connection that MOVES, so
+  // it can never clear one that was direct from its first byte - and the phone marks a
+  // library relayed the moment it OFFERS the relay, which one aborted hole-punch on the
+  // LAN is enough to trigger. All three of Tim's libraries at home were flagged relayed
+  // and capped at 2.5 Mbps over links that never touched a relay.
+  //
+  // A relay is a machine on the public internet, so a stream pointing at a private address
+  // settles it.
+  assert.equal(relay.directByAddress('192.168.50.218'), true)
+  assert.equal(relay.directByAddress('10.4.1.9'), true)
+  assert.equal(relay.directByAddress('172.20.0.5'), true)
+  assert.equal(relay.directByAddress('127.0.0.1'), true)
+  assert.equal(relay.directByAddress('fe80::1c2b'), true)
+  assert.equal(relay.directByAddress('fd12:3456::9'), true)
+})
+
+test('the address test never claims direct when it cannot know', () => {
+  // One-way on purpose: false means UNKNOWN, not relayed. A public address is what both a
+  // relay and a punched peer look like, so it stays on the conservative side.
+  assert.equal(relay.directByAddress('143.244.146.75'), false, 'the relay droplet')
+  assert.equal(relay.directByAddress('172.32.4.4'), false, 'just outside RFC1918')
+  assert.equal(relay.directByAddress('100.77.107.81'), false, 'CGNAT, and every Tailscale address')
+  assert.equal(relay.directByAddress(''), false)
+  assert.equal(relay.directByAddress(null), false)
+})
+
 test('a total written by an older counter does not survive', () => {
   // Version 1 kept counting after a connection went direct. A figure wrong by an order of
   // magnitude is worse than no figure, so it is discarded rather than migrated.
