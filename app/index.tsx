@@ -1036,10 +1036,12 @@ export default function App () {
                 the picture's full width, so the ratio below IS the asset - change one and
                 change the other.
                 TRACED, NOT RESAMPLED, and shipped at twice the width it needs: at 1600 an
-                upscale to a fullscreen window frayed every edge. And it is a near-black
-                warm grey rather than pure black, because a letterboxed film's bars ARE
-                pure black and a black silhouette disappears into them - both seen on
-                Tim's screen, 2026-08-21.
+                upscale to a fullscreen window frayed every edge.
+                AND IT IS #141312 RATHER THAN BLACK, which is a HINT off black and no more:
+                a letterboxed film's bars are pure black and a black silhouette disappears
+                into them, while the first attempt at fixing that (#22201e) read as dark
+                grey people rather than silhouettes. Both judged on Tim's screen against a
+                real film, 2026-08-21.
                 THE SEAT ROW WAS EXTENDED to get here: the drawing is 500 wide and would
                 have covered 60% of a 16:9 frame at full width, so one seat - the slice
                 between the two deepest valleys, which meets itself - was repeated three
