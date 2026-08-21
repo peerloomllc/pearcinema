@@ -724,7 +724,9 @@ test('A PLACE CAN BE REMOVED WITHOUT CLAIMING TO HAVE WATCHED IT', async (t) => 
   h.click(h.labelled('You'))
   await h.settle(220)
 
-  h.click(h.button(/^Remove$/))
+  // The button is a mark rather than a word now (2026-08-20), so it is found the way a
+  // screen reader finds it - which is also the assertion that it still says what it does.
+  h.click(h.labelled('Remove from Continue watching'))
   await h.settle(120)
 
   const zeroed = h.called('resume.set')
@@ -909,4 +911,85 @@ test('A CODE THAT IS NOT A PAIRING CODE SAYS WHAT TO DO INSTEAD', async (t) => {
   assert.match(text(), /That is not a PearCinema pairing code\./)
   assert.match(text(), /Pair a device/)
   assert.doesNotMatch(text(), /invalid PearCinema pairing link/, "the parser's words stay in the log")
+})
+
+// --- the You tab, which had no coverage at all until its buttons changed ------
+
+// What the worklet answers for a You tab with something in every list.
+const YOU_ANSWERS = {
+  'resume.list': {
+    items: [
+      { id: 'metropolis', type: 'movie', title: 'Metropolis', year: 1927, runtime: 9180, resume: { positionMs: 2820000 } },
+      { id: 'nosferatu', type: 'movie', title: 'Nosferatu', year: 1922, runtime: 5820, resume: { positionMs: 600000 } }
+    ]
+  },
+  'watched.list': { items: ['thirdman'] },
+  'library.get': { id: 'thirdman', type: 'movie', title: 'The Third Man', year: 1949, runtime: 6240 },
+  'request.list': { items: [] }
+}
+
+const VIEW_LABEL = { watched: 'Watched', requests: 'Requests', downloads: 'Downloads', manage: 'Manage library' }
+
+async function openYou (t, view = 'continue', answers = {}) {
+  const h = await open({ ...YOU_ANSWERS, ...answers })
+  t.after(() => h.win.close())
+  h.click(h.button(/^You$/))
+  await h.settle(160)
+  if (view !== 'continue') {
+    h.click(h.labelled(VIEW_LABEL[view] || view))
+    await h.settle(200)
+  }
+  return h
+}
+
+test('THE ROW BUTTONS IN You ARE MARKS, NOT SENTENCES', async (t) => {
+  // Tim, 2026-08-20: use icons instead of text for the buttons in these lists. A row is
+  // read at a glance and the same five words in every row is five words of noise per row;
+  // the wordy version of each action is still one long-press away on the film itself.
+  const h = await openYou(t, 'continue')
+  assert.match(h.text(), /Metropolis/, 'the Continue list is on screen')
+
+  // X takes this one off this list, and it says so to a screen reader.
+  const off = h.labelled('Remove from Continue watching')
+  assert.ok(off, 'every icon button here carries the words it replaced')
+  assert.equal(off.textContent.trim(), '', 'the mark alone')
+  assert.ok(off.querySelector('svg'), 'and it is a real icon rather than an empty button')
+
+  // EMPTYING THE WHOLE LIST KEEPS ITS WORDS. It is not in a row, it is destructive, and
+  // it is the one place here worth being wordy.
+  const clear = h.button(/Clear this list/)
+  assert.ok(clear, 'the list-level action still says what it does')
+  assert.ok(clear.querySelector('svg'), 'with a heavier mark beside it')
+})
+
+test('answering somebody else\'s request is a tick and a cross', async (t) => {
+  // The owner's view of the same tab. Two marks rather than "Added" and "Decline",
+  // because they are a pair and the row above them already says what is being answered.
+  const h = await openYou(t, 'manage', {
+    'identity.get': { userName: 'Tim', deviceName: 'Pixel', libraryName: 'The Cinema', owner: true, belongsTo: 'Tim' },
+    'request.all': { items: [{ id: 'r1', name: 'The Thing', kind: 'movie', status: 'pending', count: 1, refs: [] }] },
+    'device.list': { items: [] }
+  })
+  assert.match(h.text(), /The Thing/)
+  const yes = h.labelled('Mark "The Thing" as added')
+  const no = h.labelled('Decline "The Thing"')
+  assert.ok(yes && no, 'both answers say what they do, whatever they look like')
+  assert.equal(yes.textContent.trim(), '')
+  assert.equal(no.textContent.trim(), '')
+  assert.ok(yes.querySelector('svg') && no.querySelector('svg'))
+  // And pressing one answers with what it says.
+  h.click(no)
+  await h.settle(120)
+  const resolved = h.called('request.resolve')
+  assert.equal(resolved.length, 1)
+  assert.equal(resolved[0].args.status, 'declined')
+})
+
+test('the same mark means the same thing in the Watched list', async (t) => {
+  const h = await openYou(t, 'watched')
+  assert.match(h.text(), /The Third Man/)
+  const unmark = h.labelled('Mark as not watched')
+  assert.ok(unmark, 'labelled for what it does, not for what it looks like')
+  assert.equal(unmark.textContent.trim(), '')
+  assert.ok(unmark.querySelector('svg'))
 })
