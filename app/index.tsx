@@ -94,18 +94,26 @@ function parseVtt (raw: string): Cue[] {
 // perforations, so a true rate is 96 holes a second - a grey blur, and a strobe against a
 // 60 Hz screen. This is slow enough to read as film running.
 const SPROCKET_MS = 420
+// FOUR PERFORATIONS TO A FRAME, which is 35mm's own arithmetic and is why the frame lines
+// below fall where they do (Tim, 2026-08-21: "can we add vertical lines to simulate the
+// frames?").
+const PERFS_PER_FRAME = 4
 
 function FilmStrip ({ left, top, width, height, running }: { left: number, top: number, width: number, height: number, running: boolean }) {
   const count = Math.max(6, Math.round(width / 46))
   const pitch = width / count
   const x = useRef(new Animated.Value(0)).current
 
+  // THE SLIDE IS A WHOLE FRAME, not a single hole, and that is what the frame lines cost.
+  // Holes are uniform, so resetting after one pitch is invisible; a line every fourth hole
+  // is NOT uniform, and the same reset would hop the lines a hole to the right in plain
+  // sight. Sliding exactly four pitches puts the pattern back on itself.
   useEffect(() => {
     x.setValue(0)
     if (!running) return
     const loop = Animated.loop(Animated.timing(x, {
-      toValue: -pitch,
-      duration: SPROCKET_MS,
+      toValue: -pitch * PERFS_PER_FRAME,
+      duration: SPROCKET_MS * PERFS_PER_FRAME,
       easing: Easing.linear,
       useNativeDriver: true
     }))
@@ -118,8 +126,11 @@ function FilmStrip ({ left, top, width, height, running }: { left: number, top: 
   return (
     <View pointerEvents='none' style={[styles.filmStrip, { left, top, width, height }]}>
       <Animated.View style={[styles.filmStripRow, { transform: [{ translateX: x }] }]}>
-        {Array.from({ length: count + 2 }, (_, i) => (
-          <View key={i} style={{ width: pitch, alignItems: 'center' }}>
+        {Array.from({ length: count + PERFS_PER_FRAME + 1 }, (_, i) => (
+          <View key={i} style={{ width: pitch, alignItems: 'center', justifyContent: 'center' }}>
+            {/* The join between one frame and the next, drawn at the leading edge of every
+                fourth perforation and travelling with them. */}
+            {i % PERFS_PER_FRAME === 0 && <View pointerEvents='none' style={styles.frameLine} />}
             <View style={[styles.sprocket, { width: holeW, height: holeH }]} />
           </View>
         ))}
@@ -1286,6 +1297,12 @@ const styles = StyleSheet.create({
   },
   filmStripRow: { flexDirection: 'row', alignItems: 'center', height: '100%' },
   sprocket: { backgroundColor: 'rgba(240,234,220,0.85)', borderRadius: 3 },
+  // A hairline rather than a bar: it is the gap between two frames, and film is mostly
+  // frame. Absolute so it spans the strip's full height without pushing the hole around.
+  frameLine: {
+    position: 'absolute', left: 0, top: 0, bottom: 0, width: 1,
+    backgroundColor: 'rgba(240,234,220,0.42)'
+  },
   ctlTime: { color: '#efe9df', fontVariant: ['tabular-nums'], fontSize: 12 },
   // The touch target is much taller than the painted track, or a moving thumb
   // is impossible to catch mid-film.
