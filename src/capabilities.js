@@ -86,14 +86,19 @@ const STATIC = {
 //     Android chips this file's rules were written against, it does not lie about it -
 //     and the player-error retry net is still the backstop if one ever does.
 //     No VP9, no AV1: AVPlayer plays neither.
-//   - AUDIO: the ones Apple documents for local playback, and DELIBERATELY not AC-3, E-AC-3
-//     or DTS. Those are cheap to re-encode and getting them wrong is a film that plays in
-//     silence with nothing on screen to say why - the lesson the televisions taught twice
-//     over (the Roku 2026-08-19, the Samsung 2026-08-20).
+//   - AUDIO: the ones Apple documents, INCLUDING Dolby. ac3 and eac3 shipped cautiously
+//     absent on the first iOS build (2026-08-20) - silence is the worst failure available
+//     and a re-encode is the cheapest conversion there is, so they waited for an ear in
+//     the room exactly as the Samsung's 5.1 did. Tim then played a Dolby film on the SE
+//     and heard it. DTS stays out: Apple does not decode it, and there are no DTS films
+//     in this library to be wrong about anyway.
+//     The transport is what makes this safe to believe rather than a spec-sheet claim: an
+//     iPhone gets HLS for anything repackaged, MPEG-TS carries AC-3 untouched
+//     (host/hls.js TS_AUDIO), and AC-3 in HLS is Apple's OWN documented pairing.
 const IOS_STATIC = {
   containers: ['mp4'],
   videoCodecs: ['h264', 'hevc'],
-  audioCodecs: ['aac', 'mp3', 'alac', 'flac']
+  audioCodecs: ['aac', 'mp3', 'alac', 'flac', 'ac3', 'eac3']
 }
 
 // The floor for a platform, before any probe refines it. Anything that is not iOS gets

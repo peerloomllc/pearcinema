@@ -168,9 +168,13 @@ test('AN iPHONE DECLARES AN iPHONE, not this file\'s Android floor', () => {
   assert.deepEqual(ios.containers, ['mp4'], 'no Matroska, no WebM')
   assert.ok(ios.videoCodecs.includes('hevc'), 'Apple hardware has decoded HEVC since the A9')
   assert.ok(!ios.videoCodecs.includes('vp9') && !ios.videoCodecs.includes('av1'), 'AVPlayer plays neither')
-  // Sound stays timid on purpose: a re-encode is cheap and silence is the worst
-  // failure available - the lesson the televisions taught twice.
-  assert.ok(!ios.audioCodecs.includes('ac3') && !ios.audioCodecs.includes('dts'))
+  // Dolby is believed, on an ear rather than a spec sheet: it shipped absent, Tim played
+  // a Dolby film on the SE and heard it, and MPEG-TS carries AC-3 untouched so the
+  // repackaged film really is the original soundtrack. DTS stays out - Apple does not
+  // decode it - and silence being the worst failure available is why the order was that
+  // way round rather than the other.
+  assert.ok(ios.audioCodecs.includes('ac3') && ios.audioCodecs.includes('eac3'))
+  assert.ok(!ios.audioCodecs.includes('dts'))
 
   // Anything else is the Android floor, including an unknown platform: that is the one
   // that was measured.
@@ -190,8 +194,12 @@ test('the film that was a black screen on the iPhone now takes the long way roun
 
   // An HEVC film in an MP4 is the one an iPhone opens untouched.
   assert.strictEqual(decide({ container: 'mp4', videoCodec: 'hevc', audioCodec: 'aac' }, ios).mode, 'direct')
-  // A Dolby soundtrack in that same MP4 is rebuilt rather than risked.
-  assert.strictEqual(decide({ container: 'mp4', videoCodec: 'hevc', audioCodec: 'ac3' }, ios).mode, 'remux')
+  // And a Dolby soundtrack in that same MP4 needs nothing done to it either.
+  assert.strictEqual(decide({ container: 'mp4', videoCodec: 'hevc', audioCodec: 'ac3' }, ios).mode, 'direct')
+  // In a Matroska it is the container alone that has to change, with the sound copied.
+  const dolbyMkv = decide({ container: 'matroska', videoCodec: 'h264', audioCodec: 'ac3' }, ios)
+  assert.strictEqual(dolbyMkv.mode, 'remux')
+  assert.strictEqual(dolbyMkv.audio, 'copy', 'the original Dolby track, not a rebuild')
 })
 
 test('a repackaged film reaches an iPhone as a playlist, and an Android as itself', () => {
