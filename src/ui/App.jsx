@@ -2258,7 +2258,10 @@ export default function App () {
                       // abandoned rather than finished that is a lie which then
                       // shows up as a tick everywhere else.
                       right={(
-                        <button className='ghost' onClick={(e) => { e.stopPropagation(); forgetPlace(r) }}>Remove</button>
+                        <button
+                          className='ghost' aria-label='Remove from Continue watching' title='Remove from Continue watching'
+                          onClick={(e) => { e.stopPropagation(); forgetPlace(r) }}
+                        ><X size={17} /></button>
                       )}
                     />
                   ))}
@@ -2268,8 +2271,14 @@ export default function App () {
                     {showAllContinue ? 'Show fewer' : `Show all ${continueRows.length}`}
                   </button>
                 )}
+                {/* THE ONE THAT KEEPS ITS WORDS. Every button in a ROW is now the same
+                    mark - X takes this one off this list - because a row is read at a
+                    glance and five words in it are five words in every row. This one is
+                    not in a row and it empties the whole list, which is the moment to be
+                    wordy rather than clever. The icon is a Trash rather than an X for the
+                    same reason: it is the heavier action of the two. */}
                 <button className='danger' style={{ margin: '0.2rem auto 1rem', display: 'block' }} onClick={() => setClearAsk(true)}>
-                  Clear this list
+                  <Trash size={16} /> Clear this list
                 </button>
               </>
               )
@@ -2286,7 +2295,12 @@ export default function App () {
                   <ItemRow
                     key={r.id} item={r} onOpen={open} onLong={longPress}
                     sub={[r.year, fmtRuntime(r.runtime)].filter(Boolean).join(' · ')}
-                    right={<button className='ghost' onClick={(e) => { e.stopPropagation(); markWatched(r, false) }}>Unmark</button>}
+                    right={(
+                      <button
+                        className='ghost' aria-label='Mark as not watched' title='Mark as not watched'
+                        onClick={(e) => { e.stopPropagation(); markWatched(r, false) }}
+                      ><X size={17} /></button>
+                    )}
                   />
                 ))}
               </ul>
@@ -2329,7 +2343,10 @@ export default function App () {
                     <div className='sub muted sm'>{fmtBytes(r.got)} of {r.approx ? 'about ' : ''}{fmtBytes(r.size)}</div>
                     <div className='bar'><div className='fill' style={{ width: `${Math.min(100, Math.round((r.got / (r.size || 1)) * 100))}%` }} /></div>
                   </div>
-                  <button className='ghost' onClick={() => call('download.cancel', { itemId: r.itemId })}>Cancel</button>
+                  <button
+                    className='ghost' aria-label='Cancel this download' title='Cancel this download'
+                    onClick={() => call('download.cancel', { itemId: r.itemId })}
+                  ><X size={17} /></button>
                 </li>
               ))}
             </ul>
