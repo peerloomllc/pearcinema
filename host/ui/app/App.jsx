@@ -1892,6 +1892,19 @@ export default function App () {
 
       <div class='scroller'>
       <div class='content'>
+        {/* SOMETHING IS WRONG WITH THE MACHINE, not with the library - so it sits
+            above the content on EVERY tab rather than beside the source rows. The
+            case it exists for is Windows refusing inbound connections, where the
+            library is perfectly healthy and simply cannot be reached by anybody
+            (2026-08-21). Silence was the actual bug there: pairing hung with no
+            message at either end. */}
+        {(state.warnings || []).map(w => (
+          <div key={w.id} class={'banner ' + (w.severity === 'error' ? 'bad' : 'warn')}>
+            <b>{w.title}</b> {w.detail}
+            {w.fix && <pre class='fixcmd'>{w.fix}</pre>}
+          </div>
+        ))}
+
         {/* FINISHING THE WIZARD LANDS ON THE LIBRARY, always. The hash is
             cleared too: a leftover #settings/... from before the wizard was
             steering fresh installs into Settings after pairing (Tim,

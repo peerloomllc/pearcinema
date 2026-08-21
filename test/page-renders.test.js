@@ -3556,3 +3556,50 @@ test('A DRESSING SITS ON THE PICTURE, not on the player', async (t) => {
   assert.equal(Math.round(parseFloat(strips[0].style.left)), -2, 'and past both ends')
   assert.ok(strips[0].querySelector('.fstrip-run'), 'with the sliding row of perforations')
 })
+
+// A MACHINE NOBODY CAN REACH MUST SAY SO ON EVERY PAGE.
+//
+// The case this exists for is Windows refusing inbound connections (2026-08-21,
+// four-host bench): the library is perfectly healthy, the dashboard is perfectly
+// reachable from this machine, and no phone in the world can pair with it. That is
+// not a source problem, so it does not belong beside the source rows - and the
+// original bug was SILENCE, which a banner on one tab only half fixes.
+test('a machine that cannot be reached says so, with the one line that fixes it', async (t) => {
+  const FIX = 'New-NetFirewallRule -DisplayName "PearCinema" -Direction Inbound -Action Allow -Program "C:\\PearCinema.exe" -Profile Any'
+  const { doc, win, dom, text } = await open({
+    ...STATE,
+    warnings: [{
+      id: 'windows-firewall',
+      severity: 'error',
+      title: 'This machine cannot be reached',
+      detail: 'Windows is blocking PearCinema from accepting connections, so no phone can pair with it or play from it. Run this in PowerShell as an administrator:',
+      fix: FIX
+    }]
+  })
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /This machine cannot be reached/)
+  assert.match(text(), /no phone can pair with it/, 'it must say what it costs, not just what it is')
+
+  const pre = doc.querySelector('.banner .fixcmd')
+  assert.ok(pre, 'the fix has to be on the page, not just described')
+  assert.equal(pre.textContent, FIX, 'and it must be the command verbatim - a mangled one is worse than none')
+
+  const banner = doc.querySelector('.banner.bad')
+  assert.ok(banner, 'an unreachable machine is bad news, styled as such')
+
+  // Still there after changing tab: the news outlives the page you happened to open on.
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.match(text(), /This machine cannot be reached/, 'the warning must follow the operator across tabs')
+})
+
+// The ordinary case, which is every Mac, every Linux box and every container: no
+// warnings, and therefore no banner at all. A page that cries wolf on a healthy
+// machine is worse than one that stays quiet on a broken one.
+test('a healthy machine shows no machine warning', async (t) => {
+  const { doc, dom } = await open({ ...STATE })
+  t.after(() => dom.window.close())
+  assert.equal(doc.querySelector('.banner .fixcmd'), null)
+})

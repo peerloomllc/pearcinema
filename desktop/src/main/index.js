@@ -23,6 +23,7 @@ const fs = require('fs')
 const net = require('net')
 const { installService, uninstallService } = require('./service')
 const { pointAtBundledFfmpeg } = require('./ffmpeg-env')
+const firewall = require('./firewall')
 
 // The env vars MUST be set before the host modules load: ffmpeg-bin.js caches
 // resolution per process, and the probe/remux paths call it as soon as a scan or
@@ -117,9 +118,47 @@ async function main () {
     }))
     if (bins.missing) console.warn('pearcinema:', bins.hint)
 
+    // WHETHER THIS MACHINE CAN BE REACHED AT ALL. Windows blocks inbound traffic
+    // it was not told to allow, and it writes that block itself when no one is
+    // there to answer the prompt - which leaves pairing hanging with no message at
+    // either end (measured 2026-08-21; see firewall.js for the numbers). Checked
+    // once, in the background, because the answer costs a PowerShell start and
+    // nothing here may wait on it: a host that is merely unreachable must still
+    // come up, or the operator cannot open the page that explains why.
+    let firewallWarning = null
+    let firewallCheckedAt = 0
+    let firewallChecking = false
+
+    // Re-checked rather than answered once, because the banner's whole job is to be
+    // ACTED ON: somebody reads it, runs the line it gives them, and comes back to the
+    // page. A one-shot answer would keep insisting the machine is unreachable until
+    // the app was restarted, which is a second silent failure dressed as the first.
+    const checkFirewall = () => {
+      if (firewallChecking || Date.now() - firewallCheckedAt < 60000) return
+      firewallChecking = true
+      firewall.inboundState()
+        .then((state) => {
+          if (state) console.log('firewall:inbound', JSON.stringify({ state }))
+          const was = firewallWarning
+          firewallWarning = firewall.warningFor(state)
+          if (firewallWarning && !was) console.warn('pearcinema:', firewallWarning.title, '-', firewallWarning.detail)
+        })
+        .catch(() => {})
+        .finally(() => { firewallChecking = false; firewallCheckedAt = Date.now() })
+    }
+    checkFirewall()
+
     dashboard = await startDashboard({
       host, bind: BIND, port: PORT, password: '', passwordSource: 'none',
-      version: app.getVersion()
+      version: app.getVersion(),
+      // A GETTER, not a value, and a SYNCHRONOUS one: the first check is still running
+      // when the dashboard starts listening. It answers with what is known now and
+      // kicks off a refresh for the next read, so a page load a minute after the fix
+      // shows the fix, and no page load ever waits three seconds on PowerShell.
+      warnings: () => {
+        checkFirewall()
+        return firewallWarning ? [firewallWarning] : []
+      }
     })
   } catch (e) {
     dialog.showErrorBox('PearCinema could not start', String(e && e.message || e))

@@ -1788,3 +1788,21 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
  * centred heading and above a centred button (Tim, 2026-08-19, with a screenshot).
  * Only the alert shape: a real dialog's body is a form and belongs left. */
 .modal[role='alertdialog'] > p { text-align: center }
+
+/* THE ONE LINE THAT FIXES IT, in a box you can select cleanly. A command a person
+   has to retype by eye is a command they will get wrong, and this one is offered
+   at exactly the moment they have already been let down by silence. It wraps
+   rather than scrolling: a half-visible command pasted from a truncated box is
+   worse than none. */
+.banner .fixcmd {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .28);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
