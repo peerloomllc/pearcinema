@@ -2323,7 +2323,10 @@ export default function App () {
                         <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'} · {r.status}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
                       </div>
                       {r.status === 'pending' && (
-                        <button className='ghost' aria-label='Withdraw' onClick={() => call('request.remove', { id: r.id, refs: r.refs }).then(() => loadYou('requests'))}><Trash size={16} /></button>
+                        <button
+                          className='ghost' aria-label='Withdraw this request' title='Withdraw this request'
+                          onClick={() => call('request.remove', { id: r.id, refs: r.refs }).then(() => loadYou('requests'))}
+                        ><Trash size={16} /></button>
                       )}
                     </li>
                   ))}
@@ -2389,9 +2392,19 @@ export default function App () {
                         <div className='t'>{r.name}</div>
                         <div className='sub muted sm'>{r.kind === 'series' ? 'Show' : 'Film'}{r.count > 1 ? ` · asked by ${r.count}` : ''}</div>
                       </div>
+                      {/* A PAIR, so they read as a pair: tick and cross, the shape every
+                          accept-or-refuse row in the world uses. Both carry their words
+                          for a screen reader, and the sub-line already says what is being
+                          answered - which is what lets the answer be two marks. */}
                       <div className='rowacts'>
-                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'added', refs: r.refs }).then(() => loadYou('manage'))}>Added</button>
-                        <button className='ghost' onClick={() => call('request.resolve', { id: r.id, status: 'declined', refs: r.refs }).then(() => loadYou('manage'))}>Decline</button>
+                        <button
+                          className='ghost' aria-label={'Mark "' + r.name + '" as added'} title='I have added this'
+                          onClick={() => call('request.resolve', { id: r.id, status: 'added', refs: r.refs }).then(() => loadYou('manage'))}
+                        ><CheckCircle size={17} /></button>
+                        <button
+                          className='ghost' aria-label={'Decline "' + r.name + '"'} title='Decline this'
+                          onClick={() => call('request.resolve', { id: r.id, status: 'declined', refs: r.refs }).then(() => loadYou('manage'))}
+                        ><X size={17} /></button>
                       </div>
                     </li>
                   ))}

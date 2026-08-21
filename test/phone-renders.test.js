@@ -928,14 +928,16 @@ const YOU_ANSWERS = {
   'request.list': { items: [] }
 }
 
+const VIEW_LABEL = { watched: 'Watched', requests: 'Requests', downloads: 'Downloads', manage: 'Manage library' }
+
 async function openYou (t, view = 'continue', answers = {}) {
   const h = await open({ ...YOU_ANSWERS, ...answers })
   t.after(() => h.win.close())
   h.click(h.button(/^You$/))
   await h.settle(160)
   if (view !== 'continue') {
-    h.click(h.labelled(view === 'watched' ? 'Watched' : view))
-    await h.settle(160)
+    h.click(h.labelled(VIEW_LABEL[view] || view))
+    await h.settle(200)
   }
   return h
 }
@@ -958,6 +960,29 @@ test('THE ROW BUTTONS IN You ARE MARKS, NOT SENTENCES', async (t) => {
   const clear = h.button(/Clear this list/)
   assert.ok(clear, 'the list-level action still says what it does')
   assert.ok(clear.querySelector('svg'), 'with a heavier mark beside it')
+})
+
+test('answering somebody else\'s request is a tick and a cross', async (t) => {
+  // The owner's view of the same tab. Two marks rather than "Added" and "Decline",
+  // because they are a pair and the row above them already says what is being answered.
+  const h = await openYou(t, 'manage', {
+    'identity.get': { userName: 'Tim', deviceName: 'Pixel', libraryName: 'The Cinema', owner: true, belongsTo: 'Tim' },
+    'request.all': { items: [{ id: 'r1', name: 'The Thing', kind: 'movie', status: 'pending', count: 1, refs: [] }] },
+    'device.list': { items: [] }
+  })
+  assert.match(h.text(), /The Thing/)
+  const yes = h.labelled('Mark "The Thing" as added')
+  const no = h.labelled('Decline "The Thing"')
+  assert.ok(yes && no, 'both answers say what they do, whatever they look like')
+  assert.equal(yes.textContent.trim(), '')
+  assert.equal(no.textContent.trim(), '')
+  assert.ok(yes.querySelector('svg') && no.querySelector('svg'))
+  // And pressing one answers with what it says.
+  h.click(no)
+  await h.settle(120)
+  const resolved = h.called('request.resolve')
+  assert.equal(resolved.length, 1)
+  assert.equal(resolved[0].args.status, 'declined')
 })
 
 test('the same mark means the same thing in the Watched list', async (t) => {
