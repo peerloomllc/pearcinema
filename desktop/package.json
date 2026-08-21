@@ -49,7 +49,7 @@
   "build": {
     "appId": "com.pearcinema.desktop",
     "productName": "PearCinema",
-    "copyright": "Copyright © 2026 PeerLoom LLC",
+    "copyright": "Copyright \u00a9 2026 PeerLoom LLC",
     "directories": {
       "output": "dist",
       "buildResources": "build"
@@ -128,7 +128,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "PearCinema"
+      "shortcutName": "PearCinema",
+      "include": "../installer/windows/firewall.nsh"
     },
     "linux": {
       "target": [

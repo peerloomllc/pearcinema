@@ -252,6 +252,12 @@ async function startDashboard ({
   password = '',
   passwordSource = 'none',
   version = null,
+  // Things that are wrong with the MACHINE rather than the library, supplied by
+  // whatever started this dashboard because only it knows the platform it is on.
+  // A GETTER, so a check that is still running when we start listening still gets
+  // to speak. The Docker host passes none - a container that could not accept a
+  // connection would not have got this far.
+  warnings = () => [],
   log = () => {}
 } = {}) {
   // Before anything listens. A control plane that can revoke every device, open a
@@ -433,6 +439,9 @@ async function startDashboard ({
           version,
           stats,
           sourceError: host.sourceError,
+          // Platform trouble, not library trouble. Never throws: a warning source
+          // that fails must not be the reason the page the operator needs is blank.
+          warnings: (() => { try { return warnings() || [] } catch { return [] } })(),
           // Non-null while the library is being read. On the real 3 TB drive the
           // first scan probes 2,986 files and takes minutes, and an empty grid for
           // that long is indistinguishable from a broken app.
