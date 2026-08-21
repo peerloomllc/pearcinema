@@ -2785,7 +2785,7 @@ export default function App () {
 
           <div className='label' style={{ marginTop: '.7rem' }}>Player skin</div>
           <div className='seg'>
-            {[['off', 'None'], ['film', '35mm film'], ['mst3k', 'Theater']].map(([k, l]) => (
+            {[['off', 'None'], ['film', '35mm film'], ['mst3k', 'Riff mode']].map(([k, l]) => (
               <button
                 key={k} className={playerSkin === k ? 'on' : ''}
                 aria-pressed={playerSkin === k}
@@ -2794,8 +2794,8 @@ export default function App () {
             ))}
           </div>
           <div className='desc'>
-            A look laid over the player: sprocket holes and a film border, or a
-            theater row of silhouettes. Just for fun, off by default.
+            A look laid over the player: sprocket holes and a film border, or
+            riff mode. IFKYK. Just for fun, off by default.
           </div>
           {playerSkin === 'film' && (
             <>

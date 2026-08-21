@@ -1031,10 +1031,15 @@ export default function App () {
                 </>
               )
             })()}
-            {/* THE THEATER ROW, Tim's own drawing (2026-08-21) rather than the drawn
-                approximation that shipped in #58. The asset is 1600x262 and is drawn at
+            {/* RIFF MODE, Tim's own drawing (2026-08-21) rather than the drawn
+                approximation that shipped in #58. The asset is 3200x523 and is drawn at
                 the picture's full width, so the ratio below IS the asset - change one and
                 change the other.
+                TRACED, NOT RESAMPLED, and shipped at twice the width it needs: at 1600 an
+                upscale to a fullscreen window frayed every edge. And it is a near-black
+                warm grey rather than pure black, because a letterboxed film's bars ARE
+                pure black and a black silhouette disappears into them - both seen on
+                Tim's screen, 2026-08-21.
                 THE SEAT ROW WAS EXTENDED to get here: the drawing is 500 wide and would
                 have covered 60% of a 16:9 frame at full width, so one seat - the slice
                 between the two deepest valleys, which meets itself - was repeated three
@@ -1048,8 +1053,8 @@ export default function App () {
                   position: 'absolute',
                   left: pict.left,
                   width: pict.w,
-                  height: pict.w * (262 / 1600),
-                  top: pict.top + pict.h - pict.w * (262 / 1600)
+                  height: pict.w * (523 / 3200),
+                  top: pict.top + pict.h - pict.w * (523 / 3200)
                 }}
                 resizeMode='stretch'
               />
