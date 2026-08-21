@@ -187,7 +187,7 @@ function setRelayConsent (libraryId, decision) {
 // that over-declares costs the viewer a black screen - which is why video
 // needs hardware, HEVC needs Main 10, and the player-error retry below exists
 // for whatever lies through both.
-let capabilities = caps.STATIC
+let capabilities = caps.staticFor(PLATFORM)
 
 // Video codecs this device claimed and its decoder then refused at runtime,
 // per item - the honest correction for a lying chip. Consulted by every path
@@ -1520,11 +1520,12 @@ const methods = {
     const sending = capsFor(itemId)
     if (sending.maxKbps) log('stream:capped', { itemId, maxKbps: sending.maxKbps, relayed: relayedForId(itemId), dataSaver: !!readSettings().dataSaver })
     const verdict = await c.request('media.decide', { itemId, capabilities: sending }).catch(() => null)
-    if (verdict?.mode === 'transcode') {
-      return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: 'transcode' }
+    // WHICH TRANSPORT THIS PLAYER TAKES, decided in src/capabilities.js beside what it can
+    // open, because it is the same kind of fact and the two have to agree. A transcode is
+    // always a playlist; a remux is one on iOS and direct play on Android.
+    if (caps.wantsPlaylist(verdict?.mode, PLATFORM)) {
+      return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: verdict.mode }
     }
-    // `remux` collapses to direct on a phone: ExoPlayer opens the containers a
-    // browser refuses, which is why the phone declared them.
     return { url: shim.urlFor(itemId), mode: verdict?.mode || 'direct' }
   },
   'art.base': async () => ({ base: shim.artBase() }),

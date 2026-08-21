@@ -74,6 +74,35 @@ const STATIC = {
   audioCodecs: ['aac', 'mp3', 'opus', 'flac', 'vorbis']
 }
 
+// AND THE OTHER PHONE, which is a different player entirely and was declaring this one's
+// capabilities until 2026-08-20. The probe is Android-only, so iOS fell through to the
+// "conservative" static above - and that list is not conservative on an iPhone, it is
+// WRONG: it claims Matroska, which is 83% of this library and which AVPlayer will not
+// open at all. Tim's first play on the iPhone SE was a black screen with the crossed-out
+// play glyph, which is AVFoundation saying exactly that.
+//
+//   - CONTAINERS: mp4 only (the host folds mov and m4v into it). No Matroska, no WebM.
+//   - VIDEO: h264 and hevc. Apple hardware has decoded HEVC since the A9 and, unlike the
+//     Android chips this file's rules were written against, it does not lie about it -
+//     and the player-error retry net is still the backstop if one ever does.
+//     No VP9, no AV1: AVPlayer plays neither.
+//   - AUDIO: the ones Apple documents for local playback, and DELIBERATELY not AC-3, E-AC-3
+//     or DTS. Those are cheap to re-encode and getting them wrong is a film that plays in
+//     silence with nothing on screen to say why - the lesson the televisions taught twice
+//     over (the Roku 2026-08-19, the Samsung 2026-08-20).
+const IOS_STATIC = {
+  containers: ['mp4'],
+  videoCodecs: ['h264', 'hevc'],
+  audioCodecs: ['aac', 'mp3', 'alac', 'flac']
+}
+
+// The floor for a platform, before any probe refines it. Anything that is not iOS gets
+// the Android declaration, which is also the right answer for an unknown platform: it is
+// the one that was measured.
+function staticFor (platform) {
+  return String(platform || '').toLowerCase() === 'ios' ? { ...IOS_STATIC } : { ...STATIC }
+}
+
 // probe: Array<{ name, mime, hardware, profiles, maxWidth, maxHeight }> from
 // modules/decoder-probe. Returns a declaration, or null when the probe is
 // missing or too broken to trust - a list without hardware H.264 and AAC is a
@@ -130,4 +159,22 @@ function without (caps, videoCodec) {
   }
 }
 
-module.exports = { fromProbe, without, STATIC, CONTAINERS }
+// HOW A CONVERTED FILM REACHES THIS PLAYER, which is a fact about the player and belongs
+// beside what it can open.
+//
+// A transcode is always a playlist: it is generated, so it has no length and no byte
+// offsets, and every player would rather have segments than an unbounded body.
+//
+// A REMUX SPLITS BY PLATFORM. On Android it collapses to direct play - ExoPlayer opens
+// the containers a browser refuses, which is why the phone declared them, so the verdict
+// says "repackage" and the player says "no need". AVPlayer is the opposite: it opens
+// almost nothing but MP4, and it refuses a generated progressive body outright, because a
+// length-less stream with no byte ranges is exactly what AVFoundation will not take. So
+// on iOS the repackage travels as HLS - Apple's own format, cut by the host without
+// re-encoding (`plan.engine === 'copy'`, the same path a Roku gets).
+function wantsPlaylist (mode, platform) {
+  if (mode === 'transcode') return true
+  return mode === 'remux' && String(platform || '').toLowerCase() === 'ios'
+}
+
+module.exports = { fromProbe, without, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }

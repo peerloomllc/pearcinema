@@ -155,3 +155,57 @@ test('a declared AC-3 decoder moves Dolby files to direct play', () => {
   // rebuilt - the pre-probe behaviour, unchanged.
   assert.strictEqual(decide(film, caps.STATIC).mode, 'remux')
 })
+
+// --- the other phone -----------------------------------------------------------
+
+test('AN iPHONE DECLARES AN iPHONE, not this file\'s Android floor', () => {
+  // MEASURED THE HARD WAY (Tim, 2026-08-20, first play on the iPhone SE): a black screen
+  // with AVFoundation's crossed-out play glyph. The probe is Android-only, so iOS fell
+  // through to the "conservative" static declaration - which claims Matroska, and
+  // Matroska is 83% of this library and something AVPlayer will not open at all. The
+  // host was told the film would play as it is, so it sent it as it is.
+  const ios = caps.staticFor('ios')
+  assert.deepEqual(ios.containers, ['mp4'], 'no Matroska, no WebM')
+  assert.ok(ios.videoCodecs.includes('hevc'), 'Apple hardware has decoded HEVC since the A9')
+  assert.ok(!ios.videoCodecs.includes('vp9') && !ios.videoCodecs.includes('av1'), 'AVPlayer plays neither')
+  // Sound stays timid on purpose: a re-encode is cheap and silence is the worst
+  // failure available - the lesson the televisions taught twice.
+  assert.ok(!ios.audioCodecs.includes('ac3') && !ios.audioCodecs.includes('dts'))
+
+  // Anything else is the Android floor, including an unknown platform: that is the one
+  // that was measured.
+  assert.deepEqual(caps.staticFor('android'), caps.STATIC)
+  assert.deepEqual(caps.staticFor(undefined), caps.STATIC)
+  assert.deepEqual(caps.staticFor('windows-phone'), caps.STATIC)
+})
+
+test('the film that was a black screen on the iPhone now takes the long way round', () => {
+  const ios = caps.staticFor('ios')
+  // The ordinary shape of this library: h264 in Matroska with 5.1 AAC.
+  const mkv = { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 6 }
+  assert.strictEqual(decide(mkv, ios).mode, 'remux', 'repackaged rather than handed over raw')
+  // And on Android the same film still direct-plays, which is the whole reason the
+  // declaration is per-platform rather than narrowed for everybody.
+  assert.strictEqual(decide(mkv, caps.STATIC).mode, 'direct')
+
+  // An HEVC film in an MP4 is the one an iPhone opens untouched.
+  assert.strictEqual(decide({ container: 'mp4', videoCodec: 'hevc', audioCodec: 'aac' }, ios).mode, 'direct')
+  // A Dolby soundtrack in that same MP4 is rebuilt rather than risked.
+  assert.strictEqual(decide({ container: 'mp4', videoCodec: 'hevc', audioCodec: 'ac3' }, ios).mode, 'remux')
+})
+
+test('a repackaged film reaches an iPhone as a playlist, and an Android as itself', () => {
+  // The second half of the same bug. Even with the right declaration, a remux verdict
+  // collapsed to direct play on every phone - which on iOS means handing AVPlayer the
+  // Matroska it just said it could not open, or a generated body with no byte ranges,
+  // which it refuses just as flatly.
+  assert.strictEqual(caps.wantsPlaylist('remux', 'ios'), true)
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android'), false)
+  // A transcode is generated on any platform: no length, no offsets, segments or nothing.
+  assert.strictEqual(caps.wantsPlaylist('transcode', 'ios'), true)
+  assert.strictEqual(caps.wantsPlaylist('transcode', 'android'), true)
+  // And a film that needs nothing done to it is never wrapped in a playlist.
+  assert.strictEqual(caps.wantsPlaylist('direct', 'ios'), false)
+  assert.strictEqual(caps.wantsPlaylist('direct', 'android'), false)
+  assert.strictEqual(caps.wantsPlaylist(undefined, 'ios'), false)
+})
