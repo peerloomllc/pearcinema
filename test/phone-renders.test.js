@@ -913,6 +913,54 @@ test('A CODE THAT IS NOT A PAIRING CODE SAYS WHAT TO DO INSTEAD', async (t) => {
   assert.doesNotMatch(text(), /invalid PearCinema pairing link/, "the parser's words stay in the log")
 })
 
+test('A HOST THAT NEVER ANSWERS SAYS SO, WITHOUT PRETENDING TO KNOW WHY', async (t) => {
+  // THE OTHER HALF OF THE WINDOWS FIREWALL BUG (PR #152). The host end learned to say it
+  // cannot accept connections; the phone end still said nothing, so pointing a phone at a
+  // blocked machine looked identical to a tap that did nothing, and the real cause took a
+  // firewall audit to find rather than a glance.
+  //
+  // The message must NOT diagnose. peerloom-client cannot tell a firewall deny from a
+  // machine that is switched off from a code that ran out - all three are a dial that
+  // never opens - so the assertions below check that all three are named and none is
+  // claimed.
+  const { text, doc, click, win } = await open({
+    'app.state': { ...defaultAnswers()['app.state'], active: null, hosts: [], paired: false },
+    pair: () => { throw new Error('no answer from the host (unreachable, or not accepting pair requests)') }
+  })
+  t.after(() => win.close())
+
+  const byText = (re) => [...doc.querySelectorAll('button')].find((b) => re.test(b.textContent.trim()))
+  const step = async (re) => {
+    const b = byText(re)
+    assert.ok(b, `a button matching ${re}`)
+    click(b)
+    await new Promise((r) => setTimeout(r, 80))
+  }
+
+  await step(/^Get started$/)
+  const name = doc.querySelector('input')
+  name.value = 'Tim'
+  name.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Continue$/)
+  await step(/^It's mine$/)
+  await step(/^Continue$/)
+
+  const box = doc.querySelector('input[placeholder^="pear://"]')
+  box.value = 'pear://pearcinema/pair?k=whatever'
+  box.dispatchEvent(new win.Event('input', { bubbles: true }))
+  await new Promise((r) => setTimeout(r, 40))
+  await step(/^Pair$/)
+
+  const said = text()
+  assert.match(said, /No answer from that computer/, 'it says nobody picked up')
+  assert.match(said, /asleep or switched off/, 'and names the machine being off')
+  assert.match(said, /run out/, 'and names the code expiring')
+  assert.match(said, /refusing connections/, 'and names the firewall case')
+  assert.match(said, /Windows/, 'and points at where Windows explains itself')
+  assert.doesNotMatch(said, /unreachable, or not accepting pair requests/, "the client's words stay in the log")
+})
+
 // --- the You tab, which had no coverage at all until its buttons changed ------
 
 // What the worklet answers for a You tab with something in every list.

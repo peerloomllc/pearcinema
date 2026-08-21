@@ -594,6 +594,19 @@ function pairingProblem (message) {
   if (/unsupported pairing link version/i.test(m)) {
     return 'That pairing code was made by a newer PearCinema than this phone is running. Update the app and try again.'
   }
+  // NOBODY PICKED UP, and the honest part is that the phone cannot tell WHY. A dial that
+  // never opens is PEER_CONNECTION_FAILED whether the machine is off, the code has run
+  // out or the machine is refusing connections (the Windows firewall case that took an
+  // audit to find, PR #152). peerloom-client says so in its own comment: this must never
+  // be reported as "your code expired", because we do not know that. So the message names
+  // the whole set and picks none of them. Before this, a failed dial left the paste box
+  // sitting there with the client's own words under it, or nothing at all.
+  if (/no answer from the host|could not reach the host|pairing timed out|^pairing failed$/i.test(m)) {
+    return 'No answer from that computer. It may be asleep or switched off, the pairing code may have run out (they last five minutes, so ask for a fresh one), or that computer may be refusing connections. If it runs Windows, its own dashboard says so at the top of the page and gives the one line that fixes it.'
+  }
+  if (/host refused the pairing code/i.test(m)) {
+    return 'That computer answered and turned the code down. Pairing codes last five minutes and work once, so show a fresh one on its dashboard and scan again.'
+  }
   return m
 }
 
@@ -811,8 +824,13 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
       {error && <div className='error'>{error}</div>}
 
       <button className='primary scanbtn' onClick={scan} disabled={!ready}>
-        <QrCode size={20} weight='bold' /> Scan QR
+        <QrCode size={20} weight='bold' /> {busy ? 'Pairing…' : 'Scan QR'}
       </button>
+      {/* THE SCAN PATH HAD NO PROGRESS AT ALL. The camera closes, pairWith runs, and until
+          it answers the screen is the one the scan started from - so a dial that takes
+          twenty seconds to fail looked like a tap that did nothing. The paste path had
+          "Pairing…" on its own button; this gives both the same line. */}
+      {busy && <p className='muted sm'>Pairing… this takes a few seconds, and longer when you are away from home.</p>}
       <details>
         <summary className='muted sm'>Paste a link instead</summary>
         <input
