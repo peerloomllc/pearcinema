@@ -181,11 +181,24 @@ function engineCandidates ({ device = DEVICE_DEFAULT, platform = process.platfor
   // The Mac's own engine, and the only one it has.
   if (platform === 'darwin') out.push({ engine: engineFor('videotoolbox'), device: null })
 
+  // WINDOWS GETS THE OTHER TWO VENDORS, which it had no way to reach: an Intel or AMD
+  // Windows box was offered NVENC and nothing else, so it reported no video engine while
+  // holding hardware that encodes H.264. Quick Sync leads for the same reason VAAPI leads
+  // on Linux - the built-in chip converts and the discrete card stays free for whatever
+  // the machine is otherwise for - and that is a defensible default rather than a
+  // measured answer, the same words the VAAPI-first note uses. The Test button settles it
+  // per machine when the two-card picker lands.
+  if (platform === 'win32') out.push({ engine: engineFor('qsv'), device: null })
+
   // NVENC counts its own cards, so there is no path to hand it - the encoder finds the
   // machine's first, and `-gpu` picks another only once somebody has asked for one by
   // number. Not offered on macOS: no Mac in years has had an NVIDIA card, and asking
   // costs a spawn and prints "Encoder not found" where an operator can see it.
   if (platform !== 'darwin') out.push({ engine: engineFor('nvenc'), device: null })
+
+  // AMD last on Windows, and only there: on Linux the same silicon is served by VAAPI,
+  // which is the path every existing install already proved.
+  if (platform === 'win32') out.push({ engine: engineFor('amf'), device: null })
 
   return out
 }

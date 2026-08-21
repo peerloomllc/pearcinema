@@ -191,7 +191,7 @@ test('VAAPI IS NOT OFFERED WITHOUT A RENDER NODE TO OFFER IT', () => {
   // The configured device is not evidence. DEVICE_DEFAULT is a constant, so trusting it
   // is what sent /dev/dri/renderD128 to a machine that has no /dev/dri at all.
   const win = transcode.engineCandidates({ platform: 'win32', nodes: [] })
-  assert.deepEqual(win.map((c) => c.engine.id), ['nvenc'])
+  assert.equal(win.some((c) => c.engine.id === 'vaapi'), false, 'Windows has no render nodes to offer')
 
   const linuxBare = transcode.engineCandidates({ platform: 'linux', nodes: [] })
   assert.deepEqual(linuxBare.map((c) => c.engine.id), ['nvenc'], 'a Linux box with no card still has NVENC to try')
@@ -223,4 +223,51 @@ test('THE MAC ENGINE BUILDS THE ARGV THAT WAS MEASURED ON THE MAC', () => {
   // format hands frames back in system memory, exactly like the NVENC lane.
   assert.equal(vt.fromHwDecode, 'format=nv12')
   assert.equal(vt.toEngine, 'format=nv12')
+})
+
+/* ------------------------------------------- the two vendors Windows could not reach -- */
+
+test('WINDOWS IS OFFERED ALL THREE VENDORS, BUILT-IN FIRST', () => {
+  // An Intel or AMD Windows box was offered NVENC and nothing else, so it reported no
+  // video engine while holding hardware that encodes H.264 - the same shape as the NVIDIA
+  // gap (2026-08-20) and the Mac gap (2026-08-21). Quick Sync leads for the reason VAAPI
+  // leads on Linux: the built-in chip converts and the discrete card stays free.
+  const win = transcode.engineCandidates({ platform: 'win32', nodes: [] })
+  assert.deepEqual(win.map((c) => c.engine.id), ['qsv', 'nvenc', 'amf'])
+  assert.deepEqual(win.map((c) => c.device), [null, null, null], 'none of the three takes a path')
+})
+
+test('QUICK SYNC AND AMF ARE WINDOWS-ONLY', () => {
+  // On Linux the same Intel and AMD silicon is served by VAAPI, which is what every
+  // existing install already proved. Offering a second path to the same chip would be a
+  // spawn spent asking a question that has already been answered.
+  for (const platform of ['linux', 'darwin']) {
+    const ids = transcode.engineCandidates({ platform, nodes: ['/dev/dri/renderD128'] }).map((c) => c.engine.id)
+    assert.equal(ids.includes('qsv'), false, `no qsv on ${platform}`)
+    assert.equal(ids.includes('amf'), false, `no amf on ${platform}`)
+  }
+})
+
+test('THE WINDOWS ENGINES ARE THE ONLY ONES IN HERE NOBODY HAS RUN', () => {
+  // Said out loud in a test, because it is the thing most likely to be forgotten. The
+  // measurement was ATTEMPTED and could not be made: the Windows VM has a virtio display
+  // and no graphics chip, and the Umbrel has h264_qsv compiled in with no Intel runtime
+  // behind it ("Error initializing an internal MFX session: unsupported"). What IS known
+  // is that the bundled Windows ffmpeg carries all three encoders, checked on the box.
+  //
+  // Safe to ship unproven because tryEngine runs the real pipeline and demands bytes: a
+  // wrong argument shape fails the probe and leaves that machine exactly where it already
+  // is, direct play only. It is not the AV1 mistake, which was a DECODER promised to a
+  // viewer and then stalling mid-film.
+  for (const id of ['qsv', 'amf']) {
+    const e = engines.engineFor(id)
+    assert.ok(e, `${id} exists`)
+    assert.equal(e.deviceKind, null, 'Windows binds these itself, so there is no path to hand over')
+    assert.equal(e.fromHwDecode, 'format=nv12')
+    assert.equal(e.toEngine, 'format=nv12')
+    assert.deepEqual(e.inputArgs({ device: null, software: true }), [], 'burn-in decodes in software')
+    assert.ok(e.probeArgs(null).includes(e.encoder), 'the probe runs the encoder it claims')
+  }
+  assert.deepEqual(engines.engineFor('qsv').inputArgs({ device: null, software: false }), ['-hwaccel', 'qsv'])
+  assert.deepEqual(engines.engineFor('amf').inputArgs({ device: null, software: false }), ['-hwaccel', 'd3d11va'])
 })
