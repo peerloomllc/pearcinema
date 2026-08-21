@@ -450,6 +450,36 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 }
 .stage video { width: 100%; height: 100%; display: block; background: #000 }
 
+/* THE PLAYER SKINS. Pinned to the PICTURE's edges rather than the element's - the box is
+   measured in Skin.jsx, because a letterboxed film's picture is not the element. Deaf to
+   the pointer throughout, so a click still reaches the video and play/pause survives a
+   skin being worn. */
+.skinrow, .fstrip { position: absolute; pointer-events: none; }
+.fstrip { overflow: hidden; background: rgba(8, 8, 8, 0.92); }
+.fstrip-run {
+  position: absolute; top: 0; bottom: 0; left: 0; right: calc(var(--pitch) * -4);
+  /* Two repeating layers: the perforations at one pitch, the frame line at four of them.
+     35mm's own arithmetic, and the same pair the phone draws. */
+  background-image:
+    radial-gradient(circle at 50% 50%, rgba(240, 234, 220, 0.85) 0 var(--hole), transparent calc(var(--hole) + 1px)),
+    linear-gradient(90deg, rgba(240, 234, 220, 0.42) 0 1px, transparent 1px);
+  background-size: var(--pitch) 100%, calc(var(--pitch) * 4) 100%;
+  background-repeat: repeat-x, repeat-x;
+  /* A WHOLE FRAME PER CYCLE, not a single perforation: the holes are uniform and would
+     reset invisibly, the frame lines are not and would hop a hole to the right every
+     cycle in plain sight. */
+  animation: filmrun 1.68s linear infinite;
+}
+@keyframes filmrun {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(var(--pitch) * -4)); }
+}
+/* A skin is decoration, and decoration is the first thing to stop moving when somebody
+   has asked for less of it. */
+@media (prefers-reduced-motion: reduce) {
+  .fstrip-run { animation: none; }
+}
+
 .refusal { padding: 2rem 1.5rem; text-align: center; max-width: 34rem; color: var(--fg) }
 .refusal h3 { font-size: 1.05rem }
 .refusal p { color: var(--muted); font-size: .9rem }

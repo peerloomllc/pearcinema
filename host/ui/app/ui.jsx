@@ -8,6 +8,33 @@ import { Close } from './icons'
 
 /* ---- theme ---------------------------------------------------------------- */
 
+// AND THE OTHER TWO APPEARANCE CHOICES, kept beside the theme because they are the same
+// kind of thing: a preference about this browser, remembered here, never sent anywhere.
+// The phone keeps its own in the worklet's settings, deliberately - it is a different
+// device with a different screen, and somebody wearing the 35mm skin on the sofa does not
+// thereby want it on the television in the study.
+const SKIN_KEY = 'pearcinema.skin'
+const TONE_KEY = 'pearcinema.tone'
+
+const SKINS = ['off', 'film', 'mst3k']
+const TONES = ['off', 'bw', 'sepia']
+
+const readPref = (key, allowed) => {
+  try {
+    const v = localStorage.getItem(key)
+    return allowed.includes(v) ? v : allowed[0]
+  } catch {
+    return allowed[0]
+  }
+}
+const writePref = (key, v) => { try { localStorage.setItem(key, v) } catch {} }
+
+export const loadSkinPref = () => readPref(SKIN_KEY, SKINS)
+export const saveSkinPref = (v) => writePref(SKIN_KEY, SKINS.includes(v) ? v : 'off')
+export const loadTonePref = () => readPref(TONE_KEY, TONES)
+export const saveTonePref = (v) => writePref(TONE_KEY, TONES.includes(v) ? v : 'off')
+
+
 const THEME_KEY = 'pearcinema.theme'
 
 function systemIsDark () {
