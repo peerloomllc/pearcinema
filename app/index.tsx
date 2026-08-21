@@ -77,6 +77,57 @@ function parseVtt (raw: string): Cue[] {
   return cues
 }
 
+// THE 35mm STRIP, RUNNING. Tim, 2026-08-21: "can we make them move right to left as if
+// the cinema reel were running?"
+//
+// The trick is that the row is a REPEAT: the holes sit on a fixed pitch and the whole row
+// slides left by exactly one pitch before snapping back, so the snap is invisible and the
+// motion never accumulates. Two extra holes cover the gap the slide opens at the right
+// edge. Everything moves on the native driver - it is a transform and nothing else, so it
+// costs the JS thread nothing while a film is decoding.
+//
+// AND IT STOPS WHEN THE FILM STOPS, which is the whole reason it is worth having: a strip
+// that keeps running over a paused picture is a decoration, and one that halts with it is
+// the projector.
+//
+// SPEED IS NOT REALISM. A projector pulls 24 frames a second and a frame is four
+// perforations, so a true rate is 96 holes a second - a grey blur, and a strobe against a
+// 60 Hz screen. This is slow enough to read as film running.
+const SPROCKET_MS = 420
+
+function FilmStrip ({ left, top, width, height, running }: { left: number, top: number, width: number, height: number, running: boolean }) {
+  const count = Math.max(6, Math.round(width / 46))
+  const pitch = width / count
+  const x = useRef(new Animated.Value(0)).current
+
+  useEffect(() => {
+    x.setValue(0)
+    if (!running) return
+    const loop = Animated.loop(Animated.timing(x, {
+      toValue: -pitch,
+      duration: SPROCKET_MS,
+      easing: Easing.linear,
+      useNativeDriver: true
+    }))
+    loop.start()
+    return () => loop.stop()
+  }, [running, pitch])
+
+  const holeW = Math.max(3, height * 0.52)
+  const holeH = Math.max(3, height * 0.58)
+  return (
+    <View pointerEvents='none' style={[styles.filmStrip, { left, top, width, height }]}>
+      <Animated.View style={[styles.filmStripRow, { transform: [{ translateX: x }] }]}>
+        {Array.from({ length: count + 2 }, (_, i) => (
+          <View key={i} style={{ width: pitch, alignItems: 'center' }}>
+            <View style={[styles.sprocket, { width: holeW, height: holeH }]} />
+          </View>
+        ))}
+      </Animated.View>
+    </View>
+  )
+}
+
 // The strip behind the page, in both themes. These are styles.css's own
 // --color-surface-base values: the shell's background has to BE the page's background,
 // or the seam shows as a band under the status bar. The dark one was #0f0d0a, a shade
@@ -961,16 +1012,23 @@ export default function App () {
                 like everything else that is not a control. */}
             {playing.skin === 'film' && pict && (() => {
               const stripH = Math.max(14, Math.min(30, pict.h * 0.07))
-              const holes = Array.from({ length: Math.max(6, Math.round(pict.w / 46)) }, (_, i) => (
-                <View key={i} style={[styles.sprocket, { width: stripH * 0.52, height: stripH * 0.58 }]} />
-              ))
+              // Both edges are the SAME piece of film, so they run together.
               return (
                 <>
-                  <View pointerEvents='none' style={[styles.filmStrip, { left: pict.left, top: pict.top, width: pict.w, height: stripH }]}>{holes}</View>
-                  <View pointerEvents='none' style={[styles.filmStrip, { left: pict.left, top: pict.top + pict.h - stripH, width: pict.w, height: stripH }]}>{holes}</View>
+                  <FilmStrip left={pict.left} top={pict.top} width={pict.w} height={stripH} running={isPlaying} />
+                  <FilmStrip left={pict.left} top={pict.top + pict.h - stripH} width={pict.w} height={stripH} running={isPlaying} />
                 </>
               )
             })()}
+            {/* THE THEATER ROW, Tim's own drawing (2026-08-21) rather than the drawn
+                approximation that shipped in #58. The asset is 1600x262 and is drawn at
+                the picture's full width, so the ratio below IS the asset - change one and
+                change the other.
+                THE SEAT ROW WAS EXTENDED to get here: the drawing is 500 wide and would
+                have covered 60% of a 16:9 frame at full width, so one seat - the slice
+                between the two deepest valleys, which meets itself - was repeated three
+                times at each end. The figures keep their size and the row still reaches
+                both edges. */}
             {playing.skin === 'mst3k' && pict && (
               <Image
                 pointerEvents='none'
@@ -979,8 +1037,8 @@ export default function App () {
                   position: 'absolute',
                   left: pict.left,
                   width: pict.w,
-                  height: pict.w * (300 / 1600),
-                  top: pict.top + pict.h - pict.w * (300 / 1600)
+                  height: pict.w * (262 / 1600),
+                  top: pict.top + pict.h - pict.w * (262 / 1600)
                 }}
                 resizeMode='stretch'
               />
@@ -1221,8 +1279,12 @@ const styles = StyleSheet.create({
   ctlOff: { opacity: 0.35 },
   filmStrip: {
     position: 'absolute', flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-evenly', backgroundColor: 'rgba(8,8,8,0.92)'
+    backgroundColor: 'rgba(8,8,8,0.92)',
+    // The row inside is one pitch wider than the strip and slides; without this the
+    // overhanging hole is drawn outside the film and rides over the picture.
+    overflow: 'hidden'
   },
+  filmStripRow: { flexDirection: 'row', alignItems: 'center', height: '100%' },
   sprocket: { backgroundColor: 'rgba(240,234,220,0.85)', borderRadius: 3 },
   ctlTime: { color: '#efe9df', fontVariant: ['tabular-nums'], fontSize: 12 },
   // The touch target is much taller than the painted track, or a moving thumb
