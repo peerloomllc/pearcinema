@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { Animated, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native'
+import { Animated, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, useColorScheme } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -24,6 +24,7 @@ import { Asset } from 'expo-asset'
 import * as SplashScreen from 'expo-splash-screen'
 import * as ScreenOrientation from 'expo-screen-orientation'
 import * as Clipboard from 'expo-clipboard'
+import * as SystemUI from 'expo-system-ui'
 import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
@@ -75,6 +76,14 @@ function parseVtt (raw: string): Cue[] {
   }
   return cues
 }
+
+// The strip behind the page, in both themes. These are styles.css's own
+// --color-surface-base values: the shell's background has to BE the page's background,
+// or the seam shows as a band under the status bar. The dark one was #0f0d0a, a shade
+// off the page's #17140f, which reads as a faint darker stripe on a dark phone - the
+// same seam as the light-mode band, just quieter.
+const DARK_BG = '#17140f'
+const LIGHT_BG = '#faf6ee'
 
 export default function App () {
   const webref = useRef<WebView>(null)
@@ -843,6 +852,19 @@ export default function App () {
       return
     }
 
+    // WHAT THE PAGE JUST PAINTED, so the strip the shell owns matches it. The page
+    // resolves the theme (src/ui/theme.js) and tells us; without this the shell's own
+    // background is a hardcoded near-black, which on a LIGHT phone is a black band
+    // between the status bar and the page. Seen the moment PearCinema first ran on an
+    // iPhone Simulator, 2026-08-20 - the Simulator boots light and every Android phone
+    // this had been tried on was dark.
+    if (msg.method === 'theme') {
+      const scheme = msg.args?.scheme === 'light' ? 'light' : 'dark'
+      setPageTheme(scheme)
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { scheme }, error: null })})`)
+      return
+    }
+
     const ipc = ipcRef.current
     if (!ipc) {
       feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: null, error: 'worklet not ready' })})`)
@@ -856,14 +878,34 @@ export default function App () {
   // notifications bar). The shell pads; the page never needs to know.
   const insets = useSafeAreaInsets()
 
+  // THE OS's ANSWER IS THE AUTHORITY, not the WebView's own prefers-color-scheme: an
+  // Android WebView does not reliably track the app's night mode, which is why
+  // src/ui/theme.js reads `window.__pearColorScheme` first and only falls back to
+  // matchMedia. Nothing was setting it here.
+  const osScheme = useColorScheme() === 'light' ? 'light' : 'dark'
+  // What the page says it painted, once it has painted. Until then the OS's answer is
+  // the best guess available and is right for everybody who has not chosen otherwise.
+  const [pageTheme, setPageTheme] = useState<'light' | 'dark' | null>(null)
+  const shellBg = (pageTheme || osScheme) === 'light' ? LIGHT_BG : DARK_BG
+
+  // AND THE WINDOW BEHIND EVERYTHING, which is not ours to paint with a style. The root
+  // view sits inside a system-coloured window - white on a light phone, black on a dark
+  // one - and that shows in the strip above our own View, under the status bar. Painting
+  // the View alone left a white line over a cream page and a black one over a dark page,
+  // which is the same bug twice at two brightnesses.
+  useEffect(() => { SystemUI.setBackgroundColorAsync(shellBg).catch(() => {}) }, [shellBg])
+
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <View style={[styles.root, { paddingTop: insets.top, backgroundColor: shellBg }]}>
       {uri && (
         <WebView
           ref={webref}
           source={{ uri }}
           originWhitelist={['*']}
           onMessage={onMessage}
+          // Before the page's first line runs, so its very first paint resolves 'system'
+          // against the phone rather than against the WebView's guess.
+          injectedJavaScriptBeforeContentLoaded={`window.__pearColorScheme=${JSON.stringify(osScheme)};true;`}
           // The player IS an HTML5 <video> pointed at the loopback shim, so media
           // must play inline and without a user-gesture fight.
           allowsInlineMediaPlayback
@@ -1168,8 +1210,8 @@ export default function App () {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0f0d0a' },
-  web: { flex: 1, backgroundColor: '#0f0d0a' },
+  root: { flex: 1, backgroundColor: DARK_BG },
+  web: { flex: 1 },
   playerOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   controls: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'space-between' },
   ctlTop: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 40, paddingHorizontal: 14, paddingBottom: 6 },
