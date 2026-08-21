@@ -1429,13 +1429,22 @@ const methods = {
     return { base, art: { bytes: artStore.totalBytes(), count: artStore.count() } }
   },
 
-  'subtitle.list': async (args) => (await connected()).request('subtitle.list', args),
+  // WHAT SUBTITLES THE FILE CARRIES, which only the host holding that file can
+  // answer. `clientForId` rather than `connected()` for the same reason
+  // `library.get` uses it: in the merged view the item on screen belongs to
+  // whichever library holds it, and that is not necessarily the host this phone
+  // happens to have a connection to. Asked of the wrong host it answers an empty
+  // list rather than an error, so the bug reads as "this film has no subtitles"
+  // (found 2026-08-21 on a four-host bench: a Mac film opened while the phone was
+  // connected to the Windows host said None, and the Mac's own dashboard said
+  // three).
+  'subtitle.list': async (args) => (await clientForId(args.itemId)).request('subtitle.list', args),
 
   // The track's text, as WebVTT. The host STREAMS it (subtitle bytes ride the
   // same chokepoint as film bytes); buffered here because a subtitle file is
   // tens of kilobytes and the shell wants one string, not a byte feed.
   'subtitle.get': async (args) => {
-    const buf = await (await connected()).request('subtitle.get', args, { stream: true })
+    const buf = await (await clientForId(args.itemId)).request('subtitle.get', args, { stream: true })
     return { vtt: b4a.toString(buf) }
   },
 
