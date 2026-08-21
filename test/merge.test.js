@@ -327,3 +327,66 @@ test('a year-less pair with unknown runtimes keeps the old behaviour', () => {
   ])
   assert.equal(idx.movies.length, 2)
 })
+
+/* ------------------------------- two halves of one film, not two copies of it -- */
+
+test('TWO HALVES OF A FILM STAY TWO ENTRIES, SO NEITHER DISAPPEARS', () => {
+  // FOUND ON TIM'S REAL LIBRARY (2026-08-21). `The Two Towers (ext ) - Pt 1.mkv` and
+  // `- Pt 2.mkv` both matched the same TMDB record, so both arrived carrying the same
+  // title and year - one key, one entry, two copies, and the second half unreachable
+  // behind the first. The numbers below are the real ones, read off the phone: 7732
+  // seconds against 6400.
+  const halves = M.mergeMovies([
+    movie({ id: 'pt1', libraryId: 'umbrel', title: 'The Lord of the Rings: The Two Towers', year: 2002, runtime: 7732, media: { size: 3263391229 } }),
+    movie({ id: 'pt2', libraryId: 'umbrel', title: 'The Lord of the Rings: The Two Towers', year: 2002, runtime: 6400, media: { size: 2823203577 } })
+  ])
+  assert.equal(halves.length, 2, 'both halves are on the shelf')
+  assert.deepEqual(halves.map((h) => h.runtime).sort(), [6400, 7732])
+  assert.deepEqual(halves.map((h) => h.copies.length), [1, 1], 'and neither is hiding inside the other')
+  assert.equal(new Set(halves.map((h) => h.key)).size, 2, 'two entries need two keys')
+})
+
+test('TWO RIPS OF ONE FILM STILL COLLAPSE, WHICH IS THE WHOLE POINT OF MERGING', () => {
+  // The guard has to leave the case it was built around alone: the same film on two
+  // hosts, ripped at different qualities, is ONE entry with two copies.
+  const rips = M.mergeMovies([
+    movie({ id: 'a', libraryId: 'umbrel', runtime: 7700, media: { size: 9e9 } }),
+    movie({ id: 'b', libraryId: 'mac', runtime: 7690, media: { size: 4e9 } })
+  ])
+  assert.equal(rips.length, 1)
+  assert.equal(rips[0].copies.length, 2, 'both copies stay reachable behind one entry')
+})
+
+test('A COPY WITH NO RUNTIME IS NOT EVIDENCE OF A DIFFERENT FILM', () => {
+  // Unknown is not different. Splitting on a missing duration would turn one film into
+  // two on any host that does not report one, which is a worse bug than the one being
+  // fixed.
+  const mixed = M.mergeMovies([
+    movie({ id: 'known', libraryId: 'umbrel', runtime: 7700 }),
+    movie({ id: 'silent', libraryId: 'mac', runtime: null })
+  ])
+  assert.equal(mixed.length, 1, 'they stay together')
+  assert.equal(mixed[0].copies.length, 2)
+})
+
+test('A THEATRICAL AND AN EXTENDED CUT ARE TWO THINGS, AND BOTH ARE REACHABLE', () => {
+  // Falls out of the same rule and is a fix rather than a side effect: two cuts sharing
+  // a title and a year used to be one entry with one of them unreachable.
+  const cuts = M.mergeMovies([
+    movie({ id: 'theatrical', libraryId: 'umbrel', title: 'Aliens', year: 1986, runtime: 8220 }),
+    movie({ id: 'special', libraryId: 'umbrel', title: 'Aliens', year: 1986, runtime: 9420 })
+  ])
+  assert.equal(cuts.length, 2)
+})
+
+test('THE ENTRY THAT WAS ALREADY THERE KEEPS ITS KEY WHEN A HALF IS RESCUED', () => {
+  // A shelf should not reshuffle because a second half was found: the cluster holding
+  // the primary keeps the original key, and the rescued one takes a new suffix.
+  const out = M.mergeMovies([
+    movie({ id: 'main', libraryId: 'umbrel', title: 'Nosferatu', year: 1922, runtime: 5820, artId: 'art' }),
+    movie({ id: 'half', libraryId: 'umbrel', title: 'Nosferatu', year: 1922, runtime: 2900, artId: null })
+  ])
+  const main = out.find((o) => o.id === 'main')
+  assert.equal(main.key, M.movieKey({ title: 'Nosferatu', year: 1922 }), 'the original entry is untouched')
+  assert.notEqual(out.find((o) => o.id === 'half').key, main.key)
+})
