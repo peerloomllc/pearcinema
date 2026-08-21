@@ -27,7 +27,19 @@ const readPref = (key, allowed) => {
     return allowed[0]
   }
 }
-const writePref = (key, v) => { try { localStorage.setItem(key, v) } catch {} }
+// A CHANGE IS ANNOUNCED, because Settings and the player are two screens and the second
+// one has no reason to look at localStorage again. Without this a tint chosen while a film
+// is open does nothing until the next film, which is indistinguishable from a tint that
+// does not work - and is what Tim reported (2026-08-21, "sepia doesn't seem to be
+// working"; it was working, on the next film, at a strength too polite to notice).
+const writePref = (key, v) => {
+  try { localStorage.setItem(key, v) } catch {}
+  try { window.dispatchEvent(new CustomEvent('pearcinema:pref', { detail: { key, value: v } })) } catch {}
+}
+
+export const PREF_EVENT = 'pearcinema:pref'
+export const SKIN_PREF = SKIN_KEY
+export const TONE_PREF = TONE_KEY
 
 export const loadSkinPref = () => readPref(SKIN_KEY, SKINS)
 export const saveSkinPref = (v) => writePref(SKIN_KEY, SKINS.includes(v) ? v : 'off')

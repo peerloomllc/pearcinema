@@ -985,7 +985,7 @@ function AppearancePanel () {
     <>
       <div class='setpage'><span class='setpagename'>Appearance</span></div>
 
-      <div class='setrows'>
+      <div class='setrows appearance'>
         <div class='setrow'>
           <span class='rowmain'>
             <span class='rowname'>Theme</span>
@@ -1012,7 +1012,7 @@ function AppearancePanel () {
               {skin === 'film'
                 ? 'A running strip of film at the top and bottom of the picture.'
                 : skin === 'mst3k'
-                  ? 'A row of seats along the bottom of the picture.'
+                  ? 'IFKYK.'
                   : 'Nothing over the picture.'}
             </span>
           </span>
@@ -1023,7 +1023,7 @@ function AppearancePanel () {
             >
               <option value='off'>None</option>
               <option value='film'>35mm reel</option>
-              <option value='mst3k'>Theater row</option>
+              <option value='mst3k'>Riff mode</option>
             </select>
           </span>
         </div>
@@ -1053,7 +1053,8 @@ function AppearancePanel () {
       </div>
 
       <p class='muted sm' style='margin-top:.9rem'>
-        A dressing shows on the next film you start, and only in this browser.
+        A tint takes effect straight away. A dressing shows on the next film you start.
+        Both are this browser's alone.
       </p>
     </>
   )

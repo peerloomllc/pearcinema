@@ -32,7 +32,7 @@ import { api, withBase, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } f
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
 import Skin from './Skin'
-import { loadSkinPref, loadTonePref } from './ui'
+import { loadSkinPref, loadTonePref, PREF_EVENT, TONE_PREF } from './ui'
 import { Blocked, Check, Close, Info, Download as DownloadIcon, Trash } from './icons'
 
 // HOW LONG THE CARD WAITS before the next episode starts itself. Ten seconds is
@@ -61,7 +61,15 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
   // What this browser is wearing. Read once per open rather than watched: a skin changed
   // in Settings applies to the next film, which is the same shape the phone has.
   const [skin] = useState(() => loadSkinPref())
-  const [tone] = useState(() => loadTonePref())
+  // THE TINT IS LIVE and the dressing is not, deliberately. A tint appearing the moment
+  // it is chosen is what anybody would expect; a strip of film sliding in over a playing
+  // picture is a jolt, so that one waits for the next film - the same as the phone.
+  const [tone, setTone] = useState(() => loadTonePref())
+  useEffect(() => {
+    const onPref = (e) => { if (e?.detail?.key === TONE_PREF) setTone(loadTonePref()) }
+    window.addEventListener(PREF_EVENT, onPref)
+    return () => window.removeEventListener(PREF_EVENT, onPref)
+  }, [])
   // Whether the picture is actually moving, which is what the strips follow.
   const [rolling, setRolling] = useState(false)
   const [forced, setForced] = useState(false)
@@ -377,7 +385,13 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 // A TONE IS FREE HERE and is not on the phone: a phone cannot repaint a
                 // native video surface, so its black-and-white is pressed into the picture
                 // by the host's engine. A browser has a filter.
-                style={tone === 'bw' ? 'filter: grayscale(1)' : tone === 'sepia' ? 'filter: sepia(0.55) saturate(1.15) contrast(1.02)' : undefined}
+                // FULL SEPIA, not a hint of it. At 0.55 it was a tint somebody had to be
+                // told about, which is the same as no tint at all.
+                style={tone === 'bw'
+                  ? 'filter: grayscale(1)'
+                  : tone === 'sepia'
+                    ? 'filter: sepia(1) saturate(1.35) hue-rotate(-8deg) contrast(1.05)'
+                    : undefined}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
                 onPause={() => { setRolling(false); savePosition() }}
