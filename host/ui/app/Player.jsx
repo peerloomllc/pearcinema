@@ -31,6 +31,8 @@ import { useState, useEffect, useRef } from 'preact/hooks'
 import { api, withBase, fmtRuntime, fmtExact, fmtSize, fmtClock, episodeCode } from './api'
 import { verdictFor, containerName, capabilityQuery } from './playback'
 import Controls from './Controls'
+import Skin from './Skin'
+import { loadSkinPref, loadTonePref } from './ui'
 import { Blocked, Check, Close, Info, Download as DownloadIcon, Trash } from './icons'
 
 // HOW LONG THE CARD WAITS before the next episode starts itself. Ten seconds is
@@ -56,6 +58,12 @@ function writeAutoplay (on) {
 }
 
 export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp = null, watch = null, onWatchChange = () => {}, remote = false }) {
+  // What this browser is wearing. Read once per open rather than watched: a skin changed
+  // in Settings applies to the next film, which is the same shape the phone has.
+  const [skin] = useState(() => loadSkinPref())
+  const [tone] = useState(() => loadTonePref())
+  // Whether the picture is actually moving, which is what the strips follow.
+  const [rolling, setRolling] = useState(false)
   const [forced, setForced] = useState(false)
   const [subs, setSubs] = useState([])
   const [failed, setFailed] = useState(null)
@@ -364,10 +372,15 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                   // underneath the question about where to start.
                   if (wantPlay.current && offer === null) e.currentTarget.play().catch(() => {})
                 }}
-                onPlay={() => { wantPlay.current = true }}
+                onPlay={() => { wantPlay.current = true; setRolling(true) }}
+                onWaiting={() => setRolling(false)}
+                // A TONE IS FREE HERE and is not on the phone: a phone cannot repaint a
+                // native video surface, so its black-and-white is pressed into the picture
+                // by the host's engine. A browser has a filter.
+                style={tone === 'bw' ? 'filter: grayscale(1)' : tone === 'sepia' ? 'filter: sepia(0.55) saturate(1.15) contrast(1.02)' : undefined}
                 src={src}
                 onTimeUpdate={e => setAt(offset + e.currentTarget.currentTime)}
-                onPause={() => savePosition()}
+                onPause={() => { setRolling(false); savePosition() }}
                 onEnded={() => {
                   savePosition(true)
                   // A GENERATED STREAM CAN END WITHOUT THE FILM ENDING - the
@@ -381,7 +394,7 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                     setLeft(autoplay ? NEXT_SECONDS : null)
                   }
                 }}
-                onPlaying={() => setBusy(false)}
+                onPlaying={() => { setBusy(false); setRolling(true) }}
                 onError={() => {
                   setBusy(false)
                   setFailed(generated
@@ -402,6 +415,10 @@ export default function Player ({ item, caps, queue = [], onPlay, onClose, onUp 
                 ))}
               </video>
               )}
+
+        {/* The dressing, over the picture and under everything that answers a click.
+            Rendered inside .stage so it moves with the player into fullscreen. */}
+        {!blocked && dlKnown && <Skin video={video} skin={skin} running={rolling} />}
 
         {/* PICK UP WHERE YOU LEFT OFF, over the picture rather than in a strip under
             it. A banner below the player was a notice about the film; this is a

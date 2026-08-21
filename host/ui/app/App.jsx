@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'preact/hooks'
 import { api, copyText, setRemoteBase, fmtSize, onLive } from './api'
-import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme } from './ui'
+import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme, loadSkinPref, saveSkinPref, loadTonePref, saveTonePref } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
@@ -58,6 +58,11 @@ const SETTINGS_SECTIONS = [
   // live dot and one-press revoke both survive the move.
   ['people', 'People'],
   ['casting', 'Casting'],
+  // HOW THIS BROWSER LOOKS, which is not a fact about the library and gets its own page
+  // rather than a corner of another one (Tim, 2026-08-21). The theme switch lived in the
+  // header until then, where it was one tap and no explanation; here it sits with the two
+  // choices it belongs with and each of them can say what it does.
+  ['appearance', 'Appearance'],
   ['host', 'This host'],
   ['support', 'Support development']
 ]
@@ -956,6 +961,104 @@ function LibraryPanel ({ state, reload }) {
   )
 }
 
+// HOW THIS BROWSER LOOKS: the theme, and the two dressings the player can wear.
+//
+// ALL THREE ARE ABOUT THIS BROWSER and none of them is about the library, so they are
+// remembered here rather than on the host - which also means a shared library's owner
+// cannot decide what somebody else's screen looks like. The phone keeps its own three for
+// the same reason, and the two do not follow each other on purpose: wearing the 35mm skin
+// on the sofa is not a wish to wear it on the desktop in the study.
+//
+// THE SKIN APPLIES TO THE NEXT FILM, not the one playing. Changing it mid-film would mean
+// reaching into the player from Settings for a decoration, and the phone behaves the same
+// way.
+function AppearancePanel () {
+  const [theme, setTheme] = useState(loadThemePref())
+  const [skin, setSkin] = useState(loadSkinPref())
+  const [tone, setTone] = useState(loadTonePref())
+
+  const themeSub = theme === 'system'
+    ? `Following this device, which is ${resolveTheme('system')} right now.`
+    : theme === 'light' ? 'Always light.' : 'Always dark.'
+
+  return (
+    <>
+      <div class='setpage'><span class='setpagename'>Appearance</span></div>
+
+      <div class='setrows'>
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Theme</span>
+            <span class='rowsub'>{themeSub}</span>
+          </span>
+          <span class='rowctl'>
+            <select
+              value={theme} aria-label='Theme'
+              onChange={e => { const v = e.currentTarget.value; setTheme(v); applyThemePref(v) }}
+            >
+              {/* "Automatic" rather than "Match this device", which the control cuts to
+                  "Match this…" at this width. The sub-line says which it currently is. */}
+              <option value='system'>Automatic</option>
+              <option value='light'>Light</option>
+              <option value='dark'>Dark</option>
+            </select>
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Player dressing</span>
+            <span class='rowsub'>
+              {skin === 'film'
+                ? 'A running strip of film at the top and bottom of the picture.'
+                : skin === 'mst3k'
+                  ? 'A row of seats along the bottom of the picture.'
+                  : 'Nothing over the picture.'}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <select
+              value={skin} aria-label='Player dressing'
+              onChange={e => { const v = e.currentTarget.value; setSkin(v); saveSkinPref(v) }}
+            >
+              <option value='off'>None</option>
+              <option value='film'>35mm reel</option>
+              <option value='mst3k'>Theater row</option>
+            </select>
+          </span>
+        </div>
+
+        <div class='setrow'>
+          <span class='rowmain'>
+            <span class='rowname'>Picture</span>
+            <span class='rowsub'>
+              {tone === 'bw'
+                ? 'Black and white. Nothing is converted for this - your browser tints it.'
+                : tone === 'sepia'
+                  ? 'Sepia. Nothing is converted for this - your browser tints it.'
+                  : 'As the film was made.'}
+            </span>
+          </span>
+          <span class='rowctl'>
+            <select
+              value={tone} aria-label='Picture'
+              onChange={e => { const v = e.currentTarget.value; setTone(v); saveTonePref(v) }}
+            >
+              <option value='off'>Original</option>
+              <option value='bw'>Black and white</option>
+              <option value='sepia'>Sepia</option>
+            </select>
+          </span>
+        </div>
+      </div>
+
+      <p class='muted sm' style='margin-top:.9rem'>
+        A dressing shows on the next film you start, and only in this browser.
+      </p>
+    </>
+  )
+}
+
 function Settings ({ state, reload, remotes = [], onSource = () => {}, source = '', onPlayDownload = () => {} }) {
   const resolveSection = (t, s) => {
     if (t !== 'settings') return null
@@ -1006,6 +1109,8 @@ function Settings ({ state, reload, remotes = [], onSource = () => {}, source = 
         {sec === 'casting' && <CastPanel />}
 
         {sec === 'support' && <SupportPanel />}
+
+        {sec === 'appearance' && <AppearancePanel />}
 
         {sec === 'host' && <HostPanel state={state} reload={reload} />}
 
@@ -1489,9 +1594,10 @@ export default function App () {
   // them: the panel only exists on the Sharing page, so a light that waited for it
   // would appear only once you had already gone looking.
   const [pendingAsks, setPendingAsks] = useState(0)
-  // The theme lives up here now rather than inside Settings: it is a light switch, and
-  // a light switch belongs on the wall by the door (PearTune's shape, Tim 2026-08-13).
-  const [theme, setTheme] = useState(loadThemePref())
+  // THE THEME MOVED INTO SETTINGS > APPEARANCE (Tim, 2026-08-21), where it sits with the
+  // player's own two looks. It was a lone icon in the header, which is one tap and no
+  // explanation - fine while it was the only choice about how this page looks, and odd
+  // once there were three of them in three different places.
   // Where the library should open when we leave the player by climbing rather than by
   // going all the way out. Held here because the library owns which show and season it
   // is showing, and the player is a sibling of it rather than a child.
@@ -1770,15 +1876,6 @@ export default function App () {
           >
             <PeopleIcon size={18} />
             {online > 0 && <span class='dot' aria-hidden='true' />}
-          </button>
-
-          <button
-            class='iconbtn'
-            onClick={() => { const next = resolveTheme(theme) === 'dark' ? 'light' : 'dark'; setTheme(next); applyThemePref(next) }}
-            aria-label='Switch theme'
-            title={resolveTheme(theme) === 'dark' ? 'Switch to light' : 'Switch to dark'}
-          >
-            {resolveTheme(theme) === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
           </button>
 
           <button

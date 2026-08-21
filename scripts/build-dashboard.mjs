@@ -33,6 +33,9 @@ await build({
   jsx: 'automatic',
   jsxImportSource: 'preact',
   define: { 'process.env.NODE_ENV': '"production"' },
+  // The theater row is a PNG. Inlined rather than served: this page is one
+  // self-contained file by design, and the artwork is 25 KB.
+  loader: { '.png': 'dataurl' },
   outfile: TMP_JS,
   legalComments: 'none',
   minify: true

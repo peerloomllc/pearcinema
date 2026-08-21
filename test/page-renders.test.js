@@ -194,7 +194,7 @@ test('the page mounts and shows the library, rather than a blank control plane',
   // The whole navigation, which is now the name plus three icons rather than three
   // words - see the header test below.
   assert.match(text(), /Pair a device/)
-  for (const label of ['People and devices', 'Switch theme', 'Settings']) {
+  for (const label of ['People and devices', 'Settings']) {
     assert.ok([...doc.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === label), label)
   }
 })
@@ -1291,7 +1291,7 @@ test('THE HEADER IS A NAME, A SEARCH AND SOME TOOLS - and no tabs', async (t) =>
   assert.match(doc.querySelector('.brand').getAttribute('aria-label'), /Back to the library/)
   assert.ok(doc.querySelector('.brand svg'), 'with an icon that says what it does')
 
-  for (const label of ['People and devices', 'Switch theme', 'Settings']) {
+  for (const label of ['People and devices', 'Settings']) {
     assert.ok([...doc.querySelectorAll('.barright button')].some(b => b.getAttribute('aria-label') === label), label)
   }
 })
@@ -2037,7 +2037,9 @@ test('EIGHT SETTINGS PAGES BECAME SIX, and every old address still lands', async
   const labels = [...doc.querySelectorAll('.setnav button')].map(b => b.textContent.trim())
   // People joined them on 2026-08-20, beside Sharing: the two pages about other
   // people sit together.
-  assert.deepEqual(labels, ['Library', 'Sharing', 'People', 'Casting', 'This host', 'Support development'])
+  // And Appearance joined them on 2026-08-21, when the theme switch came out of the
+  // header to sit with the player's two dressings.
+  assert.deepEqual(labels, ['Library', 'Sharing', 'People', 'Casting', 'Appearance', 'This host', 'Support development'])
 
   const lands = async (hash, expect) => {
     win.location.hash = 'settings/' + hash
@@ -3463,3 +3465,89 @@ test('A SHOW HAS A PAGE TOO, with its seasons under it', async (t) => {
 })
 
 function rootText (doc) { return doc.getElementById('root').textContent }
+
+// --- Appearance: how this browser looks --------------------------------------
+
+async function openAppearance (t) {
+  const h = await open()
+  t.after(() => h.dom.window.close())
+  const tab = [...h.doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new h.win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const nav = [...h.doc.querySelectorAll('.setnav button')].find(b => b.textContent.trim() === 'Appearance')
+  assert.ok(nav, 'Appearance is a page of its own')
+  nav.dispatchEvent(new h.win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  return h
+}
+
+test('APPEARANCE HOLDS THE THREE CHOICES ABOUT LOOKS, and the theme is one of them', async (t) => {
+  // Tim, 2026-08-21: move the header's light/dark switch in here. It was one tap and no
+  // explanation, which was fine while it was the only choice about how the page looks and
+  // odd once the player had two dressings of its own in a different place entirely.
+  const { doc, win, text } = await openAppearance(t)
+
+  const pick = (label) => [...doc.querySelectorAll('select')].find(s => s.getAttribute('aria-label') === label)
+  assert.ok(pick('Theme'), 'the theme moved here')
+  assert.ok(pick('Player dressing'), 'and sits beside the player dressings')
+  assert.ok(pick('Picture'))
+
+  // Choosing one says what it means rather than just changing.
+  const theme = pick('Theme')
+  theme.value = 'light'
+  theme.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(doc.documentElement.getAttribute('data-theme'), 'light', 'the page changes at once')
+  assert.match(text(), /Always light\./)
+
+  // AND IT IS THIS BROWSER'S CHOICE, not the library's: nothing about it goes to the host.
+  const skin = pick('Player dressing')
+  skin.value = 'film'
+  skin.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  assert.equal(win.localStorage.getItem('pearcinema.skin'), 'film')
+  assert.match(text(), /running strip of film/)
+})
+
+test('THE HEADER LOST ITS THEME BUTTON, and did not lose the theme', async (t) => {
+  const { doc, win } = await open()
+  t.after(() => win.close())
+  assert.equal([...doc.querySelectorAll('button')].some(b => b.getAttribute('aria-label') === 'Switch theme'), false)
+  // Whatever was chosen still applies on a cold load, which is main.jsx's job and the
+  // reason the switch could move at all.
+  assert.ok(['light', 'dark'].includes(doc.documentElement.getAttribute('data-theme')))
+})
+
+test('A DRESSING SITS ON THE PICTURE, not on the player', async (t) => {
+  // The strips belong at the PICTURE's edges: a 2.39:1 film inside a 16:9 element is
+  // letterboxed, and a strip pinned to the element floats in the black, which is the one
+  // thing that makes a skin look like a bug. jsdom has no decoder, so the element's
+  // intrinsic size is stated here rather than measured - the arithmetic under test is the
+  // letterbox, not the codec.
+  const { dom, doc, win } = await open()
+  t.after(() => dom.window.close())
+  win.localStorage.setItem('pearcinema.skin', 'film')
+  // ON HTMLVideoElement, not HTMLMediaElement: jsdom defines videoWidth on the video
+  // prototype itself, which is nearer in the chain and would shadow an override put on
+  // the media one - it reads as "the skin never rendered" and is not.
+  Object.defineProperty(win.HTMLVideoElement.prototype, 'videoWidth', { configurable: true, get () { return 1920 } })
+  Object.defineProperty(win.HTMLVideoElement.prototype, 'videoHeight', { configurable: true, get () { return 800 } })
+  Object.defineProperty(win.HTMLElement.prototype, 'clientWidth', { configurable: true, get () { return 960 } })
+  Object.defineProperty(win.HTMLElement.prototype, 'clientHeight', { configurable: true, get () { return 540 } })
+
+  const poster = [...doc.querySelectorAll('.poster')].find(p => p.textContent.includes('Metropolis'))
+  poster.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const tryAnyway = [...doc.querySelectorAll('button')].find(b => b.textContent.includes('Try anyway'))
+  if (tryAnyway) tryAnyway.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const strips = [...doc.querySelectorAll('.fstrip')]
+  assert.equal(strips.length, 2, 'one at each edge of the picture')
+  // 1920x800 inside 960x540 scales to 960x400, so the picture starts 70px down and the
+  // bottom strip sits at its lower edge rather than the element's.
+  const top = (el) => Math.round(parseFloat(el.style.top))
+  assert.equal(top(strips[0]), 70, 'the top strip is at the top of the PICTURE')
+  assert.ok(top(strips[1]) > 400 && top(strips[1]) < 470, 'and the bottom one at the bottom of it')
+  assert.ok(strips[0].querySelector('.fstrip-run'), 'with the sliding row of perforations')
+})
