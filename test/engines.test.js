@@ -173,3 +173,54 @@ test('a probe that hangs on one vendor does not cost the machine the other', asy
   assert.equal(out.available, true)
   assert.equal(out.engine, 'nvenc')
 })
+
+/* --------------------------------------------- an engine belongs to a platform -- */
+
+test('A MAC IS NEVER ASKED FOR A RENDER NODE IT CANNOT HAVE', () => {
+  // FOUND ON THE MAC MINI (Tim, 2026-08-21). chooseEngine put /dev/dri/renderD128 at the
+  // head of the candidate list on every platform, so a Mac ffmpeg was asked for
+  // `-vaapi_device` - an option it does not have - and the dashboard published the parse
+  // error as its answer: "Error splitting the argument list: Option not found". A machine
+  // with a hardware H.264 encoder read as a broken one.
+  const mac = transcode.engineCandidates({ platform: 'darwin', nodes: [] })
+  assert.deepEqual(mac.map((c) => c.engine.id), ['videotoolbox'], 'the Mac is offered its own engine and nothing else')
+  assert.equal(mac[0].device, null, 'and nothing that looks like a Linux device path')
+})
+
+test('VAAPI IS NOT OFFERED WITHOUT A RENDER NODE TO OFFER IT', () => {
+  // The configured device is not evidence. DEVICE_DEFAULT is a constant, so trusting it
+  // is what sent /dev/dri/renderD128 to a machine that has no /dev/dri at all.
+  const win = transcode.engineCandidates({ platform: 'win32', nodes: [] })
+  assert.deepEqual(win.map((c) => c.engine.id), ['nvenc'])
+
+  const linuxBare = transcode.engineCandidates({ platform: 'linux', nodes: [] })
+  assert.deepEqual(linuxBare.map((c) => c.engine.id), ['nvenc'], 'a Linux box with no card still has NVENC to try')
+})
+
+test('A LINUX BOX WITH CARDS TRIES THE CONFIGURED ONE FIRST, THEN THE REST', () => {
+  const c = transcode.engineCandidates({
+    platform: 'linux',
+    device: '/dev/dri/renderD129',
+    nodes: ['/dev/dri/renderD128', '/dev/dri/renderD129']
+  })
+  assert.deepEqual(c.map((x) => `${x.engine.id}:${x.device}`), [
+    'vaapi:/dev/dri/renderD129',
+    'vaapi:/dev/dri/renderD128',
+    'nvenc:null'
+  ])
+})
+
+test('THE MAC ENGINE BUILDS THE ARGV THAT WAS MEASURED ON THE MAC', () => {
+  // Written from a run on the mac-mini rather than from a spec sheet, which is this
+  // file's own rule: the probe returned 73,042 bytes of MP4, and a real HEVC film
+  // converted at about 4x realtime with these exact input args.
+  const vt = engines.engineFor('videotoolbox')
+  assert.deepEqual(vt.inputArgs({ device: null, software: false }), ['-hwaccel', 'videotoolbox'])
+  assert.deepEqual(vt.inputArgs({ device: null, software: true }), [], 'burn-in and software decode add nothing')
+  assert.equal(vt.encoder, 'h264_videotoolbox')
+  assert.deepEqual(vt.encoderArgs(null), [], 'there is no card to choose on a Mac')
+  // Both lanes are the same CPU conversion: -hwaccel videotoolbox without an output
+  // format hands frames back in system memory, exactly like the NVENC lane.
+  assert.equal(vt.fromHwDecode, 'format=nv12')
+  assert.equal(vt.toEngine, 'format=nv12')
+})

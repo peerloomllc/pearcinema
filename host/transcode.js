@@ -162,21 +162,36 @@ function probeTranscode ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, timeoutMs
 // candidate is probed in turn and the first that returns real bytes wins; a machine
 // with no working card gets the FIRST candidate's complaint, because "no video engine"
 // on a box with a perfectly good card is a question that deserves an answer.
-async function chooseEngine ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, only = null, timeoutMs = 15000 } = {}) {
-  const out = await pickEngine({
-    ffmpeg,
-    only,
-    timeoutMs,
-    candidates: [
-      // The configured render node first, then the rest of them: a two-card box whose
-      // first node is a dead stub still has a second card to find.
-      ...[device, ...renderNodes().filter((n) => n !== device)].map((d) => ({ engine: VAAPI, device: d })),
-      // NVENC counts its own cards, so there is no path to hand it - the encoder finds
-      // the machine's first, and `-gpu` picks another only once somebody has asked for
-      // one by number.
-      { engine: engineFor('nvenc'), device: null }
-    ]
-  })
+// CANDIDATES BELONG TO A PLATFORM, and until 2026-08-21 they did not. `/dev/dri/renderD128`
+// went to the head of this list on every machine, so the mac-mini spent its startup asking
+// a Mac ffmpeg for `-vaapi_device` and published the parse error as its answer: "Error
+// splitting the argument list: Option not found". A Mac with a hardware H.264 encoder read
+// as a broken one, and a Windows box would have read the same way.
+//
+// So each engine is offered only where it can exist. VAAPI needs a render node and is not
+// asked for without one - which also kills the DEVICE_DEFAULT-that-is-not-there case, since
+// a configured device only leads the list if it is actually on the machine.
+function engineCandidates ({ device = DEVICE_DEFAULT, platform = process.platform, nodes = null } = {}) {
+  const found = nodes || renderNodes()
+  // The configured render node first, then the rest of them: a two-card box whose first
+  // node is a dead stub still has a second card to find.
+  const vaapiNodes = [...(found.includes(device) ? [device] : []), ...found.filter((n) => n !== device)]
+  const out = vaapiNodes.map((d) => ({ engine: VAAPI, device: d }))
+
+  // The Mac's own engine, and the only one it has.
+  if (platform === 'darwin') out.push({ engine: engineFor('videotoolbox'), device: null })
+
+  // NVENC counts its own cards, so there is no path to hand it - the encoder finds the
+  // machine's first, and `-gpu` picks another only once somebody has asked for one by
+  // number. Not offered on macOS: no Mac in years has had an NVIDIA card, and asking
+  // costs a spawn and prints "Encoder not found" where an operator can see it.
+  if (platform !== 'darwin') out.push({ engine: engineFor('nvenc'), device: null })
+
+  return out
+}
+
+async function chooseEngine ({ ffmpeg = 'ffmpeg', device = DEVICE_DEFAULT, only = null, timeoutMs = 15000, platform = process.platform } = {}) {
+  const out = await pickEngine({ ffmpeg, only, timeoutMs, candidates: engineCandidates({ device, platform }) })
   return { ...out, label: out.engine ? engineFor(out.engine).label : null }
 }
 
@@ -329,6 +344,6 @@ class Transcoder extends Remuxer {
 
 module.exports = {
   capBitrate,
-  Transcoder, transcodeArgs, probeTranscode, chooseEngine, engineFor, bitrateFor, measureEngine, hardestFilm,
+  Transcoder, transcodeArgs, probeTranscode, chooseEngine, engineCandidates, engineFor, bitrateFor, measureEngine, hardestFilm,
   HW_DECODE, DEVICE_DEFAULT, ENGINE_DEFAULT, renderNodes, MEASURE_LEVELS, MEASURE_SECONDS
 }

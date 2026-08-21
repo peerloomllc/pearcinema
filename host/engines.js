@@ -95,6 +95,41 @@ const NVENC = {
   ]
 }
 
+// VIDEOTOOLBOX, which is macOS, and which was missing for the same reason NVIDIA was:
+// this file knew one vendor's engine and the Mac has never had a render node in its life.
+// The cost was not "no hardware conversion on a Mac" - it was worse. `chooseEngine` put
+// `/dev/dri/renderD128` at the head of the list on EVERY platform, so the mac-mini ran
+// `ffmpeg -vaapi_device /dev/dri/renderD128` against a build with no such option and put
+// its answer on the dashboard: "Error splitting the argument list: Option not found"
+// (Tim, 2026-08-21). A Mac that encodes H.264 in hardware reported a parse error.
+//
+// MEASURED ON THE MAC MINI (M-series, the bundled darwin-arm64 ffmpeg) before being
+// written here, which is the rule this file already sets for itself:
+//   - the probe encodes and returns 73,042 bytes of MP4, exit 0.
+//   - a real film (Arrival.mkv, HEVC) with `-hwaccel videotoolbox` converts 3 seconds in
+//     0.72s wall, about 4x realtime, at 1920x1080 with its audio.
+//
+// `-hwaccel videotoolbox` WITHOUT an output format hands the decoded frames back in
+// system memory, exactly like the NVENC lane above, so both filter lanes are the same
+// CPU format conversion and the encode is still on the chip.
+const VIDEOTOOLBOX = {
+  id: 'videotoolbox',
+  label: 'Apple graphics',
+  encoder: 'h264_videotoolbox',
+  encoderArgs: () => [],
+  // Nothing to point it at: the encoder finds the machine's own media engine, and a Mac
+  // has exactly one.
+  deviceKind: null,
+  inputArgs: ({ software }) => (software ? [] : ['-hwaccel', 'videotoolbox']),
+  fromHwDecode: 'format=nv12',
+  toEngine: 'format=nv12',
+  probeArgs: () => [
+    '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
+    '-vf', 'format=nv12',
+    '-c:v', 'h264_videotoolbox', '-b:v', '1M'
+  ]
+}
+
 // VAAPI FIRST, and the reason is not that it is better. It is what every existing
 // install already proved and runs on, so an Intel or AMD box that upgrades to this code
 // builds byte-identical argv to the one it built yesterday. NVENC is reached by a
@@ -104,7 +139,7 @@ const NVENC = {
 // therefore converts on the built-in one. That is a defensible default and not a
 // measured answer; the honest version is to measure each and keep the faster, which is
 // the same button #138 already built and is filed in TODO with the two-card picker.
-const ENGINES = [VAAPI, NVENC]
+const ENGINES = [VAAPI, NVENC, VIDEOTOOLBOX]
 
 const engineFor = (id) => ENGINES.find((e) => e.id === String(id || '').toLowerCase()) || null
 
@@ -192,4 +227,4 @@ async function pickEngine ({ ffmpeg = 'ffmpeg', candidates = [], only = null, ti
   }
 }
 
-module.exports = { ENGINES, VAAPI, NVENC, engineFor, tryEngine, pickEngine }
+module.exports = { ENGINES, VAAPI, NVENC, VIDEOTOOLBOX, engineFor, tryEngine, pickEngine }
