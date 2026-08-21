@@ -3603,3 +3603,43 @@ test('a healthy machine shows no machine warning', async (t) => {
   t.after(() => dom.window.close())
   assert.equal(doc.querySelector('.banner .fixcmd'), null)
 })
+
+test('A HOST WITH NO VIDEO ENGINE SAYS WHAT THAT MEANS, NOT WHAT FFMPEG SAID', async (t) => {
+  // WHAT WAS ON TWO REAL DASHBOARDS (Tim, 2026-08-21). The Debian VM: "Error parsing
+  // global options: Input/output error". The mac-mini: "Error splitting the argument
+  // list: Option not found". Both true, both ffmpeg's, and neither one a sentence
+  // anybody can act on.
+  const noEngine = {
+    ...STATE,
+    transcode: {
+      available: false,
+      engine: null,
+      device: '/dev/dri/renderD128',
+      reason: 'Error parsing global options: Input/output error',
+      tried: [{ engine: 'vaapi', device: '/dev/dri/renderD128', available: false, reason: 'Error parsing global options: Input/output error' }],
+      label: null,
+      nodes: ['/dev/dri/renderD128']
+    }
+  }
+  const { text } = await openHost(t, noEngine)
+
+  assert.match(text(), /did not pass the conversion test/, 'the plain version leads')
+  assert.match(text(), /films play exactly as they are/, 'and says what it means for the films')
+  // The evidence is kept, because this is an operator's dashboard and a support answer
+  // needs it - underneath, and labelled as the converter talking.
+  assert.match(text(), /The converter said: Error parsing global options/, 'ffmpeg keeps its say, in its place')
+})
+
+test('A MACHINE WITH NOTHING TO TRY IS NOT ACCUSED OF FAILING A TEST', async (t) => {
+  // No render node, no Mac engine, nothing offered: there was no test to fail, and
+  // saying one was failed would send somebody hunting a driver that was never asked for.
+  const nothing = {
+    ...STATE,
+    transcode: { available: false, engine: null, device: null, reason: null, tried: [], label: null, nodes: [] }
+  }
+  const { text } = await openHost(t, nothing)
+
+  assert.match(text(), /no graphics chip PearCinema can convert with/)
+  assert.doesNotMatch(text(), /did not pass the conversion test/)
+  assert.doesNotMatch(text(), /The converter said/, 'nothing said anything, so nothing is quoted')
+})

@@ -1299,8 +1299,18 @@ function HostPanel ({ state, reload }) {
     ? ` on your ${t.label}${manyCards && t.device ? ` (${t.device})` : ''}`
     : (manyCards && t.device ? `, on ${t.device}` : '')
 
+  // WHAT A PERSON IS TOLD WHEN THERE IS NO ENGINE. This line used to be ffmpeg's own
+  // sentence: the Debian VM read "Error parsing global options: Input/output error" and
+  // the mac-mini "Error splitting the argument list: Option not found" (Tim, 2026-08-21).
+  // Both are true and neither is a sentence anybody can act on. The plain version says
+  // what it means for the films; ffmpeg's own words stay, underneath and labelled, because
+  // this is an operator's dashboard and that line is what a support answer needs.
+  const engineNone = (t.tried || []).length === 0
+    ? 'This machine has no graphics chip PearCinema can convert with, so films play exactly as they are.'
+    : 'This machine\'s graphics did not pass the conversion test, so films play exactly as they are. Anything a device cannot play is refused honestly rather than converted.'
+
   const engineSub = !t.available
-    ? (t.probing ? 'Asking the hardware what it can do.' : (t.reason || 'The hardware probe did not pass.'))
+    ? (t.probing ? 'Asking the hardware what it can do.' : engineNone)
     : Number(c.cap) === 0
       ? 'Nothing is converted while this is 0.'
       : `Up to ${c.cap} conversion${Number(c.cap) === 1 ? '' : 's'} run at once${engineWhere}. Setting it to 0 turns conversions off.`
@@ -1400,6 +1410,9 @@ function HostPanel ({ state, reload }) {
             <span class={`rowname ${engineTone}`}>Video engine</span>
             <span class='rowsub'>{engineSub}</span>
             {t.available && <span class='rowsub'>{measuredSub}</span>}
+            {!t.available && !t.probing && t.reason && (
+              <span class='rowsub dim'>The converter said: {t.reason}</span>
+            )}
           </span>
           {/* TWO CONTROLS, STACKED, and the number on top. Side by side they read as one
               wide control of two halves and made the right-hand column of the page ragged

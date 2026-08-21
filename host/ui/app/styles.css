@@ -1759,6 +1759,11 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 .setrow .rowname.warn { color: var(--warn) }
 .setrow .rowname.dim { color: var(--muted) }
 
+/* The engine's raw line, when there is no engine. Kept because an operator chasing a
+ * driver needs ffmpeg's own words, dimmed and smaller because it is evidence under a
+ * sentence rather than the sentence (2026-08-21). */
+.setrow .rowsub.dim { color: var(--muted); opacity: .75; font-size: .82em }
+
 /* WAITING LOOKS THE SAME EVERYWHERE. The phone answers a slow question with one
  * spinning circle and a word, centred (src/ui .loadwall); the dashboard used to answer
  * the same question with a left-aligned "Looking…" in muted type, which reads as a
