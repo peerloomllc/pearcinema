@@ -214,3 +214,37 @@ test('subtitle.list marks burnable image tracks, and only when the host can burn
   })
   assert.deepStrictEqual((await cant['subtitle.list'](ctx)).items.map(t => t.burnable), [false, false, false])
 })
+
+// THE SUBTITLE CALLS MUST ASK THE HOST THAT HOLDS THE FILE, not whichever host the
+// phone happens to have a connection to.
+//
+// Found on a four-host bench, 2026-08-21: a film on the Mac was opened while the
+// phone's live connection was to the Windows host (the merged view filters by
+// library, it does NOT reconnect), and the detail sheet said "Subtitles: None".
+// The Mac's own dashboard said three. The wire method answers an EMPTY LIST rather
+// than an error when it does not know the item, so a routing mistake here is
+// invisible - it reads as a fact about the film.
+//
+// src/bare.js cannot be required outside the Bare runtime (it is a top-level script
+// with side effects and `Bare` globals), so this pins the invariant at the source.
+// `clientForId` is the helper `library.get` and `library.siblings` already use.
+test('subtitle.list and subtitle.get route by item, not by connection', async () => {
+  const src = await fsp.readFile(path.join(__dirname, '..', 'src', 'bare.js'), 'utf8')
+
+  for (const method of ['subtitle.list', 'subtitle.get']) {
+    const at = src.indexOf(`'${method}':`)
+    assert.ok(at > 0, `${method} is gone from the worklet's method table`)
+    // The body runs to the next method key at the same indent.
+    const body = src.slice(at, at + 400)
+    assert.match(
+      body,
+      /clientForId\(args\.itemId\)/,
+      `${method} must resolve the host from the itemId, or a merged-view lookup asks the wrong host`
+    )
+    assert.doesNotMatch(
+      body.slice(0, body.indexOf('\n\n') === -1 ? body.length : body.indexOf('\n\n')),
+      /\(await connected\(\)\)\.request/,
+      `${method} must not go straight to the connected host`
+    )
+  }
+})
