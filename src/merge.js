@@ -122,6 +122,70 @@ function idCopy (x) {
 //
 // Mutates the group map in place, folding matching year-less groups into
 // their dated sibling before the entities are emitted.
+// The one runtime tolerance in this file, because two passes now ask the same
+// question and they must not drift apart: 90 seconds, or 3% on a long film.
+function sameLength (a, b) {
+  const x = Number(a) || 0
+  const y = Number(b) || 0
+  if (!x || !y) return false
+  return Math.abs(x - y) <= Math.max(90, 0.03 * Math.max(x, y))
+}
+
+// TWO HALVES OF ONE FILM ARE NOT TWO COPIES OF IT, and until this pass they were.
+// Found on Tim's real library, 2026-08-21: `The Two Towers (ext ) - Pt 1.mkv` and
+// `- Pt 2.mkv` both matched the same TMDB record, so both arrived carrying the title
+// "The Lord of the Rings: The Two Towers" and the year 2002 - one key, one entry, two
+// copies, and the second half unreachable behind the first. Which half played was
+// whatever copy-picking chose.
+//
+// WHY IT ONLY BIT SOMETIMES, and why it would have got WORSE: Fellowship and Return of
+// the King are split the same way but matched no record, kept their raw filenames and
+// stayed two distinct titles. So the bug needed a SUCCESSFUL metadata match to appear,
+// which means better metadata makes it more common, not less.
+//
+// THE FILENAME IS NOT AVAILABLE HERE - host paths deliberately never travel to the
+// phone - so the part markers that make this obvious to a human are not in reach. What
+// is in reach is the runtime, which reconcileYearless already trusts as a film's
+// fingerprint: two rips of one film agree within a couple of minutes, two halves do not
+// (Pt 1 is 6343s against an entry claiming 7732s).
+//
+// A copy with NO runtime stays with the first cluster rather than becoming an entry of
+// its own: unknown is not evidence of difference, and splitting on it would turn one
+// film into two on any host that does not report a duration.
+//
+// The extended-cut case falls out of this and is a fix rather than a side effect: a
+// theatrical and an extended cut sharing a title and a year are also two different
+// things, and today one of them is equally unreachable.
+function splitByLength (groups) {
+  for (const [key, g] of [...groups]) {
+    if (g.copies.length < 2) continue
+
+    const clusters = []
+    for (const e of g.copies) {
+      const own = Number(e.runtime) || 0
+      const home = own
+        ? clusters.find((c) => sameLength(c.runtime, own))
+        : clusters[0]
+      if (home) home.members.push(e)
+      else clusters.push({ runtime: own, members: [e] })
+    }
+    if (clusters.length < 2) continue
+
+    // The cluster holding the current primary keeps the original key and its place, so
+    // a shelf does not reshuffle because a second half was rescued.
+    const first = clusters.findIndex((c) => c.members.includes(g.primary))
+    const ordered = [clusters[first], ...clusters.filter((_, i) => i !== first)]
+
+    groups.delete(key)
+    ordered.forEach((c, i) => {
+      const k = i === 0 ? key : `${key}|~${i}`
+      let primary = c.members[0]
+      for (const e of c.members) if (betterItem(e, primary)) primary = e
+      groups.set(k, { key: k, primary, copies: c.members })
+    })
+  }
+}
+
 function reconcileYearless (groups) {
   const byTitle = new Map()
   for (const g of groups.values()) {
@@ -135,10 +199,7 @@ function reconcileYearless (groups) {
     if (!yearless.length || dated.length !== 1) continue
     const target = dated[0]
     for (const g of yearless) {
-      const a = Number(g.primary.runtime) || 0
-      const b = Number(target.primary.runtime) || 0
-      if (!a || !b) continue
-      if (Math.abs(a - b) > Math.max(90, 0.03 * Math.max(a, b))) continue
+      if (!sameLength(g.primary.runtime, target.primary.runtime)) continue
       for (const e of g.copies) {
         target.copies.push(e)
         if (betterItem(e, target.primary)) target.primary = e
@@ -152,6 +213,9 @@ function mergeMovies (movies) {
   const out = []
   const groups = groupByKey(movies, movieKey, betterItem)
   reconcileYearless(groups)
+  // AFTER the fold, not before: a year-less rip is gathered into its dated sibling
+  // above, and it has to face the same length question as everything else.
+  splitByLength(groups)
   for (const g of groups.values()) {
     const p = g.primary
     out.push({
