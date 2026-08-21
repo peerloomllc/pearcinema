@@ -130,6 +130,67 @@ const VIDEOTOOLBOX = {
   ]
 }
 
+// WINDOWS, AND THE HONEST LABEL ON BOTH OF THESE: NEITHER HAS EVER RUN ON HARDWARE.
+//
+// Every other engine in this file was measured before it was written, which is the rule
+// engines.js set itself after the AV1 mistake. These two are the exception, taken on Tim's
+// call (2026-08-21) after the measurement was attempted and could not be made:
+//
+//   - the Windows VM has a virtio display and no graphics chip at all, so nothing
+//     hardware can be proven on it. Its bundled ffmpeg DOES carry the encoders -
+//     h264_qsv, h264_amf and h264_nvenc are all compiled in, checked on the box.
+//   - the Umbrel is an Intel N100 and its ffmpeg has h264_qsv, but the container has no
+//     Intel runtime behind it: "Error initializing an internal MFX session: unsupported".
+//
+// WHY SHIPPING THEM UNPROVEN IS STILL SAFE, and why this is not the AV1 mistake repeating.
+// AV1 was a DECODER claimed in the capability set, so a film that matched it was accepted
+// and then stalled mid-play - a promise made to a viewer. An engine here is chosen only by
+// tryEngine, which runs the real pipeline and demands MP4 bytes back. A wrong argument
+// shape fails the probe on the machine that has the hardware, which is exactly where that
+// machine already stands today: no engine, direct play only. It cannot be made worse, and
+// on a machine where the shape is right it starts working.
+//
+// So: when one of these first runs on a real Windows PC, it is a MEASUREMENT, not a
+// confirmation. Write down what it did.
+const QSV = {
+  id: 'qsv',
+  label: 'Intel Quick Sync',
+  encoder: 'h264_qsv',
+  encoderArgs: () => [],
+  // Windows binds Quick Sync through D3D11 by itself. There is no path to hand it, unlike
+  // VAAPI's render node - which is the whole reason this is a separate engine from VAAPI
+  // rather than the same one with a different device.
+  deviceKind: null,
+  inputArgs: ({ software }) => (software ? [] : ['-hwaccel', 'qsv']),
+  // No `-hwaccel_output_format`, so decoded frames come back in system memory and the
+  // encoder uploads them itself. Same shape as the NVENC lane, same reason.
+  fromHwDecode: 'format=nv12',
+  toEngine: 'format=nv12',
+  probeArgs: () => [
+    '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
+    '-vf', 'format=nv12',
+    '-c:v', 'h264_qsv', '-b:v', '1M'
+  ]
+}
+
+const AMF = {
+  id: 'amf',
+  label: 'AMD graphics',
+  encoder: 'h264_amf',
+  encoderArgs: () => [],
+  deviceKind: null,
+  // d3d11va is the decode side on Windows for AMD; without an output format the frames
+  // land in system memory for the encoder, as above.
+  inputArgs: ({ software }) => (software ? [] : ['-hwaccel', 'd3d11va']),
+  fromHwDecode: 'format=nv12',
+  toEngine: 'format=nv12',
+  probeArgs: () => [
+    '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
+    '-vf', 'format=nv12',
+    '-c:v', 'h264_amf', '-b:v', '1M'
+  ]
+}
+
 // VAAPI FIRST, and the reason is not that it is better. It is what every existing
 // install already proved and runs on, so an Intel or AMD box that upgrades to this code
 // builds byte-identical argv to the one it built yesterday. NVENC is reached by a
@@ -139,7 +200,7 @@ const VIDEOTOOLBOX = {
 // therefore converts on the built-in one. That is a defensible default and not a
 // measured answer; the honest version is to measure each and keep the faster, which is
 // the same button #138 already built and is filed in TODO with the two-card picker.
-const ENGINES = [VAAPI, NVENC, VIDEOTOOLBOX]
+const ENGINES = [VAAPI, NVENC, VIDEOTOOLBOX, QSV, AMF]
 
 const engineFor = (id) => ENGINES.find((e) => e.id === String(id || '').toLowerCase()) || null
 
@@ -227,4 +288,4 @@ async function pickEngine ({ ffmpeg = 'ffmpeg', candidates = [], only = null, ti
   }
 }
 
-module.exports = { ENGINES, VAAPI, NVENC, VIDEOTOOLBOX, engineFor, tryEngine, pickEngine }
+module.exports = { ENGINES, VAAPI, NVENC, VIDEOTOOLBOX, QSV, AMF, engineFor, tryEngine, pickEngine }
