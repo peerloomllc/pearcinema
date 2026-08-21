@@ -19,14 +19,14 @@
 import { useState, useEffect, useRef } from 'preact/hooks'
 import silhouettes from '../../../assets/mst3k-silhouettes.png'
 
-// The asset is 3200x523 and is drawn at the picture's full width. Change one, change the
+// The asset is 3200x533 and is drawn at the picture's full width. Change one, change the
 // other; the phone carries the same pair of numbers for the same reason.
 //
 // WHY IT IS 3200 WIDE for a row a few hundred pixels tall: fullscreen. At 1600 the
 // upscale to a 4K-ish window frayed every edge, which is what Tim was looking at
 // (2026-08-21). It is traced from the drawing rather than resampled from it, so the
 // curves are curves at any size.
-const ROW_RATIO = 523 / 3200
+const ROW_RATIO = 533 / 3200
 
 // One perforation per this many pixels of picture width, and four perforations to a frame
 // - 35mm's own arithmetic, and the same numbers the phone uses so the two look alike.

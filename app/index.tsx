@@ -1032,16 +1032,21 @@ export default function App () {
               )
             })()}
             {/* RIFF MODE, Tim's own drawing (2026-08-21) rather than the drawn
-                approximation that shipped in #58. The asset is 3200x523 and is drawn at
+                approximation that shipped in #58. The asset is 3200x533 and is drawn at
                 the picture's full width, so the ratio below IS the asset - change one and
                 change the other.
                 TRACED, NOT RESAMPLED, and shipped at twice the width it needs: at 1600 an
                 upscale to a fullscreen window frayed every edge.
-                AND IT IS #141312 RATHER THAN BLACK, which is a HINT off black and no more:
+                AND IT IS #0d0c0c RATHER THAN BLACK, which is a HINT off black and no more:
                 a letterboxed film's bars are pure black and a black silhouette disappears
-                into them, while the first attempt at fixing that (#22201e) read as dark
-                grey people rather than silhouettes. Both judged on Tim's screen against a
-                real film, 2026-08-21.
+                into them, while the first attempts at fixing that (#22201e, then #141312)
+                read as grey people rather than silhouettes. Judged on Tim's screen against
+                a real film each time, 2026-08-21.
+                THE SEAT ROW IS CUT ON ONE CONTOUR. Extending the drawing by tiling a seat
+                left a step wherever a tile met the drawing, because the drawing's own
+                valleys are not all the same depth - Tim's arrows found two of them. Every
+                cut is now made where the outline crosses the same height, so a join is a
+                valley meeting a valley by construction.
                 THE SEAT ROW WAS EXTENDED to get here: the drawing is 500 wide and would
                 have covered 60% of a 16:9 frame at full width, so one seat - the slice
                 between the two deepest valleys, which meets itself - was repeated three
@@ -1055,8 +1060,8 @@ export default function App () {
                   position: 'absolute',
                   left: pict.left,
                   width: pict.w,
-                  height: pict.w * (523 / 3200),
-                  top: pict.top + pict.h - pict.w * (523 / 3200)
+                  height: pict.w * (533 / 3200),
+                  top: pict.top + pict.h - pict.w * (533 / 3200)
                 }}
                 resizeMode='stretch'
               />
