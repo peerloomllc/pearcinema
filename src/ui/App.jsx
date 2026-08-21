@@ -2259,26 +2259,26 @@ export default function App () {
                       // shows up as a tick everywhere else.
                       right={(
                         <button
-                          className='ghost' aria-label='Remove from Continue watching' title='Remove from Continue watching'
+                          className='rowicon' aria-label='Remove from Continue watching' title='Remove from Continue watching'
                           onClick={(e) => { e.stopPropagation(); forgetPlace(r) }}
-                        ><X size={17} /></button>
+                        ><Trash size={18} /></button>
                       )}
                     />
                   ))}
                 </ul>
                 {continueRows.length > SHELF_MAX && (
-                  <button className='ghost' style={{ margin: '0.8rem auto', display: 'block' }} onClick={() => setShowAllContinue((v) => !v)}>
+                  <button className='ghost' style={{ margin: '1.2rem auto 0.4rem', display: 'block' }} onClick={() => setShowAllContinue((v) => !v)}>
                     {showAllContinue ? 'Show fewer' : `Show all ${continueRows.length}`}
                   </button>
                 )}
-                {/* THE ONE THAT KEEPS ITS WORDS. Every button in a ROW is now the same
-                    mark - X takes this one off this list - because a row is read at a
-                    glance and five words in it are five words in every row. This one is
-                    not in a row and it empties the whole list, which is the moment to be
-                    wordy rather than clever. The icon is a Trash rather than an X for the
-                    same reason: it is the heavier action of the two. */}
-                <button className='danger' style={{ margin: '0.2rem auto 1rem', display: 'block' }} onClick={() => setClearAsk(true)}>
-                  <Trash size={16} /> Clear this list
+                {/* THE ONE THAT KEEPS ITS WORDS, and only its words. Every button in a
+                    ROW is a mark, because a row is read at a glance; this one is not in a
+                    row and empties the whole list, so it is plain text - and no icon
+                    beside it, or the same bin means two different sizes of act on one
+                    screen (Tim, 2026-08-21). It stands well clear of the last row, so
+                    nobody reaches for it while aiming at one film. */}
+                <button className='danger' style={{ margin: '1.6rem auto 1rem', display: 'block' }} onClick={() => setClearAsk(true)}>
+                  Clear list
                 </button>
               </>
               )
@@ -2297,9 +2297,9 @@ export default function App () {
                     sub={[r.year, fmtRuntime(r.runtime)].filter(Boolean).join(' · ')}
                     right={(
                       <button
-                        className='ghost' aria-label='Mark as not watched' title='Mark as not watched'
+                        className='rowicon' aria-label='Mark as not watched' title='Mark as not watched'
                         onClick={(e) => { e.stopPropagation(); markWatched(r, false) }}
-                      ><X size={17} /></button>
+                      ><Trash size={18} /></button>
                     )}
                   />
                 ))}
@@ -2324,7 +2324,7 @@ export default function App () {
                       </div>
                       {r.status === 'pending' && (
                         <button
-                          className='ghost' aria-label='Withdraw this request' title='Withdraw this request'
+                          className='rowicon' aria-label='Withdraw this request' title='Withdraw this request'
                           onClick={() => call('request.remove', { id: r.id, refs: r.refs }).then(() => loadYou('requests'))}
                         ><Trash size={16} /></button>
                       )}
@@ -2347,9 +2347,9 @@ export default function App () {
                     <div className='bar'><div className='fill' style={{ width: `${Math.min(100, Math.round((r.got / (r.size || 1)) * 100))}%` }} /></div>
                   </div>
                   <button
-                    className='ghost' aria-label='Cancel this download' title='Cancel this download'
+                    className='rowicon' aria-label='Cancel this download' title='Cancel this download'
                     onClick={() => call('download.cancel', { itemId: r.itemId })}
-                  ><X size={17} /></button>
+                  ><Trash size={18} /></button>
                 </li>
               ))}
             </ul>
@@ -2369,7 +2369,12 @@ export default function App () {
                     <ItemRow
                       key={r.id} item={r} onOpen={open} onLong={longPress}
                       sub={`${fmtBytes(r._dlSize)} on this phone`}
-                      right={<button className='ghost' onClick={(e) => { e.stopPropagation(); call('download.remove', { itemId: r.id }) }}><Trash size={16} /></button>}
+                      right={(
+                        <button
+                          className='rowicon' aria-label='Remove from this phone' title='Remove from this phone'
+                          onClick={(e) => { e.stopPropagation(); call('download.remove', { itemId: r.id }) }}
+                        ><Trash size={18} /></button>
+                      )}
                     />
                   ))}
                 </ul>
@@ -2398,11 +2403,11 @@ export default function App () {
                           answered - which is what lets the answer be two marks. */}
                       <div className='rowacts'>
                         <button
-                          className='ghost' aria-label={'Mark "' + r.name + '" as added'} title='I have added this'
+                          className='rowicon' aria-label={'Mark "' + r.name + '" as added'} title='I have added this'
                           onClick={() => call('request.resolve', { id: r.id, status: 'added', refs: r.refs }).then(() => loadYou('manage'))}
                         ><CheckCircle size={17} /></button>
                         <button
-                          className='ghost' aria-label={'Decline "' + r.name + '"'} title='Decline this'
+                          className='rowicon' aria-label={'Decline "' + r.name + '"'} title='Decline this'
                           onClick={() => call('request.resolve', { id: r.id, status: 'declined', refs: r.refs }).then(() => loadYou('manage'))}
                         ><X size={17} /></button>
                       </div>
@@ -2423,7 +2428,7 @@ export default function App () {
                     </div>
                     {!d.self && (
                       <button
-                        className='ghost'
+                        className='rowicon'
                         aria-label={'Cut off ' + (d.label || 'device')}
                         onClick={() => setRevoking(d)}
                       ><Prohibit size={17} /></button>

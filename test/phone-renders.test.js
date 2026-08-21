@@ -743,7 +743,7 @@ test('CLEARING THE LIST ASKS FIRST, and says the places will be forgotten', asyn
   h.click(h.labelled('You'))
   await h.settle(220)
 
-  h.click(h.button(/Clear this list/))
+  h.click(h.button(/Clear list/))
   await h.settle(100)
   assert.match(h.text(), /will be forgotten/)
   assert.match(h.text(), /cannot be undone/)
@@ -753,7 +753,7 @@ test('CLEARING THE LIST ASKS FIRST, and says the places will be forgotten', asyn
   await h.settle(80)
   assert.equal(h.called('resume.clear').length, 0, 'still nothing')
 
-  h.click(h.button(/Clear this list/))
+  h.click(h.button(/Clear list/))
   await h.settle(80)
   h.click(h.button(/Clear it/))
   await h.settle(150)
@@ -949,17 +949,19 @@ test('THE ROW BUTTONS IN You ARE MARKS, NOT SENTENCES', async (t) => {
   const h = await openYou(t, 'continue')
   assert.match(h.text(), /Metropolis/, 'the Continue list is on screen')
 
-  // X takes this one off this list, and it says so to a screen reader.
+  // One mark for taking something off a list, and it says so to a screen reader.
   const off = h.labelled('Remove from Continue watching')
   assert.ok(off, 'every icon button here carries the words it replaced')
   assert.equal(off.textContent.trim(), '', 'the mark alone')
   assert.ok(off.querySelector('svg'), 'and it is a real icon rather than an empty button')
 
-  // EMPTYING THE WHOLE LIST KEEPS ITS WORDS. It is not in a row, it is destructive, and
-  // it is the one place here worth being wordy.
-  const clear = h.button(/Clear this list/)
+  // EMPTYING THE WHOLE LIST KEEPS ITS WORDS, and ONLY its words. It is not in a row and
+  // it is the heavier act, so it is plain text with no mark beside it - the same bin
+  // meaning two different sizes of act on one screen is what that would be (Tim,
+  // 2026-08-21).
+  const clear = h.button(/^Clear list$/)
   assert.ok(clear, 'the list-level action still says what it does')
-  assert.ok(clear.querySelector('svg'), 'with a heavier mark beside it')
+  assert.equal(clear.querySelector('svg'), null, 'and says it without a mark')
 })
 
 test('answering somebody else\'s request is a tick and a cross', async (t) => {
