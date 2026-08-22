@@ -340,7 +340,9 @@ function ReceivedCard ({ embedded = false }) {
   // The row it changed is the only thing that changes.
   const answer = async (q, status) => {
     setBusy(q.id)
-    const r = await api('/api/asked/resolve', { id: q.id, status })
+    // Every copy of the ask, not just this machine's - the row is the union across the
+    // libraries this dashboard can reach, so the answer has to travel the same way.
+    const r = await api('/api/asked/resolve', { id: q.id, status, refs: q.refs })
     setBusy('')
     if (r?.error) return notify('Not saved', r.error)
     setRows((rs) => (rs || []).map((x) => (x.id === q.id ? { ...x, ...(r.request || { status }) } : x)))
@@ -348,7 +350,7 @@ function ReceivedCard ({ embedded = false }) {
 
   const forget = async (q) => {
     setBusy(q.id)
-    const r = await api('/api/asked/remove', { id: q.id })
+    const r = await api('/api/asked/remove', { id: q.id, refs: q.refs })
     setBusy('')
     if (r?.error) return notify('Not removed', r.error)
     setRows((rs) => (rs || []).filter((x) => x.id !== q.id))
@@ -379,6 +381,10 @@ function ReceivedCard ({ embedded = false }) {
                 {' · '}{q.kind === 'series' ? 'Show' : 'Film'}
                 {q.requesterLabel ? ` · asked by ${q.requesterLabel}` : ''}
                 {q.count > 1 ? ` · asked ${q.count} times` : ''}
+                {/* WHICH OF YOUR MACHINES HOLDS IT, once there is more than one. The
+                    same ask reaches every library the person could see, so a queue
+                    that does not say where a row lives reads as a duplicate. */}
+                {q.libraries?.length > 1 ? ` · on ${q.libraries.join(' and ')}` : ''}
               </span>
             </span>
             <span class='rowctl'>

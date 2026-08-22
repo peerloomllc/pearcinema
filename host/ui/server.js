@@ -245,6 +245,47 @@ async function collect (stream, limit = 8 * 1024 * 1024) {
   return Buffer.concat(chunks)
 }
 
+// ONE ASK, ON EVERY MACHINE THAT HOLDS IT.
+//
+// The dashboard's queue is now the union across this host and the libraries it is
+// paired to, so answering or clearing has to reach the same set - otherwise the row
+// vanishes here and sits pending on the machine next to it, which is the bug the
+// merged queue was built to end.
+//
+// `refs` comes off the collapsed row: every per-library (libraryId, id, status) the
+// ask lives on. Rows belonging to THIS host are handled by `local`, everything else
+// goes over the wire as the owner device this machine is on that library. A remote
+// that refuses - offline, or this machine is only a guest there - is skipped, and the
+// local half still happens.
+//
+// Returns { local, remote }: whether the local copy was acted on, and how many other
+// machines took it. Between them they decide 200 or 404 - AN ASK THAT ONLY EVER
+// EXISTED ON ANOTHER MACHINE IS NOT A 404 just because this one never held it.
+async function eachCopy (host, body, method, { pendingOnly = true, params = {} } = {}, local = null) {
+  const refs = Array.isArray(body?.refs) ? body.refs : []
+  const id = String(body?.id || '')
+  let localDone = false
+  let remoteDone = 0
+
+  const targets = refs.length
+    ? refs.filter((r) => r && r.libraryId && r.id && (!pendingOnly || !r.status || r.status === 'pending'))
+    : [{ libraryId: host.libraryId, id }]
+
+  await Promise.all(targets.map(async (t) => {
+    if (t.libraryId === host.libraryId) {
+      localDone = local ? ((await local(t.id)) || localDone) : true
+      return
+    }
+    if (!host.remote) return
+    try {
+      await host.remote.call(t.libraryId, method, { id: t.id, ...params })
+      remoteDone++
+    } catch {}
+  }))
+
+  return { local: localDone, remote: remoteDone }
+}
+
 async function startDashboard ({
   host,
   bind = '127.0.0.1',
@@ -786,16 +827,38 @@ async function startDashboard ({
       // to somebody else's server and answered "no such remote route" (Tim, 2026-08-19).
       if (req.method === 'GET' && url.pathname === '/api/asked') {
         try {
-          const rows = await host.userState.listRequests()
           const labels = await host.grants.personLabels()
-          return json(res, 200, {
-            items: rows.map((r) => ({
-              ...r,
-              // WHO ASKED, by the name their owner chose rather than by a key. A
-              // request nobody can attribute is one nobody can answer.
-              requesterLabel: labels.get(r.requester) || null
+          const rows = (await host.userState.listRequests()).map((r) => ({
+            ...r,
+            // WHO ASKED, by the name their owner chose rather than by a key. A
+            // request nobody can attribute is one nobody can answer.
+            requesterLabel: labels.get(r.requester) || null,
+            libraryId: host.libraryId,
+            libraryName: host.libraryName
+          }))
+
+          // AND THE SAME QUESTION PUT TO YOUR OTHER MACHINES, because an ask is filed
+          // with every library the person can reach and only the machine that answers
+          // writes it down. Answering on the Mac used to leave it pending on the
+          // Umbrel's dashboard for ever, and one owner could add a film the other had
+          // already added (found 2026-08-21; the phone's half shipped in #159).
+          //
+          // Scope does the filtering: `request.all` is owner-only, so a library this
+          // machine is merely a guest of simply does not answer, and its rows stay out.
+          if (host.remote) {
+            await Promise.all(host.remote.state.hosts.map(async (h) => {
+              try {
+                const r = await host.remote.call(h.libraryId, 'request.all', {})
+                for (const row of r?.items || []) {
+                  rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
+                }
+              } catch {}
             }))
-          })
+          }
+
+          // PENDING WINS, the owner's fold: this list is a to-do, and an ask still
+          // waiting on ANY library you own is still work.
+          return json(res, 200, { items: mergeLib.collapseRequests(rows, { pendingWins: true }) })
         } catch (e) {
           return json(res, 400, { error: e.message })
         }
@@ -805,10 +868,18 @@ async function startDashboard ({
       if (req.method === 'POST' && url.pathname === '/api/asked/remove') {
         const body = await readBody(req)
         try {
-          const row = await host.userState.getRequest(String(body?.id || ''))
-          if (!row) return json(res, 404, { error: 'no such request' })
-          await host.userState.deleteRequest(row.id)
-          host.onevent?.('request:removed', { id: row.id })
+          // Every copy of the ask, here and on the machines this one is paired to -
+          // clearing it from one queue and leaving it in another is how the same ask
+          // comes back tomorrow. `refs` comes from the collapsed row above; a caller
+          // that sends none still clears the local copy.
+          const done = await eachCopy(host, body, 'request.remove', { pendingOnly: false }, async (id) => {
+            const row = await host.userState.getRequest(id)
+            if (!row) return false
+            await host.userState.deleteRequest(row.id)
+            host.onevent?.('request:removed', { id: row.id })
+            return true
+          })
+          if (!done.local && !done.remote) return json(res, 404, { error: 'no such request' })
           return json(res, 200, { ok: true })
         } catch (e) {
           return json(res, 400, { error: e.message })
@@ -819,8 +890,18 @@ async function startDashboard ({
         const status = String(body?.status || '')
         if (!['added', 'declined'].includes(status)) return json(res, 400, { error: 'bad status' })
         try {
+          // The other machines' copies first, and only the ones still PENDING - an
+          // added must never rewrite a copy another owner already declined. The local
+          // answer below is what the page reports either way.
+          const spread = await eachCopy(host, body, 'request.resolve', { pendingOnly: true, params: { status } }, null)
           const row = await host.userState.resolveRequest(String(body?.id || ''), status)
-          if (!row) return json(res, 404, { error: 'no such request' })
+          // An ask filed only with another machine has no row here, and answering it
+          // from this page is still a real answer - report it rather than 404ing at
+          // somebody who just watched the row change on their other dashboard.
+          if (!row) {
+            if (!spread.remote) return json(res, 404, { error: 'no such request' })
+            return json(res, 200, { request: { id: String(body?.id || ''), status, elsewhere: spread.remote } })
+          }
           // The requester hears the answer wherever they are signed in - the same
           // push the wire method sends, because it is the same event.
           if (host.host?.presence && row.requester) {
