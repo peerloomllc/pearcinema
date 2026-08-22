@@ -1152,6 +1152,15 @@ const methods = {
         libraryName: paired.libraryName
       }, Date.now())
       writeHosts(hostsState)
+      // TELL IT WHO WE ARE, at once, so the person on the other end sees a name in
+      // People rather than "device". Best effort: a library that will not take it is
+      // still paired, and the name arrives with the next rename.
+      const known = readSettings().identity
+      if (known?.userName || known?.deviceName) {
+        try {
+          await raced((async () => (await connectedLib(paired.libraryId)).request('identity.set', known))())
+        } catch (e) { log('identity:introduce-failed', { libraryId: paired.libraryId, err: e.message }) }
+      }
       // A second library just arrived - the merged view wants its catalog.
       buildSoon('paired')
       emit('hosts:changed', {})
@@ -1313,9 +1322,17 @@ const methods = {
   },
   'resume.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('resume.list', args)
-    const rows = await fanOut((c) => c.request('resume.list', args))
-    const items = rows.flatMap((r) => r?.items || [])
-      .sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
+    // Tagged with the library that answered, because collapsing needs to know where a
+    // row came from - both to honour the chip and to fold the same film watched on two
+    // libraries into the one card it is everywhere else.
+    const rows = []
+    await Promise.all(hostsState.hosts.map(async (h) => {
+      try {
+        const r = await raced((async () => (await connectedLib(h.libraryId)).request('resume.list', args))())
+        for (const it of r?.items || []) rows.push({ ...it, libraryId: h.libraryId })
+      } catch {}
+    }))
+    const items = merge.collapseResume(rows, mergedIndex, libraryFilter())
     return { items: items.slice(0, Number(args.limit) || 20) }
   },
   // Emptying the shelf empties EVERY library's, because the shelf it empties is
@@ -1489,7 +1506,31 @@ const methods = {
     }
     return out
   },
-  'identity.set': async (args) => (await connected()).request('identity.set', args),
+  // WHO YOU ARE IS NOT PER LIBRARY, and it used to be sent to the active one only.
+  //
+  // So a friend who pairs with somebody else's library arrives as `label: "device"`,
+  // `claimedUser: null` - the owner sees an anonymous device in People and an
+  // unattributed ask in their queue, and cannot tell who they just let in (found
+  // walking the app as a guest, 2026-08-22). A name set on one library never reached
+  // any other either.
+  //
+  // Kept locally as well as sent, because a library paired LATER has to be told too -
+  // see `pair` below. It is the same two strings the person typed; nothing else about
+  // them is stored here.
+  'identity.set': async (args) => {
+    const name = { userName: args?.userName ?? null, deviceName: args?.deviceName ?? null }
+    writeSettings({ ...readSettings(), identity: name })
+    const out = await (await connected()).request('identity.set', args)
+    // Best effort to the rest: a library that is off hears it on the next rename, and
+    // the local copy is what a fresh pairing carries.
+    if (mergedOn()) {
+      await Promise.all(hostsState.hosts.map(async (h) => {
+        if (h.libraryId === H.activeHost(hostsState)?.libraryId) return
+        try { await raced((async () => (await connectedLib(h.libraryId)).request('identity.set', args))()) } catch {}
+      }))
+    }
+    return out
+  },
   'avatar.set': async (args) => (await connected()).request('avatar.set', args),
 
   // Downloads: pin a film for offline. The bytes ride the same media.stream

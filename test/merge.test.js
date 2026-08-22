@@ -241,6 +241,50 @@ test('searchIndex: prefix beats substring, normalized', () => {
   assert.equal(r.movies[1].title, 'The Moonstone')
 })
 
+test('collapseResume: one film half-watched on two libraries is ONE card', () => {
+  // Tim's own shelf carried "Josee, the Tiger and the Fish" and "Josee The Tiger And
+  // The Fish" as two rows - the merge working everywhere except here, because each
+  // host answers with its own row and nothing folded them (2026-08-22).
+  const idx = M.buildIndex([
+    { libraryId: 'A', movies: [movie({ id: 'a1', title: 'Josee, the Tiger and the Fish', year: 2020 })] },
+    { libraryId: 'B', movies: [movie({ id: 'b1', title: 'Josee The Tiger And The Fish', year: 2020 })] }
+  ])
+  const out = M.collapseResume([
+    { id: 'a1', libraryId: 'A', title: 'Josee, the Tiger and the Fish', resume: { positionMs: 1000, playedAt: 100 } },
+    { id: 'b1', libraryId: 'B', title: 'Josee The Tiger And The Fish', resume: { positionMs: 9000, playedAt: 900 } }
+  ], idx)
+
+  assert.equal(out.length, 1, 'one film, one card')
+  assert.equal(out[0].resume.playedAt, 900, 'and the place is the one it was last left at')
+  assert.equal(out[0].copies.length, 2, 'carrying both copies, so it plays from either')
+})
+
+test('collapseResume: THE CHIP DECIDES WHOSE SHELF THIS IS', () => {
+  // Filtered to a friend's library, the shelf showed four films of mine and none of
+  // theirs, which is the same bug the show tree had.
+  const idx = M.buildIndex([
+    { libraryId: 'friend', movies: [movie({ id: 'f1', title: 'Arrival', year: 2016 })] },
+    { libraryId: 'mine', movies: [movie({ id: 'm1', title: 'Moon', year: 2009 })] }
+  ])
+  const rows = [
+    { id: 'f1', libraryId: 'friend', resume: { positionMs: 10, playedAt: 10 } },
+    { id: 'm1', libraryId: 'mine', resume: { positionMs: 20, playedAt: 20 } }
+  ]
+  assert.equal(M.collapseResume(rows, idx).length, 2, 'unfiltered, both')
+  assert.deepEqual(M.collapseResume(rows, idx, 'friend').map((r) => r.title), ['Arrival'])
+  assert.deepEqual(M.collapseResume(rows, idx, 'mine').map((r) => r.title), ['Moon'])
+})
+
+test('collapseResume: A PLACE THE INDEX DOES NOT KNOW IS STILL SHOWN', () => {
+  // An index still building, or a film removed since it was watched. Dropping the row
+  // would take away a place somebody actually had, which is worse than showing it.
+  const out = M.collapseResume([
+    { id: 'ghost', libraryId: 'A', title: 'Something', resume: { positionMs: 5, playedAt: 5 } }
+  ], null)
+  assert.deepEqual(out.map((r) => r.title), ['Something'])
+  assert.deepEqual(M.collapseResume(null, null), [])
+})
+
 // --- the copy pick -----------------------------------------------------------
 
 test('bestCopy: primary when connected, fallback when not, primary again when nothing is', () => {

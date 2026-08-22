@@ -238,6 +238,57 @@ test('A LIBRARY THAT REMOVED YOU SAYS SO, rather than connecting for ever', asyn
   assert.ok(h.labelled('Remove Ada s Films'), 'with the way out right there')
 })
 
+test('THE ASK SHEET SAYS WHO IS BEING ASKED', async (t) => {
+  // An ask goes to EVERY paired library on purpose - none of them has the film, so any
+  // owner might add it - but somebody looking at one friend's shelf has no reason to
+  // guess that, and "I asked Ada" quietly telling four other people is not a surprise
+  // to spring (found walking the app as a guest, 2026-08-22).
+  const many = await open({
+    'app.state': {
+      platform: 'android',
+      deviceKey: 'dev-key',
+      paired: true,
+      active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
+      hosts: [
+        { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema', online: true },
+        { hostKey: 'host-2', libraryId: 'lib-2', libraryName: 'Ada s Films', online: true }
+      ],
+      merged: { on: true, ready: true, filter: '_all' },
+      live: ['lib-1', 'lib-2']
+    }
+  })
+  t.after(() => many.dom.window.close())
+  await many.settle(6500)
+
+  await h_openAsk(many)
+  assert.match(many.text(), /This goes to all 2 of your libraries/)
+
+  // WITH ONE LIBRARY THERE IS NOTHING TO WARN ABOUT, and a sentence about "all 1 of
+  // your libraries" would be worse than silence.
+  const one = await open()
+  t.after(() => one.dom.window.close())
+  await one.settle(6500)
+  await h_openAsk(one)
+  assert.doesNotMatch(one.text(), /goes to all/)
+})
+
+// The You tab's Requests view, then its Ask button - two presses that several tests
+// would otherwise repeat.
+async function h_openAsk (h) {
+  h.click(h.button(/^You$/))
+  await h.settle(300)
+  // The sub-tabs are icons until they are selected, so they are found by their label
+  // rather than their text - the same trap a person driving this on a device hits.
+  const tab = h.labelled('Requests')
+  assert.ok(tab, 'the You tab has a Requests view')
+  h.click(tab)
+  await h.settle(300)
+  const ask = [...h.doc.querySelectorAll('button')].find((b) => /Ask for a film/.test(b.textContent))
+  assert.ok(ask, 'and a way to ask for something')
+  h.click(ask)
+  await h.settle(300)
+}
+
 test('the relay marker appears only while a library is actually relayed', async (t) => {
   const direct = await open()
   t.after(() => direct.dom.window.close())
