@@ -61,7 +61,10 @@ const CACHE_VERSION = 7
 //   1 - the part marker. `- Pt 1` is read off a filename as half of a film rather
 //       than left in the title, and stops being read as episode 1 of the folder it
 //       sits in.
-const INDEX_VERSION = 1
+//   2 - an `auto` root whose own name says nothing is typed by the folder under it,
+//       so a library pointed at a parent of `Movies/` and `TV Shows/` stops filing
+//       every episode under a series called "TV Shows".
+const INDEX_VERSION = 2
 
 // How many files to stat at once when deciding which of them need probing. A stat is
 // nothing next to an ffprobe, but three thousand at once is three thousand open file
@@ -581,19 +584,43 @@ class FolderAdapter {
   // One file: what is it, and what does the disk already say about it?
   async _identify (file, rootEntry, probed, dirs) {
     const root = rootEntry.path
-    const holds = rootEntry.holds // 'movies' | 'shows' | null. See ROOT_TYPES.
-
     const dir = path.dirname(file)
     const filename = path.basename(file)
     const stem = filename.replace(/\.[^.]+$/, '')
     const rel = path.relative(root, file)
     const parts = rel.split(path.sep)
 
+    // 'movies' | 'shows' | null. See ROOT_TYPES.
+    let holds = rootEntry.holds
+
+    // A ROOT WHOSE OWN NAME SAYS NOTHING CAN STILL BE READ, because the folder
+    // directly under it usually does say (2026-08-21).
+    //
+    // Point a source at a parent holding `Movies/` and `TV Shows/` - which is how
+    // somebody typing a path by hand naturally does it - and `auto` resolved from
+    // the ROOT's name, found "PearCinema Library", and gave up. Every episode
+    // underneath then became an episode of a series called "TV Shows", because the
+    // top folder under the root is where a show's name normally is.
+    //
+    // So look one level down. `TV Shows` is not a guess any more there than it is
+    // as a root: it is what the person who made the folder wrote on the front. The
+    // folder that TYPED the file is then not a series name, so the show is one
+    // level deeper - which is the whole of the bug, and why this cannot just set
+    // `holds` and leave the rest alone.
+    //
+    // THE ROOT IS NOT REWRITTEN. Ids are minted from the path relative to the ROOT,
+    // so treating `Library/TV Shows` as a root of its own would re-mint every id
+    // under it and orphan every resume position on every phone.
+    const typedBy = holds || parts.length < 2 ? null : names.rootTypeFromName(parts[0])
+    if (typedBy) holds = typedBy
+
     // A file directly in a root is a film. Anything nested MIGHT be an episode, and
     // the top folder under the root is the show. That is the convention every
-    // scanner uses and the one Tim's library follows.
-    const seriesFolder = parts.length > 1 ? parts[0] : null
-    const seasonFolder = parts.length > 2 ? parts[parts.length - 2] : null
+    // scanner uses and the one Tim's library follows - shifted one level down where
+    // that top folder was the thing that said "these are shows".
+    const depth = typedBy ? 1 : 0
+    const seriesFolder = parts.length > depth + 1 ? parts[depth] : null
+    const seasonFolder = parts.length > depth + 2 ? parts[parts.length - 2] : null
 
     // WHAT THE ROOT SAYS OUTRANKS WHAT THE FILENAME SAYS, in both directions, and
     // that is the whole point of typing a root. A films root does no episode parsing
