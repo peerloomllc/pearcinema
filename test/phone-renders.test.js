@@ -182,6 +182,35 @@ test('a shelf waits for its first posters, then shows itself', async (t) => {
   assert.match(h.text(), /Metropolis/, 'and the films are there')
 })
 
+test('TWO HALVES OF A FILM SAY WHICH HALF THEY ARE', async (t) => {
+  // What PR #156 left open: both halves are reachable, and the shelf drew the same
+  // title twice with only their length telling them apart. The marker is in the
+  // filename, which never leaves the host, so the host carries the number and the
+  // phone is where somebody finally reads it.
+  const h = await open({
+    'library.list': {
+      items: [
+        { id: 'tt1', type: 'movie', title: 'The Two Towers', year: 2002, part: 1, runtime: 7732, artId: 'a1' },
+        { id: 'tt2', type: 'movie', title: 'The Two Towers', year: 2002, part: 2, runtime: 6400, artId: 'a2' }
+      ],
+      total: 2,
+      cursor: null
+    }
+  })
+  t.after(() => h.dom.window.close())
+  await h.settle(6500)
+
+  assert.match(h.text(), /Part 1/, 'the first half says so')
+  assert.match(h.text(), /Part 2/, 'and so does the second')
+
+  // And a film that is whole says nothing at all - an empty slot on every other
+  // poster in the library would be the worse bug.
+  const plain = await open()
+  t.after(() => plain.dom.window.close())
+  await plain.settle(6500)
+  assert.doesNotMatch(plain.text(), /Part \d/, 'a whole film has no half to name')
+})
+
 test('the relay marker appears only while a library is actually relayed', async (t) => {
   const direct = await open()
   t.after(() => direct.dom.window.close())

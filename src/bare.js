@@ -37,7 +37,7 @@ const IDENTITY_FILE = path.join(DATA_DIR, 'identity.json')
 const HOSTS_FILE = path.join(DATA_DIR, 'hosts.json')
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json')
 
-// Title, year and runtime per downloaded item, written at download time. The
+// Title, year, part and runtime per downloaded item, written at download time. The
 // cache index only knows bytes, so without this an offline Downloads list can
 // name a film nothing better than 'A removed title'.
 const DL_META_FILE = path.join(DATA_DIR, 'download-meta.json')
@@ -749,7 +749,7 @@ async function startDownload (itemId) {
   const size = item?.media?.size
   if (!size) throw new Error('this one cannot be downloaded')
   const dlMeta = readDlMeta()
-  dlMeta[itemId] = { title: item.title || '', year: item.year || null, runtime: item.runtime || null }
+  dlMeta[itemId] = { title: item.title || '', year: item.year || null, part: item.part || null, runtime: item.runtime || null }
   writeDlMeta(dlMeta)
   const mime = CONTAINER_MIME[String(item?.media?.container || '').toLowerCase()] || 'video/mp4'
   // The cache tags the film with the library the bytes CAME from, which in

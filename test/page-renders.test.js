@@ -199,6 +199,26 @@ test('the page mounts and shows the library, rather than a blank control plane',
   }
 })
 
+test('THE DASHBOARD NAMES THE HALVES TOO, not just the phone', async (t) => {
+  // The operator's own library is where a split film is most confusing: two rows with
+  // the same title and no way to tell which is which. The host reads the marker off the
+  // filename, so the dashboard has the number without asking anybody for it.
+  const { dom, text } = await open(STATE, {
+    '/api/library/list?type=movies&limit=100': {
+      items: [
+        { ...FILM, id: 'half-1', title: 'The Two Towers', year: 2002, part: 1 },
+        { ...FILM, id: 'half-2', title: 'The Two Towers', year: 2002, part: 2 }
+      ],
+      total: 2,
+      cursor: null
+    }
+  })
+  t.after(() => dom.window.close())
+
+  assert.match(text(), /Part 1/)
+  assert.match(text(), /Part 2/)
+})
+
 test('the compatibility line is on screen, and it is honest about the MKV', async (t) => {
   const { dom, doc, text } = await open()
   t.after(() => dom.window.close())
