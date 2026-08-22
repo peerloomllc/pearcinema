@@ -107,9 +107,13 @@ function media (conn, libraryId, protocol = PROTOCOL) {
   const mux = Protomux.from(conn)
   const pending = new Map()
   const chunks = new Map()
+  // Unsolicited host -> device events. The only one a REFUSED device ever sees is the
+  // goodbye, which is why the helper collects them at all.
+  const pushes = []
   let nextId = 1
   const built = protocol.channels.mediaChannel(mux, {
     id: b4a.from(libraryId),
+    onpush: (m) => pushes.push(m),
     onres: (m) => pending.get(m.id)?.({ kind: 'res', body: m.body }),
     onerr: (m) => pending.get(m.id)?.({ kind: 'err', code: m.code, message: m.message }),
     onchunk: (m) => {
@@ -120,6 +124,7 @@ function media (conn, libraryId, protocol = PROTOCOL) {
   })
   built.channel.open()
   return {
+    pushes,
     call (method, params = {}) {
       const id = nextId++
       return new Promise((resolve, reject) => {
@@ -238,14 +243,28 @@ test('REVOKE CUTS A PAIRED DEVICE OFF MID-CONNECTION', async (t) => {
 
   assert.equal(await Promise.race([closed, settle(3000).then(() => 'alive')]), 'closed')
 
+  // IT MAY GET A SOCKET, AND IT GETS NOTHING ELSE (proposal
+  // 2026-08-22-say-goodbye-to-a-revoked-device). The guarantee was never "no
+  // connection", it is "no access" - so that is what is asserted: the goodbye
+  // arrives, no method answers, and the attempt after it is refused outright.
   const again = dev.connect(h.publicKey)
+  const bye = media(again, h.libraryId)
+  const answered = await Promise.race([
+    bye.call('ping').then(() => 'answered').catch(() => 'no'),
+    settle(2500).then(() => 'silent')
+  ])
+  assert.equal(answered, 'silent', 'a device with no grant reaches no method')
+  assert.deepEqual(bye.pushes.map(p => p.kind), ['access:revoked'])
+  again.destroy()
+
+  const third = dev.connect(h.publicKey)
   const back = await Promise.race([
-    new Promise(r => again.on('open', () => r('readmitted'))),
-    new Promise(r => again.on('close', () => r('refused'))),
+    new Promise(r => third.on('open', () => r('readmitted'))),
+    new Promise(r => third.on('close', () => r('refused'))),
     settle(4000).then(() => 'refused')
   ])
-  assert.equal(back, 'refused')
-  again.destroy()
+  assert.equal(back, 'refused', 'and the goodbye is said once, not on every dial')
+  third.destroy()
 })
 
 test('DEVICE.LEAVE ends this device\'s own access, with revoke\'s teeth', async (t) => {
@@ -264,15 +283,29 @@ test('DEVICE.LEAVE ends this device\'s own access, with revoke\'s teeth', async 
   // The connection dies with the grant - leaving IS a revoke, self-inflicted.
   assert.equal(await Promise.race([closed, settle(3000).then(() => 'alive')]), 'closed')
 
-  // And it stays ended: readmission is refused exactly as after an operator revoke.
+  // And it stays ended, the same way an operator revoke ends it.
+  // IT MAY GET A SOCKET, AND IT GETS NOTHING ELSE (proposal
+  // 2026-08-22-say-goodbye-to-a-revoked-device). The guarantee was never "no
+  // connection", it is "no access" - so that is what is asserted: the goodbye
+  // arrives, no method answers, and the attempt after it is refused outright.
   const again = dev.connect(h.publicKey)
+  const bye = media(again, h.libraryId)
+  const answered = await Promise.race([
+    bye.call('ping').then(() => 'answered').catch(() => 'no'),
+    settle(2500).then(() => 'silent')
+  ])
+  assert.equal(answered, 'silent', 'a device with no grant reaches no method')
+  assert.deepEqual(bye.pushes.map(p => p.kind), ['access:revoked'])
+  again.destroy()
+
+  const third = dev.connect(h.publicKey)
   const back = await Promise.race([
-    new Promise(r => again.on('open', () => r('readmitted'))),
-    new Promise(r => again.on('close', () => r('refused'))),
+    new Promise(r => third.on('open', () => r('readmitted'))),
+    new Promise(r => third.on('close', () => r('refused'))),
     settle(4000).then(() => 'refused')
   ])
-  assert.equal(back, 'refused')
-  again.destroy()
+  assert.equal(back, 'refused', 'and the goodbye is said once, not on every dial')
+  third.destroy()
 })
 
 test('the method table refuses what it does not understand, and survives', async (t) => {

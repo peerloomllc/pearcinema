@@ -211,6 +211,33 @@ test('TWO HALVES OF A FILM SAY WHICH HALF THEY ARE', async (t) => {
   assert.doesNotMatch(plain.text(), /Part \d/, 'a whole film has no half to name')
 })
 
+test('A LIBRARY THAT REMOVED YOU SAYS SO, rather than connecting for ever', async (t) => {
+  // Watched on the TCL, 2026-08-22: revoked mid-film, the phone said "could not reach
+  // the host" and Settings said "Active, connecting…" for good, so the person blames
+  // their wifi. The host says which it is now (proposal
+  // 2026-08-22-say-goodbye-to-a-revoked-device); this is the screen saying it back.
+  const h = await open({
+    'app.state': {
+      platform: 'android',
+      deviceKey: 'dev-key',
+      paired: true,
+      active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'Ada s Films' },
+      hosts: [{ hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'Ada s Films', online: false, revoked: true }],
+      merged: { on: false, filter: '_all' },
+      live: []
+    }
+  })
+  t.after(() => h.dom.window.close())
+
+  const settings = h.button(/Settings/)
+  h.click(settings)
+  await h.settle(400)
+
+  assert.match(h.text(), /No longer shared with you/, 'the row says what happened')
+  assert.doesNotMatch(h.text(), /Active, connecting/, 'and stops pretending it is on its way')
+  assert.ok(h.labelled('Remove Ada s Films'), 'with the way out right there')
+})
+
 test('the relay marker appears only while a library is actually relayed', async (t) => {
   const direct = await open()
   t.after(() => direct.dom.window.close())

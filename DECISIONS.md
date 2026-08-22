@@ -2,6 +2,47 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-22 - A DEVICE WE ONCE LET IN IS TOLD SO, ONCE
+Tier: T3 (an auth gate speaks where it used to be silent). Proposal
+`2026-08-22-say-goodbye-to-a-revoked-device.md`, approved by merging PR #164; built in
+PR #165 here and peerloom-host PR #13. Found by walking the app as a guest, which
+nobody had ever done.
+
+Context: revoke a device and the phone says "could not reach the host", the library
+sits at "Active, connecting…" for good, and it dials again every few seconds for as
+long as the app is open - each one a `gate:deny {"reason":"device-revoked"}` in the
+ex-owner's log. The person blames their wifi, restarts the app, and eventually asks
+the owner why their server is down. The owner removed them on purpose.
+
+THE RULE IN THE WAY, and it is a good rule: `gate.js` never sends its reason to a
+peer, because "telling an attacker WHY they were refused is free intelligence". That
+is right for a STRANGER. It is not right for somebody this host once granted, and the
+difference is provable rather than a matter of taste - a device holding a tombstoned
+grant has already proved possession of a key this host issued, so it knows the
+library exists, knows it had access, and holds the host key. There is nothing left to
+leak by saying "not any more".
+
+So the line moved from the refusal to the GRANT. `mayBeToldWhy` names three reasons -
+device-revoked, person-revoked, grant-expired - and `no-grant` is deliberately not one
+of them, with its own test proving an unknown key is still told nothing at all.
+
+THE PART WORTH REVIEWING HARDEST, and the reason it is a separate function rather than
+a flag: `serveFarewell` opens the media channel with NO dispatch on it. serveMedia with
+a `goodbye: true` flag would be one `if` away from admitting a revoked device to the
+whole API; a function with no `methods` in scope cannot make that mistake. Bounded too,
+because it is a socket a refused peer can open: one goodbye per key per minute, capped
+map, every other attempt denied as before.
+
+THE ACCEPTANCE TEST CHANGED SHAPE, deliberately. "Revoke cuts off all NEW access within
+a second" used to be tested as "the socket does not open". One socket opens now, so the
+tests say what the guarantee actually means: the device is refused every method (probed
+with `ping`, which the package serves ahead of any app's table), it IS told why, the
+host drops the connection itself, and the attempt after that is refused outright.
+
+Proven on the TCL over a real DHT: one `gate:farewell`, one `media:farewell`, and no
+denials at all in the minute that follows - where the same minute used to produce six
+or seven.
+
 ## 2026-08-22 - THE DEVICE THAT ASKED CLOSES THE ASK
 Tier: T3 (an auth gate moves). Proposal `2026-08-22-the-requester-closes-the-ask.md`,
 approved by merging PR #158; built in PR #159. The shape is Tim's, chosen on 2026-08-22
