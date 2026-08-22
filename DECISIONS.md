@@ -2,6 +2,54 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-22 - THE DEVICE THAT ASKED CLOSES THE ASK
+Tier: T3 (an auth gate moves). Proposal `2026-08-22-the-requester-closes-the-ask.md`,
+approved by merging PR #158; built in PR #159. The shape is Tim's, chosen on 2026-08-22
+over the two options put to him.
+
+Context: a request is filed with EVERY reachable host, deliberately - none of them has
+the film, so any of their owners might add it. Only the host that ANSWERS writes
+anything down, and hosts do not talk to each other by design, so every sibling copy sat
+in its owner's queue as pending for good. Two owners can each add a film the other
+already added. It never showed up from a phone, because the phone's own resolve already
+fans out across `merge.requestTargets`, and always showed up from a dashboard.
+
+Three shapes were on the table: the dashboard's queue gathers from every library this
+machine is paired to and answering there closes them all; the same gather but display
+only; or leave the dashboards alone. Tim picked a fourth and better one - **the
+requesting device coordinates**. It is the only party that knows every copy exists, it
+already holds them as `refs`, and it keeps the property the other two would have eroded:
+nothing on host A ever learns that host B exists.
+
+What makes it T3 is the permission it needs. `request.resolve` was owner-only, and the
+requester may be a GUEST on the sibling hosts. So the rule is now: the library's owner
+may resolve any row, and the person who FILED a row may resolve that row. That is
+strictly less power than they already had - `request.remove` admits `row.requester` and
+DELETES the row, taking it off the owner's queue entirely.
+
+ONLY `added` TRAVELS, and this was the one term worth arguing about. A decline is one
+owner's answer about their own library; another owner may still want to add the film, so
+a declined copy is left pending elsewhere. The cost, recorded rather than discovered:
+declining from a dashboard is still per library. Answering from a phone, where the
+person owns all of them, fans out both verdicts and is unchanged.
+
+The rule lives in `src/merge.js` as `answeredElsewhere()` rather than inside the worklet,
+because the worklet cannot be required outside the Bare runtime and a rule nobody can
+test is a rule nobody can trust. Its narrowing clauses are the interesting part: refs
+only, at least two of them - `requestTargets` falls back to the row's own id when there
+are no refs, which would send a resolve straight back to the host that just answered.
+
+Compat: an old host refuses the close with `owner only` and that copy stays pending,
+which is exactly where it is today - a mixed fleet degrades to the bug rather than to an
+error. Nothing stored changes shape, so there is nothing to migrate.
+
+PROVEN ON TIM'S OWN MACHINES, on an ask that was really there: "Something", filed from
+the TCL on 2026-08-19, answered on the Windows VM and still pending on both the Umbrel
+and the Mac mini three days later. The phone closed both within seconds of listing.
+Then the live path, with nobody touching the phone: a fresh ask filed from the TCL to
+all three, answered on the UMBREL'S DASHBOARD, and the Mac mini's copy went from pending
+to added on its own.
+
 ## 2026-08-20 - THE OPERATOR'S LABEL IS NOT THE DEVICE'S NAME
 Tier: T2 (identity semantics in the shared grant store). PR #126 here,
 peerloom-host PR #12. Asked for and decided by Tim on 2026-08-20.
