@@ -186,6 +186,52 @@ function splitByLength (groups) {
   }
 }
 
+// THE HALVES THE RUNTIME SPLIT CANNOT SEE. A film cut in two is very often cut
+// down the middle, so `- Pt 1` and `- Pt 2` can agree on length to the second and
+// sail straight through splitByLength as one entry with the second half hidden
+// behind the first - the same bug, minus the only evidence that pass has.
+//
+// The filename knows. A folder source reads `- Pt 1`, `CD2`, `(Part 2)` off the
+// name and carries a `part`, so where two copies in one group disagree about which
+// half they are, they are two films regardless of what they weigh.
+//
+// RUN AFTER splitByLength, NEVER BEFORE, and the order is load-bearing: a group
+// already split correctly by length has one part per cluster and this is a no-op,
+// whereas splitting by part first would let the length pass cut the SAME halves
+// again along a host that reports no part at all, and turn two entries into three.
+//
+// A copy with no part stays with the first cluster, for the reason the length pass
+// gives: silence is not evidence of difference, and a Jellyfin source never speaks
+// here at all.
+function splitByPart (groups) {
+  for (const [key, g] of [...groups]) {
+    if (g.copies.length < 2) continue
+    const parts = new Set(g.copies.map((e) => e.part).filter((p) => p != null))
+    if (parts.size < 2) continue
+
+    const clusters = []
+    for (const e of g.copies) {
+      const home = e.part != null
+        ? clusters.find((c) => c.part === e.part)
+        : clusters[0]
+      if (home) home.members.push(e)
+      else clusters.push({ part: e.part, members: [e] })
+    }
+    if (clusters.length < 2) continue
+
+    const first = clusters.findIndex((c) => c.members.includes(g.primary))
+    const ordered = [clusters[first], ...clusters.filter((_, i) => i !== first)]
+
+    groups.delete(key)
+    ordered.forEach((c, i) => {
+      const k = i === 0 ? key : `${key}|#${c.part}`
+      let primary = c.members[0]
+      for (const e of c.members) if (betterItem(e, primary)) primary = e
+      groups.set(k, { key: k, primary, copies: c.members })
+    })
+  }
+}
+
 function reconcileYearless (groups) {
   const byTitle = new Map()
   for (const g of groups.values()) {
@@ -216,6 +262,7 @@ function mergeMovies (movies) {
   // AFTER the fold, not before: a year-less rip is gathered into its dated sibling
   // above, and it has to face the same length question as everything else.
   splitByLength(groups)
+  splitByPart(groups)
   for (const g of groups.values()) {
     const p = g.primary
     out.push({
@@ -227,6 +274,10 @@ function mergeMovies (movies) {
       // The KNOWN year wins the display even when a year-less copy won
       // primary - the reconcile above is what makes this reachable.
       year: p.year ?? g.copies.find((c) => c.year != null)?.year ?? null,
+      // Same rule for the half: the copy that KNOWS which half it is speaks for
+      // the entry, because a server source alongside a folder one knows nothing
+      // about halves and would otherwise erase the label by winning primary.
+      part: p.part ?? g.copies.find((c) => c.part != null)?.part ?? null,
       runtime: p.runtime ?? null,
       overview: p.overview ?? null,
       genres: p.genres || [],

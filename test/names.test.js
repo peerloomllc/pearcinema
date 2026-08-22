@@ -17,13 +17,13 @@ const names = require('../host/names')
 test('THE YEAR TRAP: a number in a title is not a year', () => {
   // The three that break the obvious parser, all from the real Movies folder.
   assert.deepEqual(names.parseMovie('2001 A Space Odyssey.mkv'),
-    { type: 'movie', title: '2001 A Space Odyssey', year: null })
+    { type: 'movie', title: '2001 A Space Odyssey', year: null, part: null })
 
   assert.deepEqual(names.parseMovie('Blade Runner 2049.mkv'),
-    { type: 'movie', title: 'Blade Runner 2049', year: null })
+    { type: 'movie', title: 'Blade Runner 2049', year: null, part: null })
 
   assert.deepEqual(names.parseMovie('300.mkv'),
-    { type: 'movie', title: '300', year: null })
+    { type: 'movie', title: '300', year: null, part: null })
 
   // Reporting no year is the RIGHT answer here, not a shortfall. A sidecar .nfo
   // settles it properly, and "Blade Runner" for Blade Runner 2049 is a wrong
@@ -33,20 +33,20 @@ test('THE YEAR TRAP: a number in a title is not a year', () => {
 test('a year counts when something CONFIRMS it', () => {
   // Parenthesised: unambiguous.
   assert.deepEqual(names.parseMovie('Ghostbusters (1984).mkv'),
-    { type: 'movie', title: 'Ghostbusters', year: 1984 })
+    { type: 'movie', title: 'Ghostbusters', year: 1984, part: null })
 
   // Followed by a release tag: nobody writes "1080p" after a title word.
   assert.deepEqual(names.parseMovie('Blade.1998.1080p.BluRay.x265-RARBG.mp4'),
-    { type: 'movie', title: 'Blade', year: 1998 })
+    { type: 'movie', title: 'Blade', year: 1998, part: null })
 
   assert.deepEqual(names.parseMovie('Despicable.Me.2.2013.1080p.BluRay.x264.YIFY.mp4'),
-    { type: 'movie', title: 'Despicable Me 2', year: 2013 })
+    { type: 'movie', title: 'Despicable Me 2', year: 2013, part: null })
 
   assert.deepEqual(names.parseMovie('Despicable Me 3 2017 1080p BluRay REMUX AVC DTS-X 7 1-FGT.mkv'),
-    { type: 'movie', title: 'Despicable Me 3', year: 2017 })
+    { type: 'movie', title: 'Despicable Me 3', year: 2017, part: null })
 
   assert.deepEqual(names.parseMovie('The Shining 1980 REMASTERED 1080p BluRay HEVC x265 5.1 BONE.mkv'),
-    { type: 'movie', title: 'The Shining', year: 1980 })
+    { type: 'movie', title: 'The Shining', year: 1980, part: null })
 })
 
 test('a sequel number survives, because it is part of the name', () => {
@@ -77,6 +77,48 @@ test('dots become spaces only when the name is actually dot-separated', () => {
   assert.equal(names.parseMovie('Despicable.Me.2010.1080p.BluRay.x264.YIFY.mp4').title, 'Despicable Me')
   // One dot in the stem is punctuation, not a separator.
   assert.equal(names.parseMovie('Final Fantasy Vii- Advent Children.mkv').title, 'Final Fantasy Vii- Advent Children')
+})
+
+test('THE HALF OF A FILM THE FILENAME KNOWS AND A DATABASE DOES NOT', () => {
+  // Tim's real pair, and the reason any of this exists: both files enrich to the same
+  // TMDB record, so the filename is the only thing that ever says which half is which.
+  assert.equal(names.parseMovie('The Two Towers (ext ) - Pt 1.mkv').part, 1)
+  assert.equal(names.parseMovie('The Two Towers (ext ) - Pt 2.mkv').part, 2)
+
+  // The other spellings people use, and what is left of the title once the marker is
+  // taken out of it.
+  for (const [file, title, part] of [
+    ['The Lord of the Rings The Two Towers (2002) - Pt 2.mkv', 'The Lord of the Rings The Two Towers', 2],
+    ['Gone with the Wind (1939) CD1.avi', 'Gone with the Wind', 1],
+    ['Gone.with.the.Wind.1939.1080p.BluRay.part2.mkv', 'Gone with the Wind', 2],
+    ['Fanny and Alexander (Part 1).mkv', 'Fanny and Alexander', 1],
+    ['Das Boot - disc 2.mkv', 'Das Boot', 2],
+    // The marker survives release tags sitting after it, because it usually does.
+    ['Gone with the Wind (1939) CD2 1080p BluRay x265-RARBG.mkv', 'Gone with the Wind', 2]
+  ]) {
+    const out = names.parseMovie(file)
+    assert.equal(out.part, part, file)
+    assert.equal(out.title, title, file)
+  }
+})
+
+test('A NUMBER IN SOMEBODY\'S TITLE IS NOT A HALF, WHICH IS THE EXPENSIVE MISTAKE', () => {
+  // Deleting a number that was part of a real title is a worse bug than the one the
+  // part marker fixes, so every one of these has to come back untouched.
+  for (const [file, title] of [
+    // Spelled out. `Dune - Part Two` is a film.
+    ['Dune - Part Two.mkv', 'Dune - Part Two'],
+    // The marker is not at the end - the year is after it, so `Part 1` is the title's.
+    ['Harry Potter and the Deathly Hallows Part 1 (2010).mkv', 'Harry Potter and the Deathly Hallows Part 1'],
+    // A bare space in front of `Part` is how titles are written, not how appendices are.
+    ['Kill Bill Part 2.mkv', 'Kill Bill Part 2'],
+    ['Nymphomaniac Vol. 1.mkv', 'Nymphomaniac Vol. 1'],
+    ['Deadpool 2.mkv', 'Deadpool 2']
+  ]) {
+    const out = names.parseMovie(file)
+    assert.equal(out.part, null, file)
+    assert.equal(out.title, title, `${file} keeps its own words`)
+  }
 })
 
 test('a name that is nothing but tags still yields something', () => {

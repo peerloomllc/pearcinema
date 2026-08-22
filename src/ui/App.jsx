@@ -42,6 +42,10 @@ const fmtBytes = (n) => {
   return Math.round(x / 1e3) + ' KB'
 }
 
+// WHICH HALF, when a film arrived as two files. Empty for everything else, so it
+// simply vanishes from a facts line rather than needing a branch at every site.
+const fmtPart = (p) => (Number(p) > 0 ? `Part ${Number(p)}` : '')
+
 const fmtRuntime = (s) => {
   const n = Number(s) || 0
   if (!n) return ''
@@ -416,7 +420,7 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onA
         <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=120` : null} title={item.title} onArt={onArt} />
         <div className='meta'>
           <div className='t'>{item.title}</div>
-          <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
+          <div className='sub'>{[item.year, fmtPart(item.part), fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
         </div>
         {onSave && (
           <button
@@ -444,7 +448,7 @@ function Tile ({ item, artBase, saved, onOpen, onLong, onSave, list = false, onA
       <div {...press}>
         <Cover src={item.artId && artBase ? `${artBase}${encodeURIComponent(item.artId)}?s=350` : null} title={item.title} onArt={onArt} />
         <div className='t'>{item.title}</div>
-        <div className='sub'>{[item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
+        <div className='sub'>{[item.year, fmtPart(item.part), fmtRuntime(item.runtime)].filter(Boolean).join(' · ')}</div>
       </div>
     </div>
   )
@@ -1459,7 +1463,7 @@ export default function App () {
           const item = await call('library.get', { id: i.itemId }).catch(() => null)
           // Offline (or a host that dropped the item): the download's own
           // stored meta names the row instead of 'A removed title'.
-          return item ? { ...item, _dlSize: i.size } : { id: i.itemId, title: i.title || 'A removed title', year: i.year || null, runtime: i.runtime || null, _dlSize: i.size }
+          return item ? { ...item, _dlSize: i.size } : { id: i.itemId, title: i.title || 'A removed title', year: i.year || null, part: i.part || null, runtime: i.runtime || null, _dlSize: i.size }
         }))
         setDlRows(rows)
       }
@@ -1971,7 +1975,7 @@ export default function App () {
 
       <h2 className='ttitle'>{title.title}</h2>
       <p className='tfacts'>
-        {[title.year, fmtRuntime(title.runtime), (title.genres || []).slice(0, 2).join(', ')].filter(Boolean).join(' · ')}
+        {[title.year, fmtPart(title.part), fmtRuntime(title.runtime), (title.genres || []).slice(0, 2).join(', ')].filter(Boolean).join(' · ')}
       </p>
 
       {/* ONE BIG WATCH, because that is what somebody came for - and it says the
@@ -2198,7 +2202,7 @@ export default function App () {
                 <button key={i.id} className='shelf-item' onClick={() => open(i)}>
                   <Cover src={i.artId && artBase ? `${artBase}${encodeURIComponent(i.artId)}?s=200` : null} title={i.title} />
                   <div className='shelf-t'>{i.title}</div>
-                  <div className='shelf-a'>{[i.year, fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}</div>
+                  <div className='shelf-a'>{[i.year, fmtPart(i.part), fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}</div>
                 </button>
               ))}
             </div>
@@ -2344,7 +2348,7 @@ export default function App () {
                 {watchedRows.map((r) => (
                   <ItemRow
                     key={r.id} item={r} onOpen={open} onLong={longPress}
-                    sub={[r.year, fmtRuntime(r.runtime)].filter(Boolean).join(' · ')}
+                    sub={[r.year, fmtPart(r.part), fmtRuntime(r.runtime)].filter(Boolean).join(' · ')}
                     right={(
                       <button
                         className='rowicon' aria-label='Mark as not watched' title='Mark as not watched'

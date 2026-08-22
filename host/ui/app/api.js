@@ -141,6 +141,13 @@ export function fmtRuntime (seconds) {
   return h ? `${h}h ${m}m` : `${m}m`
 }
 
+// WHICH HALF, for a film that arrived as two files. Only a folder source ever knows
+// - the marker is in the filename - so this is empty for almost everything and drops
+// out of a facts line on its own.
+export function fmtPart (part) {
+  return Number(part) > 0 ? `Part ${Number(part)}` : ''
+}
+
 // THE WHOLE LENGTH, down to the second, for the details sheet. `fmtRuntime` rounds to
 // the nearest minute, which is right on a poster and wrong in a panel somebody opened
 // specifically to see the facts about a file (Tim, 2026-08-13).

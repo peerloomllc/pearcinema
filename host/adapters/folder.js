@@ -699,6 +699,11 @@ class FolderAdapter {
         id,
         title: merged.title,
         year: merged.year,
+        // FROM THE FILENAME, NEVER FROM THE SIDECAR. A .nfo describes the film and
+        // a TMDB match describes the film; neither knows the file it was written
+        // beside is only half of one, which is exactly why both halves used to
+        // arrive identical.
+        part: movie.part,
         runtime: merged.runtime ?? probed.duration,
         overview: merged.overview,
         genres: merged.genres,

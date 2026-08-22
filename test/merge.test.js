@@ -346,6 +346,47 @@ test('TWO HALVES OF A FILM STAY TWO ENTRIES, SO NEITHER DISAPPEARS', () => {
   assert.equal(new Set(halves.map((h) => h.key)).size, 2, 'two entries need two keys')
 })
 
+test('TWO HALVES OF THE SAME LENGTH ARE STILL TWO HALVES', () => {
+  // The hole the runtime split cannot see, and the reason the filename marker travels:
+  // a film cut down the middle gives two files that agree on length to the second, so
+  // splitByLength keeps them as one entry and the second half is unreachable again.
+  const halves = M.mergeMovies([
+    movie({ id: 'pt1', libraryId: 'umbrel', title: 'Fanny and Alexander', year: 1982, part: 1, runtime: 5400 }),
+    movie({ id: 'pt2', libraryId: 'umbrel', title: 'Fanny and Alexander', year: 1982, part: 2, runtime: 5400 })
+  ])
+  assert.equal(halves.length, 2, 'both halves are on the shelf')
+  assert.deepEqual(halves.map((h) => h.part).sort(), [1, 2], 'and each one says which it is')
+  assert.equal(new Set(halves.map((h) => h.key)).size, 2)
+})
+
+test('THE HALF SURVIVES A HOST THAT KNOWS NOTHING ABOUT HALVES', () => {
+  // Only a folder source reads filenames. A Jellyfin copy of the same file reports no
+  // part at all, and it must neither erase the label nor mint an entry of its own.
+  const out = M.mergeMovies([
+    movie({ id: 'jelly', libraryId: 'mac', title: 'Das Boot', year: 1981, part: null, runtime: 18000, media: { size: 9e9 } }),
+    movie({ id: 'folder', libraryId: 'umbrel', title: 'Das Boot', year: 1981, part: 1, runtime: 18000, media: { size: 4e9 } })
+  ])
+  assert.equal(out.length, 1, 'one film, two copies')
+  assert.equal(out[0].copies.length, 2)
+  assert.equal(out[0].part, 1, 'the copy that knows speaks for the entry')
+})
+
+test('THE LENGTH SPLIT AND THE PART SPLIT DO NOT CUT THE SAME FILM TWICE', () => {
+  // Order is load-bearing. Two halves on a folder host and the same two files on a host
+  // that reports no part: splitting by length first pairs each half with its silent
+  // twin, and the part pass then has nothing left to do. Splitting by part first would
+  // have left the length pass a mixed cluster to cut again - three entries for two
+  // halves.
+  const out = M.mergeMovies([
+    movie({ id: 'a1', libraryId: 'umbrel', title: 'Nosferatu', year: 1922, part: 1, runtime: 3000 }),
+    movie({ id: 'a2', libraryId: 'umbrel', title: 'Nosferatu', year: 1922, part: 2, runtime: 4000 }),
+    movie({ id: 'b1', libraryId: 'mac', title: 'Nosferatu', year: 1922, part: null, runtime: 3000 }),
+    movie({ id: 'b2', libraryId: 'mac', title: 'Nosferatu', year: 1922, part: null, runtime: 4000 })
+  ])
+  assert.equal(out.length, 2, 'two halves, not three entries')
+  assert.deepEqual(out.map((o) => o.copies.length), [2, 2], 'each half has both hosts behind it')
+})
+
 test('TWO RIPS OF ONE FILM STILL COLLAPSE, WHICH IS THE WHOLE POINT OF MERGING', () => {
   // The guard has to leave the case it was built around alone: the same film on two
   // hosts, ripped at different qualities, is ONE entry with two copies.

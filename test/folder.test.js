@@ -184,6 +184,29 @@ test('episodes come back in structural order under their season', async (t) => {
   assert.equal(eps.items[0].seriesTitle, 'The Legend of Korra')
 })
 
+test('TWO HALVES OF ONE FILM ARRIVE SAYING WHICH HALF THEY ARE', async (t) => {
+  // The end of the road for Tim's real pair: two files, one title, and the only thing
+  // that tells them apart written in the filename. A .nfo beside them describes the
+  // FILM, so the marker has to survive the sidecar rather than come from it.
+  const { root, dataDir } = await library(t, {
+    extra: {
+      'Blurays/King Kong - Pt 1.mkv': 'x',
+      'Blurays/King Kong - Pt 1.nfo': KING_KONG_NFO,
+      'Blurays/King Kong - Pt 2.mkv': 'x',
+      'Blurays/King Kong - Pt 2.nfo': KING_KONG_NFO
+    }
+  })
+  const a = realAdapter({ root, dataDir })
+  await a.scan()
+
+  const kong = (await a.list({ type: 'movies' })).items.filter(m => m.title === 'King Kong')
+  assert.equal(kong.length, 3, 'the whole film and both halves')
+  assert.deepEqual(kong.map(m => m.part).sort((x, y) => (x || 0) - (y || 0)), [null, 1, 2])
+  // The sidecar still wins the title on all three - which is exactly why the halves
+  // need a part at all.
+  assert.ok(kong.every(m => m.year === 2005), 'and the .nfo is still read')
+})
+
 // --- streaming and the path guard -------------------------------------------
 
 test('a film streams, and SEEKS, straight off the disk', async (t) => {
@@ -468,24 +491,33 @@ test('a numbered episode under a shows root is untouched, ids and all', async (t
 })
 
 test('A FILMS ROOT NEVER PRODUCES AN EPISODE, which is the same bug pointing the other way', async (t) => {
-  // `Part 2` in a film's own folder is read as episode 2 when nothing says otherwise,
-  // because that fallback exists for shows that never write SxxExx. A films root
-  // switches it off along with every other episode rule.
+  // A number after `Part` is read as an episode when nothing says otherwise, because
+  // that fallback exists for shows that never write SxxExx. A films root switches it
+  // off along with every other episode rule.
+  //
+  // `Dune - Part 2.mkv` NO LONGER BITES even on an untyped root: a marker at the very
+  // end of a name is the disc convention, and it is read as a film's half. The one
+  // that still bites is the shape the fallback was actually derived from, with the
+  // episode's own title after the number.
   const { root, dataDir } = await split(t, {
     'Shelf/Dune Part 2/Dune - Part 2.mkv': 'x',
+    'Shelf/Band Of Brothers/Band Of Brothers Part 2 Day Of Days.mkv': 'x',
     'Shelf/Blade Runner (1982)/Blade Runner (1982).mkv': 'x'
   })
   const at = path.join(root, 'Shelf')
 
   const loose = typed({ roots: [at], dataDir })
   await loose.scan()
-  assert.equal((await loose.stats()).episodes, 1, 'the fallback bites: Part Two became an episode')
+  const before = await loose.stats()
+  assert.equal(before.episodes, 1, 'the fallback bites: Day Of Days became an episode')
+  assert.equal(before.movies, 2, 'and the trailing marker did not - it is half of Dune')
+  assert.equal((await loose.list({ type: 'movies' })).items.find(m => m.title === 'Dune').part, 2)
 
   const films = typed({ roots: [{ path: at, type: 'movies' }], dataDir })
   await films.scan()
   const stats = await films.stats()
   assert.equal(stats.episodes, 0)
-  assert.equal(stats.movies, 2)
+  assert.equal(stats.movies, 3)
 })
 
 test("THE ROOT'S OWN NAME TYPES IT, so a library saved before this fixes itself", async (t) => {

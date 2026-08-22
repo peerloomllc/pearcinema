@@ -83,6 +83,14 @@ function intOrNull (v) {
   return Number.isInteger(n) ? n : null
 }
 
+// Which half of a split film, or null. Bounded because it is a label rather than a
+// quantity: a two-parter is 1 or 2, a boxed set of discs might reach a handful, and
+// anything past that is a parse mistake being rendered on somebody's shelf.
+function partNumber (v) {
+  const n = intOrNull(v)
+  return n !== null && n >= 1 && n <= 20 ? n : null
+}
+
 function count (v) {
   const n = Number(v)
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
@@ -187,6 +195,10 @@ function movie (row = {}) {
     addedAt: Number.isFinite(Number(row.addedAt)) && Number(row.addedAt) > 0 ? Number(row.addedAt) : null,
     title: clean(row.title) || 'Untitled',
     year: year(row.year),
+    // WHICH HALF OF THE FILM THIS FILE IS, when it is one of two. Only a filename
+    // ever says so, so only the folder adapter fills it; a server source leaves it
+    // null and nothing downstream may assume otherwise.
+    part: partNumber(row.part),
     runtime: runtime(row.runtime),
     overview: clean(row.overview, TEXT_MAX) || null,
     genres: list(row.genres),

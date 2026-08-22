@@ -19,7 +19,7 @@
 // would be worse than none.
 
 import { useState, useEffect } from 'preact/hooks'
-import { api, withBase, fmtRuntime, fmtSize, fmtClock } from './api'
+import { api, withBase, fmtRuntime, fmtPart, fmtSize, fmtClock } from './api'
 import { verdictFor, containerName } from './playback'
 import { ArtIcon, Check, Play, Pencil } from './icons'
 
@@ -48,6 +48,7 @@ function BigArt ({ item }) {
 function factLine (item) {
   const bits = []
   if (item.year) bits.push(String(item.year))
+  if (item.type === 'movie' && item.part) bits.push(fmtPart(item.part))
   if (item.type === 'movie' && item.runtime) bits.push(fmtRuntime(item.runtime))
   if (item.type === 'series') {
     bits.push(`${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`)

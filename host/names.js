@@ -192,11 +192,53 @@ function parseSeasonFolder (name) {
   return null
 }
 
+// --- the half of a film that a filename knows and a database does not --------
+
+// One physical film cut across two files. The marker is in the FILENAME and
+// nowhere else - a TMDB record describes the film, not the halves, so both halves
+// of `The Two Towers (ext ) - Pt 1.mkv` / `- Pt 2.mkv` enrich to the same title
+// and the same year and become indistinguishable the moment metadata succeeds.
+// That is the bug PR #156 split apart by runtime; this is what lets the two halves
+// SAY which is which.
+//
+// The rules are deliberately tight, because the failure mode is deleting a number
+// that was part of somebody's title:
+//
+//   - The marker must be at the END of the name, with nothing after it but release
+//     tags. `Harry Potter and the Deathly Hallows Part 1 (2010)` is a title, and it
+//     is protected by the year sitting after the marker.
+//   - `pt`, `cd`, `disc` and `disk` may follow a plain space, because no film is
+//     called that. The word `part` may NOT - it needs a dash, a dot, an underscore
+//     or a bracket in front of it, so `Kill Bill Part 2` keeps its 2 and
+//     `Kill Bill - Part 2` does not.
+//   - Digits only. `Dune - Part Two` is a title and stays one.
+const PART_MARKER = /([\s._\-([]+)(pt|part|cd|disc|disk)[\s._-]*(\d{1,2})\b[)\]]?/gi
+
+// Everything after the marker has to be noise, or the marker was not a marker.
+const isNoiseTail = (tail) => toWords(tail).split(' ').filter(Boolean).every(isTag)
+
+function findPart (base) {
+  let found = null
+  for (const m of String(base).matchAll(PART_MARKER)) {
+    // `part` on a bare space is a title's own word, not an appendix.
+    if (m[2].toLowerCase() === 'part' && !/[._\-([]/.test(m[1])) continue
+    if (!isNoiseTail(base.slice(m.index + m[0].length))) continue
+    found = { part: +m[3], at: m.index, end: m.index + m[0].length }
+  }
+  return found
+}
+
 // --- the two shapes ---------------------------------------------------------
 
 // A film, from its filename.
 function parseMovie (filename) {
-  const base = String(filename).replace(/\.[a-z0-9]{1,5}$/i, '')
+  const full = String(filename).replace(/\.[a-z0-9]{1,5}$/i, '')
+
+  // The marker comes out of the name BEFORE anything else looks at it. A film
+  // whose year sits after the tags keeps `CD1` in the noise the title cut throws
+  // away, so reading it here is the only place it is still there to read.
+  const marker = findPart(full)
+  const base = marker ? full.slice(0, marker.at) + full.slice(marker.end) : full
   const words = toWords(base).split(' ').filter(Boolean)
 
   const { year, at } = findYear(words)
@@ -211,7 +253,7 @@ function parseMovie (filename) {
   title = stripTagParens(title)
   title = title.replace(GROUP_AFTER_TAG, (m) => (isTag(m.slice(1)) ? '' : m))
 
-  return { type: 'movie', title: tidy(title) || tidy(base), year }
+  return { type: 'movie', title: tidy(title) || tidy(base), year, part: marker ? marker.part : null }
 }
 
 // An episode, from its path. `seriesFolder` is the show's own directory name, and
@@ -246,7 +288,18 @@ function parseEpisode (filename, { seriesFolder = null, seasonFolder = null, tel
 
   if (!code && (seriesFolder || television)) {
     const m = normalised.match(LOOSE_EPISODE)
-    if (m) {
+    // A TRAILING `- Pt 1` IS A FILM CUT IN TWO, NOT EPISODE ONE OF ANYTHING, and the
+    // difference is where the number sits. The two real shapes this loose rule was
+    // derived from put the number BEFORE the episode's own title (`Band Of Brothers
+    // Part 2 Day Of Days`); a marker at the END with nothing after it but release
+    // tags is the disc convention instead - `King Kong - Pt 1.mkv`, `Gone with the
+    // Wind CD2.avi` - and parseMovie reads it as a part.
+    //
+    // ONLY WHERE THE SHOW WAS INFERRED. A root the operator DECLARED as television
+    // still never produces a film, so `television` skips this entirely and an episode
+    // named `- Pt 2` under a shows root is an episode, as the root says.
+    const appendix = !television && findPart(base)
+    if (m && !appendix) {
       const folderSeason = seasonFolder !== null ? parseSeasonFolder(seasonFolder) : null
       code = {
         season: folderSeason ?? 1,
@@ -378,6 +431,7 @@ function parseSubtitleName (filename, base) {
 
 module.exports = {
   parseMovie,
+  findPart,
   parseEpisode,
   parseEpisodeCode,
   parseSeasonFolder,

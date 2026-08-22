@@ -14,7 +14,7 @@
 // collection it says something uncomfortable and true.
 
 import { useState, useEffect, useMemo, useRef } from 'preact/hooks'
-import { api, withBase, fmtRuntime, episodeCode } from './api'
+import { api, withBase, fmtRuntime, fmtPart, episodeCode } from './api'
 import { verdictFor, tally } from './playback'
 import { ArtIcon, Check, Close, Detail, List, Grid, Pencil } from './icons'
 import { notify, askConfirm } from './ui'
@@ -241,7 +241,7 @@ function Poster ({ item, caps, onOpen, label = null, watch = null, badge = null,
     ? `${item.seasonCount || 0} season${item.seasonCount === 1 ? '' : 's'}`
     // An episode in a grid needs its NUMBER above all - a wall of thumbnails with
     // only titles under them is unreadable as an episode list.
-    : [label, item.year, fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
+    : [label, item.year, fmtPart(item.part), fmtRuntime(item.runtime)].filter(Boolean).join(' · ')
 
   // A DIV RATHER THAN A BUTTON, and only because of the tick in the corner: a button
   // inside a button is invalid, and the browsers that tolerate it do not agree on
@@ -1252,7 +1252,7 @@ export default function Library ({
                   // the useful fact about a show; a film has a year and a length.
                   meta={i.type === 'series'
                     ? `${i.seasonCount || 0} season${i.seasonCount === 1 ? '' : 's'}`
-                    : [i.year, fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}
+                    : [i.year, fmtPart(i.part), fmtRuntime(i.runtime)].filter(Boolean).join(' · ')}
                   onWatched={mark}
                   onOpen={open}
                 />
