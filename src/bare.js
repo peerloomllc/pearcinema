@@ -1221,13 +1221,13 @@ const methods = {
     }
     if (type === 'seasons') {
       const s = findMergedSeries(args.seriesId)
-      if (s) return { items: merge.seasonsFor(mergedIndex, s.key), cursor: null }
+      if (s) return { items: merge.seasonsFor(mergedIndex, s.key, libraryFilter()), cursor: null }
       return (await clientForId(args.seriesId)).list(args)
     }
     if (type === 'episodes') {
       const parsed = merge.parseMergedSeasonId(args.seasonId)
       if (parsed) {
-        return { items: merge.episodesFor(mergedIndex, parsed.seriesKey, parsed.seasonNumber, parsed.seasonTitle), cursor: null }
+        return { items: merge.episodesFor(mergedIndex, parsed.seriesKey, parsed.seasonNumber, parsed.seasonTitle, libraryFilter()), cursor: null }
       }
       return (await clientForId(args.seasonId || args.seriesId)).list(args)
     }
@@ -1236,7 +1236,7 @@ const methods = {
   'library.get': async (args) => (await clientForId(args.id)).get(args),
   'library.search': async (args) => {
     if (!mergedOn() || !mergedIndex) return (await connected()).search(args)
-    const r = merge.searchIndex(mergedIndex, args.q, Number(args.limit) || 60)
+    const r = merge.searchIndex(mergedIndex, args.q, Number(args.limit) || 60, libraryFilter())
     const items = [...r.movies, ...r.series, ...r.episodes].slice(0, Number(args.limit) || 60)
     return { items }
   },
@@ -1248,7 +1248,10 @@ const methods = {
     const id = String(args.id || '')
     const ep = mergedIndex.episodes.find((e) => e.copies.some((c) => c.id === id))
     if (!ep) return (await clientForId(id)).request('library.siblings', args)
-    const run = merge.seriesRun(mergedIndex, ep.seriesKey)
+    // Scoped by the chip like every other list: with a library picked, the next
+    // episode comes from THAT library. On '_all' the run still spans hosts, which is
+    // the season-boundary case the merged view exists for.
+    const run = merge.seriesRun(mergedIndex, ep.seriesKey, libraryFilter())
     const at = run.findIndex((e) => e.key === ep.key)
     if (at < 0) return { prev: null, next: null }
     return { prev: run[at - 1] || null, next: run[at + 1] || null }

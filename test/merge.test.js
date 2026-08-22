@@ -158,6 +158,67 @@ test('seriesRun walks the spanning series in watch order across hosts', () => {
   assert.notEqual(run[1].libraryId, run[2].libraryId)
 })
 
+test('THE CHIP SCOPES THE SHOW TREE, not just the film grid', () => {
+  // Found walking the app as a guest (2026-08-22): filtered to a friend's library,
+  // THEIR show grew seasons off another host - Season 2 listed eight episodes that
+  // library has never held, under the friend's name at the top of the screen. The
+  // film grid was scoped all along, which is what made it read as a fact about
+  // their collection rather than a bug.
+  const idx = M.buildIndex([
+    { libraryId: 'friend', episodes: [episode({ id: 'f1' })] },
+    {
+      libraryId: 'mine',
+      episodes: [
+        episode({ id: 'm1', episodeNumber: 2, title: 'Spanish 101' }),
+        episode({ id: 'm2', seasonNumber: 2, episodeNumber: 1, title: 'Anthropology 101' })
+      ]
+    }
+  ])
+
+  // Unfiltered, the union - the spanning-series behaviour the merged view is for.
+  assert.equal(M.seasonsFor(idx, 'community').length, 2)
+  assert.equal(M.seasonsFor(idx, 'community', '_all').length, 2)
+
+  // Filtered to the friend: one season, one episode, and nothing of mine.
+  const theirs = M.seasonsFor(idx, 'community', 'friend')
+  assert.equal(theirs.length, 1)
+  assert.equal(theirs[0].number, 1)
+  assert.equal(theirs[0].episodeCount, 1)
+  assert.deepEqual(M.episodesFor(idx, 'community', 1, null, 'friend').map((e) => e.title), ['Pilot'])
+  assert.deepEqual(M.episodesFor(idx, 'community', 2, null, 'friend'), [], 'a season they do not have is empty')
+  assert.deepEqual(M.seriesRun(idx, 'community', 'friend').map((e) => e.title), ['Pilot'])
+})
+
+test('THE CHIP SCOPES SEARCH, so a friend s library cannot answer with mine', () => {
+  const idx = M.buildIndex([
+    { libraryId: 'friend', movies: [movie({ id: 'f1', title: 'Moon', year: 2009 })] },
+    { libraryId: 'mine', movies: [movie({ id: 'm1', title: 'Moonstruck', year: 1987 })], episodes: [episode({ id: 'm2', title: 'Moon Landing' })] }
+  ])
+  const all = M.searchIndex(idx, 'moon')
+  assert.equal(all.movies.length, 2)
+  assert.equal(all.episodes.length, 1)
+
+  const theirs = M.searchIndex(idx, 'moon', 60, 'friend')
+  assert.deepEqual(theirs.movies.map((m) => m.title), ['Moon'])
+  assert.deepEqual(theirs.episodes, [], 'and none of my episodes')
+  assert.deepEqual(theirs.series, [])
+})
+
+test('AND THE WORKLET ACTUALLY PASSES IT, at all four call sites', () => {
+  // The rule is only worth having where it is applied. src/bare.js cannot be
+  // required outside the Bare runtime, so the wiring is pinned at the source - the
+  // bug was three call sites that took no filter, not a wrong filter.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'bare.js'), 'utf8')
+  for (const call of [
+    /merge\.seasonsFor\(mergedIndex, s\.key, libraryFilter\(\)\)/,
+    /merge\.episodesFor\(mergedIndex, parsed\.seriesKey, parsed\.seasonNumber, parsed\.seasonTitle, libraryFilter\(\)\)/,
+    /merge\.searchIndex\(mergedIndex, args\.q, Number\(args\.limit\) \|\| 60, libraryFilter\(\)\)/,
+    /merge\.seriesRun\(mergedIndex, ep\.seriesKey, libraryFilter\(\)\)/
+  ]) {
+    assert.match(src, call, 'a list the chip is set over must be given the chip')
+  }
+})
+
 // --- serve helpers -----------------------------------------------------------
 
 test('filterByLibrary narrows to items with a copy on that host', () => {
