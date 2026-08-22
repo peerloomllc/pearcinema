@@ -346,6 +346,8 @@ test('A NEW PARSER REBUILDS THE ROWS AND KEEPS THE PROBES', async (t) => {
   const file = first._cacheFile()
   const raw = JSON.parse(await fsp.readFile(file, 'utf8'))
   assert.ok(Object.keys(raw.probes).length > 0, 'the probes are in there to begin with')
+  const current = raw.indexVersion
+  assert.ok(current > 0, 'the cache records which parser wrote it')
   raw.indexVersion = 0 // what a cache written by yesterday's parser looks like
   await fsp.writeFile(file, JSON.stringify(raw))
 
@@ -358,7 +360,7 @@ test('A NEW PARSER REBUILDS THE ROWS AND KEEPS THE PROBES', async (t) => {
   assert.equal((await second.list({ type: 'movies' })).total, before, 'the rows came back')
 
   const rewritten = JSON.parse(await fsp.readFile(file, 'utf8'))
-  assert.equal(rewritten.indexVersion, 1, 'and the cache says which parser wrote it')
+  assert.equal(rewritten.indexVersion, current, 'and the rebuild stamps it with this parser')
 
   // The other half of the claim: with the probes gone too, that same broken ffprobe
   // empties the library - so the assertion above was about the probes being reused
@@ -584,6 +586,59 @@ test("THE ROOT'S OWN NAME TYPES IT, so a library saved before this fixes itself"
     ['TV Shows', 'auto', 'shows'],
     ['Movies', 'auto', 'movies']
   ])
+})
+
+test('A PARENT OF Movies AND TV Shows IS READ, not filed under one series', async (t) => {
+  // Somebody typing a path by hand points at the LIBRARY, not at its two halves. The
+  // root's own name then says nothing, and before this every episode underneath
+  // became an episode of a series called "TV Shows" - because the top folder under a
+  // root is where a show's name normally is.
+  const { root, dataDir } = await split(t, {
+    'PearCinema Library/Movies/Blade Runner (1982).mkv': 'x',
+    'PearCinema Library/Movies/Arrival.mkv': 'x',
+    'PearCinema Library/TV Shows/Dark/Season 01/Dark - s01e01.mkv': 'x',
+    'PearCinema Library/TV Shows/Dark/Season 01/Dark - s01e02.mkv': 'x',
+    'PearCinema Library/TV Shows/The Legend of Korra/Legend of Korra - s01e01.mkv': 'x'
+  })
+  const at = path.join(root, 'PearCinema Library')
+  const a = typed({ roots: [at], dataDir })
+  await a.scan()
+
+  const stats = await a.stats()
+  assert.equal(stats.movies, 2, 'the two films are films')
+  assert.equal(stats.series, 2, 'Dark and Korra, not one series called TV Shows')
+  assert.equal(stats.episodes, 3)
+
+  const shows = (await a.list({ type: 'series' })).items.map(s => s.title).sort()
+  assert.deepEqual(shows, ['Dark', 'The Legend of Korra'])
+
+  // The season came from the folder BELOW the show, not from the show folder itself -
+  // which is the half that breaks if only `holds` is fixed and the depth is not.
+  const dark = (await a.list({ type: 'series' })).items.find(s => s.title === 'Dark')
+  const seasons = (await a.list({ type: 'seasons', seriesId: dark.id })).items
+  assert.deepEqual(seasons.map(x => x.number), [1])
+
+  // AND THE ROOT IS STILL THE ROOT. Ids are minted relative to it, so reading a
+  // folder underneath must not re-mint them - a phone's resume positions depend on
+  // that path never moving.
+  assert.equal(a.roots.length, 1)
+  assert.equal(a.roots[0].path, at)
+  assert.equal(a.roots[0].holds, null, 'the ROOT still says nothing; the folders under it do')
+})
+
+test('a top folder that says nothing is still left to the filenames', async (t) => {
+  // The descent only applies where the folder name is one of the words that mean
+  // something. `Stuff/Blurays/...` is not, and must behave exactly as it did.
+  const { root, dataDir } = await split(t, {
+    'Stuff/Blurays/Blade Runner (1982).mkv': 'x',
+    'Stuff/Blurays/Dark - s01e01.mkv': 'x'
+  })
+  const a = typed({ roots: [path.join(root, 'Stuff')], dataDir })
+  await a.scan()
+  const stats = await a.stats()
+  assert.equal(stats.movies, 1)
+  assert.equal(stats.episodes, 1, 'the filename rules still decide')
+  assert.equal((await a.list({ type: 'series' })).items[0].title, 'Blurays', 'including the old shape')
 })
 
 test('a folder whose name says nothing is left to the filenames, exactly as before', async (t) => {
