@@ -39,6 +39,15 @@ test('AND A LIBRARY PAIRED LATER IS TOLD TOO', () => {
   const body = method('pair')
   assert.match(body, /readSettings\(\)\.identity/, 'pairing reads the name this device already goes by')
   assert.match(body, /identity\.set/, 'and introduces itself with it')
+
+  // WITH A FALLBACK, because otherwise this shipped and changed nothing: the name
+  // lives on each HOST, so a phone that has never edited its own has nothing to
+  // introduce, and every phone in the field is in that state. Caught by pairing a
+  // guest on the TCL minutes after building it - the friend's library still filed it
+  // as "device".
+  assert.match(body, /borrowIdentity\(\)/, 'a phone with no name of its own asks a library that knows')
+  assert.match(src, /async function borrowIdentity/, 'and the helper is real')
+  assert.match(method('identity.get'), /writeSettings\(/, 'and identity.get caches it, so the ask happens once')
 })
 
 test('the Continue shelf is folded and scoped, rather than concatenated', () => {
