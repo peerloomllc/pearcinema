@@ -170,6 +170,9 @@ class PearCinemaHost {
           // reaches paired DEVICES; this reaches the operator's own browser,
           // which is not one and is usually the thing that is open.
           events: (kind, data) => { try { this.onevent?.(kind, data) } catch {} },
+          // So a push that reached nobody is a line in the log rather than a
+          // theory - see `told` in methods.js.
+          log: this.log,
           // The per-person store, built by the package on its own Hyperbee. Safe to
           // read here for the same reason `grants` is: `media` is a FUNCTION the
           // package calls once the host exists, not an object built alongside it.
@@ -555,7 +558,11 @@ class PearCinemaHost {
     this.host.libraryName = clean
     this._writeSettings({ name: clean })
     // Every paired phone relabels at once rather than on its next reconnect.
-    this.host.presence.notifyAll('library:renamed', { libraryId: this.libraryId, name: clean })
+    this.log('presence:pushed', {
+      kind: 'library:renamed',
+      to: 'everyone',
+      reached: this.host.presence.notifyAll('library:renamed', { libraryId: this.libraryId, name: clean })
+    })
     this.log('host:renamed', { name: clean })
     return clean
   }
@@ -1252,7 +1259,11 @@ class PearCinemaHost {
       playedAt: Date.now(),
       deviceKey
     })
-    this.host.presence.notifyOwner(owner, 'resume:changed', { itemId: String(itemId), finished: verdict.finished })
+    this.log('presence:pushed', {
+      kind: 'resume:changed',
+      to: String(owner || '?').slice(0, 14),
+      reached: this.host.presence.notifyOwner(owner, 'resume:changed', { itemId: String(itemId), finished: verdict.finished })
+    })
   }
   leaveDevice (k) { return this.host.leaveDevice(k) }
   revokePerson (p) { return this.host.revokePerson(p) }

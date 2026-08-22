@@ -824,7 +824,11 @@ async function startDashboard ({
           // The requester hears the answer wherever they are signed in - the same
           // push the wire method sends, because it is the same event.
           if (host.host?.presence && row.requester) {
-            host.host.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+            log('presence:pushed', {
+              kind: 'request:resolved',
+              to: String(row.requester || '?').slice(0, 14),
+              reached: host.host.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+            })
           }
           host.onevent?.('request:resolved', { id: row.id, title: row.title || null, status })
           return json(res, 200, { request: row })

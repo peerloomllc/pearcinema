@@ -62,7 +62,25 @@ function requireScope (ctx, type) {
 // `events` is the LOCAL twin of the pushes below. notifyOwners reaches paired
 // devices over P2P; the operator's own dashboard is not one of them, and it was
 // the surface most likely to be open when an ask arrives.
-function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null, events = () => {} }) {
+function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null, events = () => {}, log = () => {} }) {
+  // EVERY PUSH SAYS HOW MANY IT ACTUALLY REACHED, because a host that told nobody
+  // looks exactly like a host that told everybody.
+  //
+  // `notifyOwner` and `notifyOwners` both return a count and every caller here used
+  // to throw it away. That cost an afternoon on 2026-08-22: a resolve on the Mac did
+  // not reach the phone, a resolve on the Umbrel did, and with no record of either
+  // the difference had to be guessed at - the first guess was wrong. A push is
+  // best-effort by design and reaching nobody is often FINE (an owner who is offline
+  // picks it up on their next load), which is exactly why it has to be visible
+  // rather than inferred.
+  //
+  // `to` is truncated: enough to tell one person from another in a log, not enough
+  // to be a key.
+  const told = (kind, to, reached) => {
+    log('presence:pushed', { kind, to: String(to || '?').slice(0, 14), reached })
+    return reached
+  }
+
   return {
     // --- the library ------------------------------------------------------
 
@@ -282,7 +300,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // a phone down mid-film and the tablet's Continue shelf already carries
       // the new minute, no reopen needed. The device that wrote is skipped -
       // it is the one place this is not news.
-      ctx.pushToOwner('resume:changed', { itemId, finished: verdict.finished })
+      told('resume:changed', ctx.owner, ctx.pushToOwner('resume:changed', { itemId, finished: verdict.finished }))
       return { ok: true, finished: verdict.finished, positionMs: row?.positionMs || 0 }
     },
 
@@ -323,7 +341,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       for (const r of rows) await state.setResume(ctx.owner, r.itemId, 0, null)
       // The person's OTHER devices hear it, same as a single position does -
       // clearing on a phone must not leave the tablet's shelf full.
-      ctx.pushToOwner('resume:cleared', { cleared: rows.length })
+      told('resume:cleared', ctx.owner, ctx.pushToOwner('resume:cleared', { cleared: rows.length }))
       return { ok: true, cleared: rows.length }
     },
 
@@ -341,7 +359,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // Marking something watched clears its position, for the same reason finishing
       // it does. Marking it UNWATCHED does not invent one - it starts over.
       if (on) await state.setResume(ctx.owner, itemId, 0, null)
-      ctx.pushToOwner('watched:changed', { itemId, watched: on })
+      told('watched:changed', ctx.owner, ctx.pushToOwner('watched:changed', { itemId, watched: on }))
       return { ok: true, watched: on }
     },
 
@@ -368,7 +386,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // The donor's favorites:changed, with its exceptSelf: your other phones'
       // watchlists follow this one's bookmark, and the phone that tapped it
       // already re-rendered optimistically.
-      ctx.pushToOwner('favorites:changed', { kind: String(kind), id: String(id), on: !!on })
+      told('favorites:changed', ctx.owner, ctx.pushToOwner('favorites:changed', { kind: String(kind), id: String(id), on: !!on }))
       return { ok: true, on: !!on }
     },
 
@@ -403,7 +421,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // Awaited, not fired and forgotten: it reads the grant store to find the
       // owners, and the ask is not really filed until they have been told. The
       // catch keeps a push failure from failing the ask itself.
-      await notifyOwners(ctx.presence, grants, 'request:created', created).catch(() => {})
+      told('request:created', 'owners', await notifyOwners(ctx.presence, grants, 'request:created', created).catch(() => 0))
       events('request:created', created)
       return { request }
     },
@@ -421,7 +439,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       await state.deleteRequest(row.id)
       // The other half of the same rule: an ask that leaves should leave the
       // operator's screen too, or they act on something already withdrawn.
-      await notifyOwners(ctx.presence, grants, 'request:removed', { id: row.id }).catch(() => {})
+      told('request:removed', 'owners', await notifyOwners(ctx.presence, grants, 'request:removed', { id: row.id }).catch(() => 0))
       events('request:removed', { id: row.id })
       return { ok: true }
     },
@@ -461,7 +479,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // they are signed in - the resolver did not make the request, so nobody
       // is skipped.
       if (ctx.presence && row.requester) {
-        ctx.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status })
+        told('request:resolved', row.requester, ctx.presence.notifyOwner(row.requester, 'request:resolved', { id: row.id, title: row.title || null, status }))
       }
       events('request:resolved', { id: row.id, title: row.title || null, status })
       return { request: row }
