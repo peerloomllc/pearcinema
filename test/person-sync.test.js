@@ -7,7 +7,9 @@ const test = require('node:test')
 const assert = require('node:assert')
 const { createMethods } = require('../host/methods')
 
-function harness () {
+// `reach` is how many live channels a push finds - 0 is the interesting one, and
+// the reason the count is logged at all.
+function harness ({ reach = 1 } = {}) {
   const pushes = []
   const owners = []
   // Per-DEVICE pushes, which is how the operators are reached: notifyOwners walks
@@ -50,28 +52,31 @@ function harness () {
       { deviceKey: 'owner-old', scope: 'owner', revokedAt: 1 }
     ]
   }
+  // What the host wrote down about each push.
+  const logs = []
   const m = createMethods({
     getAdapter: () => adapter,
     getLibraryName: () => 'L',
     state,
     grants,
-    events: (kind, data) => events.push({ kind, data })
+    events: (kind, data) => events.push({ kind, data }),
+    log: (kind, data) => logs.push({ kind, data })
   })
   const ctx = (params = {}) => ({
     params,
     owner: 'p:ada',
     deviceKey: 'phone-1',
     isOwner: true,
-    pushToOwner: (kind, data) => { pushes.push({ kind, data }); return 1 },
+    pushToOwner: (kind, data) => { pushes.push({ kind, data }); return reach },
     presence: {
-      notifyOwner: (owner, kind, data) => { owners.push({ owner, kind, data }); return 1 },
-      notify: (deviceKey, kind, data) => { devices.push({ deviceKey, kind, data }); return 1 }
+      notifyOwner: (owner, kind, data) => { owners.push({ owner, kind, data }); return reach },
+      notify: (deviceKey, kind, data) => { devices.push({ deviceKey, kind, data }); return reach }
     },
     badParams: (x) => new Error(x),
     notFound: (x) => new Error(x),
     forbidden: (x) => new Error(x)
   })
-  return { m, ctx, pushes, owners, devices, events, wrote, resolved }
+  return { m, ctx, pushes, owners, devices, events, wrote, resolved, logs }
 }
 
 test('a position write tells the person s other devices where the film is', async () => {
@@ -119,6 +124,53 @@ test('resolving a request tells the REQUESTER, wherever they are signed in', asy
   const { m, ctx, owners } = harness()
   await m['request.resolve'](ctx({ id: 'r1', status: 'added' }))
   assert.deepStrictEqual(owners[0], { owner: 'p:ada', kind: 'request:resolved', data: { id: 'r1', title: 'Metropolis', status: 'added' } })
+})
+
+// --- a push that reached nobody says so --------------------------------------
+
+test('EVERY PUSH WRITES DOWN HOW MANY IT REACHED, and zero is the point', async () => {
+  // A host that told nobody looks exactly like a host that told everybody, and on
+  // 2026-08-22 that cost an afternoon: a request resolved on one machine did not
+  // reach the phone, one on another did, and with no record the difference had to
+  // be guessed at. The first guess was wrong.
+  const nobody = harness({ reach: 0 })
+  await nobody.m['request.resolve'](nobody.ctx({ id: 'r1', status: 'added' }))
+  assert.deepStrictEqual(nobody.logs.map(l => l.kind), ['presence:pushed'])
+  assert.strictEqual(nobody.logs[0].data.reached, 0)
+  assert.strictEqual(nobody.logs[0].data.kind, 'request:resolved')
+
+  // AND THE KEY IS NOT IN THE LOG. Enough to tell one person from another, not
+  // enough to be an identifier - these lines are read over somebody's shoulder.
+  assert.ok(nobody.logs[0].data.to.length <= 14)
+  assert.ok('p:ada'.startsWith(nobody.logs[0].data.to.slice(0, 5)))
+
+  const two = harness({ reach: 2 })
+  await two.m['request.resolve'](two.ctx({ id: 'r1', status: 'added' }))
+  assert.strictEqual(two.logs[0].data.reached, 2)
+})
+
+test('the person-wide writes are logged the same way, not just requests', async () => {
+  // The same silence applied to every shelf that follows a sibling phone, which is
+  // where it would be missed for longest.
+  const { m, ctx, logs } = harness({ reach: 0 })
+  await m['resume.set'](ctx({ itemId: 'film1', positionMs: 60000 }))
+  await m['watched.set'](ctx({ itemId: 'film1', watched: true }))
+  await m['fav.set'](ctx({ kind: 'movie', id: 'film1', on: true }))
+  assert.deepStrictEqual(
+    logs.map(l => [l.data.kind, l.data.reached]),
+    [['resume:changed', 0], ['watched:changed', 0], ['favorites:changed', 0]]
+  )
+})
+
+test('the owner broadcast counts too, and names itself as one', async () => {
+  const { m, ctx, logs } = harness({ reach: 2 })
+  await m['request.add'](ctx({ kind: 'movie', name: 'Stalker' }))
+  const line = logs.find(l => l.data.kind === 'request:created')
+  assert.ok(line, 'a new ask tells the operators and says how many heard')
+  assert.strictEqual(line.data.to, 'owners')
+  // notifyOwners walks the grant store itself: two live owner devices, one
+  // readonly viewer and one revoked owner - so two, at `reach` each.
+  assert.strictEqual(line.data.reached, 4)
 })
 
 // --- the person who asked may close their own copy ---------------------------
