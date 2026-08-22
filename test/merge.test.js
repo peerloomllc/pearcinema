@@ -9,6 +9,8 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const M = require('../src/merge')
+const fs = require('fs')
+const path = require('path')
 
 const movie = (over = {}) => ({
   type: 'movie',
@@ -281,6 +283,72 @@ test('requestTargets: resolve reaches only the still-pending copies', () => {
   // No refs falls back to the row's own id.
   assert.deepEqual(M.requestTargets({ id: 'x' }, { fallbackLibraryId: 'A' }), [{ libraryId: 'A', id: 'x' }])
   assert.deepEqual(M.requestTargets({ id: 'x' }), [])
+})
+
+test('answeredElsewhere: an ask added on one library closes on the others', () => {
+  // The requesting device is the only party that holds every copy, so this is the
+  // list it has to act on. One host said added; the one still pending is stale.
+  const out = M.collapseRequests([
+    req({ id: 'ra', libraryId: 'A', libraryName: 'Umbrel', status: 'pending' }),
+    req({ id: 'rb', libraryId: 'B', libraryName: 'Mac', status: 'added' })
+  ])
+  assert.deepEqual(M.answeredElsewhere(out), [{ libraryId: 'A', id: 'ra' }])
+})
+
+test('answeredElsewhere: A DECLINE DOES NOT TRAVEL', () => {
+  // One owner declining is their answer about their own library. Another owner may
+  // still want to add the film, so the pending copy stays pending - and the copy
+  // that declined is never rewritten either.
+  const declined = M.collapseRequests([
+    req({ id: 'ra', libraryId: 'A', status: 'pending' }),
+    req({ id: 'rb', libraryId: 'B', status: 'declined' })
+  ])
+  assert.deepEqual(M.answeredElsewhere(declined), [], 'nothing to close')
+
+  const both = M.collapseRequests([
+    req({ id: 'ra', libraryId: 'A', status: 'pending' }),
+    req({ id: 'rb', libraryId: 'B', status: 'declined' }),
+    req({ id: 'rc', libraryId: 'C', status: 'added' })
+  ])
+  assert.deepEqual(M.answeredElsewhere(both), [{ libraryId: 'A', id: 'ra' }], 'only the pending one')
+})
+
+test('answeredElsewhere: A SINGLE-HOST ASK IS NEVER RE-RESOLVED', () => {
+  // The copy that answered must not be handed back as work. With one ref there is
+  // nothing to reconcile, and requestTargets falls back to the row's own id - which
+  // would send a resolve to the host that just resolved it.
+  const one = M.collapseRequests([req({ id: 'ra', libraryId: 'A', status: 'added' })])
+  assert.deepEqual(M.answeredElsewhere(one), [])
+  assert.deepEqual(M.answeredElsewhere([{ status: 'added', id: 'ra', libraryId: 'A' }]), [])
+  assert.deepEqual(M.answeredElsewhere(null), [])
+})
+
+test('answeredElsewhere: NOTHING TO DO WHEN NOBODY HAS ANSWERED', () => {
+  const pending = M.collapseRequests([
+    req({ id: 'ra', libraryId: 'A', status: 'pending' }),
+    req({ id: 'rb', libraryId: 'B', status: 'pending' })
+  ])
+  assert.deepEqual(M.answeredElsewhere(pending), [])
+})
+
+test('THE WORKLET ACTUALLY CALLS IT, on the list and on the answer', () => {
+  // A rule nothing invokes is a rule nobody has. src/bare.js cannot be required
+  // outside the Bare runtime (a top-level script with side effects and `Bare`
+  // globals), so this pins the two call sites at the source, the way
+  // subtitles.test.js pins its routing.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'bare.js'), 'utf8')
+
+  const list = src.slice(src.indexOf("'request.list':"), src.indexOf("'request.remove':"))
+  assert.ok(list.length > 0, "the worklet's request.list is gone")
+  assert.match(list, /closeAnsweredElsewhere\(items\)/, 'listing your own asks must heal the stale copies')
+
+  // And at once, rather than waiting for somebody to open the requests screen -
+  // which is the screen they are least likely to be on.
+  assert.match(
+    src,
+    /request:resolved'\s*&&\s*m\.data\?\.status === 'added'\) reconcileRequests\(\)/,
+    'the resolved push must trigger the reconcile in the worklet'
+  )
 })
 
 test('a year-less rip folds into the one dated film when runtimes agree', () => {

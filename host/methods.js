@@ -434,11 +434,27 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return { items: await state.listRequests() }
     },
 
+    // OWNER, OR THE PERSON WHO FILED THIS ROW - and the second half is what makes
+    // an answered ask stop being pending on every other library it went to
+    // (proposal 2026-08-22-the-requester-closes-the-ask).
+    //
+    // An ask is filed with EVERY reachable host, because none of them has the film
+    // and any of their owners might add it. Only the host that answers writes
+    // anything down, and hosts do not talk to each other, so the requesting device
+    // is the only party that knows the other copies exist. It closes them, and it
+    // may be a GUEST on those hosts.
+    //
+    // NOT A NEW POWER. `request.remove` above already admits `row.requester` and
+    // DELETES the row, which takes it off the owner's queue entirely. Being able
+    // to mark your own ask answered is the smaller of the two.
     'request.resolve': async (ctx) => {
-      if (!ctx.isOwner) throw ctx.forbidden('owner only')
       if (!state) throw ctx.notFound('no user state on this host')
       const { id, status } = ctx.params
       if (!['added', 'declined'].includes(status)) throw ctx.badParams('bad status')
+      // Read before writing, because the permission depends on WHOSE row it is.
+      const existing = await state.getRequest(String(id || ''))
+      if (!existing) throw ctx.notFound('no such request')
+      if (!ctx.isOwner && existing.requester !== ctx.owner) throw ctx.forbidden('owner only')
       const row = await state.resolveRequest(String(id || ''), status)
       if (!row) throw ctx.notFound('no such request')
       // The donor's request:resolved: whoever asked hears the answer wherever

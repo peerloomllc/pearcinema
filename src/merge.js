@@ -572,6 +572,32 @@ function requestTargets ({ refs, id, libraryId } = {}, { pendingOnly = true, fal
   return id && lib ? [{ libraryId: lib, id }] : []
 }
 
+// WHICH COPIES OF AN ASK ARE STALE, given the collapsed list a requester sees.
+//
+// An ask is filed with every reachable host, and only the host that ANSWERS writes
+// anything down. Hosts do not talk to each other, so the requesting device is the
+// only party holding every copy - which it does, as `refs`. These are the copies it
+// should close (proposal 2026-08-22-the-requester-closes-the-ask).
+//
+// TWO RULES, both narrowing:
+//
+//   - ONLY `added` TRAVELS. A decline is one owner's answer about their own
+//     library; another owner may still want to add the film, so a declined ask is
+//     left pending everywhere else. requestTargets applies the same rule from the
+//     other end, refusing to rewrite a copy somebody already declined.
+//   - REFS ONLY, and at least two of them. One ref is a single-host ask with
+//     nothing to reconcile, and requestTargets' fallback would otherwise hand back
+//     the very copy that just answered.
+function answeredElsewhere (items) {
+  const out = []
+  for (const it of items || []) {
+    if (it?.status !== 'added') continue
+    if (!Array.isArray(it.refs) || it.refs.length < 2) continue
+    for (const t of requestTargets(it, { pendingOnly: true })) out.push(t)
+  }
+  return out
+}
+
 // --- the copy pick -----------------------------------------------------------
 
 // The best copy to STREAM, device-aware (proposal §5). `connected` is a Set of
@@ -620,5 +646,6 @@ module.exports = {
   searchIndex,
   bestCopy,
   collapseRequests,
-  requestTargets
+  requestTargets,
+  answeredElsewhere
 }
