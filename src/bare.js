@@ -369,7 +369,13 @@ async function connectedLib (libraryId) {
     }
     // Pushes from EVERY connected host flow to the one UI handler, tagged with
     // their library so a shelf can scope its refetch.
-    c.onPush = (m) => emit('host:push', { ...(m && typeof m === 'object' ? m : { value: m }), libraryId })
+    c.onPush = (m) => {
+      emit('host:push', { ...(m && typeof m === 'object' ? m : { value: m }), libraryId })
+      // The answer that just arrived is the moment the other copies became stale.
+      // Done here rather than in the UI because the screen showing requests is
+      // usually not the screen somebody is on.
+      if (m?.kind === 'request:resolved' && m.data?.status === 'added') reconcileRequests().catch(() => {})
+    }
     c.conn.once('close', () => {
       // Fold in this connection's last stretch BEFORE forgetting it was relayed - a film
       // ending is exactly when the biggest uncounted delta exists.
@@ -558,6 +564,59 @@ async function fanOut (fn) {
     try { return await raced((async () => fn(await connectedLib(h.libraryId)))()) } catch { return null }
   }))
   return rs.filter(Boolean)
+}
+
+// --- an answered ask closes on the other libraries ---------------------------
+//
+// A request is filed with EVERY reachable host, because none of them has the film
+// and any of their owners might add it. Only the host that ANSWERS writes anything
+// down, and hosts do not talk to each other by design, so the sibling copies would
+// sit in their owners' queues as pending for good - and somebody adds a film
+// somebody else already added.
+//
+// THIS DEVICE IS THE ONLY PARTY THAT KNOWS THE OTHER COPIES EXIST (Tim's call,
+// 2026-08-22, proposal 2026-08-22-the-requester-closes-the-ask). It filed them, and
+// collapseRequests hands back every per-host (libraryId, id, status) on the row as
+// `refs`. So it closes them, which the host now allows because the person who filed
+// a row may resolve that row.
+//
+// ONLY `added` TRAVELS. A decline is one owner's answer about their own library and
+// another owner may still want to add the film, so a declined copy is left alone -
+// the same rule requestTargets already applies from the other end.
+//
+// MERGED MODE ONLY, which is where the fan-out happened. Reconciling with merging
+// off would dial every paired host to fix an ask that was only ever filed with one.
+async function requestRows (args = {}) {
+  const rows = []
+  await Promise.all(hostsState.hosts.map(async (h) => {
+    try {
+      const r = await raced((async () => (await connectedLib(h.libraryId)).request('request.list', args))())
+      for (const row of r?.items || []) rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
+    } catch {}
+  }))
+  return rows
+}
+
+async function closeAnsweredElsewhere (items) {
+  const targets = merge.answeredElsewhere(items)
+  if (!targets.length) return 0
+  let ok = 0
+  await Promise.all(targets.map(async (t) => {
+    try {
+      await raced((async () => (await connectedLib(t.libraryId)).request('request.resolve', { id: t.id, status: 'added' }))())
+      ok++
+    } catch {}
+  }))
+  // A host that refuses (an older one, still owner-only) or is offline simply stays
+  // pending, which is where it was - so a mixed fleet degrades to today's behaviour
+  // rather than to an error. Nothing here is retried; the next list tries again.
+  if (ok) emit('requests:reconciled', { closed: ok })
+  return ok
+}
+
+async function reconcileRequests () {
+  if (!mergedOn()) return 0
+  return closeAnsweredElsewhere(merge.collapseRequests(await requestRows({})))
 }
 
 // The merged series row a UI-held seriesId belongs to - the UI navigates with
@@ -1267,14 +1326,13 @@ const methods = {
   },
   'request.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('request.list', args)
-    const rows = []
-    await Promise.all(hostsState.hosts.map(async (h) => {
-      try {
-        const r = await raced((async () => (await connectedLib(h.libraryId)).request('request.list', args))())
-        for (const row of r?.items || []) rows.push({ ...row, libraryId: h.libraryId, libraryName: h.libraryName })
-      } catch {}
-    }))
-    return { items: merge.collapseRequests(rows) }
+    const items = merge.collapseRequests(await requestRows(args))
+    // FIRE AND FORGET, and after the answer rather than before it: the collapsed
+    // row already reads `added` here, so nobody is waiting on this. It is the
+    // OTHER libraries' owners who are still looking at a pending ask, and this is
+    // what heals them on a device that was asleep when the answer arrived.
+    closeAnsweredElsewhere(items).catch(() => {})
+    return { items }
   },
   'request.remove': async ({ id, refs }) => {
     if (!mergedOn()) return (await connected()).request('request.remove', { id })
