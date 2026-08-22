@@ -1279,9 +1279,14 @@ export default function App () {
       // With ONE library there is no merged index to answer from, so this throw is the
       // only thing that reaches the screen - and "could not reach the host" is the
       // client's vocabulary, not a sentence. Same words as the merged case above.
-      setErr(/could not reach the host|no answer from the host/i.test(String(e.message || ''))
-        ? 'That computer is not answering, so its films are not showing. It may be asleep, switched off or off the internet.'
-        : e.message)
+      // A LIBRARY THAT REMOVED YOU IS NOT A LIBRARY THAT IS ASLEEP, and the host now
+      // says which it is instead of leaving the phone to guess (2026-08-22).
+      const msg = String(e.message || '')
+      setErr(/no longer shared with you/i.test(msg)
+        ? 'This library is no longer shared with you. Whoever runs it removed this device. You can remove it from Settings.'
+        : /could not reach the host|no answer from the host/i.test(msg)
+          ? 'That computer is not answering, so its films are not showing. It may be asleep, switched off or off the internet.'
+          : msg)
     }
   }, [])
 
@@ -2574,19 +2579,23 @@ export default function App () {
           </div>
           {hosts.map((h) => {
             const online = h.active && linkUp
-            const desc = h.active
-              ? (linkUp ? 'Active, connected' : 'Active, connecting…')
-              : 'Tap to switch to this library'
+            // THE HOST SAID SO ITSELF, so the row can say it plainly rather than leaving
+            // somebody to read "connecting…" for ever and blame their wifi (2026-08-22).
+            const desc = h.revoked
+              ? 'No longer shared with you. Remove it here.'
+              : h.active
+                ? (linkUp ? 'Active, connected' : 'Active, connecting…')
+                : 'Tap to switch to this library'
             return (
               <div
                 className='row' key={h.hostKey}
-                onClick={() => { if (!h.active) call('hosts.setActive', { hostKey: h.hostKey }).then(() => { setSeries(null); setSeason(null); reload() }) }}
-                style={{ cursor: h.active ? 'default' : 'pointer' }}
+                onClick={() => { if (!h.active && !h.revoked) call('hosts.setActive', { hostKey: h.hostKey }).then(() => { setSeries(null); setSeason(null); reload() }) }}
+                style={{ cursor: h.active || h.revoked ? 'default' : 'pointer' }}
               >
                 <div style={{ minWidth: 0 }}>
                   <div className='label'>
                     {h.libraryName || 'Library'}
-                    {h.active && (
+                    {h.active && !h.revoked && (
                       <span className='val' style={{ color: online ? 'var(--color-primary)' : undefined, marginLeft: 8 }}>
                         {online ? '●' : '○'}
                       </span>

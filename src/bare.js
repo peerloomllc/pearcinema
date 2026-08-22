@@ -91,6 +91,34 @@ function relayPolicy ({ force, randomized }) {
 // catalog cache, and vanished on the rebuild without a word.
 const absentLibs = new Map() // libraryId -> the message the failed attempt carried
 
+// LIBRARIES THAT TOLD US WE ARE NO LONGER WELCOME, libraryId -> reason.
+//
+// A host whose grant for this device is gone now says so, once, instead of leaving the
+// phone to guess (`access:revoked`, proposal 2026-08-22-say-goodbye-to-a-revoked-device).
+// Before that, being removed looked exactly like a server that was switched off: "could
+// not reach the host", a library stuck on "connecting…", and a dial every few seconds for
+// as long as the app was open - watched on the TCL, 2026-08-22.
+//
+// IN MEMORY ONLY, and that is a deliberate simplification rather than an oversight. A
+// restart forgets, dials once, and hears the same goodbye - which costs one connection and
+// keeps the phone from carrying a permanent verdict about somebody else's library. If they
+// let this device back in, the next dial simply works.
+const revokedLibs = new Map()
+
+function markRevoked (libraryId, reason = 'device-revoked') {
+  if (revokedLibs.has(libraryId)) return
+  revokedLibs.set(libraryId, reason)
+  log('host:access-revoked', { libraryId, reason })
+  // Hang up rather than sit on a socket that can do nothing, and stop the merged index
+  // counting on a library that is not ours any more.
+  const slot = hostConns.get(libraryId)
+  if (slot?.client) { try { slot.client.close() } catch {} }
+  hostConns.delete(libraryId)
+  contributedLibs.delete(libraryId)
+  emit('hosts:changed', {})
+  if (mergedOn()) buildSoon('access-revoked')
+}
+
 const relayedLibs = new Set()
 
 function libraryForId (id) {
@@ -332,6 +360,10 @@ function hostRow (libraryId) {
 async function connectedLib (libraryId) {
   const row = hostRow(libraryId)
   if (!row) throw new Error('not paired with that library')
+  // Said once by the host, remembered here, so the phone stops knocking on a door that
+  // has been closed - and so every screen that surfaces this error says the true thing
+  // rather than blaming the network.
+  if (revokedLibs.has(libraryId)) throw new Error('this library is no longer shared with you')
 
   let slot = hostConns.get(libraryId)
   if (!slot) { slot = { client: null, connecting: null }; hostConns.set(libraryId, slot) }
@@ -375,6 +407,8 @@ async function connectedLib (libraryId) {
       // Done here rather than in the UI because the screen showing requests is
       // usually not the screen somebody is on.
       if (m?.kind === 'request:resolved' && m.data?.status === 'added') reconcileRequests().catch(() => {})
+      // The last frame this library will ever send us.
+      if (m?.kind === 'access:revoked') markRevoked(libraryId, m.data?.reason)
     }
     c.conn.once('close', () => {
       // Fold in this connection's last stretch BEFORE forgetting it was relayed - a film
@@ -1079,6 +1113,9 @@ const methods = {
         // Tried and failed, as opposed to merely not connected yet - which is what every
         // host looks like for the first few seconds after a cold start.
         absent: absentLibs.has(h.libraryId),
+        // Told to us by the host itself, rather than inferred from a failure to
+        // connect - which is what makes it safe to say out loud on screen.
+        revoked: revokedLibs.has(h.libraryId),
         inMerge: contributedLibs.has(h.libraryId)
       })),
       active: active ? { hostKey: active.hostKey, libraryName: active.libraryName } : null,
