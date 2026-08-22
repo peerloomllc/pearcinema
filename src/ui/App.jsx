@@ -3150,13 +3150,24 @@ export default function App () {
         <div className='sheetwrap' onClick={() => setAskTitle(false)}>
           <div className='sheet' onClick={(e) => e.stopPropagation()}>
             <h3>Ask for something</h3>
+            {/* WHO IS BEING ASKED, said out loud. An ask goes to EVERY library this
+                phone is paired with, on purpose - none of them has the film and any
+                owner might add it - but somebody looking at one friend's shelf has no
+                reason to guess that, and "I asked Ada" quietly telling four other
+                people is not a surprise to spring (found walking the app as a guest,
+                2026-08-22). */}
+            {(state.hosts || []).length > 1 && (
+              <p className='muted' style={{ marginTop: 0 }}>
+                This goes to all {(state.hosts || []).length} of your libraries. Whoever has it can add it.
+              </p>
+            )}
             <form onSubmit={(e) => {
               e.preventDefault()
               const name = e.currentTarget.elements.rq.value.trim()
               const kind = e.currentTarget.elements.kind.value
               if (!name) return
               call('request.add', { kind, name })
-                .then(() => { setAskTitle(false); say('Asked. The owner will see it'); loadYou('requests') })
+                .then(() => { setAskTitle(false); say((state.hosts || []).length > 1 ? 'Asked. Every library you are in will see it' : 'Asked. The owner will see it'); loadYou('requests') })
                 .catch((er) => setErr(er.message))
             }}>
               <input name='rq' className='search' placeholder='Title' autoFocus />
