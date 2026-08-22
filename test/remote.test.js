@@ -288,6 +288,70 @@ test('requests and the rollups travel the wire', { timeout: 120000 }, async (t) 
   assert.equal((await (await get('/api/requests')).json()).items.length, 0)
 })
 
+test('ONE QUEUE ACROSS YOUR MACHINES, and answering it reaches them all', { timeout: 120000 }, async (t) => {
+  // A request is filed with EVERY library the person can reach, and only the machine
+  // that answers writes it down. So answering on one dashboard used to leave the ask
+  // pending on the other, and one owner could add a film the other had already added
+  // (Tim, 2026-08-21). The phone's half shipped in #159; this is the dashboards'.
+  const { friend, desktop, post, get } = await rig(t)
+
+  // Paired as an OWNER of the other machine, which is what "your other machine" means -
+  // `request.all` is owner-only, and a library this one is merely a guest of stays out
+  // of the queue by that rule alone.
+  const link = friend.startPairing({ owner: true })
+  const paired = await post('/api/remote/pair', { link })
+  assert.ok(paired.libraryId)
+
+  // The same ask on both machines, as a phone would file it.
+  await friend.userState.addRequest('p:ada', { kind: 'movie', name: 'The General' })
+  await desktop.userState.addRequest('p:ada', { kind: 'movie', name: 'The General' })
+
+  const queue = await (await get('/api/asked')).json()
+  assert.equal(queue.items.length, 1, 'one ask, not one per machine')
+  const row = queue.items[0]
+  assert.equal(row.name, 'The General')
+  assert.equal(row.status, 'pending')
+  assert.equal(row.refs.length, 2, 'carrying both copies')
+  assert.deepEqual(row.libraries.sort(), ['The Desktop', 'The Friend'], 'and saying where they are')
+
+  // Answer it here, once.
+  const answered = await post('/api/asked/resolve', { id: row.id, status: 'added', refs: row.refs })
+  assert.ok(!answered.error, answered.error)
+
+  // BOTH stores say added - the point of the whole exercise.
+  assert.equal((await desktop.userState.listRequests())[0].status, 'added')
+  assert.equal((await friend.userState.listRequests())[0].status, 'added', 'the other machine heard it too')
+
+  // And the queue reads as done rather than showing it again.
+  const after = await (await get('/api/asked')).json()
+  assert.equal(after.items.length, 1)
+  assert.equal(after.items[0].status, 'added')
+})
+
+test('A DECLINE ON ONE MACHINE IS NOT AN ANSWER FOR THE OTHER', { timeout: 120000 }, async (t) => {
+  // The same rule the phone follows: one owner declining is their answer about their
+  // own library, and the fan-out only touches copies still PENDING. Here the other
+  // machine has already added it, and an operator declining locally must not rewrite
+  // that.
+  const { friend, desktop, post, get } = await rig(t)
+  const link = friend.startPairing({ owner: true })
+  await post('/api/remote/pair', { link })
+
+  const there = await friend.userState.addRequest('p:ada', { kind: 'movie', name: 'Stalker' })
+  await friend.userState.resolveRequest(there.id, 'added')
+  await desktop.userState.addRequest('p:ada', { kind: 'movie', name: 'Stalker' })
+
+  const queue = await (await get('/api/asked')).json()
+  assert.equal(queue.items.length, 1, 'one row, both machines')
+  const row = queue.items[0]
+  assert.equal(row.refs.length, 2, 'and it knows about both copies, or the guard below proves nothing')
+  assert.equal(row.status, 'pending', 'the owner queue folds pending-first: there is still work here')
+
+  await post('/api/asked/resolve', { id: row.id, status: 'declined', refs: row.refs })
+  assert.equal((await desktop.userState.listRequests())[0].status, 'declined')
+  assert.equal((await friend.userState.listRequests())[0].status, 'added', 'their answer stands')
+})
+
 // --- news that arrives on its own -------------------------------------------
 //
 // The dashboard had a 10s poll standing in for pushes on the requests card, and

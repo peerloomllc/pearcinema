@@ -449,7 +449,14 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'request.all': async (ctx) => {
       if (!ctx.isOwner) throw ctx.forbidden('owner only')
       if (!state) return { items: [] }
-      return { items: await state.listRequests() }
+      const rows = await state.listRequests()
+      // WHO ASKED, by the name their owner chose. The dashboard's own route has always
+      // decorated these; the wire answer did not, so an owner reading the same queue
+      // from a phone - or from another machine's dashboard, which reads it through
+      // here - saw a key or nothing at all.
+      const labels = grants ? await grants.personLabels().catch(() => null) : null
+      if (!labels) return { items: rows }
+      return { items: rows.map((r) => ({ ...r, requesterLabel: labels.get(r.requester) || null })) }
     },
 
     // OWNER, OR THE PERSON WHO FILED THIS ROW - and the second half is what makes
