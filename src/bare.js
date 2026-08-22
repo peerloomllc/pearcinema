@@ -440,6 +440,30 @@ async function connectedLib (libraryId) {
   }
 }
 
+// WHO THIS DEVICE ALREADY GOES BY, asked of a library that already knows.
+//
+// The name lives on each host, not here - it is what the person claimed and what the
+// operator confirmed - so a phone that has never edited its name has nothing of its
+// own to introduce. Rather than let a new library file it as "device", ask a library
+// that has been answering that question for months. Cached by the identity.get above,
+// so this runs once.
+//
+// Best effort and quiet: if no library answers, the pairing still succeeds and the
+// name arrives with the next rename.
+async function borrowIdentity () {
+  for (const h of hostsState.hosts) {
+    try {
+      const out = await raced((async () => (await connectedLib(h.libraryId)).request('identity.get', {}))())
+      if (out?.userName || out?.deviceName) {
+        const name = { userName: out.userName || null, deviceName: out.deviceName || null }
+        writeSettings({ ...readSettings(), identity: name })
+        return name
+      }
+    } catch {}
+  }
+  return null
+}
+
 // The active host, for everything that is per-device or per-dashboard rather
 // than per-item: identity, devices, pairing, requests.
 async function connected () {
@@ -1155,7 +1179,7 @@ const methods = {
       // TELL IT WHO WE ARE, at once, so the person on the other end sees a name in
       // People rather than "device". Best effort: a library that will not take it is
       // still paired, and the name arrives with the next rename.
-      const known = readSettings().identity
+      const known = readSettings().identity || await borrowIdentity()
       if (known?.userName || known?.deviceName) {
         try {
           await raced((async () => (await connectedLib(paired.libraryId)).request('identity.set', known))())
@@ -1498,6 +1522,16 @@ const methods = {
     // row, which was captured at pair time and is never otherwise refreshed
     // (renameHost is idempotent, so the steady state costs nothing). Without
     // this, two libraries both showing "My Library" is the norm, not the edge.
+    // SEED THE LOCAL COPY from whatever a library already calls us. Without this the
+    // introduction below has nothing to say until the person happens to edit their
+    // name, which for an existing phone is never - the fix would ship and change
+    // nothing (caught pairing a guest on the TCL right after building it, 2026-08-22).
+    if (out?.userName || out?.deviceName) {
+      const held = readSettings().identity
+      if (held?.userName !== out.userName || held?.deviceName !== out.deviceName) {
+        writeSettings({ ...readSettings(), identity: { userName: out.userName || null, deviceName: out.deviceName || null } })
+      }
+    }
     const active = H.activeHost(hostsState)
     if (active && out?.libraryName && out.libraryName !== active.libraryName) {
       hostsState = H.renameHost(hostsState, active.hostKey, out.libraryName)
