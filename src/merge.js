@@ -405,8 +405,8 @@ function parseMergedSeasonId (id) {
 
 // The season rows for one merged series, derived from the deduped episodes -
 // the union across hosts, ordered specials-first-numerically then titled sets.
-function seasonsFor (index, seriesKeyStr) {
-  const eps = index.episodes.filter((e) => e.seriesKey === seriesKeyStr)
+function seasonsFor (index, seriesKeyStr, libraryId = null) {
+  const eps = filterByLibrary(index.episodes, libraryId).filter((e) => e.seriesKey === seriesKeyStr)
   const groups = new Map()
   for (const e of eps) {
     const slot = e.seasonNumber == null ? `t:${e.seasonTitle || ''}` : e.seasonNumber
@@ -438,8 +438,8 @@ function seasonsFor (index, seriesKeyStr) {
 }
 
 // The episodes of one merged season, in airing order across hosts.
-function episodesFor (index, seriesKeyStr, seasonNumber, seasonTitle) {
-  return index.episodes
+function episodesFor (index, seriesKeyStr, seasonNumber, seasonTitle, libraryId = null) {
+  return filterByLibrary(index.episodes, libraryId)
     .filter((e) => e.seriesKey === seriesKeyStr &&
       (seasonNumber == null
         ? e.seasonNumber == null && (e.seasonTitle || '') === (seasonTitle || '')
@@ -451,8 +451,8 @@ function episodesFor (index, seriesKeyStr, seasonNumber, seasonTitle) {
 // Every episode of a merged series in watch order - the sibling walk's
 // universe. Seasons interleave across hosts (the spanning-series wrinkle);
 // unnumbered sets sort after numbered seasons, alphabetically within.
-function seriesRun (index, seriesKeyStr) {
-  const eps = index.episodes.filter((e) => e.seriesKey === seriesKeyStr)
+function seriesRun (index, seriesKeyStr, libraryId = null) {
+  const eps = filterByLibrary(index.episodes, libraryId).filter((e) => e.seriesKey === seriesKeyStr)
   return eps.sort((a, b) => {
     const an = a.seasonNumber ?? Infinity
     const bn = b.seasonNumber ?? Infinity
@@ -491,6 +491,15 @@ function sortItems (items, key, order = 'asc') {
 // Narrow the merged list to items with a copy on `libraryId`. '_all'/falsy is
 // the whole blend. This is why the per-host view is free: it is the merged
 // index filtered.
+// THE CHIP, applied. `null` and `_all` mean the blend, and everything else narrows
+// to the entries one library actually holds.
+//
+// EVERY LIST THE CHIP IS SET OVER HAS TO USE THIS, and for a while three did not:
+// a show's seasons, its episodes and search went to the whole index (found walking
+// the app as a guest, 2026-08-22). Filtered to a friend's library, their show grew
+// two seasons off somebody else's host and a search returned hundreds of episodes
+// that library has never heard of - under their name, which is what made it read as
+// a fact about their collection rather than a bug.
 function filterByLibrary (items, libraryId) {
   if (!libraryId || libraryId === '_all') return items || []
   return (items || []).filter(
@@ -500,7 +509,7 @@ function filterByLibrary (items, libraryId) {
 
 // Search the merged index: normalized substring match, title-prefix hits
 // first, then shows by name, both alphabetical inside their band.
-function searchIndex (index, q, limit = 60) {
+function searchIndex (index, q, limit = 60, libraryId = null) {
   const needle = norm(q)
   if (!needle) return { movies: [], series: [], episodes: [] }
   const score = (title) => {
@@ -515,9 +524,9 @@ function searchIndex (index, q, limit = 60) {
     .slice(0, limit)
     .map((r) => r.x)
   return {
-    movies: pick(index.movies, (m) => m.title),
-    series: pick(index.series, (s) => s.title),
-    episodes: pick(index.episodes, (e) => `${e.seriesTitle || ''} ${e.title}`)
+    movies: pick(filterByLibrary(index.movies, libraryId), (m) => m.title),
+    series: pick(filterByLibrary(index.series, libraryId), (s) => s.title),
+    episodes: pick(filterByLibrary(index.episodes, libraryId), (e) => `${e.seriesTitle || ''} ${e.title}`)
   }
 }
 
