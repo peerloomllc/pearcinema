@@ -46,6 +46,23 @@ const PROBE_CONCURRENCY = 4
 // index and the probe store beside it.
 const CACHE_VERSION = 7
 
+// HOW THIS BUILD READ THOSE FILES, which is a different question from what the files
+// ARE and now has its own number.
+//
+// Every bump of CACHE_VERSION above threw the probes away with the index, because each
+// one added something only ffprobe could answer. A change to the NAME PARSER is not
+// that: the bytes on the disk have not moved, so re-reading 2,986 files with ffprobe
+// buys nothing, but the rows built from those probes are stale the moment a rule
+// changes and would go on being served for up to SCAN_TTL_MS.
+//
+// So a parser change bumps this instead: the index is rebuilt on the next start, from
+// probes that are still perfectly good, in seconds rather than minutes.
+//
+//   1 - the part marker. `- Pt 1` is read off a filename as half of a film rather
+//       than left in the title, and stops being read as episode 1 of the folder it
+//       sits in.
+const INDEX_VERSION = 1
+
 // How many files to stat at once when deciding which of them need probing. A stat is
 // nothing next to an ffprobe, but three thousand at once is three thousand open file
 // descriptors, so it goes in handfuls.
@@ -866,6 +883,11 @@ class FolderAdapter {
       // only files whose size or mtime has changed. A version 6 cache has none, which
       // costs one full probe pass and then behaves like any other.
       if (raw.version !== CACHE_VERSION) return false
+      // AND THE PARSER THAT BUILT THESE ROWS, which is why this is separate from the
+      // version above: an index read by an older set of rules is stale even though
+      // every probe in the same file is still true. Rejecting here rebuilds the rows
+      // and keeps the probes - see INDEX_VERSION.
+      if (raw.indexVersion !== INDEX_VERSION) return false
       // A cache built from different folders describes a different library - and a
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
@@ -903,6 +925,7 @@ class FolderAdapter {
       await fsp.mkdir(path.dirname(file), { recursive: true })
       await fsp.writeFile(file, JSON.stringify({
         version: CACHE_VERSION,
+        indexVersion: INDEX_VERSION,
         roots: this.roots,
         scannedAt: this.scannedAt,
         movies,

@@ -332,6 +332,47 @@ test('THE CACHE SPARES A RESCAN, because 12,000 files is twenty minutes of disk'
   assert.ok(second.scannedAt)
 })
 
+test('A NEW PARSER REBUILDS THE ROWS AND KEEPS THE PROBES', async (t) => {
+  // The half-fix this guards against: a rule changes, every deployed host goes on
+  // serving rows built by the old one until something forces a rescan. The index is
+  // rejected on its own version now, so the next start rebuilds it - but the probes
+  // in the same file are still true, so nothing is read off the disk again.
+  const { root, dataDir } = await library(t)
+
+  const first = realAdapter({ root, dataDir })
+  await first.scan()
+  const before = (await first.list({ type: 'movies' })).total
+
+  const file = first._cacheFile()
+  const raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+  assert.ok(Object.keys(raw.probes).length > 0, 'the probes are in there to begin with')
+  raw.indexVersion = 0 // what a cache written by yesterday's parser looks like
+  await fsp.writeFile(file, JSON.stringify(raw))
+
+  // AN FFPROBE THAT CANNOT RUN is how "nothing was read off the disk again" is
+  // proven rather than asserted: every file this walk had to probe would come back
+  // unreadable and drop out of the library.
+  const second = realAdapter({ root, dataDir })
+  second.ffprobe = '/nonexistent/ffprobe-must-not-run'
+  await second.scan()
+  assert.equal((await second.list({ type: 'movies' })).total, before, 'the rows came back')
+
+  const rewritten = JSON.parse(await fsp.readFile(file, 'utf8'))
+  assert.equal(rewritten.indexVersion, 1, 'and the cache says which parser wrote it')
+
+  // The other half of the claim: with the probes gone too, that same broken ffprobe
+  // empties the library - so the assertion above was about the probes being reused
+  // and not about a scan that never happened.
+  const stripped = JSON.parse(await fsp.readFile(file, 'utf8'))
+  stripped.indexVersion = 0
+  stripped.probes = {}
+  await fsp.writeFile(file, JSON.stringify(stripped))
+  const third = realAdapter({ root, dataDir })
+  third.ffprobe = '/nonexistent/ffprobe-must-not-run'
+  await third.scan()
+  assert.equal((await third.list({ type: 'movies' })).total, 0)
+})
+
 test('the cache is refused when it describes a DIFFERENT library', async (t) => {
   const { root, dataDir } = await library(t)
   await realAdapter({ root, dataDir }).scan()
