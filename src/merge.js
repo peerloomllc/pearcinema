@@ -530,6 +530,45 @@ function searchIndex (index, q, limit = 60, libraryId = null) {
   }
 }
 
+// THE CONTINUE SHELF, folded the way every other list is.
+//
+// Each host answers with its OWN rows, so the same film half-watched on two libraries
+// arrived as two cards - Tim's shelf carried "Josee, the Tiger and the Fish" and
+// "Josee The Tiger And The Fish" as separate entries, which is the merge working
+// everywhere except here (found walking the app as a guest, 2026-08-22). And the chip
+// was ignored, so a friend's library showed four films of mine and none of theirs.
+//
+// Both are one operation: map each row onto the merged entry that owns its id, keep
+// the freshest position per entry, and hand back the MERGED item so the card opens the
+// same thing the grid would.
+//
+// A row whose id the index does not know - an index still building, a film removed
+// since - keeps its own identity rather than vanishing. A shelf that silently drops a
+// place somebody had is worse than one that shows it twice.
+function collapseResume (rows, index = null, libraryId = null) {
+  const owner = new Map()
+  for (const list of [index?.movies, index?.episodes]) {
+    for (const entry of list || []) {
+      for (const c of entry.copies || []) owner.set(c.id, entry)
+    }
+  }
+
+  const byKey = new Map()
+  for (const r of filterByLibrary(rows || [], libraryId)) {
+    if (!r) continue
+    const entry = owner.get(r.id) || null
+    const key = entry ? entry.key : `${r.libraryId || ''}|${r.id}`
+    const at = Number(r.resume?.playedAt) || 0
+    const held = byKey.get(key)
+    if (held && (Number(held.row.resume?.playedAt) || 0) >= at) continue
+    byKey.set(key, { row: r, entry })
+  }
+
+  return [...byKey.values()]
+    .map(({ row, entry }) => (entry ? { ...entry, resume: row.resume } : row))
+    .sort((a, b) => (Number(b.resume?.playedAt) || 0) - (Number(a.resume?.playedAt) || 0))
+}
+
 // --- requests across a blended library (phase 2) -----------------------------
 //
 // In merged mode a request is filed with EVERY connected host - none of them
@@ -656,5 +695,6 @@ module.exports = {
   bestCopy,
   collapseRequests,
   requestTargets,
-  answeredElsewhere
+  answeredElsewhere,
+  collapseResume
 }

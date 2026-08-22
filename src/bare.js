@@ -1313,9 +1313,17 @@ const methods = {
   },
   'resume.list': async (args) => {
     if (!mergedOn()) return (await connected()).request('resume.list', args)
-    const rows = await fanOut((c) => c.request('resume.list', args))
-    const items = rows.flatMap((r) => r?.items || [])
-      .sort((a, b) => (b.resume?.playedAt || 0) - (a.resume?.playedAt || 0))
+    // Tagged with the library that answered, because collapsing needs to know where a
+    // row came from - both to honour the chip and to fold the same film watched on two
+    // libraries into the one card it is everywhere else.
+    const rows = []
+    await Promise.all(hostsState.hosts.map(async (h) => {
+      try {
+        const r = await raced((async () => (await connectedLib(h.libraryId)).request('resume.list', args))())
+        for (const it of r?.items || []) rows.push({ ...it, libraryId: h.libraryId })
+      } catch {}
+    }))
+    const items = merge.collapseResume(rows, mergedIndex, libraryFilter())
     return { items: items.slice(0, Number(args.limit) || 20) }
   },
   // Emptying the shelf empties EVERY library's, because the shelf it empties is
