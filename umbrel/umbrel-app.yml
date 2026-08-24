@@ -3,7 +3,7 @@ id: peerloom-pearcinema
 name: PearCinema
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "0.1.0"
+version: "1.0.0"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -27,6 +27,35 @@ description: >-
   this machine.
 
 
+  YOU CAN ALSO JUST WATCH IT HERE. This dashboard is a player, so a laptop or a
+  desktop on your network can open the library and start a film without installing
+  anything at all.
+
+
+  IT MAKES YOUR FILES PLAY, whatever they are. Files your phone can already handle go
+  straight through untouched. Anything it cannot, this machine repackages or converts
+  as it plays, using the graphics chip it has - Intel, AMD, NVIDIA or Apple - so it
+  costs the processor almost nothing. Subtitles come along, including the picture
+  subtitles from discs, which are drawn onto the film where a phone cannot show them
+  by itself.
+
+
+  KEEP A FILM FOR THE PLANE. Download it to a phone and it plays with everything
+  switched off, converted in advance if that device needs it. On a train or in a car
+  it works over mobile data too, at a lower quality so it does not eat a data plan.
+
+
+  PUT IT ON THE TELEVISION. Cast to a Roku or a Samsung TV on your network and drive
+  it from your phone, including from the lock screen. When an episode ends, the next
+  one is offered.
+
+
+  EVERYBODY GETS THEIR OWN PLACE IN IT. Where you stopped follows you from your phone
+  to your laptop and back, and every person in the house has their own list rather
+  than sharing yours. Have more than one machine running PearCinema? Pair with both
+  and they look like one library.
+
+
   YOU decide who gets in. Every device that pairs appears here with a name it chose
   and a person it belongs to. Revoke a device and playback stops within a second,
   mid-film - not "on next login". Revoke a person and every device they hold dies at
@@ -38,7 +67,8 @@ description: >-
   their own place here, with their own devices and their own place in whatever they
   were watching - and no login to pass around. Hand out a guest pass that expires by
   itself, or cut someone off the moment you want to. They never get a copy of a
-  single file.
+  single file. If they want something you do not have, they can ask, and the ask
+  arrives here.
 
 
   Pair a device by scanning the QR code on this dashboard with the PearCinema app.
@@ -49,17 +79,34 @@ repo: https://github.com/peerloomllc/pearcinema
 support: https://github.com/peerloomllc/pearcinema/issues
 gallery: []
 releaseNotes: |-
-  First release. What works today:
-  - Play films and shows from a Jellyfin or Emby server, or straight from a folder.
-  - Skip to any point in a film without downloading it first.
-  - Pair a device by scanning a code. Revoke it and playback stops within a second.
-  - Guest passes that expire by themselves.
+  First release.
 
-  Good to know:
+  New features
+  - Play your films and shows from a Jellyfin or Emby server, or straight from a
+    folder of files.
+  - Watch in this dashboard, on any computer on your network, with nothing to install.
+  - Files that will not play on your phone are repackaged or converted here as they
+    play, on the machine's graphics chip.
+  - Subtitles, including the picture subtitles from discs.
+  - Download a film to a phone and watch it with everything switched off.
+  - Cast to a Roku or a Samsung TV, and drive it from your phone's lock screen.
+  - Where you stopped follows you between your own devices, and everyone in the house
+    has their own list.
+  - Pair with more than one machine and they look like one library.
+  - Someone you have shared with can ask for a film you do not have.
+
+  Sharing and safety
+  - Pair a device by scanning a code. Revoke it and playback stops within a second,
+    mid-film.
+  - Guest passes that expire by themselves.
+  - Nothing about your library is uploaded anywhere, and nobody you share with gets a
+    copy of a file.
+
+  Good to know
   - The phone apps are not in the app stores yet.
-  - This version plays your files as they are and does not convert them. Android
-    handles almost everything; some files will not play on an iPhone yet.
   - Films kept on an external drive work, including drives you plug in later.
+  - Away from home on mobile data, playback is held to a lower quality so it does not
+    eat a data plan.
 path: ""
 defaultUsername: ""
 # umbrelOS replaces defaultPassword with the derived value when this is set - it is

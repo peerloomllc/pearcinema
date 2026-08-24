@@ -67,7 +67,7 @@ services:
       # transcode all still treat the library as read-only.
       - ${UMBREL_ROOT}/home/Downloads:/library
 
-      # EXTERNAL DRIVES, and `propagation: rslave` is the load-bearing part.
+      # EXTERNAL DRIVES, and `rslave` is the load-bearing part.
       #
       # Without it, a drive plugged in AFTER this container started is invisible
       # inside it - the mount happens in the host's namespace and never propagates.
@@ -75,11 +75,21 @@ services:
       # hunting through the app instead of at the mount. This is the same gap
       # already logged against PearTune, and it matters far more here because an
       # external drive is the normal case for video rather than an unusual one.
-      - type: bind
-        source: ${UMBREL_ROOT}/external
-        target: /external
-        bind:
-          propagation: rslave
+      #
+      # SHORT SYNTAX IS A HARD RULE HERE, and this line was the long form until
+      # 2026-08-24. umbreld patches an app's compose on install AND on update, and
+      # its patcher calls .replace() on every volume entry - so an object volume
+      # crashes both with "volume?.replace is not a function". That is exactly how
+      # PearTune's store listing 1.0.4 wedged mid-update at 1% with the container
+      # already removed, leaving the app stuck in "updating" for good (peartune
+      # DONE 2026-08-17). This listing has never been installed, so it would have
+      # been the FIRST install that hit it. test/umbrel-compose.test.js guards it.
+      #
+      # Writable rather than `:ro` - PearTune's is read-only and PearCinema's cannot
+      # be, because the library that gets metadata saved beside it is usually the one
+      # on the external drive. Only the dashboard's explicit save action ever writes,
+      # and it only ever creates new files (host/sidecars.js).
+      - ${UMBREL_ROOT}/external:/external:rslave
 
     # THE VIDEO ENGINE, for hardware transcode (proposals/2026-08-13-hardware-
     # transcode.md). This is the compose edit PR #9 promised would be enough, and it
