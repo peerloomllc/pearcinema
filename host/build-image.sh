@@ -128,7 +128,15 @@ if [ "$PUSH" = "--push" ]; then
   else
     # podman builds each architecture into a MANIFEST LIST, which is the same thing
     # buildx's --platform produces, and pushes the list rather than one image.
-    podman manifest rm "$IMAGE:$VERSION" >/dev/null 2>&1 || true
+    # CLEAR THE NAME FIRST, and it is not always a manifest that holds it. A plain
+    # `./host/build-image.sh <version>` earlier in the day leaves an ordinary IMAGE on
+    # that tag, and `manifest create` then refuses with "that name is already in use"
+    # - which `manifest rm` does not fix, because there is no manifest to remove.
+    if podman manifest exists "$IMAGE:$VERSION" 2>/dev/null; then
+      podman manifest rm "$IMAGE:$VERSION" >/dev/null 2>&1 || true
+    elif podman image exists "$IMAGE:$VERSION" 2>/dev/null; then
+      podman untag "$IMAGE:$VERSION" >/dev/null 2>&1 || true
+    fi
     podman manifest create "$IMAGE:$VERSION"
     podman build --format docker --platform linux/amd64,linux/arm64 --manifest "$IMAGE:$VERSION" .
     podman manifest push --all "$IMAGE:$VERSION" "docker://$IMAGE:$VERSION"
