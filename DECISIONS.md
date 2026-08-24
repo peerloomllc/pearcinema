@@ -2,6 +2,72 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-24 - THE NVIDIA CONVERSION NEVER LEAVES THE CARD, AND THE PROBE DECIDES
+Tier: T1 (a second lane of an existing engine, chosen by measurement, with the proven one
+as the fallback). TODO item "The all-on-the-GPU NVENC path, when a machine can prove it",
+filed 2026-08-20 and deliberately left out of #140.
+
+Context: `-hwaccel cuda` without `-hwaccel_output_format cuda` decodes on the card and
+copies every frame down to system memory, where a CPU filter converts 10-bit to 8-bit and
+the encoder copies it back up. That was shipped on purpose - `scale_cuda` is a BUILD option
+rather than a card feature, and no machine here was both an NVIDIA box and running a build
+that has it, so writing the fast path would have been reading a feature off a spec sheet.
+That is the AV1 mistake (2026-08-16) exactly.
+
+WHAT CHANGED IS THAT THE MACHINE TURNED UP, and it was here all along. The vendored
+ffmpeg this repo already ships as `vendor/ffmpeg/linux-x64` - the build the desktop app
+installs on a machine that has never heard of ffmpeg - carries `scale_cuda` and
+`overlay_cuda`, and Tim's desktop has the RTX 4070 Ti. The blocker as filed asked for the
+container image on an NVIDIA box; the desktop build on an NVIDIA box answers the same
+question, and is how an NVIDIA gaming PC would actually run this.
+
+MEASURED, 2026-08-24, driver 610.57.04, 60 seconds of output per run:
+
+|                     | wall            | CPU seconds burnt |
+| ------------------- | --------------- | ----------------- |
+| 1080p HEVC Main 10  | 3.21s -> 3.10s  | 8.13 -> 0.74      |
+| 4K HEVC Main 10     | 18.15s -> 11.02s| 55.96 -> 1.25     |
+
+The clock is the boring half. At 1080p it barely moves, and anyone costing this on wall
+time alone would drop it. THE CPU NUMBER IS THE POINT: 11x less at 1080p and 45x less at
+4K, which is what decides how many streams a host serves at once - the conversion stops
+competing with the scan, the HTTP path and the other conversions. #138's engine
+measurement will find a bigger number on the same hardware for that reason. The 4K case
+is also far steadier: three runs of the old lane took 13.09s, 14.43s and 17.06s while the
+new one took 11.04s, 11.06s and 11.06s, and a stream that must keep up with realtime cares
+about the worst run rather than the median.
+
+WHY IT IS SAFE TO PREFER, which is the rule engines.js already sets for itself. `nvenc-cuda`
+is offered ahead of `nvenc` and the probe settles it: the probe uploads a frame and runs
+`scale_cuda` on it, so a build without the filter exits non-zero with no bytes and
+`pickEngine` falls through to the lane every existing install already runs, byte-identical.
+Proven both ways on this box - the vendored build picks `nvenc-cuda`, Fedora's own ffmpeg
+answers "Filter not found" and lands on `nvenc`.
+
+THREE THINGS TESTED RATHER THAN ASSUMED:
+
+- **A codec the card cannot decode still works.** `-hwaccel_output_format cuda` looks like
+  it would hard-fail where the old lane silently decodes in software. It does not: MPEG-4
+  Part 2 through the new lane produced byte-identical output, because ffmpeg falls back to
+  software decode and inserts the upload itself. HEVC 4:4:4 decoded on the card outright on
+  this generation.
+- **The first run costs five seconds.** `scale_cuda`'s kernel is compiled by the driver on
+  first use and cached: 5.38s cold against 0.46s warm, measured by pointing CUDA_CACHE_PATH
+  at an empty directory rather than by clearing anyone's real cache. The startup probe pays
+  it, so the first viewer to press play gets a warm one. A recreated container pays it again,
+  at startup, where it is a slow probe rather than a stalled film.
+- **Software frames take the old lane's answer, deliberately.** Burning in a subtitle and
+  tone mapping are CPU filters, so the frames are in system memory already and there is
+  nothing to save by uploading them by hand. Both NVIDIA lanes build the identical burn-in
+  graph, which keeps `overlay_cuda` out of this entirely - and the reason to leave it out is
+  already written down (DECISIONS 2026-08-15: the engine's own compositor is a third faster
+  and SEGFAULTS on real discs when a PGS stream changes composition size mid-stream).
+
+WHAT IS STILL NOT PROVEN: the deployed container image. Debian's ffmpeg is a different build
+from the vendored one, and no NVIDIA box here runs the image - podman is installed but
+nvidia-container-toolkit is not, and it is not in Fedora's repositories. That gap costs
+nothing now: an image without the filter fails the first probe and converts on the second.
+
 ## 2026-08-22 - A DEVICE WE ONCE LET IN IS TOLD SO, ONCE
 Tier: T3 (an auth gate speaks where it used to be silent). Proposal
 `2026-08-22-say-goodbye-to-a-revoked-device.md`, approved by merging PR #164; built in
