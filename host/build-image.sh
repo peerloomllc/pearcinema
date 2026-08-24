@@ -18,6 +18,9 @@
 #   ./host/build-image.sh 0.1.0            # local, current arch
 #   ./host/build-image.sh 0.1.0 --push     # multi-arch to ghcr.io
 #
+# Works with docker OR podman, whichever the machine has - the box holding the ghcr
+# credential is not always the box holding Docker.
+#
 # Umbrel Home is x86_64; a Pi-class Umbrel is arm64. A single-arch image installs
 # on one and fails on the other with an error that says nothing useful, so --push
 # always builds both.
@@ -80,17 +83,69 @@ cp "$REPO/host/Dockerfile" "$STAGE/Dockerfile"
 
 cd "$STAGE"
 
+# DOCKER OR PODMAN, because the machine that has the credential is not always the machine
+# that has Docker. This repo's own development box runs Fedora with podman and no docker
+# at all, and the Umbrel that has docker has no ghcr login - so insisting on one of them
+# meant the image could not be built anywhere (2026-08-24). Both speak the same Dockerfile
+# and both can push a multi-arch manifest to ghcr; only the words differ.
+if command -v docker >/dev/null 2>&1; then
+  ENGINE=docker
+elif command -v podman >/dev/null 2>&1; then
+  ENGINE=podman
+else
+  echo "neither docker nor podman is installed - nothing can build this" >&2
+  exit 1
+fi
+echo "building with $ENGINE"
+
+# PODMAN MUST BE TOLD `--format docker`, and the cost of not telling it is silent.
+# podman writes OCI images by default, and the OCI image spec has no HEALTHCHECK field -
+# so podman drops the Dockerfile's healthcheck with a warning in the middle of a hundred
+# lines of build output and produces an image that looks fine. The healthcheck is the
+# thing that catches the failure mode that actually matters here: a host that is running
+# and unreachable. Docker's format carries it.
+
+# BOTH ARCHITECTURES, ALWAYS, on a push. Umbrel Home is x86_64 and a Pi-class Umbrel is
+# arm64; a single-arch image installs on one and fails on the other with an error that
+# says nothing useful. Cross-building needs qemu registered with binfmt_misc, which is
+# what `qemu-user-static` provides - check it rather than discover it as an exec-format
+# error forty layers in.
+if [ "$PUSH" = "--push" ] && [ "$ENGINE" = "podman" ]; then
+  if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
+    echo "no qemu-aarch64 registered with binfmt_misc, so the arm64 half cannot be built here" >&2
+    echo "install qemu-user-static (Fedora: sudo dnf install qemu-user-static-aarch64)" >&2
+    exit 1
+  fi
+fi
+
 if [ "$PUSH" = "--push" ]; then
-  docker buildx build \
-    --platform linux/amd64,linux/arm64 \
-    -t "$IMAGE:$VERSION" \
-    --push .
+  if [ "$ENGINE" = "docker" ]; then
+    docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      -t "$IMAGE:$VERSION" \
+      --push .
+    DIGEST="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+  else
+    # podman builds each architecture into a MANIFEST LIST, which is the same thing
+    # buildx's --platform produces, and pushes the list rather than one image.
+    podman manifest rm "$IMAGE:$VERSION" >/dev/null 2>&1 || true
+    podman manifest create "$IMAGE:$VERSION"
+    podman build --format docker --platform linux/amd64,linux/arm64 --manifest "$IMAGE:$VERSION" .
+    podman manifest push --all "$IMAGE:$VERSION" "docker://$IMAGE:$VERSION"
+    DIGEST="$(podman manifest inspect "$IMAGE:$VERSION" | sha256sum | awk '{print "sha256:"$1}')"
+    # That digest is of the local manifest bytes, which is NOT necessarily what the
+    # registry stored. Ask the registry itself, which is the only answer worth pinning.
+    REG="$(skopeo inspect --raw "docker://$IMAGE:$VERSION" 2>/dev/null | sha256sum | awk '{print "sha256:"$1}' || true)"
+    [ -n "$REG" ] && DIGEST="$REG"
+  fi
   echo
   echo "pushed $IMAGE:$VERSION"
   echo "PIN IT BY DIGEST in umbrel/docker-compose.yml - the digest is the rollback plan:"
-  docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}' || true
+  echo "  image: $IMAGE:$VERSION@$DIGEST"
 else
-  docker build -t "$IMAGE:$VERSION" .
+  FORMAT=""
+  [ "$ENGINE" = "podman" ] && FORMAT="--format docker"
+  $ENGINE build $FORMAT -t "$IMAGE:$VERSION" .
   echo
   echo "built $IMAGE:$VERSION (this architecture only - use --push for a release)"
 fi

@@ -63,10 +63,13 @@ THREE THINGS TESTED RATHER THAN ASSUMED:
   already written down (DECISIONS 2026-08-15: the engine's own compositor is a third faster
   and SEGFAULTS on real discs when a PGS stream changes composition size mid-stream).
 
-WHAT IS STILL NOT PROVEN: the deployed container image. Debian's ffmpeg is a different build
-from the vendored one, and no NVIDIA box here runs the image - podman is installed but
-nvidia-container-toolkit is not, and it is not in Fedora's repositories. That gap costs
-nothing now: an image without the filter fails the first probe and converts on the second.
+WHAT IS STILL NOT PROVEN, narrowed the same day by actually building and running the image:
+Debian bookworm's ffmpeg 5.1.9 in the deployed image HAS `scale_cuda` and `overlay_cuda`,
+checked inside a running container, so the filters are not the gap. What is left is running
+them against a real NVIDIA card INSIDE a container, which needs the NVIDIA Container Toolkit
+- podman is installed on the box with the card and the toolkit is not, and it is not in
+Fedora's repositories. That gap costs nothing: an image that cannot run the filter fails the
+first probe and converts on the second.
 
 ## 2026-08-22 - A DEVICE WE ONCE LET IN IS TOLD SO, ONCE
 Tier: T3 (an auth gate speaks where it used to be silent). Proposal
