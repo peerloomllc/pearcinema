@@ -60,16 +60,11 @@ const VAAPI = {
   ]
 }
 
-// NVENC, AND DELIBERATELY THE COMPATIBLE HALF OF IT. `-hwaccel cuda` without
-// `-hwaccel_output_format cuda` decodes on the card and hands the frames back to system
-// memory, so every filter after it is an ordinary CPU filter and the encode is still on
-// the card. The all-on-the-GPU version (`scale_cuda`, `overlay_cuda`) is faster and is
-// NOT written here on purpose: Fedora's ffmpeg 8.1 has neither filter while the deployed
-// image has both, so it is a path that would exist on some installs and not others, and
-// it cannot be proven end to end on any hardware in this house - the NVIDIA card is on a
-// desktop and the image runs on a box with an Intel one. That is the AV1 mistake exactly
-// (DECISIONS 2026-08-16: an engine feature read off a spec sheet, dead in the deployed
-// driver, presenting as a player stall). It waits for a machine that can prove it.
+// NVENC, THE COMPATIBLE HALF OF IT. `-hwaccel cuda` without `-hwaccel_output_format
+// cuda` decodes on the card and hands the frames back to system memory, so every filter
+// after it is an ordinary CPU filter and the encode is still on the card. This is the
+// fallback now rather than the only NVIDIA lane - see NVENC_CUDA below, which keeps the
+// frames on the card and is tried first.
 const NVENC = {
   id: 'nvenc',
   label: 'NVIDIA graphics',
@@ -91,6 +86,71 @@ const NVENC = {
   probeArgs: () => [
     '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
     '-vf', 'format=nv12',
+    '-c:v', 'h264_nvenc', '-b:v', '1M'
+  ]
+}
+
+// NVENC WITH THE FRAMES NEVER LEAVING THE CARD, and the reason to prefer it is not the
+// clock. `-hwaccel_output_format cuda` keeps decoded frames in card memory and
+// `scale_cuda` does the 10-bit-to-8-bit conversion there, so the CPU touches no pixels
+// at all; the lane above copies every frame down to system memory, converts it with a
+// CPU filter and lets the encoder copy it back up.
+//
+// MEASURED ON THE RTX 4070 Ti (driver 610.57.04, the vendored ffmpeg the desktop app
+// ships), 60 seconds of output per run, against the lane above:
+//
+//                        wall            CPU seconds burnt
+//   1080p HEVC Main 10   3.21s -> 3.10s  8.13 -> 0.74   (11x less)
+//   4K HEVC Main 10     18.15s -> 11.02s 55.96 -> 1.25  (45x less)
+//
+// So at 1080p the clock barely moves and the CPU cost collapses, which is the number
+// that decides how many streams a host can serve at once - the conversion no longer
+// competes with the scan, the HTTP path or the other conversions. At 4K the clock moves
+// too, and moves more consistently: three runs of the lane above took 13.09s, 14.43s and
+// 17.06s while this one took 11.04s, 11.06s and 11.06s.
+//
+// THE PROBE IS WHY THIS IS SAFE TO PREFER, and it is the rule this file already sets for
+// itself. `scale_cuda` is a build option, not a card feature: the vendored build carries
+// it and Fedora's own ffmpeg 8.1 does not. The probe below uploads a frame and runs
+// `scale_cuda` on it, so on a build without the filter it exits non-zero with no bytes
+// ("No such filter: 'scale_cuda'", checked 2026-08-24) and `pickEngine` falls through to
+// the compatible lane. Nothing is read off a spec sheet.
+//
+// THE FIRST RUN COSTS FIVE SECONDS. `scale_cuda`'s kernel is compiled by the driver on
+// first use and cached (~/.nv, or CUDA_CACHE_PATH): 5.38s cold, 0.46s warm, measured by
+// pointing the cache at an empty directory. The probe runs at startup and pays it there,
+// so the first viewer to press play gets a warm cache. In a container the cache is inside
+// the container filesystem, so a recreated container pays it again - at startup, where it
+// is a slow probe rather than a stalled film.
+//
+// A CODEC THE CARD CANNOT DECODE STILL WORKS. `-hwaccel_output_format cuda` looks like it
+// would hard-fail where the compatible lane silently decodes in software, so it was
+// tested rather than assumed: MPEG-4 Part 2 through this lane produced byte-identical
+// output to the lane above (ffmpeg falls back to software decode and inserts the upload
+// itself), and HEVC 4:4:4 decoded on the card on this generation.
+const NVENC_CUDA = {
+  id: 'nvenc-cuda',
+  label: 'NVIDIA graphics',
+  encoder: 'h264_nvenc',
+  deviceKind: 'card number',
+  encoderArgs: (device) => (/^\d+$/.test(String(device || '')) ? ['-gpu', String(device)] : []),
+  inputArgs: ({ device, software }) => {
+    // SOFTWARE FRAMES TAKE THE OTHER LANE'S ANSWER, deliberately. Burning in a subtitle
+    // and tone mapping are CPU filters, so the frames are already in system memory and
+    // there is nothing to save by uploading them by hand - the encoder uploads them
+    // itself, which is exactly what the lane above does.
+    if (software) return []
+    const args = ['-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
+    if (/^\d+$/.test(String(device || ''))) args.push('-hwaccel_device', String(device))
+    return args
+  },
+  fromHwDecode: 'scale_cuda=format=nv12',
+  toEngine: 'format=nv12',
+  // The upload is HERE and nowhere else: it exists to put a software test frame on the
+  // card so `scale_cuda` can be asked to prove it exists.
+  probeArgs: () => [
+    '-f', 'lavfi', '-i', 'testsrc2=duration=0.5:size=640x360:rate=30',
+    '-vf', 'format=nv12,hwupload_cuda,scale_cuda=format=nv12',
     '-c:v', 'h264_nvenc', '-b:v', '1M'
   ]
 }
@@ -200,7 +260,7 @@ const AMF = {
 // therefore converts on the built-in one. That is a defensible default and not a
 // measured answer; the honest version is to measure each and keep the faster, which is
 // the same button #138 already built and is filed in TODO with the two-card picker.
-const ENGINES = [VAAPI, NVENC, VIDEOTOOLBOX, QSV, AMF]
+const ENGINES = [VAAPI, NVENC_CUDA, NVENC, VIDEOTOOLBOX, QSV, AMF]
 
 const engineFor = (id) => ENGINES.find((e) => e.id === String(id || '').toLowerCase()) || null
 
@@ -288,4 +348,4 @@ async function pickEngine ({ ffmpeg = 'ffmpeg', candidates = [], only = null, ti
   }
 }
 
-module.exports = { ENGINES, VAAPI, NVENC, VIDEOTOOLBOX, QSV, AMF, engineFor, tryEngine, pickEngine }
+module.exports = { ENGINES, VAAPI, NVENC_CUDA, NVENC, VIDEOTOOLBOX, QSV, AMF, engineFor, tryEngine, pickEngine }
