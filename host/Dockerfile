@@ -54,8 +54,26 @@ FROM node:20-bookworm-slim
 #                           so neither is a non-free apt component. Harmless on a
 #                           box with no GPU - the startup probe fails and the
 #                           transcode mode stays off.
+#
+# AND THE VA DRIVER IS PER-ARCHITECTURE, which broke the arm64 half of this image
+# outright until 2026-08-24 - the first time anybody built one. `intel-media-va-driver`
+# is Intel's, published for amd64 and i386 and NOTHING else, so on arm64 apt ends the
+# build with "Package 'intel-media-va-driver' has no installation candidate" and there
+# is no arm64 image at all. A Pi-class Umbrel is arm64, so half the platform could not
+# install this app and the error said nothing about why.
+#
+# A Pi's video engine is the vc4, which speaks VAAPI through MESA rather than through
+# Intel's driver, so the arm64 leg takes `mesa-va-drivers` (22.3.6 in bookworm, checked
+# on a real arm64 container). Neither one is a promise that conversion works: the
+# startup probe runs the real encoder and demands bytes back, and a box whose driver
+# cannot deliver simply stays on direct play.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates libatomic1 ffmpeg intel-media-va-driver \
+ && apt-get install -y --no-install-recommends ca-certificates libatomic1 ffmpeg \
+ && if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      apt-get install -y --no-install-recommends intel-media-va-driver; \
+    else \
+      apt-get install -y --no-install-recommends mesa-va-drivers; \
+    fi \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

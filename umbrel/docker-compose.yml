@@ -16,10 +16,12 @@ services:
   # which umbrelOS fills with the app password shown next to PearCinema in the app
   # list. The host must refuse to start on a non-loopback bind without it.
   app:
-    # PIN BY DIGEST before this ships. The digest IS the rollback plan: reverting a
-    # bad release is re-pinning the previous one, a one-line change to a file that
-    # already works that way.
-    image: ghcr.io/peerloomllc/pearcinema-host:0.1.0
+    # PINNED BY DIGEST, and the digest IS the rollback plan: reverting a bad release is
+    # re-pinning the previous one, a one-line change to a file that already works that
+    # way. Pushed 2026-08-24 as a manifest list carrying BOTH linux/amd64 and linux/arm64
+    # - Umbrel Home is x86_64 and a Pi-class Umbrel is arm64, and a single-arch image
+    # installs on one and fails on the other with an error that says nothing useful.
+    image: ghcr.io/peerloomllc/pearcinema-host:0.1.0@sha256:952a9791f887d878f5f7b1b1060fd02fd4e2135aa4fd90d07448fcc1d56d1b98
     restart: on-failure
     stop_grace_period: 1m
     network_mode: host
