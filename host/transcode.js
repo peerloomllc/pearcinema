@@ -194,7 +194,16 @@ function engineCandidates ({ device = DEVICE_DEFAULT, platform = process.platfor
   // machine's first, and `-gpu` picks another only once somebody has asked for one by
   // number. Not offered on macOS: no Mac in years has had an NVIDIA card, and asking
   // costs a spawn and prints "Encoder not found" where an operator can see it.
-  if (platform !== 'darwin') out.push({ engine: engineFor('nvenc'), device: null })
+  //
+  // THE ALL-ON-THE-CARD LANE LEADS, and the compatible one catches it. `nvenc-cuda` needs
+  // `scale_cuda`, which is a BUILD option rather than a card feature - the vendored ffmpeg
+  // has it, Fedora's own does not - so the two are offered in order and the probe decides.
+  // A build without the filter fails the first probe with no bytes and lands on the second,
+  // which is byte-for-byte the argv it built yesterday.
+  if (platform !== 'darwin') {
+    out.push({ engine: engineFor('nvenc-cuda'), device: null })
+    out.push({ engine: engineFor('nvenc'), device: null })
+  }
 
   // AMD last on Windows, and only there: on Linux the same silicon is served by VAAPI,
   // which is the path every existing install already proved.

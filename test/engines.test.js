@@ -119,7 +119,7 @@ test('THE ENGINE IS CHOSEN BY RUNNING IT, and NVIDIA is reached when VAAPI genui
   `)
   const out = await transcode.chooseEngine({ ffmpeg: bin })
   assert.equal(out.available, true)
-  assert.equal(out.engine, 'nvenc')
+  assert.equal(out.engine, 'nvenc-cuda', 'the all-on-the-card lane is the one tried first')
   assert.equal(out.label, 'NVIDIA graphics')
   // What was tried and what each said, because an operator whose card was skipped
   // deserves to see why rather than a shrug.
@@ -171,7 +171,7 @@ test('a probe that hangs on one vendor does not cost the machine the other', asy
   `)
   const out = await transcode.chooseEngine({ ffmpeg: bin, timeoutMs: 300 })
   assert.equal(out.available, true)
-  assert.equal(out.engine, 'nvenc')
+  assert.equal(out.engine, 'nvenc-cuda')
 })
 
 /* --------------------------------------------- an engine belongs to a platform -- */
@@ -194,7 +194,8 @@ test('VAAPI IS NOT OFFERED WITHOUT A RENDER NODE TO OFFER IT', () => {
   assert.equal(win.some((c) => c.engine.id === 'vaapi'), false, 'Windows has no render nodes to offer')
 
   const linuxBare = transcode.engineCandidates({ platform: 'linux', nodes: [] })
-  assert.deepEqual(linuxBare.map((c) => c.engine.id), ['nvenc'], 'a Linux box with no card still has NVENC to try')
+  assert.deepEqual(linuxBare.map((c) => c.engine.id), ['nvenc-cuda', 'nvenc'],
+    'a Linux box with no card still has both NVENC lanes to try')
 })
 
 test('A LINUX BOX WITH CARDS TRIES THE CONFIGURED ONE FIRST, THEN THE REST', () => {
@@ -206,6 +207,7 @@ test('A LINUX BOX WITH CARDS TRIES THE CONFIGURED ONE FIRST, THEN THE REST', () 
   assert.deepEqual(c.map((x) => `${x.engine.id}:${x.device}`), [
     'vaapi:/dev/dri/renderD129',
     'vaapi:/dev/dri/renderD128',
+    'nvenc-cuda:null',
     'nvenc:null'
   ])
 })
@@ -233,8 +235,8 @@ test('WINDOWS IS OFFERED ALL THREE VENDORS, BUILT-IN FIRST', () => {
   // gap (2026-08-20) and the Mac gap (2026-08-21). Quick Sync leads for the reason VAAPI
   // leads on Linux: the built-in chip converts and the discrete card stays free.
   const win = transcode.engineCandidates({ platform: 'win32', nodes: [] })
-  assert.deepEqual(win.map((c) => c.engine.id), ['qsv', 'nvenc', 'amf'])
-  assert.deepEqual(win.map((c) => c.device), [null, null, null], 'none of the three takes a path')
+  assert.deepEqual(win.map((c) => c.engine.id), ['qsv', 'nvenc-cuda', 'nvenc', 'amf'])
+  assert.deepEqual(win.map((c) => c.device), [null, null, null, null], 'none of them takes a path')
 })
 
 test('QUICK SYNC AND AMF ARE WINDOWS-ONLY', () => {
@@ -270,4 +272,114 @@ test('THE WINDOWS ENGINES ARE THE ONLY ONES IN HERE NOBODY HAS RUN', () => {
   }
   assert.deepEqual(engines.engineFor('qsv').inputArgs({ device: null, software: false }), ['-hwaccel', 'qsv'])
   assert.deepEqual(engines.engineFor('amf').inputArgs({ device: null, software: false }), ['-hwaccel', 'd3d11va'])
+})
+
+/* ------------------------------------- the NVIDIA lane where nothing leaves the card -- */
+
+test('THE ALL-ON-THE-CARD LANE KEEPS THE FRAMES THERE, and the compatible one is untouched', () => {
+  // MEASURED ON THE RTX 4070 Ti, 2026-08-24, 60 seconds of output per run. The clock
+  // barely moves at 1080p (3.21s -> 3.10s) and the CPU cost collapses (8.13s -> 0.74s of
+  // CPU); at 4K both move (18.15s -> 11.02s wall, 55.96s -> 1.25s of CPU). The CPU number
+  // is the one that decides how many streams a host serves at once.
+  const media = { videoCodec: 'hevc', width: 1920 }
+  const cuda = transcode.transcodeArgs({ input: '/x.mkv', media, engine: 'nvenc-cuda' })
+  assert.equal(at(cuda, '-hwaccel'), 'cuda')
+  assert.equal(at(cuda, '-hwaccel_output_format'), 'cuda', 'the decoded frames stay in card memory')
+  assert.equal(at(cuda, '-vf'), 'scale_cuda=format=nv12', 'and the 10-bit conversion happens there too')
+  assert.equal(at(cuda, '-c:v'), 'h264_nvenc')
+  assert.equal(cuda.includes('hwupload_cuda'), false, 'nothing is uploaded: it never came down')
+
+  // The compatible lane is still exactly what it was, which is the regression that
+  // matters: a machine whose ffmpeg has no scale_cuda lands here and builds the argv it
+  // built yesterday.
+  const nvenc = transcode.transcodeArgs({ input: '/x.mkv', media, engine: 'nvenc' })
+  assert.equal(nvenc.includes('-hwaccel_output_format'), false)
+  assert.equal(at(nvenc, '-vf'), 'format=nv12')
+
+  // Nothing else about the conversion is a lane question.
+  for (const flag of ['-map_chapters', '-b:v', '-movflags', '-f', '-c:v']) {
+    assert.equal(at(cuda, flag), at(nvenc, flag), `${flag} is not a lane question`)
+  }
+})
+
+test('SOFTWARE FRAMES TAKE THE SAME ANSWER ON BOTH NVIDIA LANES', () => {
+  // Burning in a subtitle and tone mapping are CPU filters, so the frames are in system
+  // memory already and there is nothing to save by uploading them by hand - the encoder
+  // uploads them itself. Deliberately identical, so a burn-in is one graph and not two.
+  const cuda = engines.engineFor('nvenc-cuda')
+  const nvenc = engines.engineFor('nvenc')
+  assert.deepEqual(cuda.inputArgs({ device: null, software: true }), [])
+  assert.equal(cuda.toEngine, nvenc.toEngine)
+
+  const media = { videoCodec: 'mpeg4', width: 720 }
+  const sw = transcode.transcodeArgs({ input: '/x.avi', media, engine: 'nvenc-cuda' })
+  assert.equal(sw.includes('-hwaccel'), false, 'nothing to accelerate on the way in')
+  assert.equal(at(sw, '-vf'), 'format=nv12')
+  assert.equal(at(sw, '-c:v'), 'h264_nvenc', 'and the encode is still on the card')
+
+  const burned = hls.segmentArgs({
+    input: '/x.mkv', seq: 0, media: { videoCodec: 'hevc', width: 1920 },
+    device: null, hwDecode: true, bitrate: '6M', engine: 'nvenc-cuda', burn: { index: 2 }
+  })
+  assert.equal(burned.includes('-hwaccel'), false, 'burn-in decodes in software, on either lane')
+  assert.match(burned[burned.indexOf('-filter_complex') + 1], /overlay\[ov\];\[ov\]format=nv12\[out\]$/)
+  assert.equal(burned.includes('scale_cuda'), false, 'a CUDA filter has no CUDA frames to work on here')
+})
+
+test('THE HLS PATH TAKES THE CARD LANE TOO', () => {
+  const base = {
+    input: '/x.mkv', seq: 0, media: { videoCodec: 'hevc', width: 3840 },
+    device: null, hwDecode: true, bitrate: '6M'
+  }
+  const seg = hls.segmentArgs({ ...base, engine: 'nvenc-cuda' })
+  assert.equal(at(seg, '-hwaccel_output_format'), 'cuda')
+  assert.equal(at(seg, '-vf'), 'scale_cuda=format=nv12')
+  assert.equal(at(seg, '-c:v'), 'h264_nvenc')
+
+  // A tone is a software filter, so it takes the other lane, prefix and all.
+  const toned = hls.segmentArgs({ ...base, engine: 'nvenc-cuda', tone: 'bw' })
+  assert.equal(toned.includes('-hwaccel'), false)
+  assert.match(at(toned, '-vf'), /,format=nv12$/)
+  assert.equal(toned.includes('scale_cuda'), false)
+})
+
+test('AN ffmpeg WITHOUT scale_cuda FALLS BACK TO THE COMPATIBLE LANE', () => {
+  // `scale_cuda` is a BUILD option rather than a card feature: the vendored ffmpeg the
+  // desktop ships carries it and Fedora's own ffmpeg 8.1 does not (checked 2026-08-24,
+  // "No such filter: 'scale_cuda'", exit 8, no bytes). So the probe has to ask for the
+  // filter by name, or the engine would be chosen off a build's reputation - which is the
+  // AV1 mistake exactly.
+  const cuda = engines.engineFor('nvenc-cuda')
+  const probe = cuda.probeArgs(null).join(' ')
+  assert.match(probe, /scale_cuda/, 'the probe asks for the filter that distinguishes this lane')
+  assert.match(probe, /hwupload_cuda/, 'having put a software test frame on the card to run it on')
+  assert.match(probe, /h264_nvenc/, 'and it runs the encoder it claims')
+})
+
+test('a build with no scale_cuda lands on the compatible NVIDIA lane, not on nothing', async () => {
+  // The whole point of two candidates. The fake refuses the filter the way Fedora's
+  // ffmpeg does and accepts the plain encode, so the machine still converts.
+  const bin = await fakeFfmpeg(`
+    case "$*" in
+      *h264_vaapi*) echo "Failed to initialise VAAPI connection: -1 (unknown libva error)." >&2; exit 1 ;;
+      *scale_cuda*) echo "[AVFilterGraph @ 0x1] No such filter: 'scale_cuda'" >&2; exit 8 ;;
+      *h264_nvenc*) printf "mp4bytes"; exit 0 ;;
+    esac
+    exit 1
+  `)
+  const out = await transcode.chooseEngine({ ffmpeg: bin, platform: 'linux' })
+  assert.equal(out.available, true)
+  assert.equal(out.engine, 'nvenc', 'the card still converts, on the lane the build can run')
+  assert.equal(out.label, 'NVIDIA graphics')
+  assert.match(out.tried.find((t) => t.engine === 'nvenc-cuda').reason, /No such filter/)
+})
+
+test('PEARCINEMA_ENGINE can pin either NVIDIA lane', async () => {
+  // Which is the rollback if the card lane ever misbehaves on somebody's driver.
+  const bin = await fakeFfmpeg('printf "mp4bytes"; exit 0')
+  for (const id of ['nvenc', 'nvenc-cuda']) {
+    const pinned = await transcode.chooseEngine({ ffmpeg: bin, only: id })
+    assert.equal(pinned.engine, id)
+    assert.equal(pinned.tried.every((t) => t.engine === id), true, 'nothing else is even asked')
+  }
 })
