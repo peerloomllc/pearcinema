@@ -22,7 +22,12 @@ import {
 import { call, on, haptic } from './bridge'
 import { loadThemePref, applyThemePref, onSystemThemeChange } from './theme'
 
-const APP_VERSION = '0.1.0'
+// Injected by scripts/build-ui.mjs from app.json's version, which is the file a release
+// rewrites. A literal here is how PearTune nearly shipped an App Store build whose About
+// screen said 0.1.0 for ever (peartune DONE 2026-07-31). The fallback is only for a stray
+// bundler that does not define it; a real build always does.
+/* global __APP_VERSION__ */
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev'
 const LIGHTNING_ADDRESS = 'peerloomllc@strike.me'
 const STRIKE_TIP_URL = 'https://strike.me/peerloomllc/'
 const BUYMEACOFFEE_URL = 'https://buymeacoffee.com/peerloomllc'

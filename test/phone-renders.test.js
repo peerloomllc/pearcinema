@@ -1201,3 +1201,28 @@ test('the same mark means the same thing in the Watched list', async (t) => {
   assert.equal(unmark.textContent.trim(), '')
   assert.ok(unmark.querySelector('svg'))
 })
+
+test('THE VERSION IN THE APP IS app.json\'s, not a literal somebody has to remember', () => {
+  // PearTune nearly shipped an App Store build whose About screen said 0.1.0 for ever
+  // (peartune DONE 2026-07-31): `APP_VERSION` was a literal in App.jsx and release.sh
+  // rewrites app.json without touching the UI. PearCinema had the identical literal.
+  //
+  // It matters beyond About: the phone stamps its version into a bug report precisely so
+  // the report says which build produced it, and a report that names the wrong build is
+  // worse than one that names none.
+  //
+  // This reads the BUILT page, which is the thing the APK actually ships.
+  const version = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', 'app.json'), 'utf8')
+  ).expo.version
+
+  assert.ok(version, 'app.json declares a version')
+  assert.ok(
+    PAGE.includes(version),
+    `the built phone UI does not carry app.json's version (${version}) - rebuild with npm run build:ui`
+  )
+  assert.ok(
+    !PAGE.includes('0.0.0-dev'),
+    'the built page fell back to the dev version, so the bundler never defined __APP_VERSION__'
+  )
+})
