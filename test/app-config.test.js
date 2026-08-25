@@ -65,3 +65,23 @@ test('the app is the same app on both stores', () => {
   assert.equal(app.android.package, 'com.pearcinema')
   assert.ok(app.version, 'and it declares a version, which the phone UI is built from')
 })
+
+/* ------------------------------------------------ what a store listing needs -- */
+
+test('THE PLAY FEATURE GRAPHIC IS 1024x500 AND HAS NO ALPHA', () => {
+  // Play requires a feature graphic for a listing, refuses anything but 1024x500, and
+  // refuses RGBA - PearTune lost a cycle to alpha on BOTH stores in one day, because a
+  // screenshot pipeline writes it and nothing says so (peartune DONE 2026-07-31).
+  //
+  // The file is built by scripts/build-feature-graphic.mjs and committed, so this reads
+  // the committed artefact rather than trusting the generator to have been run.
+  const { execFileSync } = require('child_process')
+  const file = path.join(__dirname, '..', 'metadata', 'android', 'feature-graphic.png')
+  assert.ok(fs.existsSync(file), 'metadata/android/feature-graphic.png exists')
+
+  const out = execFileSync('magick', ['identify', '-format', '%w %h %[channels]', file]).toString()
+  const [w, h, channels] = out.split(' ')
+  assert.equal(w, '1024', 'Play refuses any other width')
+  assert.equal(h, '500', 'Play refuses any other height')
+  assert.ok(!/a$/.test(channels) && channels !== 'rgba', `alpha survived: ${channels}`)
+})
