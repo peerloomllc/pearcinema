@@ -3,7 +3,7 @@ id: peerloom-pearcinema
 name: PearCinema
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "1.0.0"
+version: "1.0.1"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -79,7 +79,13 @@ repo: https://github.com/peerloomllc/pearcinema
 support: https://github.com/peerloomllc/pearcinema/issues
 gallery: []
 releaseNotes: |-
-  First release.
+  Bug fixes
+  - Changing which folder your films are in now updates the library straight away, and
+    shows you how far it has got while it reads. Before this it read the new folder
+    correctly and then carried on showing the old one, with nothing to say it had
+    finished.
+
+  First release, just before this one.
 
   New features
   - Play your films and shows from a Jellyfin or Emby server, or straight from a
