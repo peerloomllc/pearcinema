@@ -85,3 +85,66 @@ test('THE PLAY FEATURE GRAPHIC IS 1024x500 AND HAS NO ALPHA', () => {
   assert.equal(h, '500', 'Play refuses any other height')
   assert.ok(!/a$/.test(channels) && channels !== 'rgba', `alpha survived: ${channels}`)
 })
+
+test('EVERY STORE FIELD IS WITHIN THE STORE\'S LIMIT', () => {
+  // A field over the limit is not caught until an upload is refused, which on the App
+  // Store means a round trip through review scheduling. The limits themselves are the
+  // stores': iOS name and subtitle 30, keywords 100, promotional text 170, description
+  // 4000; Play title 30, short description 80, full description 4000.
+  //
+  // The short description was 83 characters when first written, which is exactly the kind
+  // of thing that reads fine and fails at the console.
+  const read = (...p) => JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', ...p), 'utf8'))
+  const limits = {
+    name: 30, subtitle: 30, description: 4000, keywords: 100, promotionalText: 170,
+    title: 30, shortDescription: 80, fullDescription: 4000
+  }
+  const files = [
+    read('ios', 'app-info', 'en-US.json'),
+    read('ios', 'version', 'default', 'en-US.json'),
+    read('android', 'listing', 'en-US.json')
+  ]
+  for (const f of files) {
+    for (const [k, v] of Object.entries(f)) {
+      if (!limits[k]) continue
+      assert.ok(v.length <= limits[k], `${k} is ${v.length}, limit is ${limits[k]}`)
+      assert.ok(v.length > 0, `${k} is empty`)
+    }
+  }
+})
+
+test('THE LISTINGS DO NOT OFFER A DEMO THAT DOES NOT EXIST', () => {
+  // PearTune drafted its store description from a proposal that put "Try it without a
+  // server" on the intro card. It had moved, and sending a reviewer to a button that is
+  // not there is how a 2.1 rejection happens (peartune DONE 2026-07-31).
+  //
+  // PearCinema has NO demo library at all - App.jsx says so where the onboarding diverges
+  // from the donor's - so the listings must say a server is needed and must not imply
+  // anything is bundled to watch.
+  const ios = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'ios', 'version', 'default', 'en-US.json'), 'utf8'))
+  const play = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'android', 'listing', 'en-US.json'), 'utf8'))
+
+  for (const [what, text] of [['iOS', ios.description], ['Play', play.fullDescription]]) {
+    assert.match(text, /needs that machine running the free PearCinema host/,
+      `${what} says a server is required`)
+    assert.match(text, /comes with nothing to watch/, `${what} says nothing is bundled`)
+    assert.ok(!/demo library|built-in demo|try it without a server/i.test(text),
+      `${what} must not offer a demo PearCinema does not have`)
+  }
+
+  // And the sentence a reviewer of a VIDEO app is looking for, said outright rather than
+  // implied by the rest.
+  for (const [what, text] of [['iOS', ios.description], ['Play', play.fullDescription]]) {
+    assert.match(text, /hosts nothing, indexes nothing/, `${what} says it provides no content`)
+  }
+})
+
+test('the listings point at pages that exist', () => {
+  // Both stores require a privacy policy URL and Apple requires a support URL. These were
+  // 404s until 2026-08-25, when the pages were written.
+  const info = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'ios', 'app-info', 'en-US.json'), 'utf8'))
+  const ver = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'ios', 'version', 'default', 'en-US.json'), 'utf8'))
+  assert.equal(info.privacyPolicyUrl, 'https://peerloomllc.com/pearcinema/privacy')
+  assert.equal(ver.supportUrl, 'https://peerloomllc.com/pearcinema/support')
+  assert.equal(ver.marketingUrl, 'https://peerloomllc.com/pearcinema/')
+})
