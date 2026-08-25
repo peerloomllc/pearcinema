@@ -23,13 +23,38 @@ It is the video sibling of [PearTune](../peartune) and shares its proven host.
 
 ## Getting the server running
 
+### On an Umbrel, from the app store
+
+The easiest way, and the one to prefer: the platform installs it, keeps it running and
+updates it.
+
+In umbrelOS, add the PeerLoom community app store
+(`https://github.com/peerloomllc/peerloom-umbrel-app-store`), then install **PearCinema**
+from it. The dashboard's password is the one umbrelOS shows next to the app.
+
+It looks for films in the Umbrel's own `Downloads` folder to begin with. Most film
+libraries are on an external drive instead, so open Settings and pick the folder under
+`/external` - every drive plugged into the box appears there, including one plugged in
+after the app started.
+
+Moving over from a hand-run container? `host/migrate-to-umbrel-app.sh` carries the
+identity, the grants and the scan across, so nothing has to pair again. It MOVES the data
+rather than copying it, deliberately: the store refuses to open a copy, because two copies
+of one library on a machine would corrupt each other.
+
 ### With Docker
 
 ```
-docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:latest
+docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:0.1.1
 ```
 
-Build that image yourself with `bash host/build-image.sh <version>`.
+There is deliberately no `latest` tag. A version is what an install can be reproduced
+from and rolled back to, and `umbrel/docker-compose.yml` goes further and pins the digest.
+Published tags are listed at
+[ghcr.io/peerloomllc/pearcinema-host](https://github.com/peerloomllc/pearcinema/pkgs/container/pearcinema-host).
+
+Build that image yourself with `bash host/build-image.sh <version>`, which works with
+docker or podman and always builds x86 and arm64 together.
 `umbrel/docker-compose.yml` is the same thing as compose, with the reasoning behind every
 line written into it, and `host/redeploy-umbrel.sh` is that run command with a drive that
 moves and a container that has to survive it.
@@ -161,9 +186,10 @@ Umbrel; there are Android, iOS and desktop clients, a browser player, casting, d
 for offline, subtitles, multiple libraries blended into one, and hardware conversion on
 three vendors' chips.
 
-What is left before it can be called released is packaging and paperwork rather than
-features: an Umbrel app rather than a hand-run container, store listings, and the App
-Review trip. `TODO.md` is the honest list.
+It is a real Umbrel app now rather than a hand-run container, published for both x86 and
+arm64 machines, so the platform owns it and brings it back after a restart. What is left
+before it can be called released is paperwork rather than features: store listings for the
+phone apps, and the App Review trip. `TODO.md` is the honest list.
 
 ## Developing
 
