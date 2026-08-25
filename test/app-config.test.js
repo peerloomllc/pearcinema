@@ -148,3 +148,26 @@ test('the listings point at pages that exist', () => {
   assert.equal(ver.supportUrl, 'https://peerloomllc.com/pearcinema/support')
   assert.equal(ver.marketingUrl, 'https://peerloomllc.com/pearcinema/')
 })
+
+test('THE PLAY SCREENSHOTS ARE WITHIN PLAY\'S RULES', () => {
+  // Play caps a screenshot's long side at 2x its short side and refuses RGBA. PearTune
+  // failed BOTH on the same day, on both stores (peartune DONE 2026-07-31): 1080x2424 is
+  // 2.24, and `screencap` always writes alpha.
+  //
+  // These are captured at 1080x2160, which is exactly 2.000 - a real 18:9 phone shape -
+  // so no padding is needed at all, and the alpha is stripped on capture.
+  const { execFileSync } = require('child_process')
+  const dir = path.join(__dirname, '..', 'metadata', 'store', 'android')
+  const shots = fs.readdirSync(dir).filter(f => f.endsWith('.png'))
+
+  assert.ok(shots.length >= 2, 'Play wants at least two phone screenshots')
+  for (const s of shots) {
+    const out = execFileSync('magick', ['identify', '-format', '%w %h %[channels]', path.join(dir, s)]).toString()
+    const [w, h, channels] = out.split(' ')
+    const long = Math.max(+w, +h)
+    const short = Math.min(+w, +h)
+    assert.ok(long / short <= 2, `${s} is ${w}x${h}, ratio ${(long / short).toFixed(3)} - Play caps it at 2`)
+    assert.ok(short >= 320 && long <= 3840, `${s} is outside Play's 320..3840`)
+    assert.ok(!/a$/.test(channels), `${s} still has alpha (${channels}) and Play refuses it`)
+  }
+})
