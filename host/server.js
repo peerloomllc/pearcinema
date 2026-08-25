@@ -449,7 +449,22 @@ class PearCinemaHost {
       dataDir: this.dataDir,
       log: this.log
     })
-    const leaves = await next.scan({ force }) // throws on a bad URL, bad credentials, no folder
+    // THE PROGRESS IS PUBLISHED WHILE THIS RUNS, the same way a rescan's is. Reading a
+    // real library is minutes - 2,986 files off a USB drive took four of them on the
+    // Umbrel - and without this the page has nothing to show for any of it, so changing
+    // the source looked like it never finished (Tim, 2026-08-25).
+    this.scanning = { done: 0, total: 0, startedAt: Date.now() }
+    let leaves
+    try {
+      // Throws on a bad URL, bad credentials, no folder. The adapter is swapped only
+      // AFTER this returns, so a mistyped password leaves the old source serving.
+      leaves = await next.scan({
+        force,
+        onProgress: (done, total) => { this.scanning = { ...this.scanning, done, total } }
+      })
+    } finally {
+      this.scanning = null
+    }
 
     this._inner = next
     this.adapter = this._decorated(next)
@@ -461,6 +476,15 @@ class PearCinemaHost {
 
     const stats = await next.stats().catch(() => ({}))
     this.log('host:source-changed', { source: cfg.kind, leaves })
+    // AND THE BLEND IS REBUILT, which is the half that made the whole thing look broken.
+    // `_scan` has always ended with this; setSource never did, so pointing the library at
+    // a different folder scanned the new one, wrote the config, swapped the adapter - and
+    // then left every shelf on every phone and every dashboard showing the OLD library,
+    // because the merged index nobody rebuilt is what they read. On the real Umbrel that
+    // was 248 films and 3,215 episodes on disk still showing as 10 and 469, with nothing
+    // saying why, until the next periodic rescan - and `rescanIntervalMin` there is 360,
+    // so the wait was six hours (Tim, 2026-08-25).
+    this.blend.buildSoon('source')
     return { kind: cfg.kind, leaves, ...stats }
   }
 
