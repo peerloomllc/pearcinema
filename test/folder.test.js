@@ -1005,3 +1005,87 @@ test('A RESCAN RE-READS ONLY WHAT CHANGED, which is why one new episode is not 2
   await d.scan({ force: true })
   assert.equal(probes, 1, 'the changed one')
 })
+
+/* --------------------------------- pointing the library somewhere else -- */
+//
+// THE HOSTS BELOW ARE CLOSED INLINE, per the note above `envHost`. A `t.after(close)`
+// runs AFTER `library()`'s own directory delete - node:test runs after-hooks in
+// registration order - so RocksDB is still holding files under a directory that is
+// already gone, and the file never exits. Learned here the same way first-pair.test.js
+// learned it: 47 tests all green and the runner hanging on the last one.
+
+test('CHANGING THE SOURCE REBUILDS THE BLEND, or every shelf still shows the old library', async (t) => {
+  // FOUND ON THE REAL UMBREL, 2026-08-25, the day PearCinema became a store app. The
+  // hand-run container had mounted the drive on /library and a store listing cannot know
+  // a drive is called "Elements", so the folders were re-picked under /external. The scan
+  // ran and found 248 films and 3,215 episodes. Every shelf went on showing 10 and 469.
+  //
+  // `_scan` has always ended with `blend.buildSoon`; `setSource` never did. The merged
+  // index is what phones and dashboards actually read, so scanning the new folder,
+  // writing the config and swapping the adapter changed nothing anybody could see - and
+  // `rescanIntervalMin` on that box is 360, so the wait for the periodic rescan to put it
+  // right was six hours, with nothing on the page saying so.
+  const { root, dataDir } = await library(t)
+  const other = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-other-'))
+  await fsp.mkdir(path.join(other, 'Movies'), { recursive: true })
+  await fsp.writeFile(path.join(other, 'Movies', 'Arrival (2016).mkv'), 'x')
+
+  const { host, close } = await envHost(dataDir)
+  const built = []
+  host.blend.buildSoon = (reason) => built.push(reason)
+
+  await host.setSource({ kind: 'folder', roots: [{ path: root, type: 'auto' }] })
+  assert.deepEqual(built, ['source'], 'the first source change rebuilds it')
+
+  await host.setSource({ kind: 'folder', roots: [{ path: other, type: 'auto' }] })
+  assert.deepEqual(built, ['source', 'source'], 'and so does the next one')
+
+  await close()
+  await fsp.rm(other, { recursive: true, force: true })
+})
+
+test('a source change publishes progress, so the page can say it finished', async (t) => {
+  // The other half of the same report: "it doesn't ever tell me it's finished". Reading a
+  // real library is minutes - 2,986 files off a USB drive took four of them on the real
+  // Umbrel - and `setSource` called the adapter's scan directly, so `scanning` stayed null
+  // throughout and the page had nothing to show for any of it. `_scan` had always
+  // published it.
+  //
+  // SAMPLED FROM INSIDE THE SCAN, because before and after prove nothing: the adapter logs
+  // as it probes, so the host's own log is the hook that catches the middle.
+  const { root, dataDir } = await library(t)
+  const createTestnet = require('hyperdht/testnet')
+  const { PearCinemaHost } = require('../host/server')
+  const testnet = await createTestnet(3)
+  const seen = []
+  const host = new PearCinemaHost({
+    dataDir,
+    bootstrap: testnet.bootstrap,
+    log: (ev) => { if (String(ev).startsWith('folder:')) seen.push(host.scanning) }
+  })
+
+  assert.equal(host.scanning, null, 'nothing is scanning before')
+  await host.setSource({ kind: 'folder', roots: [{ path: root, type: 'auto' }] })
+
+  assert.ok(seen.length > 0, 'the adapter reported while it worked')
+  assert.ok(seen.some(s => s && typeof s.startedAt === 'number'),
+    'and the host was publishing a scan the whole time, which is what the banner reads')
+  assert.equal(host.scanning, null, 'cleared afterwards, which is what ENDS the banner')
+
+  await host.close()
+  await testnet.destroy()
+})
+
+test('a source that throws still clears the scanning banner', async (t) => {
+  // The `finally` earns its place: without it a bad path leaves the page saying "reading
+  // your library" for good, on a library that is not being read.
+  const { dataDir } = await library(t)
+  const { host, close } = await envHost(dataDir)
+
+  await assert.rejects(
+    host.setSource({ kind: 'folder', roots: [{ path: path.join(os.tmpdir(), 'pearcinema-nope-' + Date.now()), type: 'auto' }] })
+  )
+  assert.equal(host.scanning, null, 'the banner is gone even though the scan failed')
+
+  await close()
+})
