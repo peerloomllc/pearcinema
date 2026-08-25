@@ -15,6 +15,14 @@ const OUT = 'assets/index.html'
 const TMP_JS = 'src/ui/.phone.bundle'
 const TMP_CSS = 'src/ui/.phone.css'
 
+// THE VERSION COMES FROM app.json, which is the file a release rewrites. It used to be a
+// literal in App.jsx, and PearTune shipped exactly that and caught it on the way to the
+// App Store (peartune DONE 2026-07-31): `release.sh` rewrites app.json and never touches
+// the UI, so About and every bug report would have said 0.1.0 for ever - and the phone
+// stamps its version into a report precisely so the report says which build it came from.
+const APP_VERSION = JSON.parse(readFileSync('app.json', 'utf8')).expo.version
+if (!APP_VERSION) throw new Error('app.json has no expo.version - the phone would ship with no version at all')
+
 await build({
   entryPoints: ['src/ui/main.jsx'],
   bundle: true,
@@ -24,7 +32,10 @@ await build({
   // The donor UI's dependencies (@phosphor-icons/react) import react; preact
   // answers, exactly as the donor's own build does it the other way around.
   alias: { react: 'preact/compat', 'react-dom': 'preact/compat' },
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    __APP_VERSION__: JSON.stringify(APP_VERSION)
+  },
   outfile: TMP_JS,
   legalComments: 'none',
   minify: true
