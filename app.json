@@ -51,6 +51,7 @@
         "LSApplicationQueriesSchemes": [
           "lightning"
         ],
+        "NSLocalNetworkUsageDescription": "PearCinema plays straight from your library when it is on the same network, instead of sending your films out to the internet and back.",
         "NSCameraUsageDescription": "PearCinema scans a pairing QR code to connect to your library host.",
         "NSAppTransportSecurity": {
           "NSExceptionDomains": {
