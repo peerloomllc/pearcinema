@@ -2,6 +2,28 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-25 - A FILM STOPS WHEN THE PHONE IS PUT AWAY, and that is the decision
+Tier: T1 (a deliberate absence, recorded so nobody "fixes" it). Tim, 2026-08-25, asked
+while sweeping PearTune's release-era work.
+
+Noticed rather than reported: PearCinema declares no `UIBackgroundModes: ['audio']` on
+iOS and no foreground service permission on Android, so sound does not continue when the
+app is backgrounded or the screen locks. PearTune declares both, because music that stops
+when you put the phone in your pocket is not a music app.
+
+ASKED RATHER THAN COPIED, and the answer is to leave it. A film is watched rather than
+listened to, and the case for it - concert films, stand-up, anything on in the background -
+did not outweigh the work: a background mode is not a flag, it is a media notification and
+a foreground service on both platforms, each with its own lifecycle to get wrong.
+
+WHAT THIS PINS, so it is not re-derived from an absence: the privacy page must not claim
+background playback (it did, briefly, on the day it was written - corrected in website #60
+before it was ever published), and a store listing must not either. If it is ever wanted
+it is a product change with a proposal, not a one-line addition to app.json.
+
+Note the CASTING remote is a different thing and unaffected: driving a television from the
+lock screen (#121) is the phone sending commands, not the phone playing.
+
 ## 2026-08-24 - THE NVIDIA CONVERSION NEVER LEAVES THE CARD, AND THE PROBE DECIDES
 Tier: T1 (a second lane of an existing engine, chosen by measurement, with the proven one
 as the fallback). TODO item "The all-on-the-GPU NVENC path, when a machine can prove it",
