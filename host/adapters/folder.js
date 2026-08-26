@@ -727,6 +727,13 @@ class FolderAdapter {
           media: items.media(probed)
         }),
         _file: file,
+        // Internal, stripped before anything leaves the adapter. `_index` needs to ask
+        // "does this show have real seasons?", and a seriesId cannot be inverted back
+        // into the key it was minted from. It lives out here rather than inside
+        // items.episode() because that builder returns a FIXED shape and quietly drops
+        // anything it does not know - which is exactly how the first attempt at this
+        // did nothing at all.
+        _seriesKey: seriesKey,
         _artFile: artFile,
         _subs: subs,
         _seriesArtFile: seriesArtFile,
@@ -784,11 +791,51 @@ class FolderAdapter {
   // new internal field is a compile-time visit to this line instead of a silent
   // disclosure.
   static _strip (item) {
-    const { _file, _artFile, _subs, _seriesArtFile, _seriesArtId, _seasonArtFile, _seasonArtId, ...rest } = item
+    const { _file, _artFile, _subs, _seriesArtFile, _seriesArtId, _seasonArtFile, _seasonArtId, _seriesKey, ...rest } = item
     return rest
   }
 
+  // AN EXTRA IS NOT A SEASON. A show folder with no season subdirectories can still
+  // hold something that is not an episode - a documentary, a featurette, a blooper
+  // reel - and `parseEpisode` rightly refuses to invent a number for it. It then had
+  // nowhere to go: no number and no folder to be named after, so it became a season
+  // keyed `unnumbered` and rendered as a second card labelled just "Season", beside
+  // the real Season 1 and with a placeholder where a poster would be.
+  //
+  // FOUND ON THE REAL LIBRARY, 2026-08-25, taking store screenshots. `Band Of
+  // Brothers/` is eleven flat files: ten `Band Of Brothers Part N Title.mkv`, which
+  // parse as season 1, and one `Band Of Brothers Documentry 2001.mkv`, which does not
+  // parse at all. It is not one show's quirk - any show folder holding an extra does
+  // the same.
+  //
+  // SEASON 0 IS THE CONVENTION and this codebase already speaks it: items.js titles 0
+  // "Specials" and sorts it structurally, names.js reads a folder called `Specials` as
+  // 0, and sidecars.js looks for `season-specials-poster.jpg`. So the fix is to say the
+  // thing that was always meant rather than to invent a label.
+  //
+  // ONLY WHERE THE SHOW HAS REAL SEASONS, which is why this is here and not in the
+  // scan: a per-file decision cannot see its siblings, and a show whose filenames ALL
+  // fail to parse is a different problem - calling every one of its episodes a special
+  // would be worse than the nameless shelf. Those are left exactly as they were.
+  static _specialsFromExtras (episodes, ids, libraryId, kind) {
+    const numbered = new Set()
+    for (const e of episodes) if (e.seasonNumber !== null && e.seasonNumber !== undefined) numbered.add(e.seriesId)
+
+    let moved = 0
+    for (const e of episodes) {
+      const nameless = (e.seasonNumber === null || e.seasonNumber === undefined) && !e.seasonTitle
+      if (!nameless || !numbered.has(e.seriesId) || !e._seriesKey) continue
+      e.seasonNumber = 0
+      e.seasonId = ids.itemId(libraryId, kind, `season:${e._seriesKey}:0`)
+      moved++
+    }
+    return moved
+  }
+
   _index (movies, episodes) {
+    const moved = FolderAdapter._specialsFromExtras(episodes, this.ids, this.libraryId, this.kind)
+    if (moved) this.log('folder:specials', { episodes: moved })
+
     const cleanMovies = movies.map(FolderAdapter._strip)
     const cleanEpisodes = episodes.map(FolderAdapter._strip)
 
