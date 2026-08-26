@@ -3,7 +3,7 @@ id: peerloom-pearcinema
 name: PearCinema
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "1.0.2"
+version: "1.0.3"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -80,6 +80,9 @@ support: https://github.com/peerloomllc/pearcinema/issues
 gallery: []
 releaseNotes: |-
   Bug fixes
+  - The Specials fix below now reaches libraries that were already up and running.
+    Without this, only a library that happened to re-read its files from scratch would
+    have seen any change.
   - A documentary or featurette sitting in a show's folder now appears as "Specials",
     the way Kodi and Jellyfin file them. Before this it turned up as a second season
     with no number and no artwork, sitting next to the real one.
