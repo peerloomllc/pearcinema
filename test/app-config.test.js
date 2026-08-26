@@ -194,3 +194,26 @@ test('THE APP STORE FRAMES FIT A SLOT APP STORE CONNECT ACTUALLY HAS', () => {
     assert.ok(!/a$/.test(channels), `${s} still has alpha (${channels}) and the App Store refuses it`)
   }
 })
+
+test('THE HOST IMAGE VERSION IS DECIDED IN ONE PLACE, not two that disagree', () => {
+  // The pre-flight prompt said "next host image: $APP_VERSION" while the step that
+  // actually builds patch-bumped the highest tag on ghcr. So a release run named 0.1.0,
+  // published months earlier, and would have pushed 0.1.5 - a prompt confirming a
+  // different version from the one about to go out (found 2026-08-25 on the first
+  // release-script run, settled 2026-08-26).
+  //
+  // THE TWO VERSION LINES STAY SEPARATE, which is the opposite of PearTune's call and
+  // deliberate: the app is at 0.1.0 and the published image is past it, so tagging the
+  // image with the app version pushes a LOWER number than the Umbrels are running and
+  // umbrelOS offers the downgrade as an update.
+  const script = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'release.sh'), 'utf8')
+
+  assert.match(script, /_host_next_version\(\)\s*\{/, 'the one helper exists')
+  assert.match(script, /_host_next="\$\(_host_next_version\)"/, 'the pre-flight prompt asks it')
+  assert.match(script, /HOST_IMAGE_BUILT="\$\(_host_next_version\)"/, 'and so does the step that pushes')
+
+  // The old rule, in the words it was written in. Either call site reverting to the app
+  // version is the regression this pins.
+  assert.ok(!/HOST_IMAGE_VERSION:-\$APP_VERSION/.test(script),
+    'no call site falls back to the app version for the host image tag')
+})
