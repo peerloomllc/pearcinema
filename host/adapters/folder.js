@@ -64,7 +64,14 @@ const CACHE_VERSION = 7
 //   2 - an `auto` root whose own name says nothing is typed by the folder under it,
 //       so a library pointed at a parent of `Movies/` and `TV Shows/` stops filing
 //       every episode under a series called "TV Shows".
-const INDEX_VERSION = 2
+//   3 - a file in a show folder that is not an episode is a SPECIAL rather than a
+//       second nameless season, where the show has real seasons beside it. Without
+//       this bump the fix only reaches libraries that happen to rescan: the cache is
+//       written AFTER `_index` runs, so a cache built by the old code carries the old
+//       grouping and is served for up to SCAN_TTL_MS. Deployed to a real Umbrel on
+//       2026-08-26 and the phantom season was still there, which is how the miss was
+//       found.
+const INDEX_VERSION = 3
 
 // How many files to stat at once when deciding which of them need probing. A stat is
 // nothing next to an ffprobe, but three thousand at once is three thousand open file
