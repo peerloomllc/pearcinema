@@ -1090,6 +1090,64 @@ test('a source that throws still clears the scanning banner', async (t) => {
   await close()
 })
 
+test('SAVING A SOURCE ANSWERS AT ONCE AND READS THE LIBRARY AFTERWARDS', async (t) => {
+  // Saving used to await the whole scan inside the request, which on the real 3 TB
+  // library is about four minutes with a browser holding one connection open. Rescan was
+  // fixed out of exactly this shape on 2026-08-19 and save was left behind, found on
+  // 2026-08-25 while fixing #174.
+  //
+  // PROVED BY THE ORDER OF EVENTS, not by a clock: the call returns while `scanning` is
+  // still published, and the counts only exist once the scan that ran behind it has
+  // finished. A timing assertion would pass on a two-file fixture whatever the code did.
+  const { root, dataDir } = await library(t)
+  const { host, close } = await envHost(dataDir)
+
+  const built = []
+  host.blend.buildSoon = (reason) => built.push(reason)
+
+  const res = await host.setSource({ kind: 'folder', roots: [{ path: root, type: 'auto' }] }, { wait: false })
+
+  assert.equal(res.started, true, 'it says it started rather than reporting a total')
+  assert.equal(res.leaves, undefined, 'and it does NOT quote a count it has not read yet')
+  assert.ok(res.scanning && typeof res.scanning.startedAt === 'number',
+    'the scan is already published, which is what the page reads for progress')
+  assert.equal(host.adapter.kind, 'folder', 'the new source is serving immediately')
+  assert.deepEqual(built, [], 'AND THE CALL RETURNED FIRST - the blend is rebuilt at the END of a scan')
+
+  // And it does finish, clearing the same banner every other slow thing uses.
+  while (host.scanning) await new Promise((r) => setTimeout(r, 20))
+  assert.deepEqual(built, ['source'], 'the scan that ran behind the answer finished and rebuilt the blend')
+  assert.equal(typeof host.lastScanLeaves, 'number', 'and the library was actually read')
+
+  await close()
+})
+
+test('A SOURCE THAT CANNOT BE REACHED IS REFUSED, and the old one keeps serving', async (t) => {
+  // The guarantee the blocking scan used to provide, and the one thing that must not be
+  // lost by moving the scan into the background: a library that goes dark because
+  // somebody mistyped a password is not an acceptable way to find out you mistyped a
+  // password. `ping()` is what proves the new source now, and it costs a stat.
+  const { root, dataDir } = await library(t)
+  const { host, close } = await envHost(dataDir)
+
+  await host.setSource({ kind: 'folder', roots: [{ path: root, type: 'auto' }] })
+  assert.equal(host.source.roots[0].path, root, 'a library is serving')
+
+  const gone = path.join(os.tmpdir(), 'pearcinema-nope-' + Date.now())
+  await assert.rejects(
+    host.setSource({ kind: 'folder', roots: [{ path: gone, type: 'auto' }] }, { wait: false }),
+    /readable/,
+    'the unreachable folder is refused, and says which one'
+  )
+
+  assert.equal(host.source.roots[0].path, root, 'the OLD folder is still the one being served')
+  assert.equal(host.scanning, null, 'and nothing is claiming to be reading anything')
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'source.json'), 'utf8'))
+  assert.equal(saved.roots[0].path, root, 'and the refused config was never written to disk')
+
+  await close()
+})
+
 /* ------------------------------------------------- an extra is not a season -- */
 
 test('A DOCUMENTARY IN A SHOW FOLDER IS A SPECIAL, not a second nameless season', async (t) => {

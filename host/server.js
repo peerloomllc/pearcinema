@@ -434,36 +434,41 @@ class PearCinemaHost {
 
   // Change where the films come from, live, without a restart.
   //
-  // The adapter is swapped ATOMICALLY and only after the new one has scanned: if the
-  // Jellyfin credentials are wrong, this throws and the old source is still serving.
-  // A library that goes dark because someone mistyped a password is not an
-  // acceptable way to find out you mistyped a password.
+  // THE NEW SOURCE IS PROVED BEFORE THE OLD ONE IS DROPPED, which is the guarantee this
+  // method exists to keep: a mistyped Jellyfin password must leave the old library
+  // serving rather than take it dark. `ping()` is what proves it - the folder adapter
+  // says whether the configured folders are readable, the Jellyfin one authenticates -
+  // and it costs a directory stat or one HTTP round trip.
+  //
+  // IT USED TO BE THE FULL SCAN THAT PROVED IT, and that is why saving held the request
+  // open for four minutes on the 3 TB library. Rescan was fixed for exactly this on
+  // 2026-08-19 and save was left behind (found 2026-08-25 fixing #174). So the scan now
+  // runs in the background, the same `_scan` the startup and the timer use, publishing
+  // progress on `scanning` where every other slow thing publishes it.
+  //
+  // `wait` keeps the command line honest. `--folder` on the CLI has to finish scanning
+  // before the process moves on to whatever it was going to do with the library, and
+  // `--codec-report` walks the adapter itself the moment this returns - two scans at once
+  // would fight over the same cache file. The dashboard is the caller that passes false.
+  //
   // `force` walks the disk again instead of trusting the scan cache. It has to be a
   // parameter rather than a decision made inside the adapter, because the operator
   // is the only one who knows they just added a film - or that they are running a
   // build that reads something off the disk the last scan did not.
-  async setSource (cfg, { force = false } = {}) {
+  async setSource (cfg, { force = false, wait = true } = {}) {
     const next = buildAdapter(cfg, {
       libraryId: this.host.libraryId,
       ids: PROTOCOL.ids,
       dataDir: this.dataDir,
       log: this.log
     })
-    // THE PROGRESS IS PUBLISHED WHILE THIS RUNS, the same way a rescan's is. Reading a
-    // real library is minutes - 2,986 files off a USB drive took four of them on the
-    // Umbrel - and without this the page has nothing to show for any of it, so changing
-    // the source looked like it never finished (Tim, 2026-08-25).
-    this.scanning = { done: 0, total: 0, startedAt: Date.now() }
-    let leaves
-    try {
-      // Throws on a bad URL, bad credentials, no folder. The adapter is swapped only
-      // AFTER this returns, so a mistyped password leaves the old source serving.
-      leaves = await next.scan({
-        force,
-        onProgress: (done, total) => { this.scanning = { ...this.scanning, done, total } }
-      })
-    } finally {
-      this.scanning = null
+
+    // The empty adapter is the one kind that cannot be proved and does not need to be:
+    // it IS "no source configured", it never throws, and refusing to save it would leave
+    // an operator no way to disconnect a source at all.
+    if (next.kind !== 'empty') {
+      const reach = await next.ping().catch((e) => ({ ok: false, detail: e.message }))
+      if (!reach.ok) throw new Error(reach.detail || 'that source cannot be read')
     }
 
     this._inner = next
@@ -473,19 +478,22 @@ class PearCinemaHost {
     this.sourceError = null
     fs.mkdirSync(this.dataDir, { recursive: true })
     fs.writeFileSync(path.join(this.dataDir, 'source.json'), JSON.stringify(cfg, null, 2), { mode: 0o600 })
+    this.log('host:source-changed', { source: cfg.kind })
 
+    // THE BLEND IS REBUILT AT THE END OF THE SCAN, which is the half that made the whole
+    // thing look broken. `_scan` has always done it; setSource used not to, so pointing
+    // the library at a different folder scanned the new one, wrote the config, swapped the
+    // adapter - and then left every shelf on every phone and every dashboard showing the
+    // OLD library, because the merged index nobody rebuilt is what they read. On the real
+    // Umbrel that was 248 films and 3,215 episodes on disk still showing as 10 and 469,
+    // with nothing saying why, until the next periodic rescan - and `rescanIntervalMin`
+    // there is 360, so the wait was six hours (Tim, 2026-08-25).
+    const scan = this._scan({ rescan: force, reason: 'source' })
+    if (!wait) return { kind: cfg.kind, started: true, scanning: this.scanning }
+
+    await scan
     const stats = await next.stats().catch(() => ({}))
-    this.log('host:source-changed', { source: cfg.kind, leaves })
-    // AND THE BLEND IS REBUILT, which is the half that made the whole thing look broken.
-    // `_scan` has always ended with this; setSource never did, so pointing the library at
-    // a different folder scanned the new one, wrote the config, swapped the adapter - and
-    // then left every shelf on every phone and every dashboard showing the OLD library,
-    // because the merged index nobody rebuilt is what they read. On the real Umbrel that
-    // was 248 films and 3,215 episodes on disk still showing as 10 and 469, with nothing
-    // saying why, until the next periodic rescan - and `rescanIntervalMin` there is 360,
-    // so the wait was six hours (Tim, 2026-08-25).
-    this.blend.buildSoon('source')
-    return { kind: cfg.kind, leaves, ...stats }
+    return { kind: cfg.kind, leaves: this.lastScanLeaves, ...stats }
   }
 
   // Does this config actually work? The dashboard's Test button, so an operator
@@ -1198,7 +1206,11 @@ class PearCinemaHost {
   // unplugged, scan() throws - and if that propagated, the operator would be locked
   // out of the very page they need in order to fix it. Come up, serve, say what is
   // wrong.
-  async _scan ({ rescan = false } = {}) {
+  //
+  // `reason` names who asked, and reaches the blend so a rebuild can be traced back to
+  // the thing that caused it: 'scan' for the startup and the timer, 'source' when the
+  // operator pointed the library somewhere else.
+  async _scan ({ rescan = false, reason = 'scan' } = {}) {
     this.scanning = { done: 0, total: 0, startedAt: Date.now() }
     try {
       const n = await this.adapter.scan({
@@ -1206,9 +1218,10 @@ class PearCinemaHost {
         onProgress: (done, total) => { this.scanning = { ...this.scanning, done, total } }
       })
       this.sourceError = null
+      this.lastScanLeaves = n
       this.log('host:scanned', { source: this.adapter.kind, items: n })
       // The blend's local member just changed shape.
-      this.blend.buildSoon('scan')
+      this.blend.buildSoon(reason)
     } catch (e) {
       this.sourceError = e.message
       this.log('host:source-failed', { source: this.adapter.kind, err: e.message })

@@ -2014,7 +2014,12 @@ async function startDashboard ({
       if (req.method === 'POST' && url.pathname === '/api/source') {
         const cfg = await readBody(req)
         try {
-          return json(res, 200, await host.setSource(cfg))
+          // SAVING DOES NOT HOLD THE CONNECTION OPEN FOR THE SCAN. On the 3 TB library
+          // that was about four minutes with a browser waiting on one request, the same
+          // shape Rescan was fixed out of on 2026-08-19. The new source is still proved
+          // before the old one is dropped - setSource pings it first - so a mistyped
+          // password still fails here, and fast.
+          return json(res, 200, await host.setSource(cfg, { wait: false }))
         } catch (e) {
           // The OLD source is still serving - setSource swaps only after the new one
           // scans clean. Say that, because "save failed" otherwise reads as "my
