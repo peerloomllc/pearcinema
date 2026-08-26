@@ -2,6 +2,29 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-25 - RIFF MODE STAYS, AND NEVER APPEARS IN ANYTHING A STORE SEES
+Tier: T1 (a release constraint on an existing feature). Tim, 2026-08-25, asked when the
+open IP question cost its first real thing.
+
+The MST3K silhouettes have been an open question since 2026-08-15 ("revisit the
+silhouettes before any store release"). On 2026-08-25 the first Android store screenshot
+was taken with riff mode on, the frame wore the trio and the seat row, and it was thrown
+away. That is the question arriving rather than waiting.
+
+FOUR OPTIONS WERE PUT UP: redraw further from the source, keep it and argue parody,
+remove it before release, or keep it and never show it. Tim chose the last.
+
+SO THE RULE IS: riff mode ships and is off by default, and it must not appear in a store
+screenshot, a store listing, a feature graphic, an App Review build's demo path or a
+promotional video. Anything a person paid to look at recognisable artwork will look at.
+The player skin must be set to None before capturing any store frame - which is now
+written into the screenshot work rather than remembered.
+
+WHAT THIS DOES NOT DO is settle whether the drawing itself is defensible. It reduces how
+often the question is asked by keeping it out of the shop window; a reviewer who installs
+the app and opens Settings can still find it. If that becomes a problem the redraw is
+still the option that removes the question rather than hiding it.
+
 ## 2026-08-25 - A FILM STOPS WHEN THE PHONE IS PUT AWAY, and that is the decision
 Tier: T1 (a deliberate absence, recorded so nobody "fixes" it). Tim, 2026-08-25, asked
 while sweeping PearTune's release-era work.

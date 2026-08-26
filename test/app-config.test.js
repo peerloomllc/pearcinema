@@ -171,3 +171,26 @@ test('THE PLAY SCREENSHOTS ARE WITHIN PLAY\'S RULES', () => {
     assert.ok(!/a$/.test(channels), `${s} still has alpha (${channels}) and Play refuses it`)
   }
 })
+
+test('THE APP STORE FRAMES FIT A SLOT APP STORE CONNECT ACTUALLY HAS', () => {
+  // App Store Connect uploads iPhone screenshots into fixed slots: 6.9" is 1320x2868 and
+  // 6.7" is 1290x2796. Anything else has nowhere to go - PearTune found that out on
+  // 2026-07-31 with six good screenshots already captured on a 6.1" simulator, and this
+  // repo nearly repeated it: the standing PearCinema-Test simulator is an iPhone 16.
+  // PearCinema-Shots is the Pro Max, and its UDID is in scripts/app.conf.
+  //
+  // ASC refuses RGBA too, and `simctl io screenshot` always writes it, so the alpha is
+  // stripped after capture.
+  const { execFileSync } = require('child_process')
+  const dir = path.join(__dirname, '..', 'metadata', 'store', 'ios')
+  const shots = fs.readdirSync(dir).filter(f => f.endsWith('.png'))
+  const slots = ['1320x2868', '1290x2796']
+
+  assert.ok(shots.length >= 2, 'the App Store wants at least two iPhone screenshots')
+  for (const s of shots) {
+    const out = execFileSync('magick', ['identify', '-format', '%w %h %[channels]', path.join(dir, s)]).toString()
+    const [w, h, channels] = out.split(' ')
+    assert.ok(slots.includes(`${w}x${h}`), `${s} is ${w}x${h}, which is not ${slots.join(' or ')}`)
+    assert.ok(!/a$/.test(channels), `${s} still has alpha (${channels}) and the App Store refuses it`)
+  }
+})
