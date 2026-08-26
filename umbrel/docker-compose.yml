@@ -21,7 +21,7 @@ services:
     # way. Pushed 2026-08-24 as a manifest list carrying BOTH linux/amd64 and linux/arm64
     # - Umbrel Home is x86_64 and a Pi-class Umbrel is arm64, and a single-arch image
     # installs on one and fails on the other with an error that says nothing useful.
-    image: ghcr.io/peerloomllc/pearcinema-host:0.1.1@sha256:7e24695a9dd2becec549055fbc7d2fa0383931e55542b15958ed080df68e4c34
+    image: ghcr.io/peerloomllc/pearcinema-host:0.1.2@sha256:bd6c1f304a8df86c13dc790bb901e5cdf5e0b9a93e34964a8c42d61a0e587971
     restart: on-failure
     stop_grace_period: 1m
     network_mode: host
