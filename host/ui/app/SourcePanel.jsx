@@ -287,7 +287,10 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
       return notify('Not saved', res.error + `\n\nYour library is still being served from the old source, so nothing has gone dark.`)
     }
     await reload()
-    notify('Saved', `Now serving ${describe(res)}.`)
+    // IT CANNOT COUNT WHAT IT HAS NOT READ YET. Saving proves the new source is reachable
+    // and then reads it in the background, so this says what Rescan says rather than
+    // quoting a total the scan has not reached.
+    notify('Saved', 'The new library is being read. Progress is on the Library settings page.')
     // A disclosure that stays open after it has done its job reads as unfinished.
     onSaved?.()
   }
