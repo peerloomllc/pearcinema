@@ -475,6 +475,26 @@ if best:
 " 2>/dev/null || echo ""
 }
 
+# WHAT THE HOST IMAGE WILL BE TAGGED, asked in ONE place because it used to be
+# answered in two and they disagreed.
+#
+# The pre-flight prompt said "next host image: $APP_VERSION" - a rule inherited from
+# PearTune, where the two lines were deliberately merged - while step 5c patch-bumped
+# the highest tag on ghcr. So the prompt named 0.1.0, already published months ago,
+# and the step would have pushed 0.1.5. A prompt that names a version other than the
+# one about to be pushed is worse than a drift: it is a confirmation of the wrong
+# thing (found 2026-08-25 on the first release-script run, settled 2026-08-26).
+#
+# THE TWO LINES STAY SEPARATE HERE, which is Tim's call and the opposite of PearTune's.
+# The app is at 0.1.0 and the published image is already at 0.1.4, so tagging the image
+# with the app version would push a LOWER number than the Umbrels are running and
+# umbrelOS would offer a downgrade as an update. Derived from what is PUBLISHED rather
+# than from app.json, so the number cannot go backwards no matter what app.json says.
+# HOST_IMAGE_VERSION still pins it outright for a host-only rebuild or a re-push.
+_host_next_version() {
+  printf '%s' "${HOST_IMAGE_VERSION:-$(_patch_bump "${HOST_IMAGE_CURRENT:-}")}"
+}
+
 # ---------------------------------------------------------------------------
 # NO StartOS / Start9 version helper, and no step 5d / 7b below.
 #
@@ -785,7 +805,7 @@ if $CHECK_VERSIONS_ONLY; then
   echo ""
   if [ -n "$HOST_IMAGE_CURRENT" ]; then
     echo "    Host image query succeeded: $HOST_IMAGE_CURRENT ($HOST_IMAGE)"
-    echo "    Next host image would be: $APP_VERSION  (the app version; override with HOST_IMAGE_VERSION)"
+    echo "    Next host image would be: $(_host_next_version)  (its own line, from what is published; override with HOST_IMAGE_VERSION)"
   else
     echo "    Host image query returned nothing for $HOST_IMAGE — the image may not be"
     echo "    published yet, the package may be private, or the registry was unreachable."
@@ -1114,11 +1134,10 @@ if ! $CHECK_VERSIONS_ONLY; then
   if $SKIP_HOST; then
     echo "    - Host image (skipped via --skip-host)"
   else
-    # ONE CADENCE (Tim, 2026-07-31): the host image rides the app version rather than
-    # patch-bumping a line of its own. It had drifted to 0.2.41 against an app at 1.0.0,
-    # which is what made "am I out of date" unanswerable and left four version lines to
-    # reconcile by hand. HOST_IMAGE_VERSION still overrides for a host-only rebuild.
-    _host_next="${HOST_IMAGE_VERSION:-$APP_VERSION}"
+    # ONE ANSWER, from _host_next_version above: the host image keeps its own line and
+    # takes the next patch after what is PUBLISHED. This prompt used to say $APP_VERSION
+    # while step 5c pushed something else entirely.
+    _host_next="$(_host_next_version)"
     if [ -z "$_host_next" ]; then
       SKIP_HOST=true
       echo "    - Host image (skipped — could not read the current tag from ghcr;"
@@ -1936,13 +1955,12 @@ fi # end NEEDS_BUILD (desktop installers)
 # Zapstore-only or desktop-only release.
 #
 # THE HOST IMAGE HAS ITS OWN VERSION LINE, and passing $RELEASE_TAG here would
-# be a regression, not a bump: the app is at 0.1.x while the published host
-# image is at 0.2.x, so tagging the image with the app version would push a
-# LOWER number than what the Umbrels are already running. The version is
-# therefore resolved as (highest tag on ghcr) + 1 patch, or pinned outright with
-# HOST_IMAGE_VERSION. If neither yields an answer the step skips rather than
-# guessing — the destination prompt showed the transition, so nothing here is a
-# surprise.
+# be a regression, not a bump: the app is at 0.1.0 while the published host
+# image is already at 0.1.4, so tagging the image with the app version would push
+# a LOWER number than what the Umbrels are already running and umbrelOS would
+# offer the downgrade as an update. The version comes from _host_next_version,
+# which the pre-flight prompt also calls, so what was confirmed is what is
+# pushed. If it yields nothing the step skips rather than guessing.
 #
 # Best-effort like the desktop builds: a failure (no podman, not logged in to
 # ghcr, qemu-user-static missing for the arm64 leg) is logged and skipped.
@@ -1955,7 +1973,7 @@ fi # end NEEDS_BUILD (desktop installers)
 if $SKIP_HOST; then
   echo "==> Skipping host image build."
 else
-  HOST_IMAGE_BUILT="${HOST_IMAGE_VERSION:-$(_patch_bump "$HOST_IMAGE_CURRENT")}"
+  HOST_IMAGE_BUILT="$(_host_next_version)"
   if [ -z "$HOST_IMAGE_BUILT" ]; then
     echo "==> Skipping host image build (no version could be resolved; set HOST_IMAGE_VERSION)."
   else
