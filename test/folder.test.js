@@ -1089,3 +1089,67 @@ test('a source that throws still clears the scanning banner', async (t) => {
 
   await close()
 })
+
+/* ------------------------------------------------- an extra is not a season -- */
+
+test('A DOCUMENTARY IN A SHOW FOLDER IS A SPECIAL, not a second nameless season', async (t) => {
+  // FOUND ON THE REAL LIBRARY, 2026-08-25, while taking store screenshots. Band Of
+  // Brothers rendered Season 1 correctly and, beside it, a second card labelled just
+  // "Season" with an initials placeholder where a poster would be.
+  //
+  // The folder has NO season subdirectories - eleven flat files. Ten are
+  // `Band Of Brothers Part N Title.mkv`, which parse as season 1 episodes. One is
+  // `Band Of Brothers Documentry 2001.mkv`, which is not an episode at all, so it had no
+  // number and no folder to be named after and became a season keyed `unnumbered`.
+  //
+  // The filenames below are the real ones, spelling included.
+  const { root, dataDir } = await library(t, {
+    extra: {
+      'TV Shows/Band Of Brothers/Band Of Brothers Part 1 Currahee (1080p x265 Joy).mkv': 'x',
+      'TV Shows/Band Of Brothers/Band Of Brothers Part 2 Day Of Days (1080p x265 Joy).mkv': 'x',
+      'TV Shows/Band Of Brothers/Band Of Brothers Part 3 Carentan (1080p x265 Joy).mkv': 'x',
+      'TV Shows/Band Of Brothers/Band Of Brothers Documentry 2001 (1080p x265 Joy).mkv': 'x'
+    }
+  })
+  const a = realAdapter({ root, dataDir })
+  await a.scan()
+
+  const series = (await a.list({ type: 'series' })).items
+  const bob = series.find(x => /Band Of Brothers/i.test(x.title || ''))
+  assert.ok(bob, `the show is in the library: ${JSON.stringify(series.map(x => x.title))}`)
+
+  const titles = (await a.list({ type: 'seasons', seriesId: bob.id })).items.map(x => x.title).sort()
+
+  assert.ok(!titles.includes('Season'), `a nameless "Season" card is back: ${JSON.stringify(titles)}`)
+  assert.ok(titles.includes('Specials'), `the extra should be Specials, got ${JSON.stringify(titles)}`)
+  assert.ok(titles.includes('Season 1'), `and the real season is untouched, got ${JSON.stringify(titles)}`)
+
+  // And the special really is the documentary, not a real episode swept up with it.
+  const specials = (await a.list({ type: 'seasons', seriesId: bob.id })).items.find(x => x.title === 'Specials')
+  const eps = (await a.list({ type: 'episodes', seasonId: specials.id })).items
+  assert.equal(eps.length, 1, 'exactly the one file that is not an episode')
+  assert.match(eps[0].title, /Documentry/i)
+})
+
+test('a show whose filenames ALL fail to parse is left alone', async (t) => {
+  // The reason the promotion is conditional. A per-file decision cannot see its siblings,
+  // and calling every episode of a show a "special" because its naming is unusual would be
+  // worse than the nameless shelf it replaced.
+  const { root, dataDir } = await library(t, {
+    extra: {
+      'TV Shows/Some Documentary Series/Some Documentary Series The Beginning.mkv': 'x',
+      'TV Shows/Some Documentary Series/Some Documentary Series The Middle.mkv': 'x',
+      'TV Shows/Some Documentary Series/Some Documentary Series The End.mkv': 'x'
+    }
+  })
+  const a = realAdapter({ root, dataDir })
+  await a.scan()
+
+  const series = (await a.list({ type: 'series' })).items
+  const doc = series.find(x => /Some Documentary Series/i.test(x.title || ''))
+  if (doc) {
+    const titles = (await a.list({ type: 'seasons', seriesId: doc.id })).items.map(x => x.title)
+    assert.ok(!titles.includes('Specials'),
+      `nothing should be promoted with no real season beside it, got ${JSON.stringify(titles)}`)
+  }
+})
