@@ -79,3 +79,11 @@ src/ui/.phone.css
 # The README documenting the convention IS committed.
 vendor/ffmpeg/*
 !vendor/ffmpeg/README.md
+
+# The demo library - about 160 MB of public-domain film, fetched and encoded by
+# scripts/fetch-demo-films.sh from the archive.org identifiers recorded there. Video
+# that every clone would carry for ever and that git stores badly, so the repo keeps
+# the identifiers and the licence evidence instead. LICENCES.md IS committed, because
+# the evidence is the part that must not be re-derived.
+assets/demo-library/*
+!assets/demo-library/LICENCES.md
