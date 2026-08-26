@@ -3,7 +3,7 @@ id: peerloom-pearcinema
 name: PearCinema
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "1.0.3"
+version: "1.0.4"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -79,15 +79,19 @@ repo: https://github.com/peerloomllc/pearcinema
 support: https://github.com/peerloomllc/pearcinema/issues
 gallery: []
 releaseNotes: |-
-  Bug fixes
+  Improvements
+  - Saving a change to which folder your films are in now answers straight away. It
+    used to sit there while every file was read, which on a big collection is minutes
+    of a page that looks stuck. It still checks the new folder is really there first,
+    so a wrong one is refused and your library keeps playing from the old one.
+
+  Earlier fixes
   - The Specials fix below now reaches libraries that were already up and running.
     Without this, only a library that happened to re-read its files from scratch would
     have seen any change.
   - A documentary or featurette sitting in a show's folder now appears as "Specials",
     the way Kodi and Jellyfin file them. Before this it turned up as a second season
     with no number and no artwork, sitting next to the real one.
-
-  Earlier fixes
   - Changing which folder your films are in now updates the library straight away, and
     shows you how far it has got while it reads. Before this it read the new folder
     correctly and then carried on showing the old one, with nothing to say it had
