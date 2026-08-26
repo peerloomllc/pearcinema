@@ -198,8 +198,18 @@ Beyond `npm run verify`:
    time, and the reason this proposal exists now rather than at submission.
 2. **Whether the demo survives after pairing** - a "show me the demo again"
    affordance, or strictly a first-run state that retires for good.
-3. **Whether Play needs it too.** Probably eventually; the rejection risk there is
-   lower, so it can follow rather than block.
+3. **Whether Play gets it too, and on Android it does not simply fit** (measured
+   2026-08-26, after the library was built). Apple is what forces this feature - the
+   2.1 rejection risk is theirs, and Play's equivalent is milder. But the files are
+   ordinary assets in one codebase, so they ship in BOTH builds unless something
+   deliberately excludes them, and Android has the harder ceiling: Play caps the
+   compressed download of an app bundle's base module at **200 MB**, and 164 MB of
+   film on top of the app exceeds it. Apple's 200 MB is only the point where a
+   cellular install asks first.
+   So the choices are: bundle for iOS only and leave Android without a demo; or put
+   the films in a Play **asset pack**, which lifts the ceiling and is real build work;
+   or shrink the library for Android alone. Deciding it is not optional, because the
+   default - doing nothing - is an Android build that Play refuses.
 4. **Whether the shorts should be dressed with poster art**, which the films grid
    is built around. A grid of initials placeholders demonstrates the app looking
    worse than it is, and public-domain stills are their own sourcing job.
