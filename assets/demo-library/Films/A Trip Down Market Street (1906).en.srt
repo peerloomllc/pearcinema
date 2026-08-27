@@ -1,9 +1,9 @@
 1
-00:00:04,000 --> 00:00:12,000
+00:00:01,000 --> 00:00:07,000
 [The film is silent. These captions describe what is on screen.]
 
 2
-00:00:14,000 --> 00:00:22,000
+00:00:22,000 --> 00:00:30,000
 A camera fixed to the front of a cable car looks down Market Street, San Francisco.
 
 3

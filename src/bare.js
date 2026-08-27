@@ -1930,8 +1930,17 @@ const methods = {
       // demoSubtitleFile answers; the local path then comes from the shell's map.
       const owned = demo.demoSubtitleFile(demoCatalog, args.itemId, args.subtitleId)
       const file = owned ? demoSubs.get(String(args.subtitleId)) : null
-      if (!file) throw new Error('no such subtitle')
-      return { vtt: fs.readFileSync(file, 'utf8') }
+      if (!file) {
+        log('demo:subtitle-unknown', { itemId: args.itemId, subtitleId: args.subtitleId, owned: owned || null })
+        throw new Error('no such subtitle')
+      }
+      // Logged because a caption track that silently fails to load looks exactly like a
+      // film with no captions: the picker offers the track, the choice is accepted and
+      // nothing is ever drawn. One line here is the difference between a bug report and
+      // a shrug.
+      const text = fs.readFileSync(file, 'utf8')
+      log('demo:subtitle', { file, bytes: text.length })
+      return { vtt: text }
     }
     const buf = await (await clientForId(args.itemId)).request('subtitle.get', args, { stream: true })
     return { vtt: b4a.toString(buf) }
