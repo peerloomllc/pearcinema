@@ -2,6 +2,39 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-27 - EVERY RELEASE APK THIS REPO COULD BUILD WAS DEBUG-SIGNED
+Tier: T2 (a release-path defect with a permanent consequence). Found and fixed the same
+day, filling in the store credentials.
+
+WHAT WAS WRONG. The Expo template points `buildTypes.release` at `signingConfigs.debug`.
+PearTune carries `plugins/with-android-release-signing.js` to change that; PearCinema
+never had it. So `./gradlew assembleRelease` produced a release APK signed with Android's
+throwaway debug key.
+
+WHY IT WENT UNNOTICED for as long as the app has existed: a debug-signed release APK
+builds, installs and runs perfectly. Nothing about it is visibly wrong. The only way to
+see it is to ask apksigner what signed the file, and nothing had.
+
+WHY IT MATTERS: the first key to sign a published app is the only key that can ever
+update it. Publishing one debug-signed APK to Play or Zapstore would have bound
+PearCinema's identity to a key that lives in every Android developer's home directory -
+permanently, with no way back that does not mean a new listing.
+
+HOW IT WAS FOUND, which is the part worth keeping. Not by a test and not by reading: by
+filling in `scripts/.env`, noticing the keystore had seven aliases and none of them
+`pearcinema`, generating the key, building a release APK to prove the key worked, and
+then CHECKING what the APK was actually signed with. Three of those four steps would have
+passed a review. The fourth is the one that found it.
+
+`scripts/release.sh` already refused to publish a debug-signed APK - inherited from
+PearTune with the rest of the script. That guard was the safety net and it would have
+worked, but it fires after a full build and says nothing about how to fix it, which for
+this repo would have been "port a plugin you do not have".
+
+WHAT IS THERE NOW: the plugin, registered in app.json, and `test/release-signing.test.js`
+which holds its transform against a sample of the Expo template - so the next time Expo
+edits the shape the plugin matches on, `npm run verify` says so rather than a release.
+
 ## 2026-08-27 - A REVOKED LIBRARY'S FILMS STOP, INCLUDING THE ONES ALREADY ON THE PHONE
 Tier: T2 (it changes what a revoke does, which is one of the two inherited rules that are
 security bugs if broken). Tim, 2026-08-27, deciding it while it was in front of him.

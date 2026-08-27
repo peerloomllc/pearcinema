@@ -86,6 +86,7 @@
       ],
       "./plugins/with-android-abis",
       "./plugins/with-android-debug-app-id",
+      "./plugins/with-android-release-signing",
       "./plugins/with-android-queries",
       "./plugins/with-localhost-cleartext",
       "./plugins/with-standalone-debug",
