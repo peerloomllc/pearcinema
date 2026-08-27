@@ -9,8 +9,20 @@ and it is the only place the conversion story appears at all, since the demo del
 avoids needing a host. PearTune's equivalent (`peartune-app-review.mp4`, 2026-07-28) is the
 model, and this follows its shape.
 
-`metadata/ios/review-notes.md` links to it, and `scripts/release.sh` refuses to submit
-while that link is still `[VIDEO URL]`.
+`metadata/ios/review-notes.md` says it is attached to the submission, and
+`scripts/release.sh` refuses to submit if that promise is made and no cut exists. Nothing
+can check that the file reached Apple: it goes in the **Attachment** field of App Review
+Information, by hand, beside the notes.
+
+**CUT 2026-08-27**, 2m02s, `pearcinema-app-review.mp4`. Re-cut it with:
+
+```
+bash scripts/cut-app-review-video.sh
+```
+
+which reads the four takes from `~/Videos/Screencasts` and the phone half from the repo
+root, and writes the film. Every cut point is a line in that script, so a re-shot take
+costs an edit rather than an afternoon.
 
 ---
 
@@ -62,6 +74,11 @@ Then, one take each:
 4. **The revoke.** With that film still playing on the phone, revoke the device from the
    dashboard, and keep both in frame if you can. It stops mid-film. That is the point of
    the whole app and it is the last thing the video should show.
+
+   TWO THINGS THE FIRST TAKES TAUGHT. Close the browser's tab and bookmark bars, or crop
+   them out afterwards - the first take had somebody's own bookmarks along the top of
+   every dashboard frame. And hold the phone still for a few seconds after the film
+   stops: the app now says why it stopped, and that sentence is the shot.
 
 Dead air is fine and gets cut. Long QR time in take 2 was cut from PearTune's.
 

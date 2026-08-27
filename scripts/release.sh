@@ -1709,7 +1709,17 @@ _confirm "Release notes look good?"
 _review_notes="$REPO_ROOT/metadata/ios/review-notes.md"
 if [ -f "$_review_notes" ] && grep -q "\[VIDEO URL\]" "$_review_notes"; then
   echo "ERROR: metadata/ios/review-notes.md still says [VIDEO URL]." >&2
-  echo "       Record the walkthrough, put its link in, and run this again." >&2
+  echo "       Record the walkthrough and say where it is, then run this again." >&2
+  exit 1
+fi
+# And the film itself, if the notes claim it is attached. This cannot check that anybody
+# uploaded it to Apple - nothing here can - but it can check that the thing they are
+# meant to upload was actually cut.
+if [ -f "$_review_notes" ] && grep -q "attached to this submission" "$_review_notes" \
+   && [ ! -f "$REPO_ROOT/pearcinema-app-review.mp4" ]; then
+  echo "ERROR: the review notes say a video is attached and there is no" >&2
+  echo "       pearcinema-app-review.mp4 in the repo root." >&2
+  echo "       Cut it: bash scripts/cut-app-review-video.sh" >&2
   exit 1
 fi
 

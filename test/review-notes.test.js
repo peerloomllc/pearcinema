@@ -76,13 +76,21 @@ test('the licence evidence the notes link to is really at that path', () => {
   assert.ok(fs.existsSync(path.join(root, m[1])), `${m[1]} is linked from the review notes and is not in the tree`)
 })
 
-test('the video is either linked or OBVIOUSLY not linked', () => {
-  // One or the other, never neither: a note that quietly lost the video line reads as
-  // finished. The placeholder is the correct state of this file until the walkthrough
-  // is recorded, so it does not fail here - scripts/release.sh refuses to submit while
-  // it stands, which is the moment it actually matters.
-  assert.match(body, /\[VIDEO URL\]|https:\/\/\S+/,
-    'the review notes should either link the walkthrough video or still hold its placeholder')
+test('the video is promised, and the thing that makes it exists', () => {
+  // The notes tell a reviewer a video is attached, so something has to be able to make
+  // one. Three states are allowed and no fourth: attached (what ships), a link, or the
+  // placeholder that says nobody has recorded it yet. A note that quietly lost the line
+  // reads as finished.
+  assert.match(body, /attached to this submission|\[VIDEO URL\]|https:\/\/\S+/,
+    'the review notes should promise the walkthrough, or still hold its placeholder')
+
+  // NO SCRIPT CAN CHECK THAT A FILE REACHED APPLE. What it can check is that the video
+  // is reproducible from this tree - the cut is a script, not somebody's afternoon.
+  assert.ok(fs.existsSync(path.join(root, 'scripts', 'cut-app-review-video.sh')),
+    'the notes promise a video, so the thing that cuts it has to be in the tree')
+  assert.ok(fs.existsSync(path.join(root, 'scripts', 'ios-sim-demo-video.sh')),
+    'and the thing that records its phone half')
+
   const release = fs.readFileSync(path.join(root, 'scripts', 'release.sh'), 'utf8')
   assert.match(release, /VIDEO URL/, 'release.sh must be the thing that refuses a placeholder at submission')
 })

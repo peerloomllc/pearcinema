@@ -11,6 +11,12 @@ RE-WALK IT ON THE BUILD BEING SUBMITTED. The test proves the words exist, not th
 order is still right.
 
 Sign-In Required: NO. There is no account in this app and nothing to sign in to.
+
+Attachment: pearcinema-app-review.mp4 in the repo root, cut by
+scripts/cut-app-review-video.sh. It goes in the Attachment field of App Review
+Information, beside these notes. The notes below say it is attached, so attaching it is
+not optional - scripts/release.sh refuses to submit while they still hold a placeholder,
+but no script can check that a file was uploaded to Apple.
 -->
 
 ---
@@ -57,9 +63,9 @@ not break the app, and the demo above does not need it.
 
 TO SEE THE FULL FLOW
 
-The part a reviewer cannot try - installing the host, pairing a phone to it, browsing a
-real library, playing from it and revoking the phone mid-film - is shown end to end in
-this video: [VIDEO URL]
+The part you cannot try - a host running on somebody's own machine, a phone paired to it,
+a real library browsed and played from, and the phone cut off mid-film - is shown end to
+end in the two-minute video attached to this submission. It is silent, with captions.
 
 CONTACT
 
