@@ -133,6 +133,10 @@ function retireDemo (why) {
   demoCatalog = null
   demoFilms = new Map()
   demoArt = new Map()
+  // The watch state goes with it, in RAM as well as on disk: starting the demo again
+  // should be a fresh look around rather than a shelf of places somebody left before
+  // they decided against it.
+  demoState = demo.emptyDemoState()
   try { fs.unlinkSync(DEMO_FILE) } catch {}
   // Nothing else to reclaim: the films and posters were never copied out of the app
   // bundle, so retiring the demo frees no space and cannot delete anything of anyone's.
