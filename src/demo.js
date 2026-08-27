@@ -102,6 +102,34 @@ function mediaOf (m = {}, size = null) {
   }
 }
 
+// One film's subtitle tracks, in the row shape the folder adapter emits - so the
+// picker, the CC button and the player read them without knowing where they came from.
+//
+// EXTERNAL AND PLAYABLE, always: the demo ships SubRip text written by us (LICENCES.md
+// says any subtitle beside these films is ours rather than a third party's), so there
+// is no image track to refuse and nothing for a host to burn in. `external: true` is
+// what tells the burn resolver to leave it alone.
+//
+// The `file` field is stripped before a row reaches a client, exactly as the folder
+// adapter strips its `_file`: it is a key into the shell's asset map, not something a
+// phone should be handed.
+function subtitleRows (ids, libraryId, rows) {
+  if (!Array.isArray(rows)) return []
+  return rows.filter((r) => r?.file).map((r) => ({
+    id: ids.itemId(libraryId, DEMO_KIND, `sub:${r.file}`),
+    file: r.file,
+    language: r.language || null,
+    title: clean(r.title, 120) || (r.language ? String(r.language).toUpperCase() : 'Subtitles'),
+    codec: 'subrip',
+    external: true,
+    forced: false,
+    sdh: false,
+    playable: true,
+    reason: null,
+    burnable: false
+  }))
+}
+
 // manifest -> the whole demo library, in the shapes the app already consumes.
 //
 // `files` is the shell's { manifest name -> local path } map. A film missing from it
@@ -119,6 +147,8 @@ function buildDemoCatalog (manifest, { ids, files = {}, stats = {} } = {}) {
 
   const paths = new Map() // itemId -> the manifest file name
   const art = new Map() // artId -> the manifest's poster file name
+  const subs = new Map() // itemId -> its subtitle rows
+  const subFiles = new Map() // subtitleId -> the manifest file name
   const movies = []
   for (const f of Array.isArray(m.films) ? m.films : []) {
     if (!f?.file || !have(f.file)) continue
@@ -129,6 +159,11 @@ function buildDemoCatalog (manifest, { ids, files = {}, stats = {} } = {}) {
     const id = ids.itemId(libraryId, DEMO_KIND, f.file)
     paths.set(id, f.file)
     if (f.poster) art.set(id, f.poster)
+    const rows = subtitleRows(ids, libraryId, f.subtitles)
+    if (rows.length) {
+      subs.set(id, rows.map(({ file, ...row }) => row))
+      for (const r of rows) subFiles.set(r.id, r.file)
+    }
     const st = stats[f.file] || {}
     movies.push({
       type: 'movie',
@@ -230,9 +265,16 @@ function buildDemoCatalog (manifest, { ids, files = {}, stats = {} } = {}) {
     episodes,
     paths,
     art,
+    subs,
+    subFiles,
     // Every id the demo owns, which is what the router asks about before it answers a
     // request from the bundle rather than from a host.
-    ids: new Set([...paths.keys(), ...series.map((s) => s.id), ...seasons.map((s) => s.id)])
+    ids: new Set([
+      ...paths.keys(),
+      ...subFiles.keys(),
+      ...series.map((s) => s.id),
+      ...seasons.map((s) => s.id)
+    ])
   }
 }
 
@@ -412,6 +454,20 @@ function demoFavShelf (catalog, state) {
   return { items: s.favs.map((id) => all.get(id)).filter(Boolean) }
 }
 
+// What subtitles one demo film carries. Empty for everything else, which is honest
+// rather than an error: most of the demo has none.
+function demoSubtitles (catalog, itemId) {
+  return { items: catalog.subs.get(String(itemId || '')) || [] }
+}
+
+// THE TRACK MUST BELONG TO THE ITEM THAT ASKED FOR IT, the same check the folder
+// adapter makes. Not a disclosure on its own - it is all one library - but it is the
+// loose coupling that stops being harmless the first time anything is per-item.
+function demoSubtitleFile (catalog, itemId, subtitleId) {
+  const track = (catalog.subs.get(String(itemId || '')) || []).find((t) => t.id === String(subtitleId || ''))
+  return track ? catalog.subFiles.get(track.id) || null : null
+}
+
 // --- serving the bytes -------------------------------------------------------
 
 // The shim's own route for a demo film, which exists because a demo film is the one
@@ -548,6 +604,8 @@ module.exports = {
   demoGet,
   demoSearch,
   demoSiblings,
+  demoSubtitles,
+  demoSubtitleFile,
   emptyDemoState,
   setDemoResume,
   demoResume,

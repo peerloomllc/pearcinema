@@ -87,6 +87,7 @@ const DEMO_FILE = path.join(DATA_DIR, 'demo.json')
 let demoCatalog = null
 let demoFilms = new Map() // itemId -> the local path of that film
 let demoArt = new Map() // artId -> the local path of that poster
+let demoSubs = new Map() // subtitleId -> the local path of that caption file
 // Where you got to, what you finished and what you saved, for a library with no host to
 // keep it for you. Retired with the demo, and never merged into a real library's.
 let demoState = demo.emptyDemoState()
@@ -133,6 +134,7 @@ function retireDemo (why) {
   demoCatalog = null
   demoFilms = new Map()
   demoArt = new Map()
+  demoSubs = new Map()
   // The watch state goes with it, in RAM as well as on disk: starting the demo again
   // should be a fresh look around rather than a shelf of places somebody left before
   // they decided against it.
@@ -1291,7 +1293,7 @@ const methods = {
   //
   // Idempotent, and it touches NOTHING of a real library: not hosts.json, not the
   // identity keypair, not a grant and not a pairing window.
-  'demo.start': async ({ manifest, files = {}, posters = {}, restore = false } = {}) => {
+  'demo.start': async ({ manifest, files = {}, posters = {}, subtitles = {}, restore = false } = {}) => {
     const rec = readDemoRecord()
     // A restore is the shell putting back what was already on. It must not be able to
     // turn the demo on by itself, or a phone that retired the demo when it paired
@@ -1308,12 +1310,14 @@ const methods = {
     demoCatalog = built
     demoFilms = new Map([...built.paths].map(([id, name]) => [id, files[name]]).filter(([, p]) => p))
     demoArt = new Map([...built.art].map(([id, name]) => [id, posters[name]]).filter(([, p]) => p))
+    demoSubs = new Map([...built.subFiles].map(([id, name]) => [id, subtitles[name]]).filter(([, p]) => p))
     demoState = rec?.state || demo.emptyDemoState()
     saveDemoState()
     log('demo:on', {
       films: built.movies.length,
       episodes: built.episodes.length,
       posters: demoArt.size,
+      subtitles: demoSubs.size,
       restore: !!restore
     })
     emit('hosts:changed', {})
@@ -1906,14 +1910,38 @@ const methods = {
   // (found 2026-08-21 on a four-host bench: a Mac film opened while the phone was
   // connected to the Windows host said None, and the Mac's own dashboard said
   // three).
-  // The demo ships no subtitle files yet, and it has no host that could extract an
-  // embedded track - so the picker is honestly empty rather than an error.
-  'subtitle.list': async (args) => (demoMode() ? { items: [] } : (await clientForId(args.itemId)).request('subtitle.list', args)),
+  // The demo's own caption file, listed the way a folder library lists a sidecar .srt.
+  // Only the one film has one, and the rest answer with an empty list rather than an
+  // error - the demo has no host that could extract an embedded track.
+  'subtitle.list': async (args) => (
+    demoMode() ? demo.demoSubtitles(demoCatalog, args.itemId) : (await clientForId(args.itemId)).request('subtitle.list', args)
+  ),
 
   // The track's text, as WebVTT. The host STREAMS it (subtitle bytes ride the
   // same chokepoint as film bytes); buffered here because a subtitle file is
   // tens of kilobytes and the shell wants one string, not a byte feed.
   'subtitle.get': async (args) => {
+    // The demo's caption file, read straight off the bundle. Handed over AS IT IS, the
+    // same as a folder library hands over a sidecar .srt - the shell's parser takes
+    // either a comma or a full stop before the milliseconds, so SubRip needs no
+    // conversion and there is no second format-handling path to keep honest.
+    if (demoMode()) {
+      // The track has to belong to the item that asked for it, which is what
+      // demoSubtitleFile answers; the local path then comes from the shell's map.
+      const owned = demo.demoSubtitleFile(demoCatalog, args.itemId, args.subtitleId)
+      const file = owned ? demoSubs.get(String(args.subtitleId)) : null
+      if (!file) {
+        log('demo:subtitle-unknown', { itemId: args.itemId, subtitleId: args.subtitleId, owned: owned || null })
+        throw new Error('no such subtitle')
+      }
+      // Logged because a caption track that silently fails to load looks exactly like a
+      // film with no captions: the picker offers the track, the choice is accepted and
+      // nothing is ever drawn. One line here is the difference between a bug report and
+      // a shrug.
+      const text = fs.readFileSync(file, 'utf8')
+      log('demo:subtitle', { file, bytes: text.length })
+      return { vtt: text }
+    }
     const buf = await (await clientForId(args.itemId)).request('subtitle.get', args, { stream: true })
     return { vtt: b4a.toString(buf) }
   },

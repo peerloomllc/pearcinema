@@ -3030,10 +3030,11 @@ export default function App () {
         </p>
         {/* THIS PARAGRAPH SAID THE OPPOSITE UNTIL 2026-08-26, and it was a claim about
             where somebody's films go. It was written before the relay shipped
-            (proposal 2026-08-18-relay-for-video reversed "no relay, by design") and
-            nothing brought it back into line, so the About screen promised no relay
-            while Settings offered a switch for one. Found walking the app on the
-            Simulator. Same wording as the store listing's relay paragraph, on purpose. */}
+            (proposal 2026-08-18-relay-for-video reversed the earlier decision) and
+            nothing brought it back into line, so this screen contradicted the switch
+            Settings offers three taps away. Found by walking the app on the Simulator,
+            and now guarded by test/claude-md.test.js. Same wording as the store
+            listing's relay paragraph, on purpose. */}
         <p>
           Every stream tries a direct connection between your phone and the machine
           first. Some mobile networks and locked-down wifi refuse one, and then

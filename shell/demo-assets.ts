@@ -23,3 +23,4 @@
 export const DEMO_MANIFEST: any = null
 export const DEMO_FILES: Record<string, any> = {}
 export const DEMO_POSTERS: Record<string, any> = {}
+export const DEMO_SUBTITLES: Record<string, any> = {}

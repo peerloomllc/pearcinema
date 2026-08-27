@@ -1696,6 +1696,23 @@ _confirm "Release notes look good?"
 # A hard failure, deliberately: it runs before the tag, the slow builds and any
 # publish, so aborting here costs nothing, and a warning that scrolls past in a
 # long release log is exactly how this class of bug keeps happening.
+# THE APP REVIEW NOTES MUST NOT GO TO APPLE WITH A PLACEHOLDER IN THEM.
+#
+# metadata/ios/review-notes.md sends the reviewer to a walkthrough video, and the URL is
+# written in by hand once the video exists. A submission carrying "[VIDEO URL]" tells a
+# reviewer we did not read our own note; one that silently lost the line is worse.
+#
+# A hard failure, and here rather than in the test suite on purpose: the placeholder is
+# the correct state of that file for as long as there is no video, so it must not turn
+# `npm run verify` red for everyone every day. It only matters at a submission, which is
+# this script.
+_review_notes="$REPO_ROOT/metadata/ios/review-notes.md"
+if [ -f "$_review_notes" ] && grep -q "\[VIDEO URL\]" "$_review_notes"; then
+  echo "ERROR: metadata/ios/review-notes.md still says [VIDEO URL]." >&2
+  echo "       Record the walkthrough, put its link in, and run this again." >&2
+  exit 1
+fi
+
 _umbrel_manifest="$REPO_ROOT/${UMBREL_DIR:-umbrel}/umbrel-app.yml"
 if [ -f "$_umbrel_manifest" ]; then
   echo "==> Writing release notes into $( basename "$(dirname "$_umbrel_manifest")" )/umbrel-app.yml..."

@@ -91,3 +91,11 @@ assets/demo-library/*
 # The catalogue IS committed: it is a few kilobytes, it is what the app builds the demo
 # library from, and its file names are the keys the shell resolves the assets by.
 !assets/demo-library/manifest.json
+# AND THE SUBTITLES ARE COMMITTED, because we wrote them. The fetch script cannot
+# reproduce a caption file the way it reproduces a film, and LICENCES.md's rule is that
+# any subtitle shipped beside these is ours rather than a third party's. Git cannot
+# re-include a file inside an excluded directory, so Films/ is re-admitted and then
+# emptied again except for the .srt.
+!assets/demo-library/Films/
+assets/demo-library/Films/*
+!assets/demo-library/Films/*.srt

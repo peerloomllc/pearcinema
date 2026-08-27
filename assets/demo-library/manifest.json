@@ -15,6 +15,13 @@
     {
       "file": "Films/A Trip Down Market Street (1906).mp4",
       "poster": "Films/A Trip Down Market Street (1906).bin",
+      "subtitles": [
+        {
+          "file": "Films/A Trip Down Market Street (1906).en.srt",
+          "language": "en",
+          "title": "English (descriptions)"
+        }
+      ],
       "title": "A Trip Down Market Street",
       "year": 1906,
       "runtime": 717,

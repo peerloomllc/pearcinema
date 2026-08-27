@@ -234,15 +234,20 @@ test('subtitle.list and subtitle.get route by item, not by connection', async ()
   for (const method of ['subtitle.list', 'subtitle.get']) {
     const at = src.indexOf(`'${method}':`)
     assert.ok(at > 0, `${method} is gone from the worklet's method table`)
-    // The body runs to the next method key at the same indent.
-    const body = src.slice(at, at + 400)
+    // TO THE NEXT METHOD KEY, not a fixed number of characters. It was 400 of them
+    // until 2026-08-26, when the demo library's branch went in at the top of both
+    // methods and pushed the line this looks for past the window - so the guard failed
+    // on code that still holds the invariant it guards.
+    const rest = src.slice(at + method.length + 3)
+    const next = rest.search(/\n {2}'[a-z][a-zA-Z.]*': /)
+    const body = next === -1 ? rest : rest.slice(0, next)
     assert.match(
       body,
       /clientForId\(args\.itemId\)/,
       `${method} must resolve the host from the itemId, or a merged-view lookup asks the wrong host`
     )
     assert.doesNotMatch(
-      body.slice(0, body.indexOf('\n\n') === -1 ? body.length : body.indexOf('\n\n')),
+      body,
       /\(await connected\(\)\)\.request/,
       `${method} must not go straight to the connected host`
     )
