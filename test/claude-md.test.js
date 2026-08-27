@@ -41,6 +41,35 @@ test('CLAUDE.md does not say "no relay" while a relay key ships', () => {
   }
 })
 
+test('NOTHING A USER READS SAYS THERE IS NO RELAY, while a relay key ships', () => {
+  // The same drift, one surface further out, and worse there: CLAUDE.md misleads a
+  // session, but these tell a PERSON where their films go.
+  //
+  // Both of these were wrong on 2026-08-26, eight days after the relay shipped - the
+  // About screen said "PearCinema ships with no relay at all" while the Settings screen
+  // three taps away offered a switch for one, and the README said the same in a
+  // paragraph of arithmetic. Found by looking, not by any test, which is why this
+  // exists.
+  const relay = fs.readFileSync(path.join(root, 'src', 'relay.js'), 'utf8')
+  const key = relay.match(/RELAY_PUBLIC_KEY_Z\s*=\s*'([^']*)'/)
+  if (!key || !key[1].length) return // no key shipped: the old sentence is true again
+
+  const surfaces = [
+    ['README.md', fs.readFileSync(path.join(root, 'README.md'), 'utf8')],
+    ['the app\'s About screen', fs.readFileSync(path.join(root, 'src', 'ui', 'App.jsx'), 'utf8')],
+    ['the iOS listing', fs.readFileSync(path.join(root, 'metadata', 'ios', 'version', 'default', 'en-US.json'), 'utf8')],
+    ['the Play listing', fs.readFileSync(path.join(root, 'metadata', 'android', 'listing', 'en-US.json'), 'utf8')]
+  ]
+  // Matched loosely on purpose: "no relay of its own", "ships with no relay at all" and
+  // "without a relay" are all the same promise, and the next way to write it should trip
+  // this too. A comment explaining the OLD decision is caught as well, which is correct -
+  // there is no reason to still be asserting it anywhere.
+  for (const [what, text] of surfaces) {
+    const claim = text.match(/[^.\n]{0,120}\bno relay\b[^.\n]{0,120}/i)
+    assert.equal(claim, null, `${what} still says there is no relay: "${claim && claim[0].trim()}"`)
+  }
+})
+
 test('the paths CLAUDE.md sends a reader to are really there', () => {
   // A tour of a tree that has moved on is the same failure in a smaller way.
   for (const rel of ['host/methods.js', 'src/merge.js', 'src/ui/App.jsx', 'desktop', 'umbrel', 'plugins', 'host/redeploy-umbrel.sh', 'scripts/ios-sim-build.sh']) {

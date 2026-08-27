@@ -30,7 +30,7 @@ import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 import * as CastRemote from '../modules/cast-remote'
 
-import { DEMO_MANIFEST, DEMO_FILES, DEMO_POSTERS } from '../shell/demo-assets'
+import { DEMO_MANIFEST, DEMO_FILES, DEMO_POSTERS, DEMO_SUBTITLES } from '../shell/demo-assets'
 
 const bundle = require('../assets/bare-universal.bundle')
 
@@ -80,7 +80,12 @@ async function resolveDemoAssets () {
     const p = await resolveAsset(mod)
     if (p) posters[name] = p
   }
-  return { manifest: DEMO_MANIFEST, files, posters }
+  const subtitles: Record<string, string> = {}
+  for (const [name, mod] of Object.entries(DEMO_SUBTITLES)) {
+    const p = await resolveAsset(mod)
+    if (p) subtitles[name] = p
+  }
+  return { manifest: DEMO_MANIFEST, files, posters, subtitles }
 }
 
 // HOW LONG THE PLAYING-NEXT CARD WAITS before the next episode starts itself.

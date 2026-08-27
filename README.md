@@ -162,11 +162,18 @@ On the same network it is direct. Away from home, the two ends punch through the
 and connect directly, which works for most people and not for everybody: some routers,
 at both ends at once, leave no direct path.
 
-**PearCinema ships with no relay of its own, deliberately.** Video at 8 Mbps is 3.6 GB per
-hour, and a service quietly paying for that is a service that eventually stops. Instead you
-can **bring your own relay**: run the daemon on a VPS you control and paste its key into
-the app. Nothing crosses it without being asked first, the app shows what it has carried
-this month, and you can cap what it is allowed to use.
+**When there is no direct path, PearCinema falls back to a relay** run by PeerLoom, which
+forwards encrypted data it cannot read and keeps no copy of it. It is offered only after a
+direct connection has actually failed, or where our own network makes one impossible - so
+the ordinary case never touches it. A relayed film is held near 2.5 Mbps, the app says so
+while it lasts, and it shows what has crossed this month.
+
+This reverses an earlier decision, and the arithmetic behind that one still stands: video
+at 8 Mbps is 3.6 GB an hour, and a service quietly paying for that is a service that
+eventually stops. What the arithmetic missed was that being right about it meant a phone on
+mobile data could not reach its own library at all. So there is no hard cap, and you can
+**bring your own relay** instead: run the daemon on a VPS you control and paste its key
+into the app, and yours is the one that gets used.
 
 ## Where your library lives
 

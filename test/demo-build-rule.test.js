@@ -23,6 +23,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
+const { execSync } = require('child_process')
 
 const root = path.join(__dirname, '..')
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
@@ -35,6 +36,8 @@ const films = manifest.films.map((f) => f.file)
   .concat(manifest.shows.flatMap((s) => s.episodes.map((e) => e.file)))
 const posters = manifest.films.map((f) => f.poster).filter(Boolean)
   .concat(manifest.shows.map((s) => s.poster).filter(Boolean))
+const subtitles = manifest.films.flatMap((f) => (f.subtitles || []).map((t) => t.file))
+  .concat(manifest.shows.flatMap((s) => s.episodes.flatMap((e) => (e.subtitles || []).map((t) => t.file))))
 
 test('THE ANDROID SIDE REFERENCES NO FILM AT ALL', () => {
   assert.ok(!/demo-library/.test(otherAssets), 'shell/demo-assets.ts must not require anything from assets/demo-library')
@@ -54,13 +57,14 @@ test('the iOS side lists exactly what the manifest names, by the same keys', () 
   const inSource = (name) => iosAssets.includes(name.replace(/'/g, "\\'"))
   for (const f of films) assert.ok(inSource(f), `shell/demo-assets.ios.ts is missing ${f}`)
   for (const p of posters) assert.ok(inSource(p), `shell/demo-assets.ios.ts is missing ${p}`)
+  for (const t of subtitles) assert.ok(inSource(t), `shell/demo-assets.ios.ts is missing ${t}`)
 
   const listed = [...iosAssets.matchAll(/demo-library\/((?:[^'\\]|\\.)+)'\)/g)]
     .map((m) => m[1].replace(/\\'/g, "'"))
   for (const name of listed) {
     if (name === 'manifest.json') continue
     assert.ok(
-      films.includes(name) || posters.includes(name),
+      films.includes(name) || posters.includes(name) || subtitles.includes(name),
       `${name} is required by the iOS build and is not in the manifest`
     )
   }
@@ -70,6 +74,27 @@ test('the fetch script produces exactly the files the manifest names', () => {
   const script = read('scripts/fetch-demo-films.sh')
   for (const f of films) assert.ok(script.includes(f), `scripts/fetch-demo-films.sh does not produce ${f}`)
   for (const p of posters) assert.ok(script.includes(p), `scripts/fetch-demo-films.sh does not produce ${p}`)
+})
+
+test('THE CAPTION FILE IS IN THE REPO, because we wrote it', () => {
+  // The films are fetched and the posters are grabbed from them, so neither is
+  // committed. A caption file is neither: no script can reproduce a piece of writing,
+  // and LICENCES.md's rule is that any subtitle beside these films is ours rather than
+  // a third party's. So it has to survive a clone, and git will not include a file
+  // inside an excluded directory without the directory being re-admitted first.
+  assert.ok(subtitles.length > 0, 'the demo should demonstrate subtitles at all')
+  for (const t of subtitles) {
+    assert.match(t, /\.srt$/)
+    const full = path.join(root, 'assets', 'demo-library', t)
+    assert.ok(fs.existsSync(full), `${t} is named in the manifest and is not in the tree`)
+    assert.ok(
+      execSync(`git check-ignore -q "assets/demo-library/${t}" || echo tracked`, { cwd: root }).toString().includes('tracked'),
+      `${t} is gitignored, so a clone would not have it`
+    )
+    // SubRip, and readable as such: a cue number, a timestamp line, and text.
+    assert.match(fs.readFileSync(full, 'utf8'), /^1\n\d\d:\d\d:\d\d,\d\d\d --> \d\d:\d\d:\d\d,\d\d\d\n\S/)
+  }
+  assert.ok(/assetExts\.push\('srt'\)/.test(read('metro.config.js')), "metro.config.js must treat .srt as an asset")
 })
 
 test('every film is direct-playable, because demo mode has no host to remux with', () => {

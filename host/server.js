@@ -49,13 +49,17 @@ const SOURCE_CHECK_MS = 60_000
 // PearCinema's own topics, so the two apps never collide on the DHT and a PearTune
 // phone cannot half-connect to a PearCinema host.
 //
-// NO RELAY KEY, deliberately. PearTune's relay carried 163 MB in six days against
-// a 500 GB/month tier; video at 8 Mbps is 3.6 GB per HOUR, so one person watching
-// two hours a day is 216 GB/month by themselves. `relayThroughFor` returns null the
-// moment the key is null, so this is a config value rather than an architectural
-// change - and the honest cost is that a user behind symmetric NAT at both ends has
-// no off-LAN path at all. The answer offered is bring-your-own-relay, a settings
-// field for a key on their own VPS.
+// NO RELAY KEY HERE, AND THAT IS NOT THE OLD "no relay, by design". PearCinema ships
+// a relay as of 2026-08-18 (proposals/2026-08-18-relay-for-video.md); the key lives in
+// src/relay.js, on the PHONE, because relayThrough is the DIALING side's policy and the
+// host is dialed rather than dialing. A key here would be a value nothing reads.
+//
+// The arithmetic that once argued against a relay at all still stands and is worth
+// keeping: video at 8 Mbps is 3.6 GB per HOUR, so one person watching two hours a day
+// is 216 GB a month by themselves. What it missed is that being right about the cost
+// meant a phone on mobile data could not reach its own library at all. Hence: direct
+// first, the key offered only after a punch has actually failed, a 2.5 Mbps ceiling
+// while relayed, and bring-your-own-relay for anyone who would rather not use ours.
 const PROTOCOL = createProtocol({
   app: 'pearcinema',
   displayName: 'PearCinema',

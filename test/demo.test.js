@@ -24,6 +24,7 @@ const MANIFEST = {
   films: [
     {
       file: 'Films/Duck and Cover (1951).mp4',
+      subtitles: [{ file: 'Films/Duck and Cover (1951).en.srt', language: 'en', title: 'English (descriptions)' }],
       poster: 'Films/Duck and Cover (1951).bin',
       title: 'Duck and Cover',
       year: 1951,
@@ -199,6 +200,45 @@ test('the shelf survives a demo.json written by an older build', () => {
   assert.deepEqual(D.demoResumeShelf(c, null).items, [])
   assert.deepEqual(D.demoFavShelf(c, { favs: 'nonsense' }).items, [])
   assert.deepEqual(D.setDemoWatched(undefined, 'x', true).watched, ['x'])
+})
+
+test('subtitles are listed like a folder library\'s sidecars, and only for their own film', () => {
+  const c = build()
+  const film = c.movies.find((m) => m.title === 'Duck and Cover')
+  const other = c.movies.find((m) => m.title === 'A Trip Down Market Street')
+
+  const { items } = D.demoSubtitles(c, film.id)
+  assert.equal(items.length, 1)
+  const t = items[0]
+  assert.equal(t.title, 'English (descriptions)')
+  assert.equal(t.language, 'en')
+  assert.equal(t.codec, 'subrip')
+  assert.equal(t.playable, true)
+  // EXTERNAL, so nothing tries to burn it into the picture - there is no host that
+  // could, and a burn request on a demo film would be a re-encode nobody can do.
+  assert.equal(t.external, true)
+  assert.equal(t.burnable, false)
+  // The path is a key into the shell's asset map and never reaches a client, the same
+  // rule the folder adapter follows with its own `_file`.
+  assert.equal(t.file, undefined)
+
+  assert.deepEqual(D.demoSubtitles(c, other.id).items, [])
+  assert.deepEqual(D.demoSubtitles(c, 'nonsense').items, [])
+})
+
+test('a subtitle only resolves against the film that owns it', () => {
+  const c = build()
+  const film = c.movies.find((m) => m.title === 'Duck and Cover')
+  const other = c.movies.find((m) => m.title === 'A Trip Down Market Street')
+  const id = D.demoSubtitles(c, film.id).items[0].id
+
+  assert.equal(D.demoSubtitleFile(c, film.id, id), 'Films/Duck and Cover (1951).en.srt')
+  // Asked against the wrong film, or with an id that is not a subtitle at all.
+  assert.equal(D.demoSubtitleFile(c, other.id, id), null)
+  assert.equal(D.demoSubtitleFile(c, film.id, film.id), null)
+  assert.equal(D.demoSubtitleFile(c, film.id, ''), null)
+  // And the id is the demo's own, so the router answers for it from the bundle.
+  assert.ok(c.ids.has(id))
 })
 
 test('the routes only claim what belongs to the demo', () => {

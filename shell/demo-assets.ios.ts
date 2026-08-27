@@ -37,6 +37,14 @@ export const DEMO_FILES: Record<string, any> = {
   'TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E02 - Houston, We\'ve Got A Problem.mp4': require('../assets/demo-library/TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E02 - Houston, We\'ve Got A Problem.mp4')
 }
 
+// THE ONE CAPTION FILE, and it is ours: written from the footage of a silent film, so
+// nobody else's caption file is inherited along with it (assets/demo-library/LICENCES.md).
+// It IS in the repo, unlike the films - the fetch script can reproduce a download, not a
+// piece of writing.
+export const DEMO_SUBTITLES: Record<string, any> = {
+  'Films/A Trip Down Market Street (1906).en.srt': require('../assets/demo-library/Films/A Trip Down Market Street (1906).en.srt')
+}
+
 // NOT .jpg. A recognised image extension becomes an Android drawable RESOURCE, which
 // expo-asset can only name and never resolve to a readable path - PearTune's first demo
 // build failed exactly there. The bytes are ordinary JPEG.
