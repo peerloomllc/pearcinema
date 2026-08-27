@@ -3,6 +3,8 @@
 **Goal** - give an App Store reviewer, and anyone who installs before they run a
 host, a PearCinema that plays something without a server.
 
+**Status** - **APPROVED 2026-08-26** (PR #191, merged). Code may start.
+
 **Tier** - **T2.** App-only. No wire change, no host change, nothing near grants,
 pairing or the security boundary. It earns T2 on shipping video inside the binary
 and on adding a first-run path that bypasses onboarding.
