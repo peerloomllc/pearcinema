@@ -2,6 +2,60 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-26 - THE DEMO FILMS ARE SERVED FROM THE APP BUNDLE, NOT COPIED INTO THE CACHE
+Tier: T2 (part of the approved app-review demo, proposal 2026-08-26-app-review-demo).
+Decided while building it, and written down because it departs from both the proposal's
+own wording and from PearTune, which is the donor for everything else here.
+
+THE PROPOSAL SAID pinned cache entries: "the demo files are installed as pinned cache
+entries and the lease check has to answer true for demo ids". That is exactly what
+PearTune does with its five CC0 tracks, and for 18 MB of music it is free - the demo
+plays through the same disk path a downloaded album plays through, and no new serving
+code exists at all.
+
+IT DOES NOT CARRY OVER AT 164 MB, for three reasons that only appear at that size:
+
+1. It doubles what the demo costs. The films are already on the phone, inside the app.
+   Copying them into the app's Documents directory means the same 164 MB twice.
+2. The second copy would be in the iCloud backup. Apple's own data-storage guidance says
+   not to put re-creatable or bundled data where it gets backed up, and a rejection over
+   that would be a rejection caused by the feature written to avoid a rejection.
+3. It would show up as the person's own. A pinned cache entry IS a download: it would
+   appear in Downloads, and 164 MB would appear in the storage figures, as if somebody
+   had chosen to keep it.
+
+SO A DEMO FILM IS SERVED STRAIGHT FROM THE BUNDLE by the shim's own /demo/ route, which
+costs about forty lines of Range arithmetic in src/demo.js - all of it unit-tested,
+including the suffix range (`bytes=-64`) iOS uses to read the moov atom of an MP4, which
+is the one that means "the film will not open" rather than "seeking is odd". The cache
+never learns the demo exists, so eviction, the cap, Downloads and Clear films are all
+untouched by it and none of them needed a demo branch. Retiring the demo frees nothing
+because it never took anything, which is the point.
+
+THE POSTERS GO THE SAME WAY, through the same route ahead of the shim's art path, rather
+than into the art store. Same reasoning, smaller numbers.
+
+WHAT THIS COSTS: one route the shared shim knows nothing about, and a code path that a
+real library does not use. That was judged cheaper than 164 MB in the wrong place.
+
+## 2026-08-26 - THE DEMO KEEPS ITS OWN WATCH STATE, ON THE PHONE
+Tier: T2 (same proposal). The alternative was a demo where three shelves do nothing.
+
+A demo library has no host, and watch state lives on the host - so resume positions,
+watched ticks and the watchlist have nowhere to go. PearTune answered every one of them
+with `{ ok: true }` and a shrug, which is defensible for five tracks.
+
+It is not defensible here. Continue watching is the first row of the app, an episode is
+28 minutes, and a reviewer who plays ten minutes of Apollo 11, leaves and comes back is
+looking at exactly the feature the shelf exists for. So demo mode keeps resume, watched
+and favourites in demo.json beside the flag that says the demo is on, and retires them
+with it.
+
+THE RULES ARE NOT A SECOND SET. src/demo.js requires host/watch.js - the only place the
+phone reaches into host/ - so what "started" and "finished" mean is decided once. A demo
+that put a film on the Continue shelf at forty seconds, where a real library would not,
+would be demonstrating an app that does not exist.
+
 ## 2026-08-25 - RIFF MODE STAYS, AND NEVER APPEARS IN ANYTHING A STORE SEES
 Tier: T1 (a release constraint on an existing feature). Tim, 2026-08-25, asked when the
 open IP question cost its first real thing.

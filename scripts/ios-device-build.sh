@@ -41,6 +41,24 @@ SUITE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 say () { printf '\n== %s ==\n' "$1"; }
 mac () { ssh -o BatchMode=yes "$MAC" "$REMOTE_ENV $*"; }
 
+# THE DEMO FILMS ARE NOT IN THE REPO, AND THE iOS BUNDLE REQUIRES THEM BY NAME.
+# shell/demo-assets.ios.ts requires each one statically, so a missing file is an
+# "Unable to resolve module" from Metro halfway through a build that has already
+# spent several minutes. Checked here instead, where the fix is one line.
+missing=0
+while IFS= read -r f; do
+  [ -f "$REPO_ROOT/assets/demo-library/$f" ] || { echo "  missing: $f" >&2; missing=1; }
+done < <(python3 -c "
+import json
+m = json.load(open('$REPO_ROOT/assets/demo-library/manifest.json'))
+for f in m['films']:
+    print(f['file']);  print(f['poster'])
+for s in m['shows']:
+    print(s['poster'])
+    for e in s['episodes']: print(e['file'])
+")
+[ "$missing" = 0 ] || { echo "the demo library is not built - run: bash scripts/fetch-demo-films.sh" >&2; exit 1; }
+
 # THE ONE THAT COSTS AN AFTERNOON, inherited whole from PearTune rather than rediscovered.
 #
 # codesign over ssh dies with `errSecInternalComponent` at the embed-frameworks phase -

@@ -51,6 +51,27 @@ ITEMS=(
   "apollo-13|gov.archives.arc.1155023|gov.archives.arc.1155023.mpeg|TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E02 - Houston, We've Got A Problem.mp4|$EP_BITRATE"
 )
 
+# A POSTER PER TILE, grabbed from the film itself. The library grid is built around
+# artwork, and a demo of initials placeholders shows the app looking worse than it is.
+# A frame of a public-domain film is public domain, and LICENCES.md says so.
+#
+# Square, because the app's covers are square (object-fit: cover, aspect-ratio 1) and a
+# 4:3 archival frame letterboxed into one would be a poster with grey sides.
+#
+# NAMED .bin, NOT .jpg, AND THAT IS NOT A STYLE CHOICE. React Native's Android asset
+# packager routes recognised image types into res/drawable, where expo-asset can hand
+# back a resource NAME and never a path anything can open - PearTune's first demo build
+# failed exactly there. An unrecognised extension goes to res/raw and copies out as a
+# real file. The bytes are ordinary JPEG.
+#
+# output path | source film | timestamp
+POSTERS=(
+  "Films/Duck and Cover (1951).bin|Films/Duck and Cover (1951).mp4|00:01:12"
+  "Films/A Trip Down Market Street (1906).bin|Films/A Trip Down Market Street (1906).mp4|00:03:40"
+  "TV Shows/The Apollo Missions/poster.bin|TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E01 - The Eagle Has Landed.mp4|00:05:00"
+)
+POSTER_PX="${POSTER_PX:-600}"
+
 say () { printf '\n== %s ==\n' "$1"; }
 
 command -v ffmpeg >/dev/null || { echo "ffmpeg is not installed, and the encode needs it" >&2; exit 1; }
@@ -121,6 +142,21 @@ for row in "${ITEMS[@]}"; do
     -movflags +faststart "$dest"
   rm -f "$pass_log"*
 
+  printf '  %s (%s)\n' "$out" "$(du -h "$dest" | cut -f1)"
+done
+
+say "posters"
+for row in "${POSTERS[@]}"; do
+  IFS='|' read -r out from at <<< "$row"
+  dest="$OUT/$out"
+  src="$OUT/$from"
+  [ -f "$dest" ] && { echo "already made: $out"; continue; }
+  [ -f "$src" ] || { echo "  no film to grab from: $from" >&2; continue; }
+  # Scaled so the SHORT side is POSTER_PX, then centre-cropped square, so nothing is
+  # stretched and the crop takes from the long side.
+  ffmpeg -nostdin -v error -y -ss "$at" -i "$src" -frames:v 1 \
+    -vf "scale=w=$POSTER_PX:h=$POSTER_PX:force_original_aspect_ratio=increase,crop=$POSTER_PX:$POSTER_PX" \
+    -q:v 4 -f mjpeg "$dest"
   printf '  %s (%s)\n' "$out" "$(du -h "$dest" | cut -f1)"
 done
 

@@ -537,7 +537,9 @@ function ActionSheet ({ item, saved, watched, downloaded, onClose, onPlay, onSav
           <button onClick={() => { onClose(); onWatched(item, !watched) }}>
             <CheckCircle size={18} /> {watched ? 'Mark unwatched' : 'Mark watched'}
           </button>
-          {playable && (
+          {/* A null onDownload hides it, which is what demo mode passes: those films
+              are already on the phone. */}
+          {playable && onDownload && (
             <button onClick={() => { onClose(); onDownload(item, !downloaded) }}>
               <DownloadSimple size={18} /> {downloaded ? 'Remove download' : 'Download'}
             </button>
@@ -683,7 +685,7 @@ function Scanner ({ onScan, onCancel }) {
 // what somebody typed must not be eaten by the machinery mid-flow.
 let obNames = { userName: '', deviceName: '' }
 
-function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = null }) {
+function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = null, onDemo = null, demoStarting = false }) {
   const [phase, setPhase] = useState(addHost ? 'pair' : 'intro')
   const [names, setNamesState] = useState(obNames)
   const setNames = (n) => { obNames = n; setNamesState(n) }
@@ -789,6 +791,26 @@ function Onboarding ({ onPaired, initialLink = '', addHost = false, onCancel = n
             <>
               <button className='primary' onClick={() => setOwner('mine')}>It's mine</button>
               <button onClick={() => setOwner('friend')}>It's a friend's</button>
+              {/* THE THIRD HONEST ANSWER. "Whose library is it?" has three, and
+                  "none yet" is one of them - which is the position an App Store
+                  reviewer is in, and equally anyone who installs the app before
+                  setting a server up. It sits here beside the others rather than as
+                  an escape hatch on the intro card, and only while the question is
+                  unanswered, so it never crowds an explainer somebody is reading.
+                  Absent entirely on Android, where the films are not in the build
+                  (the shell answers shell.demoAvailable). */}
+              {onDemo && (
+                <>
+                  <div className='obsep' />
+                  <button onClick={onDemo} disabled={demoStarting}>
+                    {demoStarting ? 'Setting up…' : 'I don\'t have one yet'}
+                  </button>
+                  <p className='muted sm hint'>
+                    Watch a few short films that come with the app, so you can look around before
+                    you have a library to connect to.
+                  </p>
+                </>
+              )}
             </>
             )
           : (
@@ -944,6 +966,13 @@ export default function App () {
   // Cross-tab data.
   const [artBase, setArtBase] = useState('')
   const [ident, setIdent] = useState(null)
+  // THE DEMO LIBRARY (proposal 2026-08-26-app-review-demo). Whether this build has one
+  // at all is the shell's answer, not a platform test here: the films ship in the Apple
+  // build only, and the Android bundle references none of them.
+  const [demoAvailable, setDemoAvailable] = useState(false)
+  // Resolving the bundled films takes a moment on a first tap, and a button with no
+  // feedback reads as broken.
+  const [demoStarting, setDemoStarting] = useState(false)
   const [saved, setSaved] = useState(new Set())
   const [savedItems, setSavedItems] = useState(null)
   const [watchedIds, setWatchedIds] = useState(new Set())
@@ -1078,6 +1107,9 @@ export default function App () {
 
   useEffect(() => {
     reload().catch((e) => setErr(e.message))
+    // Asked once, at boot: whether this build carries the demo films cannot change
+    // while the app is running.
+    call('shell.demoAvailable').then((r) => setDemoAvailable(!!r?.available)).catch(() => {})
     const offs = [
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
@@ -1871,8 +1903,40 @@ export default function App () {
     try { await call('cast.stop', { entityId: c.entityId, libraryId: c.libraryId }) } catch (e) { setErr(e.message) }
   }
 
+  // "I don't have one yet" - turn on the films that ship inside the app. The shell
+  // resolves them (only it can) and the worklet builds a library out of them; no
+  // pairing, no host and no network is involved at any point.
+  const startDemo = async () => {
+    if (demoStarting) return
+    setDemoStarting(true)
+    setErr('')
+    try {
+      await call('shell.demoStart')
+      await reload()
+    } catch (e) { setErr(e.message) }
+    setDemoStarting(false)
+  }
+
+  // Leave the demo by hand, from Settings. Pairing a real library does this on its own,
+  // so this is for somebody who tried the demo and would rather the app went back to
+  // asking for a server.
+  const leaveDemo = async () => {
+    try {
+      await call('demo.stop')
+      setSeries(null); setSeason(null); setTitle(null)
+      await reload()
+    } catch (e) { setErr(e.message) }
+  }
+
   if (!state) return <div className='center'><p className='muted'>Starting…</p></div>
-  if (!state.active) return <Onboarding initialLink={pairLink} onPaired={() => reload()} />
+  if (!state.active) {
+    return (
+      <Onboarding
+        initialLink={pairLink} onPaired={() => reload()}
+        onDemo={demoAvailable ? startDemo : null} demoStarting={demoStarting}
+      />
+    )
+  }
 
   if (addingLibrary) {
     return (
@@ -2008,10 +2072,15 @@ export default function App () {
           <span className='tcirc'><CheckCircle size={20} weight={watchedIds.has(title.id) ? 'fill' : 'regular'} /></span>
           <span>{watchedIds.has(title.id) ? 'Watched' : 'Mark watched'}</span>
         </button>
-        <button onClick={() => toggleDownload(title, !dlIds.has(title.id))}>
-          <span className='tcirc'><DownloadSimple size={20} weight={dlIds.has(title.id) ? 'fill' : 'regular'} /></span>
-          <span>{dlIds.has(title.id) ? 'Downloaded' : 'Download'}</span>
-        </button>
+        {/* NO DOWNLOAD IN THE DEMO. A demo film is already on this phone, inside the
+            app - downloading it would copy sixty megabytes to sit beside itself. The
+            worklet refuses it too, so this is the button and not the rule. */}
+        {!state.demo && (
+          <button onClick={() => toggleDownload(title, !dlIds.has(title.id))}>
+            <span className='tcirc'><DownloadSimple size={20} weight={dlIds.has(title.id) ? 'fill' : 'regular'} /></span>
+            <span>{dlIds.has(title.id) ? 'Downloaded' : 'Download'}</span>
+          </button>
+        )}
         {canCast && (
           <button onClick={() => openCast(title)}>
             <span className='tcirc'><Screencast size={20} /></span>
@@ -2192,6 +2261,20 @@ export default function App () {
               : `${relayLibs.find((l) => l.relayed)?.libraryName || 'This library'} is coming through a relay, so films are capped near 2.5 Mbps.`}
             {relayUsage?.warning && ' ' + relayUsage.warning.message}
           </span>
+        </div>
+      )}
+
+      {/* WHAT THIS LIBRARY IS, said plainly and permanently. The proposal's rule is that
+          the demo must never look like a paired library, and the strongest version of
+          that is a line on the shelf itself rather than a label somebody has to go
+          looking for in Settings. Not dismissable, for the same reason. */}
+      {state.demo && !results && !series && (
+        <div className='relaybar'>
+          <FilmStrip size={15} weight='fill' />
+          <span>
+            These are the demo films that come with the app. Connect a library to watch your own.
+          </span>
+          <button className='linkbtn' onClick={() => setAddingLibrary(true)}>Connect</button>
         </div>
       )}
 
@@ -2572,6 +2655,35 @@ export default function App () {
 
       <div className='settings-acc'>
         <Section id='library' title={hosts.length > 1 ? 'Libraries' : 'Library'} Icon={FilmStrip} open={settingsOpen === 'library'} onToggle={toggleSection}>
+          {/* THE DEMO IS NOT A PAIRED LIBRARY AND THIS SECTION MUST NOT PRETEND IT IS.
+              There is no host to switch to, nothing to revoke and no row to remove -
+              so it gets its own two sentences and its own two buttons, and none of
+              the machinery below is rendered for it. */}
+          {state.demo
+            ? (
+              <>
+                <div className='row'>
+                  <div style={{ minWidth: 0 }}>
+                    <div className='label'>{state.active.libraryName}</div>
+                    <div className='desc'>
+                      A few public-domain films that come with the app. They play with no server
+                      and no internet connection at all.
+                    </div>
+                  </div>
+                </div>
+                <div className='btnrow'>
+                  <button className='primary' onClick={() => setAddingLibrary(true)}>Connect a library</button>
+                  <button onClick={leaveDemo}>Leave the demo</button>
+                </div>
+                <p className='desc'>
+                  Connecting a library replaces these films with yours. Leaving the demo puts the
+                  app back to asking for a server, and the films are still in the app if you want
+                  them again.
+                </p>
+              </>
+              )
+            : (
+              <>
           <div className='libactions'>
             <button className='libact' aria-label='Add a library' title='Add a library' onClick={() => setAddingLibrary(true)}>
               <Plus size={22} weight='bold' />
@@ -2616,6 +2728,8 @@ export default function App () {
               </div>
             )
           })}
+              </>
+              )}
         </Section>
 
         <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
@@ -2963,6 +3077,25 @@ export default function App () {
         </div>
       </Section>
 
+      {/* THE ATTRIBUTION THE DEMO OWES, and it is not optional. A Trip Down Market
+          Street is long out of copyright, but what the app ships is a 2018 scan whose
+          scanner gave permission to reuse it and asked to be credited - which is the
+          only reason that film is usable at all. Shown whenever this build carries the
+          films, rather than only while the demo is on: retiring the demo does not
+          retire the credit for a print that was played. See
+          assets/demo-library/LICENCES.md. */}
+      {demoAvailable && (
+        <Section id='demo' title='The films that come with the app' Icon={FilmStrip} open={aboutOpen === 'demo'} onToggle={toggleAbout}>
+          <p>
+            PearCinema comes with a few public-domain films so it has something to play
+            before you connect a library. Duck and Cover and the Apollo documentaries are
+            works of the US government. A Trip Down Market Street (1906) was scanned from
+            35mm by the Internet Archive, from a print held by Prelinger Archives, who ask
+            to be credited: here they are.
+          </p>
+        </Section>
+      )}
+
       <Section id='share' title='Share the app' Icon={ShareNetwork} open={aboutOpen === 'share'} onToggle={toggleAbout}>
         <p>
           Know someone with a film collection and no good way to reach it from
@@ -3054,7 +3187,7 @@ export default function App () {
           downloaded={dlIds.has(sheet.id)}
           libraryNames={new Map((state?.hosts || []).map((h) => [h.libraryId, h.libraryName || 'Library']))}
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched} onCast={openCast}
-          onDownload={toggleDownload}
+          onDownload={state.demo ? null : toggleDownload}
         />
       )}
 

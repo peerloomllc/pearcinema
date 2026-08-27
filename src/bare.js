@@ -65,6 +65,80 @@ const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' }
 
 const caps = require('./capabilities')
 const relay = require('./relay')
+const demo = require('./demo')
+
+// --- the demo library -------------------------------------------------------
+//
+// A few public-domain films shipped inside the app, played with no host, no pairing and
+// no network at all (proposal 2026-08-26-app-review-demo). It exists because an App
+// Store reviewer - and anyone who installs before setting up a server - otherwise opens
+// PearCinema to a wall with nothing to press.
+//
+// Demo mode is a THIRD branch taken first, ahead of the merged branch and the host
+// branch every browse method already has. Nothing about it touches the identity
+// keypair, hosts.json, a grant or a pairing window: a demo library is not a pairing,
+// and a host never learns it exists.
+//
+// The catalog lives in RAM and the local paths with it, because only the SHELL can
+// resolve a bundled asset to a path and it does so afresh on each launch - an app
+// update moves the bundle, so a path persisted today is a dead path tomorrow. What IS
+// persisted is one flag: whether the demo is on.
+const DEMO_FILE = path.join(DATA_DIR, 'demo.json')
+let demoCatalog = null
+let demoFilms = new Map() // itemId -> the local path of that film
+let demoArt = new Map() // artId -> the local path of that poster
+// Where you got to, what you finished and what you saved, for a library with no host to
+// keep it for you. Retired with the demo, and never merged into a real library's.
+let demoState = demo.emptyDemoState()
+
+function demoMode () { return !!demoCatalog }
+function isDemoId (id) { return !!demoCatalog && demoCatalog.ids.has(String(id)) }
+
+function readDemoRecord () {
+  try { return JSON.parse(fs.readFileSync(DEMO_FILE, 'utf8')) || null } catch { return null }
+}
+function writeDemoRecord (r) {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
+  fs.writeFileSync(DEMO_FILE, JSON.stringify(r))
+}
+function saveDemoState () {
+  writeDemoRecord({ on: true, state: demoState })
+}
+
+// The synthetic host row the demo renders as. Deliberately NOT written to hosts.json:
+// it is not a pairing and must never outlive an uninstall of the demo or be counted as
+// a library by anything that counts libraries. It carries the same fields a real row
+// does so the library menu, the browse screens and the player render unchanged, plus
+// `demo: true` so the UI can say what this is.
+function demoHostRow () {
+  return {
+    hostKey: null,
+    libraryId: demoCatalog.libraryId,
+    libraryName: demoCatalog.name,
+    demo: true,
+    active: true,
+    online: true,
+    absent: false,
+    revoked: false,
+    inMerge: false
+  }
+}
+
+// Leave the demo. Called by hand from Settings and - the important one - by a
+// successful pair: the moment a real library exists the demo has done its job, and
+// leaving it in the library menu is exactly the "must never look like a paired library"
+// the proposal forbids. Safe to call when the demo is already off.
+function retireDemo (why) {
+  const was = demoMode()
+  demoCatalog = null
+  demoFilms = new Map()
+  demoArt = new Map()
+  try { fs.unlinkSync(DEMO_FILE) } catch {}
+  // Nothing else to reclaim: the films and posters were never copied out of the app
+  // bundle, so retiring the demo frees no space and cannot delete anything of anyone's.
+  if (was) log('demo:retired', { why: why || null })
+  return { ok: true, was }
+}
 
 // The relay policy, handed to every Client we build. The client owns the gate - direct
 // first, a key only after a punch has actually failed - and asks this for the key.
@@ -836,6 +910,10 @@ const CONTAINER_MIME = {
 const downloads = new Map()
 
 async function startDownload (itemId) {
+  // A demo film is already on this phone, inside the app. Downloading it would copy
+  // 60 MB out of the bundle to sit beside itself - and the UI hides the button in demo
+  // mode anyway, so this is the seam that keeps the rule true if it ever forgets to.
+  if (isDemoId(itemId)) return { ok: true, already: true }
   if (cache.has(itemId)) {
     cache.setPinned(itemId, true)
     emit('download:done', { itemId })
@@ -991,6 +1069,21 @@ const shim = createAudioShim({
   extra: async (req, res) => {
     const url = req.url || ''
 
+    // THE DEMO LIBRARY'S OWN ROUTES, ahead of everything else, because every route
+    // below this point resolves a host for the id it is given and a demo film has
+    // none. Both serve straight out of the app bundle - see src/demo.js for why the
+    // films are not copied into the cache the way PearTune's demo tracks are.
+    if (demoMode()) {
+      const filmId = demo.demoRoute(url)
+      if (filmId && demoFilms.has(filmId)) {
+        return demo.serveDemoFile({ file: demoFilms.get(filmId), req, res, log: (m, d) => log(m, d) })
+      }
+      const artId = demo.demoArtRoute(url)
+      if (artId && demoArt.has(artId)) {
+        return demo.serveDemoFile({ file: demoArt.get(artId), req, res, mime: 'image/jpeg', log: (m, d) => log(m, d) })
+      }
+    }
+
     let m = /^\/hls\/([a-z0-9]+)\.m3u8/i.exec(url)
     if (m) {
       const itemId = m[1]
@@ -1125,6 +1218,20 @@ const methods = {
 
   // Everything the UI needs to draw its first screen, in one call.
   'app.state': async () => {
+    // THE DEMO IS ONE LIBRARY AND IT IS THE ONLY ONE. It is never merged with a real
+    // library, because pairing one retires it - so there is nothing here to blend.
+    if (demoMode()) {
+      return {
+        platform: PLATFORM,
+        deviceKey: z32.encode(keyPair.publicKey),
+        demo: true,
+        hosts: [demoHostRow()],
+        active: { hostKey: null, libraryName: demoCatalog.name, demo: true },
+        attribution: demoCatalog.attribution,
+        merged: { on: false, ready: false, filter: '_all' },
+        shimPort
+      }
+    }
     const active = H.activeHost(hostsState)
     const live = connectedLibs()
     return {
@@ -1164,6 +1271,60 @@ const methods = {
     return { ok: true, ready: !!mergedIndex }
   },
 
+  // --- the demo library ------------------------------------------------------
+
+  // Is the demo on, and does this build even have one? The shell asks at boot: if the
+  // answer is on, it resolves the bundled assets and calls demo.start to put the paths
+  // back, because an app update moves them and nothing here may hold a stale one.
+  'demo.state': async () => ({ on: demoMode(), was: !!readDemoRecord()?.on }),
+
+  // Turn the demo library on, or put it back after a relaunch.
+  //
+  // Only the SHELL can do the resolving half: the films and posters are bundled assets
+  // and turning one into a path a filesystem call can open is native-side work. It
+  // hands over `files` and `posters` as { manifest name -> local path }; anything it
+  // could not resolve is simply absent, and the catalog leaves that film out rather
+  // than listing something that will not play.
+  //
+  // Idempotent, and it touches NOTHING of a real library: not hosts.json, not the
+  // identity keypair, not a grant and not a pairing window.
+  'demo.start': async ({ manifest, files = {}, posters = {}, restore = false } = {}) => {
+    const rec = readDemoRecord()
+    // A restore is the shell putting back what was already on. It must not be able to
+    // turn the demo on by itself, or a phone that retired the demo when it paired
+    // would grow it again at the next launch.
+    if (restore && !rec?.on) return { ok: true, on: false }
+    if (!manifest || (!Array.isArray(manifest.films) && !Array.isArray(manifest.shows))) {
+      throw new Error('The demo library is missing from this build.')
+    }
+    const stats = demo.statDemoFiles(files)
+    const built = demo.buildDemoCatalog(manifest, { ids: protocol.ids, files, stats })
+    if (!built.movies.length && !built.episodes.length) {
+      throw new Error('The demo library is missing from this build.')
+    }
+    demoCatalog = built
+    demoFilms = new Map([...built.paths].map(([id, name]) => [id, files[name]]).filter(([, p]) => p))
+    demoArt = new Map([...built.art].map(([id, name]) => [id, posters[name]]).filter(([, p]) => p))
+    demoState = rec?.state || demo.emptyDemoState()
+    saveDemoState()
+    log('demo:on', {
+      films: built.movies.length,
+      episodes: built.episodes.length,
+      posters: demoArt.size,
+      restore: !!restore
+    })
+    emit('hosts:changed', {})
+    return { ok: true, on: true, films: built.movies.length, episodes: built.episodes.length }
+  },
+
+  // Leave the demo by hand, from Settings. Pairing a real library does the same thing
+  // without being asked - see `pair`.
+  'demo.stop': async () => {
+    const r = retireDemo('asked')
+    emit('hosts:changed', {})
+    return r
+  },
+
   // Pair by the link a QR or a paste carries. On success the host joins the list
   // and becomes active.
   'pair': async ({ link, label = '' }) => {
@@ -1185,6 +1346,11 @@ const methods = {
           await raced((async () => (await connectedLib(paired.libraryId)).request('identity.set', known))())
         } catch (e) { log('identity:introduce-failed', { libraryId: paired.libraryId, err: e.message }) }
       }
+      // THE DEMO HAS DONE ITS JOB. A real library exists now, so the bundled one goes
+      // - leaving it in the library menu beside a paired library is exactly what the
+      // proposal forbids, and it would show up in the merged view as a fifth "host"
+      // nobody paired with.
+      retireDemo('paired')
       // A second library just arrived - the merged view wants its catalog.
       buildSoon('paired')
       emit('hosts:changed', {})
@@ -1240,7 +1406,7 @@ const methods = {
   // The library. One host: proxied straight through, the UI's vocabulary IS
   // the host's. More than one: served from the merged index (proposal
   // 2026-08-16), which speaks the same vocabulary - the UI cannot tell.
-  'library.stats': async () => (await connected()).stats(),
+  'library.stats': async () => (demoMode() ? demo.demoStats(demoCatalog) : (await connected()).stats()),
 
   // WHICH LIBRARIES CANNOT REACH THEIR OWN FILMS, asked of every connected host
   // rather than only the active one.
@@ -1255,6 +1421,9 @@ const methods = {
   // Named, because "a library cannot reach its films" is not useful when you have
   // three and the shelf is showing all of them at once.
   'library.sources': async () => {
+    // Nothing to lose: the demo's films are inside the app, so there is no drive that
+    // could go missing and no host that could fail to answer.
+    if (demoMode()) return { items: [] }
     const out = []
     const lost = new Set()
     for (const libraryId of connectedLibs()) {
@@ -1278,7 +1447,11 @@ const methods = {
     lostSources = lost
     return { items: out }
   },
+  // THE DEMO IS THE THIRD BRANCH AND IT IS TAKEN FIRST, in every browse method
+  // below: the merged branch needs an index built from hosts and the host branch
+  // needs a host, and demo mode has neither.
   'library.list': async (args) => {
+    if (demoMode()) return demo.demoList(demoCatalog, args)
     if (!mergedOn() || !mergedIndex) return (await connected()).list(args)
     const type = String(args.type || 'movies')
     if (type === 'movies' || type === 'series') {
@@ -1303,8 +1476,12 @@ const methods = {
     }
     return (await connected()).list(args)
   },
-  'library.get': async (args) => (await clientForId(args.id)).get(args),
+  'library.get': async (args) => {
+    if (demoMode()) return demo.demoGet(demoCatalog, args.id)
+    return (await clientForId(args.id)).get(args)
+  },
   'library.search': async (args) => {
+    if (demoMode()) return demo.demoSearch(demoCatalog, args.q, Number(args.limit) || 60)
     if (!mergedOn() || !mergedIndex) return (await connected()).search(args)
     const r = merge.searchIndex(mergedIndex, args.q, Number(args.limit) || 60, libraryFilter())
     const items = [...r.movies, ...r.series, ...r.episodes].slice(0, Number(args.limit) || 60)
@@ -1314,6 +1491,7 @@ const methods = {
   // merged view answers from its own interleaved run, because a series can
   // SPAN hosts and the season-boundary neighbour may live on the other one.
   'library.siblings': async (args) => {
+    if (demoMode()) return demo.demoSiblings(demoCatalog, args.id)
     if (!mergedOn() || !mergedIndex) return (await connected()).request('library.siblings', args)
     const id = String(args.id || '')
     const ep = mergedIndex.episodes.find((e) => e.copies.some((c) => c.id === id))
@@ -1331,8 +1509,25 @@ const methods = {
   // lands on EVERY host holding a copy (phase 2), so either server resumes the
   // same film at the same minute; a read takes the freshest answer across
   // them. The Continue shelf is every host's answer concatenated newest-first.
-  'resume.set': async (args) => writeToCopies(args.itemId, (c, id) => c.request('resume.set', { ...args, itemId: id })),
+  // In demo mode all of this is kept on the phone: there is no host to keep it, and a
+  // demo whose Continue shelf never fills is a demo of a feature the app has. It is
+  // written to demo.json and goes when the demo does.
+  'resume.set': async (args) => {
+    if (demoMode()) {
+      const item = demo.demoGet(demoCatalog, args.itemId)
+      demoState = demo.setDemoResume(demoState, {
+        id: args.itemId,
+        positionMs: args.positionMs,
+        runtime: item?.runtime,
+        ended: !!args.ended
+      })
+      saveDemoState()
+      return { ok: true }
+    }
+    return writeToCopies(args.itemId, (c, id) => c.request('resume.set', { ...args, itemId: id }))
+  },
   'resume.get': async (args) => {
+    if (demoMode()) return demo.demoResume(demoState, args.itemId)
     const refs = copyRefs(args.itemId)
     if (refs.length < 2) return (await clientForId(args.itemId)).request('resume.get', args)
     let best = { resume: null }
@@ -1345,6 +1540,7 @@ const methods = {
     return best
   },
   'resume.list': async (args) => {
+    if (demoMode()) return demo.demoResumeShelf(demoCatalog, demoState, Number(args.limit) || 20)
     if (!mergedOn()) return (await connected()).request('resume.list', args)
     // Tagged with the library that answered, because collapsing needs to know where a
     // row came from - both to honour the chip and to fold the same film watched on two
@@ -1363,13 +1559,27 @@ const methods = {
   // every library's answers put together - clearing one and leaving the other
   // would refill the row the moment it reloaded.
   'resume.clear': async (args) => {
+    if (demoMode()) {
+      const cleared = Object.keys(demoState.resume || {}).length
+      demoState = { ...demoState, resume: {} }
+      saveDemoState()
+      return { ok: true, cleared }
+    }
     if (!mergedOn()) return (await connected()).request('resume.clear', args)
     const rows = await fanOut((c) => c.request('resume.clear', args))
     if (!rows.length) throw new Error('no library reachable to clear')
     return { ok: true, cleared: rows.reduce((n, r) => n + (Number(r?.cleared) || 0), 0) }
   },
-  'watched.set': async (args) => writeToCopies(args.itemId, (c, id) => c.request('watched.set', { ...args, itemId: id })),
+  'watched.set': async (args) => {
+    if (demoMode()) {
+      demoState = demo.setDemoWatched(demoState, args.itemId, args.watched !== false)
+      saveDemoState()
+      return { ok: true }
+    }
+    return writeToCopies(args.itemId, (c, id) => c.request('watched.set', { ...args, itemId: id }))
+  },
   'watched.list': async (args) => {
+    if (demoMode()) return { items: [...(demoState.watched || [])] }
     if (!mergedOn()) return (await connected()).request('watched.list', args)
     const rows = await fanOut((c) => c.request('watched.list', args))
     return { items: [...new Set(rows.flatMap((r) => r?.items || []))] }
@@ -1377,8 +1587,16 @@ const methods = {
 
   // The watchlist: a heart lands on every host holding a copy (phase 2), the
   // list is the union.
-  'fav.set': async (args) => writeToCopies(args.id, (c, id) => c.request('fav.set', { ...args, id })),
+  'fav.set': async (args) => {
+    if (demoMode()) {
+      demoState = demo.setDemoFav(demoState, args.id, args.on !== false)
+      saveDemoState()
+      return { ok: true }
+    }
+    return writeToCopies(args.id, (c, id) => c.request('fav.set', { ...args, id }))
+  },
   'fav.list': async (args) => {
+    if (demoMode()) return demo.demoFavShelf(demoCatalog, demoState)
     if (!mergedOn()) return (await connected()).request('fav.list', args)
     const rows = await fanOut((c) => c.request('fav.list', args))
     const seen = new Set()
@@ -1399,13 +1617,18 @@ const methods = {
   // one ask carrying the best status. The owner's queue folds the same rows
   // pending-first, because that view is a to-do list and one library resolved
   // must not hide the copies that are not.
+  // ASKING FOR A FILM NEEDS SOMEBODY TO ASK. A demo library has no owner, so the
+  // request screens are empty and the ask is refused in a sentence rather than
+  // failing at a connection that was never going to exist.
   'request.add': async (args) => {
+    if (demoMode()) throw new Error('There is nobody to ask yet. Connect a library first.')
     if (!mergedOn()) return (await connected()).request('request.add', args)
     const rs = await fanOut((c) => c.request('request.add', args))
     if (!rs.length) throw new Error('no library reachable to ask')
     return rs[0]
   },
   'request.list': async (args) => {
+    if (demoMode()) return { items: [] }
     if (!mergedOn()) return (await connected()).request('request.list', args)
     const items = merge.collapseRequests(await requestRows(args))
     // FIRE AND FORGET, and after the answer rather than before it: the collapsed
@@ -1426,6 +1649,7 @@ const methods = {
     return { ok: true }
   },
   'request.all': async (args) => {
+    if (demoMode()) return { items: [] }
     if (!mergedOn()) return (await connected()).request('request.all', args)
     const rows = []
     await Promise.all(hostsState.hosts.map(async (h) => {
@@ -1513,9 +1737,26 @@ const methods = {
     const c = args.libraryId ? await connectedLib(args.libraryId) : await connected()
     return c.request('cast.state', { entityId: args.entityId })
   },
-  'device.list': async (args) => (await connected()).request('device.list', args),
+  // Nobody else is in a demo library, and nothing in it could be revoked - the films
+  // are inside the app. Empty rather than an error, so the People screen renders.
+  'device.list': async (args) => (demoMode() ? { items: [] } : (await connected()).request('device.list', args)),
   'device.revoke': async (args) => (await connected()).request('device.revoke', args),
   'identity.get': async (args) => {
+    // There is nobody to be, in a library with no server. The names typed at
+    // onboarding are still held locally and still shown, but nothing has confirmed
+    // them and nothing here is an owner - a demo must not hand out owner-only screens.
+    if (demoMode()) {
+      const held = readSettings().identity || {}
+      return {
+        userName: held.userName || null,
+        deviceName: held.deviceName || null,
+        belongsTo: null,
+        confirmed: false,
+        owner: false,
+        libraryName: demoCatalog.name,
+        demo: true
+      }
+    }
     const out = await (await connected()).request('identity.get', args)
     // The host reports its CURRENT library name here - that is how a dashboard
     // rename reaches an already-paired phone. Fold it back into the stored host
@@ -1653,7 +1894,9 @@ const methods = {
   // (found 2026-08-21 on a four-host bench: a Mac film opened while the phone was
   // connected to the Windows host said None, and the Mac's own dashboard said
   // three).
-  'subtitle.list': async (args) => (await clientForId(args.itemId)).request('subtitle.list', args),
+  // The demo ships no subtitle files yet, and it has no host that could extract an
+  // embedded track - so the picker is honestly empty rather than an error.
+  'subtitle.list': async (args) => (demoMode() ? { items: [] } : (await clientForId(args.itemId)).request('subtitle.list', args)),
 
   // The track's text, as WebVTT. The host STREAMS it (subtitle bytes ride the
   // same chokepoint as film bytes); buffered here because a subtitle file is
@@ -1686,6 +1929,13 @@ const methods = {
   // the host decides again - usually landing on transcode. The client still
   // never ASKS for a mode; it only tells the truth about itself.
   'stream.url': async ({ itemId, deviceRefusedVideo = false, burnSubtitleId = null }) => {
+    // A DEMO FILM NEEDS NOTHING: no host, no capability negotiation, no relay consent
+    // and no network of any kind. It is H.264 in MP4 already - which is a constraint on
+    // what may ship in the demo rather than a lucky fact - so it plays directly, from
+    // the app's own bundle, in airplane mode. That is the honest test of this feature.
+    if (demoMode() && demoFilms.has(String(itemId))) {
+      return { url: `http://127.0.0.1:${shimPort}/demo/${itemId}`, mode: 'direct' }
+    }
     // A downloaded film needs no host at all - the shim serves it off disk
     // with full Range support. Checked BEFORE connecting, or offline playback
     // would die asking a host it does not need. A burn request skips the disk

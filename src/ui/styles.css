@@ -149,6 +149,13 @@ input {
   margin: .5rem 0; font-size: .82rem; text-align: left; line-height: 1.35;
 }
 .relaybar svg { flex: 0 0 auto; color: var(--color-accent); }
+/* The demo bar's one action, in the same treatment the relay-consent row uses: a word
+   in the sentence rather than a button competing with the shelf below it. */
+.relaybar .linkbtn {
+  background: none; border: 0; padding: 0; font: inherit; font-weight: 600;
+  color: var(--color-primary); text-decoration: underline; text-underline-offset: 3px;
+  cursor: pointer; flex: 0 0 auto;
+}
 
 /* A failure the user has to READ: an icon to catch the eye, a plain-language line,
    what to do about it, and - for a real bug - the technical text one tap away with

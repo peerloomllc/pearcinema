@@ -30,7 +30,58 @@ import b4a from 'b4a'
 import { probe as probeDecoders } from '../modules/decoder-probe'
 import * as CastRemote from '../modules/cast-remote'
 
+import { DEMO_MANIFEST, DEMO_FILES, DEMO_POSTERS } from '../shell/demo-assets'
+
 const bundle = require('../assets/bare-universal.bundle')
+
+// THE DEMO LIBRARY (proposal 2026-08-26-app-review-demo). A few public-domain films
+// shipped inside the app so PearCinema works with no server at all - see
+// assets/demo-library/LICENCES.md for the per-item evidence that each may be
+// redistributed in a binary.
+//
+// iOS ONLY, and that is decided by which file Metro resolves ./demo-assets to rather
+// than by a check here. On Android both maps are empty, so `demoAvailable` is false and
+// the UI never offers the card.
+//
+// Nothing is resolved - so nothing is copied out of the bundle - until the demo is
+// actually asked for. A first launch that goes straight to pairing pays none of it.
+const demoAvailable = () => !!DEMO_MANIFEST && Object.keys(DEMO_FILES).length > 0
+
+// Copy a bundled asset out to a real path the worklet can read. On a release build the
+// file is inside the IPA, so this is a genuine resolve the first time and a no-op after.
+async function resolveAsset (mod: any): Promise<string | null> {
+  try {
+    const a = Asset.fromModule(mod)
+    await a.downloadAsync()
+    const uri = a.localUri ?? a.uri ?? ''
+    if (!uri) return null
+    const p = uri.replace(/^file:\/\//, '')
+    // PERCENT-DECODE. A file:// URI is a URL, so its path is percent-encoded - and
+    // every demo film's name has spaces in it. Stripping the scheme alone leaves "%20"
+    // in the string, which bare-fs opens literally and ENOENTs, so the library browses
+    // perfectly and plays nothing. PearTune found this on the iOS Simulator, 2026-07-28;
+    // Android never showed it because its packager renames assets to a sanitised form.
+    try { return decodeURIComponent(p) } catch { return p }
+  } catch {
+    return null
+  }
+}
+
+// Resolve every demo asset to a path. One that will not resolve is left out, and the
+// worklet leaves that film out of the catalog rather than listing something unplayable.
+async function resolveDemoAssets () {
+  const files: Record<string, string> = {}
+  const posters: Record<string, string> = {}
+  for (const [name, mod] of Object.entries(DEMO_FILES)) {
+    const p = await resolveAsset(mod)
+    if (p) files[name] = p
+  }
+  for (const [name, mod] of Object.entries(DEMO_POSTERS)) {
+    const p = await resolveAsset(mod)
+    if (p) posters[name] = p
+  }
+  return { manifest: DEMO_MANIFEST, files, posters }
+}
 
 // HOW LONG THE PLAYING-NEXT CARD WAITS before the next episode starts itself.
 // Ten seconds is what a television does, and it is the number to copy rather
@@ -378,6 +429,28 @@ export default function App () {
       shellCall('capabilities.declare', { probe: decoders }).then((r) => {
         console.warn('[shell] capabilities', JSON.stringify(r?.result ?? null))
       })
+
+      // PUT THE DEMO BACK, if this phone was in it. The worklet cannot do this half
+      // alone: it holds a flag saying the demo is on, but the PATHS are bundled-asset
+      // paths that an app update moves, so they are resolved fresh on every launch and
+      // handed over again. `restore` means the worklet may only put back a demo that
+      // was already on - it can never turn one on by itself.
+      //
+      // AWAITED, not fired off: the WebView's first app.state has to find the demo
+      // already back, or a returning demo user watches the onboarding card flash past
+      // before the library appears. On iOS the resolve is a path lookup rather than a
+      // copy, so it costs milliseconds. A failure here is swallowed - the app still
+      // starts, on the pairing card, which is exactly what a phone with no demo shows.
+      if (demoAvailable()) {
+        try {
+          const s = await shellCall('demo.state', {})
+          if (s?.result?.was && !s?.result?.on) {
+            await shellCall('demo.start', { ...(await resolveDemoAssets()), restore: true })
+          }
+        } catch (e: any) {
+          console.warn('[shell] demo restore failed', e?.message)
+        }
+      }
 
       let page = await shellCall('ui.page', { html: uiHtml })
       // The shim listens moments after boot; ask again until the port exists.
@@ -898,6 +971,31 @@ export default function App () {
     // permission for. The UI asks here before opening the scanner; denial is
     // not an error - the scanner shows its own sentence and the paste path
     // still works.
+    // DOES THIS BUILD HAVE A DEMO LIBRARY AT ALL? Only the shell knows: the answer is
+    // which file Metro resolved ./demo-assets to, which is iOS or not. The UI asks
+    // rather than testing the platform itself, so there is one place to change if the
+    // Android decision is ever revisited.
+    if (msg.method === 'shell.demoAvailable') {
+      feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: { available: demoAvailable(), films: Object.keys(DEMO_FILES).length }, error: null })})`)
+      return
+    }
+    // "Look around without a server". Only the shell can do the resolving half - the
+    // films are bundled assets and turning one into a path a filesystem call can open
+    // is native-side work - so it hands the paths to the worklet, which builds the
+    // catalog and switches into demo mode.
+    if (msg.method === 'shell.demoStart') {
+      ;(async () => {
+        try {
+          if (!demoAvailable()) throw new Error('This build has no demo library.')
+          const assets = await resolveDemoAssets()
+          const out = await shellCallRef.current?.('demo.start', assets)
+          feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: out?.result ?? null, error: out?.error ?? null })})`)
+        } catch (err: any) {
+          feedWebView(`window.__pearResponse && window.__pearResponse(${JSON.stringify(msg.id)}, ${JSON.stringify({ result: null, error: err?.message ?? String(err) })})`)
+        }
+      })()
+      return
+    }
     if (msg.method === 'shell.cameraPermission') {
       ;(async () => {
         let granted = true
