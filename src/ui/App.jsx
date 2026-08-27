@@ -1114,6 +1114,26 @@ export default function App () {
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
       on('merged:changed', () => setMergedTick((t) => t + 1)),
+      // THE FILM STOPS WHEN THE LIBRARY SAYS NO, which hanging up cannot do on its own:
+      // by the time a revoke lands the player has usually been handed the whole file, so
+      // it would otherwise play happily to the end of something nobody is allowed to
+      // watch any more. Found filming exactly this for App Review (Tim, 2026-08-27), and
+      // the store listing promises it in so many words - "mid-film, not on next login".
+      on('access:revoked', (d) => {
+        call('shell.stop').catch(() => {})
+        setSeries(null); setSeason(null); setTitle(null)
+        // The SENTENCE is drawn from the library's own row further down, not set here:
+        // an error line is cleared by the next list that loads, and on a phone with more
+        // than one library that is a second later.
+        reload().catch(() => {})
+      }),
+      // Let back in. The shelves are empty from the revoke and nothing else asks again -
+      // the active library never changed - so this is what refills them.
+      on('access:restored', () => {
+        setErr('')
+        setMergedTick((t) => t + 1)
+        reload().catch(() => {})
+      }),
       on('host:connected', () => { setLinkUp(true); refreshRelay() }),
       on('host:disconnected', () => { setLinkUp(false); refreshRelay() }),
       // A punch that landed late moved a live connection off the relay. The marker and
@@ -2225,6 +2245,21 @@ export default function App () {
       )}
 
       {err && <div className='error'>{err}</div>}
+
+      {/* CUT OFF, AND IT STAYS SAID. This used to be the transient error line above,
+          which is wrong twice over: on a phone with more than one library the next
+          successful list wipes it a second later (watched on the iPhone, 2026-08-27,
+          filming the revoke - the film stopped and nothing on screen said why), and it
+          is not an error in the first place. It is a fact about the library, so it is
+          drawn from the library's own row and stays until that library takes the device
+          back. */}
+      {(state.hosts || []).filter((h) => h.revoked).map((h) => (
+        <div className='error' key={h.hostKey || h.libraryId}>
+          <b>{h.libraryName || 'That library'} is no longer shared with this device.</b> Its
+          films will not play, including any kept on this phone. Pair with it again to be let
+          back in.
+        </div>
+      ))}
 
       {/* THE LIBRARY IS NOT EMPTY, IT IS UNREACHABLE, and those look identical from
           here. Said above the shelf rather than in place of it, because whatever was

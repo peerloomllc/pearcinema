@@ -65,6 +65,7 @@ const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' }
 
 const caps = require('./capabilities')
 const relay = require('./relay')
+const revoke = require('./revoked')
 const demo = require('./demo')
 
 // --- the demo library -------------------------------------------------------
@@ -185,9 +186,34 @@ const absentLibs = new Map() // libraryId -> the message the failed attempt carr
 // let this device back in, the next dial simply works.
 const revokedLibs = new Map()
 
+// AND IT IS WRITTEN DOWN, since 2026-08-27. In memory was enough while a revoke only
+// stopped the phone from dialling: a restart forgot, dialled once and heard the same
+// goodbye. It is not enough now that the verdict also stops films the phone already
+// holds - forgetting it means relaunching in airplane mode plays a revoked library's
+// cache back. Cleared the moment that library lets this device in again (see
+// connectedLib), so it is a note about right now rather than a permanent judgement.
+const REVOKED_FILE = path.join(DATA_DIR, 'revoked.json')
+
+function readRevoked () {
+  try {
+    const raw = JSON.parse(fs.readFileSync(REVOKED_FILE, 'utf8'))
+    return new Map(Object.entries(raw && typeof raw === 'object' ? raw : {}))
+  } catch { return new Map() }
+}
+function writeRevoked () {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true })
+    fs.writeFileSync(REVOKED_FILE, JSON.stringify(Object.fromEntries(revokedLibs)))
+  } catch (e) { log('revoke:save-failed', { err: e.message }) }
+}
+
+// Filled at boot from the file above, before the first dial or the first stream URL.
+for (const [lib, reason] of readRevoked()) revokedLibs.set(lib, reason)
+
 function markRevoked (libraryId, reason = 'device-revoked') {
   if (revokedLibs.has(libraryId)) return
   revokedLibs.set(libraryId, reason)
+  writeRevoked()
   log('host:access-revoked', { libraryId, reason })
   // Hang up rather than sit on a socket that can do nothing, and stop the merged index
   // counting on a library that is not ours any more.
@@ -195,8 +221,28 @@ function markRevoked (libraryId, reason = 'device-revoked') {
   if (slot?.client) { try { slot.client.close() } catch {} }
   hostConns.delete(libraryId)
   contributedLibs.delete(libraryId)
+  // STOP THE FILM, which is the half hanging up cannot do. On a home network the player
+  // has been handed the whole file long before this arrives, so nothing about closing a
+  // socket reaches the picture - the UI has to be told (Tim, 2026-08-27, filming exactly
+  // this for App Review and watching the film play on).
+  emit('access:revoked', { libraryId, reason, libraryName: hostRow(libraryId)?.libraryName || null })
   emit('hosts:changed', {})
   if (mergedOn()) buildSoon('access-revoked')
+}
+
+// They let us back in. The next successful dial is the proof, and it is the only thing
+// that clears the verdict - so a library that changes its mind needs no action here.
+function clearRevoked (libraryId) {
+  if (!revokedLibs.has(libraryId)) return
+  revokedLibs.delete(libraryId)
+  writeRevoked()
+  log('host:access-restored', { libraryId })
+  // The shelves were emptied by the revoke and nothing else makes them ask again: the
+  // active library has not changed, so every list effect keyed on it stays put. Watched
+  // on the Simulator, 2026-08-27 - the library came back with its own name in the header
+  // and no films under it until the chip was tapped.
+  emit('access:restored', { libraryId, libraryName: hostRow(libraryId)?.libraryName || null })
+  emit('hosts:changed', {})
 }
 
 const relayedLibs = new Set()
@@ -454,6 +500,9 @@ async function connectedLib (libraryId) {
     if (slot.client) { try { await slot.client.close() } catch {} }
     const c = new Client({ protocol, keyPair, log: (m, d) => log(m, d), relayThrough: relayPolicy })
     await c.connect({ hostKey: z32.decode(row.hostKey), libraryId: row.libraryId })
+    // A dial that lands is a grant that exists: whatever this library said last time, it
+    // is taking us now. Nothing else clears a revoke, and nothing else should.
+    clearRevoked(libraryId)
     // Recorded per library the moment the dial lands, because everything that has to
     // behave differently on a relayed link - the ceiling, the marker, the byte count -
     // asks by library rather than by connection.
@@ -1090,6 +1139,24 @@ const shim = createAudioShim({
       }
     }
 
+    // A REVOKED LIBRARY IS SERVED NOTHING, and this is the only place that can enforce it
+    // for bytes the phone already holds: the cache path answers off disk with no host in
+    // the way, which is the whole point of a cache and exactly wrong here. Ahead of the
+    // built-in routes, so a cache hit never gets the chance.
+    if (revokedLibs.size) {
+      const stop = revoke.blocked(url, {
+        revoked: new Set(revokedLibs.keys()),
+        ownerOf: (id) => owners.get(String(id)) || null,
+        cacheLibraryOf: (id) => cache.get(String(id))?.library || null
+      })
+      if (stop) {
+        log('revoke:refused', { itemId: stop.id, libraryId: stop.libraryId })
+        res.writeHead(403, { 'content-type': 'text/plain' })
+        res.end('this library is no longer shared with you')
+        return true
+      }
+    }
+
     let m = /^\/hls\/([a-z0-9]+)\.m3u8/i.exec(url)
     if (m) {
       const itemId = m[1]
@@ -1344,6 +1411,14 @@ const methods = {
         libraryName: paired.libraryName
       }, Date.now())
       writeHosts(hostsState)
+      // A PAIRING IS A GRANT, so it clears any revoke standing against this library -
+      // and it has to be cleared HERE rather than by the next dial, because connectedLib
+      // refuses to dial a revoked library at all. Without this a phone that was ever
+      // revoked could pair again, be granted by the host, and still be told by itself
+      // that the library is not shared with it. Found re-pairing after a revoke on the
+      // Simulator, 2026-08-27, and it was a bug before the verdict was ever persisted -
+      // persisting it only made it survive a restart.
+      clearRevoked(paired.libraryId)
       // TELL IT WHO WE ARE, at once, so the person on the other end sees a name in
       // People rather than "device". Best effort: a library that will not take it is
       // still paired, and the name arrives with the next rename.
@@ -1401,6 +1476,9 @@ const methods = {
         const { removed, bytes, untagged } = artStore.removeLibrary(leaving.libraryId)
         log('art:reclaimed', { libraryId: leaving.libraryId, removed, bytes, untagged })
       } catch (e) { log('art:reclaim-failed', { err: e.message }) }
+      // And the note that this library revoked us, which is about a row that no longer
+      // exists. Pairing clears it too; this stops a verdict outliving the thing it judged.
+      clearRevoked(leaving.libraryId)
     }
     // The removed host's connection dies with its row, and the merged index
     // must stop offering its items.
@@ -1982,6 +2060,14 @@ const methods = {
     // copy on purpose: the download has no subtitles pressed in, so the burned
     // stream must come from the host. Checked against the id the UI asked for,
     // BEFORE any copy pick - the download lives under that id.
+    // BEFORE THE CACHE, or a revoked library's downloads would open with no host asked
+    // and no error shown. The shim refuses the bytes too; this is what makes the refusal
+    // a sentence rather than a player that stalls.
+    const owner = libraryForId(itemId)
+    if (owner && revokedLibs.has(owner)) {
+      throw new Error('this library is no longer shared with you')
+    }
+
     if (!deviceRefusedVideo && !burnSubtitleId && cache.has(String(itemId))) {
       burnSub.delete(itemId)
       return { url: shim.urlFor(itemId), mode: 'download' }
