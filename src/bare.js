@@ -66,6 +66,7 @@ const protocol = createProtocol({ app: 'pearcinema', displayName: 'PearCinema' }
 const caps = require('./capabilities')
 const relay = require('./relay')
 const revoke = require('./revoked')
+const hlsRoutes = require('./hls-routes')
 const demo = require('./demo')
 
 // --- the demo library -------------------------------------------------------
@@ -1168,7 +1169,10 @@ const shim = createAudioShim({
           res.end(out?.reason || 'no playlist for this item')
           return true
         }
-        const body = out.playlist.replace(/^(\d+)\.ts$/gm, `/hlsseg/${itemId}/$1.ts`)
+        // POINT EVERY LINE THE HOST WROTE AT THIS SHIM - segments and, for a
+        // fragmented-MP4 playlist, the header named by `#EXT-X-MAP`. The rule
+        // lives in src/hls-routes.js where a test can reach it.
+        const body = hlsRoutes.rewritePlaylist(out.playlist, itemId)
         res.writeHead(200, { 'content-type': 'application/vnd.apple.mpegurl', 'cache-control': 'no-store' })
         res.end(body)
       } catch (e) {
@@ -1178,10 +1182,38 @@ const shim = createAudioShim({
       return true
     }
 
-    m = /^\/hlsseg\/([a-z0-9]+)\/(\d+)\.ts/i.exec(url)
+    // THE HEADER FOR A FRAGMENTED-MP4 PLAYLIST, fetched once per film. Kept as its
+    // own route rather than folded into the segment one, because it is a different
+    // wire method and has no sequence number - `init` is a name, not an index.
+    m = /^\/hlsinit\/([a-z0-9]+)\/init\.mp4/i.exec(url)
+    if (m) {
+      const itemId = m[1]
+      let dead = false
+      res.on('close', () => { dead = true })
+      try {
+        const c = await clientForId(itemId)
+        res.writeHead(200, { 'content-type': 'video/mp4', 'cache-control': 'no-store' })
+        await c.request('media.init', { itemId, capabilities: capsFor(itemId) }, {
+          stream: true,
+          buffer: false,
+          onchunk: (chunk) => {
+            if (dead) return
+            try { res.write(chunk) } catch { dead = true }
+          }
+        })
+        if (!dead) { try { res.end() } catch {} }
+      } catch (e) {
+        log('hls:init-failed', { err: e.message })
+        try { res.destroy() } catch {}
+      }
+      return true
+    }
+
+    m = /^\/hlsseg\/([a-z0-9]+)\/(\d+)\.(ts|m4s)/i.exec(url)
     if (m) {
       const itemId = m[1]
       const seq = Number(m[2])
+      const fragmented = m[3].toLowerCase() === 'm4s'
       let dead = false
       let cancelSeg = null
       // A scrub away from a transcoding segment cancels it on the wire, which
@@ -1190,7 +1222,7 @@ const shim = createAudioShim({
       res.on('close', () => { dead = true; try { cancelSeg?.() } catch {} })
       try {
         const c = await clientForId(itemId)
-        res.writeHead(200, { 'content-type': 'video/mp2t', 'cache-control': 'no-store' })
+        res.writeHead(200, { 'content-type': fragmented ? 'video/mp4' : 'video/mp2t', 'cache-control': 'no-store' })
         const p = c.request('media.segment', { itemId, seq, capabilities: capsFor(itemId) }, {
           stream: true,
           buffer: false,

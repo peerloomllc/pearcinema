@@ -201,6 +201,31 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       return ctx.stream(session.stdout)
     },
 
+    // THE HEADER A FRAGMENTED-MP4 PLAYLIST NAMES. One per film rather than one per
+    // segment, which is the whole point of `#EXT-X-MAP` - and the reason a segment
+    // can be the few kilobytes of boxes plus its picture and nothing else.
+    //
+    // A playlist whose segments are MPEG-TS has no header to fetch and answers
+    // notFound here, which is the honest answer rather than an empty stream: a
+    // client asking for one has misread its own playlist.
+    'media.init': async (ctx) => {
+      if (!media || !media.init) throw ctx.notFound('this host serves no segments')
+      if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      let session
+      try {
+        session = await media.init({
+          itemId: String(ctx.params.itemId),
+          capabilities: ctx.params.capabilities || {}
+        })
+      } catch (e) {
+        if (e.code === 'BUSY') { ctx.fail('BUSY', e.message); return }
+        throw e
+      }
+      if (!session) throw ctx.notFound('this film has no init segment')
+      if (seen) seen(ctx.deviceKey, String(ctx.params.itemId))
+      return ctx.stream(session.stdout)
+    },
+
     // The whole converted film, streamed once for keeps - the download side of
     // data saver. The host still decides: an item the device could take as-is
     // answers `direct: true` and the client downloads the original bytes.
