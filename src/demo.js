@@ -224,7 +224,6 @@ function buildDemoCatalog (manifest, { ids, files = {}, stats = {} } = {}) {
     libraryId,
     name: clean(m.name) || DEMO_LIBRARY_NAME,
     kind: DEMO_KIND,
-    attribution: clean(m.attribution, 500) || null,
     movies,
     series,
     seasons,

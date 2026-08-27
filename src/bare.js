@@ -1227,7 +1227,6 @@ const methods = {
         demo: true,
         hosts: [demoHostRow()],
         active: { hostKey: null, libraryName: demoCatalog.name, demo: true },
-        attribution: demoCatalog.attribution,
         merged: { on: false, ready: false, filter: '_all' },
         shimPort
       }
@@ -1795,6 +1794,10 @@ const methods = {
   'identity.set': async (args) => {
     const name = { userName: args?.userName ?? null, deviceName: args?.deviceName ?? null }
     writeSettings({ ...readSettings(), identity: name })
+    // In the demo there is nobody to tell. The name is still kept, and it is the one a
+    // later pairing introduces this phone with - which is the whole reason onboarding
+    // asks before the demo starts rather than after.
+    if (demoMode()) return { ...name, belongsTo: null, confirmed: false, owner: false, demo: true }
     const out = await (await connected()).request('identity.set', args)
     // Best effort to the rest: a library that is off hears it on the next rename, and
     // the local copy is what a fresh pairing carries.
@@ -1806,7 +1809,12 @@ const methods = {
     }
     return out
   },
-  'avatar.set': async (args) => (await connected()).request('avatar.set', args),
+  // A picture is kept by the library, so in the demo there is nowhere to put one. Said
+  // in a sentence rather than left to fail as "not paired with any library".
+  'avatar.set': async (args) => {
+    if (demoMode()) throw new Error('Your picture is kept by the library you are in. Connect one first.')
+    return (await connected()).request('avatar.set', args)
+  },
 
   // Downloads: pin a film for offline. The bytes ride the same media.stream
   // chokepoint as playback; the shim then serves the finished file off disk,

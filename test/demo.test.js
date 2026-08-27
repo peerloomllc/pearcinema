@@ -21,7 +21,6 @@ const ids = createProtocol({ app: 'pearcinema' }).ids
 
 const MANIFEST = {
   name: 'Demo library',
-  attribution: 'Scanned by the Internet Archive.',
   films: [
     {
       file: 'Films/Duck and Cover (1951).mp4',

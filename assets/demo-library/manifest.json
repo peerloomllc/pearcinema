@@ -1,7 +1,6 @@
 {
   "_readme": "The demo library's metadata. The FILMS are not committed - scripts/fetch-demo-films.sh fetches and encodes them, and assets/demo-library/LICENCES.md carries the per-item licence evidence. This file is committed because it is small, it is the catalogue the app builds its demo library from, and the file names below are the keys the shell resolves assets by. A name changed here must be changed in the fetch script and in shell/demo-assets.ios.ts in the same commit.",
   "name": "Demo library",
-  "attribution": "A Trip Down Market Street was scanned by the Internet Archive from a print held by Prelinger Archives.",
   "films": [
     {
       "file": "Films/Duck and Cover (1951).mp4",
