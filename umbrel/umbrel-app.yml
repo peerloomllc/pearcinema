@@ -57,7 +57,7 @@ description: >-
 
 
   YOU decide who gets in. Every device that pairs appears here with a name it chose
-  and a person it belongs to. Revoke a device and playback stops within a second,
+  and a person it belongs to. Revoke a device and playback stops within seconds,
   mid-film - not "on next login". Revoke a person and every device they hold dies at
   once. There are no shared passwords or bearer tokens anywhere in the design: every
   connection is authenticated by the device's own key.
@@ -120,7 +120,7 @@ releaseNotes: |-
   - Someone you have shared with can ask for a film you do not have.
 
   Sharing and safety
-  - Pair a device by scanning a code. Revoke it and playback stops within a second,
+  - Pair a device by scanning a code. Revoke it and playback stops within seconds,
     mid-film.
   - Guest passes that expire by themselves.
   - Nothing about your library is uploaded anywhere, and nobody you share with gets a
