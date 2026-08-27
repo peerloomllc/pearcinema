@@ -52,6 +52,7 @@
 // mid-film has to snap to a real cut point rather than to a multiple of four.
 
 const { VAAPI, engineFor } = require('./engines')
+const fmp4 = require('./fmp4')
 
 const SEGMENT_SECONDS = 4
 
@@ -134,25 +135,41 @@ function copyPlan (times, { runtime, reorderDelay = 0, target = SEGMENT_SECONDS 
 // player's side, and the durations have to be the REAL ones: a Roku takes the
 // film's length from the sum of these lines, measured 2026-08-19 (it reported
 // 111924 ms for a playlist whose EXTINF values summed to 111.924 s).
-function playlistFor (item, { base = '', plan = null } = {}) {
+
+// What the init segment is called in a playlist. One name, used by the host that
+// writes the line and by the phone's shim that rewrites it, so the two cannot
+// drift apart.
+const INIT_NAME = 'init.mp4'
+
+// `container` says which of the two shapes the segments are, and the playlist has
+// to agree with them in three places at once - the extension, the header line and
+// the version. A fragmented-MP4 playlist needs `#EXT-X-MAP` naming the init
+// segment, and EXT-X-MAP is a version 6 tag, so the version rises with it. Getting
+// any one of the three wrong is a stream that never starts, which is what a
+// self-contained segment with no `#EXT-X-MAP` did on the Simulator: 0:00, forever,
+// with no error.
+function playlistFor (item, { base = '', plan = null, container = 'mpegts' } = {}) {
   const p = plan || gridPlan(item?.runtime)
   if (!p || !p.starts.length) return null
 
+  const isFmp4 = container === 'fmp4'
   const durations = durationsOf(p)
   const lines = [
     '#EXTM3U',
-    '#EXT-X-VERSION:3',
+    `#EXT-X-VERSION:${isFmp4 ? 7 : 3}`,
     `#EXT-X-TARGETDURATION:${Math.max(1, Math.ceil(Math.max(...durations)))}`,
     '#EXT-X-MEDIA-SEQUENCE:0',
     '#EXT-X-PLAYLIST-TYPE:VOD'
   ]
+  if (isFmp4) lines.push(`#EXT-X-MAP:URI="${base}${INIT_NAME}"`)
   for (let k = 0; k < p.starts.length; k++) {
     lines.push(`#EXTINF:${durations[k].toFixed(3)},`)
-    lines.push(`${base}${k}.ts`)
+    lines.push(`${base}${k}${isFmp4 ? '.m4s' : '.ts'}`)
   }
   lines.push('#EXT-X-ENDLIST')
   return lines.join('\n') + '\n'
 }
+
 
 // Every segment's real length, the playlist's EXTINF values and the only honest
 // answer to "how long is segment k".
@@ -186,6 +203,14 @@ const TONES = {
 // still rebuilt when the segment container cannot hold it.
 const TS_AUDIO = new Set(['aac', 'mp3', 'ac3', 'eac3'])
 
+// And what a fragmented MP4 segment will carry untouched, which is a different
+// list because the container is a different container. AC-3 and E-AC-3 stay -
+// Apple documents both in HLS and DECISIONS 2026-08-13 has them measured through
+// the remux path. MP3 goes, because it is an MPEG-TS elementary stream in HLS and
+// not one of the codecs Apple's fMP4 rules name; rebuilding it costs the cheapest
+// conversion there is, against a silent film if the guess is wrong.
+const FMP4_AUDIO = new Set(['aac', 'ac3', 'eac3', 'alac', 'flac'])
+
 // The ffmpeg argv for ONE COPIED segment. The picture is not touched at all; only
 // the soundtrack is rebuilt, which is what a remux already does to a pipe.
 //
@@ -217,9 +242,34 @@ function channelsFor (clientMax, sourceChannels) {
   return have ? Math.min(want, have) : want
 }
 
-function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', audioCodec = null, audioChannels = 2 }) {
+// How much film the init run below asks for. Long enough to contain a keyframe and
+// its first audio, short enough to be over instantly. Declared above its use, per
+// the suite's own TDZ lesson.
+const INIT_SECONDS = 0.5
+
+// WHICH CONTAINER A COPIED SEGMENT LEAVES IN, and it is decided by the picture
+// rather than by the client.
+//
+// MPEG-TS unless the picture is HEVC, because HEVC in MPEG-TS is not something
+// Apple's player will draw: it plays the sound, reports no error, and leaves the
+// picture 0 x 0 (measured on the iPhone SE, 2026-08-27 - see host/fmp4.js for the
+// whole measurement). Apple carries HEVC in fragmented MP4 and only there.
+//
+// Nothing consults the platform, because the fact is about the codec: no client
+// that reaches this path with an HEVC picture is asking for TS. Every television
+// declares `videoCodecs: ['h264']`, so a cast never copies HEVC at all, and every
+// hardware engine in host/engines.js encodes H.264 - so a copied HEVC segment can
+// only be a phone's, and this is the one path that changes.
+function segmentContainerFor (videoCodec) {
+  return fmp4.needsFmp4(videoCodec) ? 'fmp4' : 'mpegts'
+}
+
+function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', audioCodec = null, audioChannels = 2, videoCodec = null }) {
   const args = ['-hide_banner', '-loglevel', 'error', '-nostdin']
   if (headers) args.push('-headers', Object.entries(headers).map(([k, v]) => `${k}: ${v}\r\n`).join(''))
+
+  const container = segmentContainerFor(videoCodec)
+  const carries = container === 'fmp4' ? FMP4_AUDIO : TS_AUDIO
 
   args.push('-copyts', '-noaccurate_seek')
   // The first segment starts at the film's own beginning, so it is not seeked at
@@ -230,7 +280,11 @@ function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', aud
 
   args.push('-map', '0:v:0', '-map', '0:a:0?', '-map_chapters', '-1')
   args.push('-c:v', 'copy')
-  if (audio === 'copy' && TS_AUDIO.has(String(audioCodec || '').toLowerCase())) {
+  // The sample entry Apple's stack needs on a copied HEVC picture. ffmpeg's MP4
+  // muxer writes `hev1` by default, which is the same no-picture failure by a
+  // second route - so the container fix without this one would still be black.
+  if (container === 'fmp4') args.push('-tag:v', fmp4.HVC1)
+  if (audio === 'copy' && carries.has(String(audioCodec || '').toLowerCase())) {
     args.push('-c:a', 'copy')
   } else {
     args.push('-c:a', 'aac', '-b:a', '192k', '-ac', String(Math.max(1, Number(audioChannels) || 2)))
@@ -239,9 +293,39 @@ function copySegmentArgs ({ input, headers = null, seq, plan, audio = 'aac', aud
   // The muxer's own 1.4 s preload would shift every segment's clock off the film's,
   // and negative-timestamp shifting would undo -copyts on the first segment.
   args.push('-avoid_negative_ts', 'disabled', '-muxdelay', '0', '-muxpreload', '0')
-  args.push('-f', 'mpegts', 'pipe:1')
+  if (container === 'fmp4') args.push('-movflags', fmp4.SEGMENT_MOVFLAGS, '-f', 'mp4', 'pipe:1')
+  else args.push('-f', 'mpegts', 'pipe:1')
   return args
 }
+
+// THE INIT SEGMENT'S OWN RUN, which is the same segment-zero command stopped
+// almost at once. `#EXT-X-MAP` names one header for the whole film and it has to
+// describe the tracks the segments carry - same input, same mapping, same codec
+// arguments, so it does.
+//
+// IT IS SHORT ON PURPOSE. `delay_moov` holds the header back until the first
+// fragment is cut, so asking segment zero for it would mean muxing a whole
+// segment - several megabytes and a second or two of work - to keep the first
+// kilobyte. Half a second of film produces the same header, because nothing in it
+// depends on how much film followed.
+function initArgs ({ input, headers = null, plan, audio = 'aac', audioCodec = null, audioChannels = 2, videoCodec = null }) {
+  const args = copySegmentArgs({
+    input,
+    headers,
+    seq: 0,
+    plan: { ...plan, ends: [...plan.ends] },
+    audio,
+    audioCodec,
+    audioChannels,
+    videoCodec
+  })
+  // Replace segment zero's end with a moment's worth, leaving every other flag as
+  // the segments' own so the header cannot describe something different.
+  const at = args.indexOf('-to')
+  if (at >= 0) args[at + 1] = Math.min(INIT_SECONDS, Number(plan.ends[0]) || INIT_SECONDS).toFixed(6)
+  return args
+}
+
 
 function segmentArgs ({ input, headers = null, seq, media = {}, device, hwDecode, bitrate, burn = null, tone = null, plan = null, audioChannels = 2, engine = null }) {
   const at = plan?.starts ? plan.starts[seq] : seq * SEGMENT_SECONDS
@@ -323,6 +407,11 @@ module.exports = {
   segmentCount,
   segmentArgs,
   copySegmentArgs,
+  initArgs,
+  segmentContainerFor,
+  INIT_NAME,
+  INIT_SECONDS,
+  FMP4_AUDIO,
   channelsFor,
   gridPlan,
   copyPlan,

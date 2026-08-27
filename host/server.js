@@ -33,6 +33,7 @@ const watch = require('./watch')
 const sidecars = require('./sidecars')
 const subtitles = require('./subtitles')
 const hls = require('./hls')
+const fmp4 = require('./fmp4')
 const keyframes = require('./keyframes')
 
 // THE FIELD'S CEILING WHEN THIS BOX HAS NEVER BEEN MEASURED. A round number chosen
@@ -212,6 +213,9 @@ class PearCinemaHost {
             decide: (p) => this.decideFor(p),
             playlist: (p) => this.hlsPlaylist(p),
             segment: (p) => this.hlsSegment(p),
+            // The header a fragmented-MP4 playlist names in `#EXT-X-MAP`. Null
+            // for a TS playlist, which has none.
+            init: (p) => this.hlsInit(p),
             export: (p) => this.exportFor(p),
             // Whether THIS host could burn an image subtitle track into the
             // picture - the engine must have proven itself. subtitle.list uses
@@ -987,7 +991,15 @@ class PearCinemaHost {
       ? await this.adapter.ffmpegInput({ itemId: String(itemId) })
       : null
     const plan = await this._hlsPlan({ item, verdict, source })
-    return { item, verdict, burn, source, plan }
+    // WHICH SHAPE THE SEGMENTS ARE, worked out once and used by the playlist, the
+    // segments and the init segment alike - three routes that have to agree, and
+    // one wrong answer among them is a film that never starts. Only a COPIED
+    // picture can be HEVC: every engine in host/engines.js encodes H.264, so a
+    // re-encoded segment is MPEG-TS whatever went in.
+    const container = plan && plan.engine === 'copy'
+      ? hls.segmentContainerFor(item.media?.videoCodec)
+      : 'mpegts'
+    return { item, verdict, burn, source, plan, container }
   }
 
   async hlsPlaylist ({ itemId, capabilities = {} }) {
@@ -997,7 +1009,7 @@ class PearCinemaHost {
     if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') {
       return { mode: verdict.mode, reason: verdict.reason, playlist: null }
     }
-    const playlist = plan ? hls.playlistFor(item, { plan }) : null
+    const playlist = plan ? hls.playlistFor(item, { plan, container: ctx.container }) : null
     if (!playlist) {
       // Two ways to get here and they deserve different words, because one is a
       // fact about the film and the other is a fact about this host.
@@ -1012,6 +1024,11 @@ class PearCinemaHost {
       playlist,
       segments: plan.starts.length,
       segmentSeconds: hls.SEGMENT_SECONDS,
+      // WHETHER THERE IS A HEADER TO FETCH. A fragmented-MP4 playlist names one
+      // through `#EXT-X-MAP`, and the phone's shim has to route it; a TS playlist
+      // has none and must not invent one.
+      container: ctx.container,
+      init: ctx.container === 'fmp4',
       // WHERE EACH SEGMENT REALLY BEGINS. A copy plan's segments are uneven, so a
       // cast resuming mid-film cannot work out its start point by dividing - it
       // has to be told. host/cast.js snaps to these.
@@ -1022,7 +1039,7 @@ class PearCinemaHost {
   async hlsSegment ({ itemId, seq, capabilities = {} }) {
     const ctx = await this._hlsContext({ itemId, capabilities })
     if (!ctx) return null
-    const { item, verdict, burn, source, plan } = ctx
+    const { item, verdict, burn, source, plan, container } = ctx
     if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') return null
     if (!plan || !source) return null
 
@@ -1037,6 +1054,9 @@ class PearCinemaHost {
         plan,
         audio: verdict.audio || 'aac',
         audioCodec: item.media?.audioCodec || null,
+        // Decides the container and, with it, whether the picture needs the
+        // `hvc1` sample entry Apple's player will not play without.
+        videoCodec: item.media?.videoCodec || null,
         // The client's own speaker count, which is the whole reason a film with
         // a perfect picture is being touched at all - held down to the film's own
         // count, so a stereo soundtrack is never upmixed to fill a television.
@@ -1063,7 +1083,47 @@ class PearCinemaHost {
     // hardware, but it still holds a file handle on the library drive and still
     // has to die when a revoke says so.
     const session = this.transcoder.start({ argv, at: plan.starts[k], audio: 'aac', media: item.media })
-    this.log('host:hls-segment', { seq: k, engine: plan.engine, running: this.transcoder.running })
+    // A FRAGMENTED-MP4 SEGMENT IS SHAPED ON THE WAY OUT: ffmpeg writes a whole
+    // little MP4 and an HLS segment is the part after the header, moved onto the
+    // film's clock. Done as a stream, so the megabytes still never collect - see
+    // host/fmp4.js for why both steps are needed and what each one fixes.
+    if (container === 'fmp4') {
+      session.stdout = session.stdout.pipe(new fmp4.SegmentShaper({ startSeconds: plan.starts[k] }))
+    }
+    this.log('host:hls-segment', { seq: k, engine: plan.engine, container, running: this.transcoder.running })
+    return session
+  }
+
+  // THE INIT SEGMENT: the header every fragmented-MP4 segment leaves out, served
+  // once for the whole film because `#EXT-X-MAP` names it once.
+  //
+  // It is segment zero's own command stopped after half a second (hls.initArgs),
+  // so the header describes exactly the tracks the segments carry - same input,
+  // same mapping, same codec arguments. Asking segment zero itself would mux a
+  // whole segment to keep its first kilobyte.
+  //
+  // Runs through the same pool as everything else, so it is capped, it dies on a
+  // revoke, and a busy host refuses it the same way.
+  async hlsInit ({ itemId, capabilities = {} }) {
+    const ctx = await this._hlsContext({ itemId, capabilities })
+    if (!ctx) return null
+    const { item, verdict, source, plan, container } = ctx
+    if (container !== 'fmp4') return null
+    if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') return null
+    if (!plan || !source) return null
+
+    const argv = hls.initArgs({
+      input: source.input,
+      headers: source.headers || null,
+      plan,
+      audio: verdict.audio || 'aac',
+      audioCodec: item.media?.audioCodec || null,
+      audioChannels: hls.channelsFor(capabilities.maxAudioChannels, item.media?.audioChannels),
+      videoCodec: item.media?.videoCodec || null
+    })
+    const session = this.transcoder.start({ argv, at: 0, audio: 'aac', media: item.media })
+    session.stdout = session.stdout.pipe(new fmp4.SegmentShaper({ mode: 'header' }))
+    this.log('host:hls-init', { itemId: String(itemId), running: this.transcoder.running })
     return session
   }
 

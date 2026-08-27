@@ -2,6 +2,98 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-27 - HEVC LEAVES FOR AN APPLE DEVICE IN A FRAGMENTED MP4, NEVER IN MPEG-TS
+Tier: T2 (a mechanism change on the segment path, recorded rather than made quietly).
+Found by finally doing the thing TODO.md had been asking for since 2026-08-26: watching
+an x265 file play on a real iPhone.
+
+WHAT WAS WRONG. Every HLS segment this host produced was MPEG-TS. Apple carries HEVC in
+fragmented MP4 and only there, and AVFoundation handed HEVC in a TS segment does not
+refuse it - it plays the SOUND, runs the clock, reports `readyState` 4 and
+`video.error` null, and leaves `videoWidth x videoHeight` at 0 x 0. A black rectangle
+with dialogue coming out of it.
+
+HOW BIG IT WAS: 3,336 of the 5,972 items in the host's own scan of the real library are
+Matroska holding HEVC. On iOS a Matroska file needs a container change, a container
+change is a remux, and a remux on iOS is a playlist (src/capabilities.js `wantsPlaylist`)
+- so every one of them took the segment path. Over half the library, silently
+pictureless, on the platform being submitted to a store this week.
+
+WHY NOTHING CAUGHT IT, and there are three separate reasons:
+
+  - THE APP'S RETRY NET CANNOT SEE IT. `refusedVideo` in src/bare.js is the answer to a
+    chip that lies about a codec, and it fires on a player ERROR. Nothing errors here.
+    The net is for the loud failures, and this is the quiet one.
+  - THE SIMULATOR WAS BLAMED FOR IT. TODO.md recorded on 2026-08-26 that "the Simulator
+    will not render HEVC at all", so every Simulator playback check was written off as
+    vacuous for x265 and the question was parked for a real phone. The Simulator was
+    telling the truth. It was reproducing a real bug in our own host, and calling it a
+    Simulator limitation is what kept it alive for a day.
+  - ANDROID NEVER SEES IT. ExoPlayer opens HEVC in MPEG-TS quite happily, and on Android
+    a remux is direct play rather than a playlist, so the path does not even run.
+
+HOW IT WAS PROVED, rather than argued from Apple's authoring rules. The same thirty
+seconds of the same episode was served to the same phone four ways from a web server on
+the LAN, with the video packets byte-identical in all four and only the box around them
+changed:
+
+  A  MPEG-TS segments, which is what the app sent       sound, no picture
+  B  fMP4 segments with an `#EXT-X-MAP` init segment     plays
+  C  self-contained fMP4 segments, no EXT-X-MAP          sits at 0:00, never starts
+  D  fMP4 built the way this host would build it         plays
+
+C is the one worth keeping: it was the cheap version of the fix, and it does not work.
+Apple wants the real init segment, so the change had to carry a third route rather than
+a container swap.
+
+THREE THINGS EACH HAD TO BE RIGHT, and any one of them alone is still a black rectangle:
+
+  1. THE CONTAINER, and `-tag:v hvc1` with it. ffmpeg's MP4 muxer writes `hev1` by
+     default, which keeps the parameter sets in-band and which AVFoundation will not
+     decode - the same no-picture failure by a second route.
+  2. THE PLAYLIST AGREEING WITH THE SEGMENTS: `.m4s` names, `#EXT-X-MAP` naming the
+     header, and `#EXT-X-VERSION:7` because EXT-X-MAP is a version 6 tag. And the
+     phone's shim rewriting that map line as well as the segment lines - a missed map
+     line resolves `init.mp4` against the player's own base and the film never starts,
+     with nothing logged anywhere.
+  3. THE BYTES RESHAPED ON THE WAY OUT. Each segment is its own ffmpeg run and comes out
+     a whole little MP4 (ftyp, moov, moof, mdat), so the header is split off and served
+     once through `media.init`, and every fragment is moved onto the film's clock.
+
+ON THAT LAST ONE, because it is the surprising half. ffmpeg's MP4 muxer rebases every
+output to start at zero, whatever `-copyts` did to the packets. Measured against
+`-output_ts_offset`, `+cmaf` and `+dash`: all three still wrote `tfdt: 0`. So every
+segment claimed to begin at the start of the film, and the symptom was a picture that
+appeared and then a clock that stuck at the first join. The fix writes each track's real
+start into its `tfdt`, ADDED rather than SET - `frag_keyframe` cuts a fragment at every
+keyframe and a copy plan's segment spans the keyframes it skipped, so one segment holds
+several fragments whose own values already say where they sit inside it.
+
+THE RESHAPING STAYS A STREAM. Only `ftyp`, `moov` and `moof` are buffered - a few
+kilobytes - while `mdat`, which is all of the megabytes, is counted past and never
+collected. Nothing is written to disk, which is the constraint the whole segment path
+exists to keep.
+
+WHAT DELIBERATELY DID NOT CHANGE. The rule is about the CODEC, not the client: a copied
+HEVC picture leaves in fMP4 whoever asked for it. That is not a platform check dressed up
+- it is why no television is dragged onto this path. Every cast target in host/cast.js
+declares `videoCodecs: ['h264']`, so a cast never copies HEVC at all, and every engine in
+host/engines.js encodes H.264, so a re-encoded segment is MPEG-TS whatever went in. An
+MPEG-TS playlist comes out byte for byte as it did.
+
+THE ONE JUDGEMENT CALL IN IT: MP3 is copied into an MPEG-TS segment and rebuilt as AAC
+into a fragmented one. MP3 is an MPEG-TS elementary stream in HLS and is not among the
+codecs Apple's fMP4 rules name. An audio re-encode is the cheapest conversion there is
+and a silent film is the most expensive mistake, so the guess goes that way. AC-3 and
+E-AC-3 stay copied, which is the 2026-08-13 measurement and ~620 files of this library,
+and Frasier S01E01 - 480p HEVC Main 10 with AC-3 - was played to check it.
+
+THE ALTERNATIVE THAT WAS NOT TAKEN: drop `hevc` from the iOS declaration and let the host
+convert. One line, and it would have worked. It also re-encodes 3,336 files that needed
+nothing, costs the engine on every play, loses quality, and REFUSES OUTRIGHT on a host
+with no video engine - which is any machine without the hardware. The picture was already
+perfect; the box around it was wrong.
+
 ## 2026-08-27 - EVERY RELEASE APK THIS REPO COULD BUILD WAS DEBUG-SIGNED
 Tier: T2 (a release-path defect with a permanent consequence). Found and fixed the same
 day, filling in the store credentials.
