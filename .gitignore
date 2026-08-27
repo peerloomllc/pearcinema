@@ -85,5 +85,9 @@ vendor/ffmpeg/*
 # that every clone would carry for ever and that git stores badly, so the repo keeps
 # the identifiers and the licence evidence instead. LICENCES.md IS committed, because
 # the evidence is the part that must not be re-derived.
+# The posters are frame grabs of those same films, made by the same script.
 assets/demo-library/*
 !assets/demo-library/LICENCES.md
+# The catalogue IS committed: it is a few kilobytes, it is what the app builds the demo
+# library from, and its file names are the keys the shell resolves the assets by.
+!assets/demo-library/manifest.json

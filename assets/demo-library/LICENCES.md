@@ -105,3 +105,13 @@ An addition to this library is an addition to this file in the same commit, with
 five things: the identifier, the source URL, the licence field quoted from the item's own
 metadata, the date checked and which print it is. If a candidate cannot be given all five,
 it does not ship.
+
+Three other files move with it, and `test/demo-build-rule.test.js` fails until they do:
+`assets/demo-library/manifest.json` (the catalogue the app builds from),
+`scripts/fetch-demo-films.sh` (which produces the bytes and the poster) and
+`shell/demo-assets.ios.ts` (which is what puts the file in the iOS build at all).
+
+**And if the new item asks for attribution, the About screen changes too.** The credit
+lives in App.jsx as prose, under "The films that come with the app", because it has to
+survive the demo being retired - a print that has been played is credited whether or not
+the demo is still on. A test cannot tell you that sentence has gone stale.

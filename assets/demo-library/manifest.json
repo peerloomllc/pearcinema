@@ -1,0 +1,57 @@
+{
+  "_readme": "The demo library's metadata. The FILMS are not committed - scripts/fetch-demo-films.sh fetches and encodes them, and assets/demo-library/LICENCES.md carries the per-item licence evidence. This file is committed because it is small, it is the catalogue the app builds its demo library from, and the file names below are the keys the shell resolves assets by. A name changed here must be changed in the fetch script and in shell/demo-assets.ios.ts in the same commit.",
+  "name": "Demo library",
+  "films": [
+    {
+      "file": "Films/Duck and Cover (1951).mp4",
+      "poster": "Films/Duck and Cover (1951).bin",
+      "title": "Duck and Cover",
+      "year": 1951,
+      "runtime": 554,
+      "genres": ["Short", "Documentary"],
+      "overview": "Bert the Turtle teaches American schoolchildren what to do when they see the flash. Made for the Federal Civil Defense Administration and shown in classrooms through the 1950s.",
+      "media": { "container": "mp4", "videoCodec": "h264", "audioCodec": "aac", "audioChannels": 2, "width": 720, "height": 480 }
+    },
+    {
+      "file": "Films/A Trip Down Market Street (1906).mp4",
+      "poster": "Films/A Trip Down Market Street (1906).bin",
+      "title": "A Trip Down Market Street",
+      "year": 1906,
+      "runtime": 717,
+      "genres": ["Short", "Documentary"],
+      "overview": "A camera strapped to the front of a cable car rides the length of Market Street, San Francisco, four days before the earthquake. Silent, and there is no soundtrack to miss.",
+      "media": { "container": "mp4", "videoCodec": "h264", "audioCodec": null, "audioChannels": null, "width": 640, "height": 480 }
+    }
+  ],
+  "shows": [
+    {
+      "title": "The Apollo Missions",
+      "poster": "TV Shows/The Apollo Missions/poster.bin",
+      "year": 1969,
+      "genres": ["Documentary"],
+      "overview": "Documentaries made for NASA in the early 1970s and narrated by Burgess Meredith, following the Apollo programme from the first landing to the flight that nearly did not come home.",
+      "episodes": [
+        {
+          "file": "TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E01 - The Eagle Has Landed.mp4",
+          "season": 1,
+          "episode": 1,
+          "title": "The Eagle Has Landed",
+          "year": 1969,
+          "runtime": 1706,
+          "overview": "NASA's own account of Apollo 11, from the Saturn V leaving the pad to the first steps on the Sea of Tranquility.",
+          "media": { "container": "mp4", "videoCodec": "h264", "audioCodec": "aac", "audioChannels": 2, "width": 720, "height": 480 }
+        },
+        {
+          "file": "TV Shows/The Apollo Missions/Season 01/The Apollo Missions - S01E02 - Houston, We've Got A Problem.mp4",
+          "season": 1,
+          "episode": 2,
+          "title": "Houston, We've Got a Problem",
+          "year": 1970,
+          "runtime": 1701,
+          "overview": "An oxygen tank fails 200,000 miles out, and flight controllers have to work out how to bring three astronauts home in a spacecraft built to land on the Moon.",
+          "media": { "container": "mp4", "videoCodec": "h264", "audioCodec": "aac", "audioChannels": 2, "width": 720, "height": 480 }
+        }
+      ]
+    }
+  ]
+}

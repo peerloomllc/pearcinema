@@ -113,30 +113,37 @@ test('EVERY STORE FIELD IS WITHIN THE STORE\'S LIMIT', () => {
   }
 })
 
-test('THE LISTINGS DO NOT OFFER A DEMO THAT DOES NOT EXIST', () => {
+test('EACH LISTING OFFERS EXACTLY THE DEMO ITS OWN BUILD HAS', () => {
   // PearTune drafted its store description from a proposal that put "Try it without a
   // server" on the intro card. It had moved, and sending a reviewer to a button that is
   // not there is how a 2.1 rejection happens (peartune DONE 2026-07-31).
   //
-  // PearCinema has NO demo library at all - App.jsx says so where the onboarding diverges
-  // from the donor's - so the listings must say a server is needed and must not imply
-  // anything is bundled to watch.
+  // PearCinema's two builds now differ, which is the new way to get this wrong: the
+  // Apple build carries four public-domain films and the Play build carries none,
+  // because 164 MB of film exceeds Play's 200 MB base-module cap (proposal
+  // 2026-08-26-app-review-demo). So a listing that copies the other one is a listing
+  // that lies about its own build, in one direction or the other.
   const ios = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'ios', 'version', 'default', 'en-US.json'), 'utf8'))
   const play = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'metadata', 'android', 'listing', 'en-US.json'), 'utf8'))
 
   for (const [what, text] of [['iOS', ios.description], ['Play', play.fullDescription]]) {
     assert.match(text, /needs that machine running the free PearCinema host/,
       `${what} says a server is required`)
-    assert.match(text, /comes with nothing to watch/, `${what} says nothing is bundled`)
-    assert.ok(!/demo library|built-in demo|try it without a server/i.test(text),
-      `${what} must not offer a demo PearCinema does not have`)
-  }
-
-  // And the sentence a reviewer of a VIDEO app is looking for, said outright rather than
-  // implied by the rest.
-  for (const [what, text] of [['iOS', ios.description], ['Play', play.fullDescription]]) {
+    // THE SENTENCE THAT SURVIVES THE DEMO. A handful of public-domain shorts does not
+    // weaken it and must never be written as though it does.
     assert.match(text, /hosts nothing, indexes nothing/, `${what} says it provides no content`)
   }
+
+  // Apple: the demo exists, so the listing says what it is and says it is all there is.
+  assert.match(ios.description, /four short public-domain films and nothing else/,
+    'the iOS listing says what the app comes with')
+  assert.ok(!/comes with nothing to watch/.test(ios.description),
+    'the iOS build DOES come with something to watch, and the listing must not deny it')
+
+  // Play: no films in that build, so the old promise stands unchanged.
+  assert.match(play.fullDescription, /comes with nothing to watch/, 'Play says nothing is bundled')
+  assert.ok(!/demo library|public-domain|try it without a server/i.test(play.fullDescription),
+    'the Play listing must not offer a demo the Android build does not carry')
 })
 
 test('the listings point at pages that exist', () => {
