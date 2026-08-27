@@ -3028,10 +3028,19 @@ export default function App () {
           The server keeps the list of which devices are allowed in, and can cut one
           off in the middle of a film.
         </p>
+        {/* THIS PARAGRAPH SAID THE OPPOSITE UNTIL 2026-08-26, and it was a claim about
+            where somebody's films go. It was written before the relay shipped
+            (proposal 2026-08-18-relay-for-video reversed "no relay, by design") and
+            nothing brought it back into line, so the About screen promised no relay
+            while Settings offered a switch for one. Found walking the app on the
+            Simulator. Same wording as the store listing's relay paragraph, on purpose. */}
         <p>
-          PearCinema ships with no relay at all: every stream is a direct
-          peer-to-peer connection, and nothing of yours ever crosses a server run
-          by anyone else.
+          Every stream tries a direct connection between your phone and the machine
+          first. Some mobile networks and locked-down wifi refuse one, and then
+          PearCinema can fall back to a relay run by PeerLoom, which forwards encrypted
+          data it cannot read and keeps no copy of it. Films are held to a lower quality
+          while that lasts. You can turn the fallback off, or point it at a relay of
+          your own, under Connection in Settings.
         </p>
         <div className='btnrow'>
           <button onClick={() => openUrl('https://pears.com/')}>Learn about P2P ↗</button>
