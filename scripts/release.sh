@@ -1379,25 +1379,39 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Native project preparation
 #
-# android/ is checked into this repo, so there is nothing to regenerate for the
-# Android build. The step still holds the slot: PearList and PearPetal gitignore
-# android/ and run `expo prebuild --clean` here. Keeping the number reserved is
-# what lets the pipeline checker tell "this app has no prebuild" apart from
-# "this app runs prebuild in the wrong place". See RELEASE-PIPELINE.md §2.
+# NEITHER android/ NOR ios/ IS IN THIS REPO. `/android/` is line 66 of .gitignore
+# and ios/ has never been committed; `expo prebuild` generates both from app.json
+# plus plugins/, which is the suite default and what scripts/app.conf already says.
+# PearTune commits its android/ tree and this script was inherited from it, so this
+# step used to announce "android/ and ios/ are checked in, no prebuild needed" and
+# regenerate only iOS.
 #
-# ios/ is ALSO checked in (DECISIONS.md 2026-08-18), so it too needs nothing
-# regenerated in the normal case. The prebuild below is the recovery path for a
-# tree that is missing it, and only when the App Store is a destination. Without
-# --clean, on purpose: a --clean here would delete a working ios/Pods and force a
-# full CocoaPods install on every release.
+# THAT WAS A RELEASE THAT DIED AT STEP 3 ON A CLEAN CLONE, and it never bit because
+# a development machine always has a generated android/ lying around from ordinary
+# work. Found 2026-08-27 by reading this file before running it for the first time.
+# Nothing about the Android build says why it failed: `cd android` simply is not
+# there.
 #
-# The consequence of committing it is that app.json's ios block does NOT reach the
-# archive on its own - prebuild does not run when ios/ is present. test/ios-version.test.js
-# is the gate that catches an app.json edit that was never prebuilt and committed.
+# So each tree is regenerated WHEN IT IS ABSENT, and left alone when it is not.
+# Without --clean, on purpose: a --clean would delete a working ios/Pods and force a
+# full CocoaPods install on every release, and would throw away an android/ that is
+# already correct.
+#
+# Prebuild reads app.json, so a value that lives nowhere else reaches the build only
+# through it. test/app-config.test.js pins what must survive a regeneration - the
+# iPhone asked for the local network with no purpose string until 2026-08-25 because
+# the string lived only in a generated file.
 # ---------------------------------------------------------------------------
-echo "==> Native project: android/ and ios/ are checked in, no prebuild needed."
+if $SKIP_ANDROID; then
+  echo "==> Native project: skipping android/ (--skip-android)."
+elif [ ! -f "$REPO_ROOT/android/app/build.gradle" ]; then
+  echo "==> android/ is missing - running expo prebuild -p android..."
+  npx expo prebuild -p android
+else
+  echo "==> Native project: android/ is already generated, leaving it alone."
+fi
 if $PUBLISH_APP_STORE && [ ! -f "$XCODE_PROJECT" ]; then
-  echo "==> ios/ is missing — running expo prebuild -p ios..."
+  echo "==> ios/ is missing - running expo prebuild -p ios..."
   npx expo prebuild -p ios
 fi
 
