@@ -10,7 +10,7 @@ to the internet and no file is ever copied to anybody else's server.
 
 **That machine does not have to be yours.** A library's owner can let a friend or a family
 member in, each as their own person holding their own devices, and cut any of them off
-again in a second.
+again within seconds.
 
 It is the video sibling of [PearTune](../peartune) and shares its proven host.
 

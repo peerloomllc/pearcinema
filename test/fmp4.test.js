@@ -19,6 +19,7 @@ const assert = require('node:assert/strict')
 
 const fmp4 = require('../host/fmp4')
 const hls = require('../host/hls')
+const engines = require('../host/engines')
 
 // A fragmented MP4, hand-built, so these tests need no ffmpeg and no film. Box
 // sizes are real and the fields the code reads are in their real places; the
@@ -290,6 +291,42 @@ test('a truncated segment ends rather than handing the player a broken box', asy
   assert.ok(out.length < whole.length - init.length)
   assert.equal(out.toString('latin1', 4, 8), 'moof')
   assert.deepEqual(tfdts(out), [4 * 90000])
+})
+
+test('ANDROID NEVER SEES A FRAGMENTED SEGMENT, which is why an older app on a phone still works', () => {
+  const caps = require('../src/capabilities')
+  const remux = require('../host/remux')
+
+  // An HEVC Matroska file is the shape that broke iOS - 3,336 items of the real
+  // library. Android reaches it two ways and neither one produces a fragmented
+  // segment.
+  const media = { container: 'matroska', videoCodec: 'hevc', audioCodec: 'aac', audioChannels: 2 }
+
+  // ONE: a phone whose decoder probe found hardware HEVC. ExoPlayer opens
+  // Matroska, so the container never has to change and nothing is generated at
+  // all - the file is played as it sits on the drive.
+  const probed = { ...caps.staticFor('android'), videoCodecs: ['h264', 'hevc', 'vp9', 'av1'] }
+  assert.equal(remux.decide(media, probed, { transcode: true }).mode, 'direct')
+
+  // TWO: the conservative static floor, which does NOT claim HEVC - a probe is
+  // what adds it, and a phone with none under-declares on purpose. That is a
+  // TRANSCODE, and a transcode re-encodes to H.264 (every engine in
+  // host/engines.js does), so its segments are MPEG-TS whatever went in.
+  assert.equal(caps.staticFor('android').videoCodecs.includes('hevc'), false)
+  assert.equal(remux.decide(media, caps.staticFor('android'), { transcode: true }).mode, 'transcode')
+  for (const spec of engines.ENGINES) {
+    assert.match(spec.encoder, /^h264_/, spec.id + ' must encode H.264')
+  }
+  assert.equal(hls.segmentContainerFor('h264'), 'mpegts')
+
+  // AND ON iOS the same file is a remux, which is a playlist, which is where the
+  // bug lived. A remux becomes a playlist on iOS alone.
+  assert.equal(remux.decide(media, caps.staticFor('ios'), { transcode: true }).mode, 'remux')
+  assert.equal(caps.wantsPlaylist('remux', 'android'), false)
+  assert.equal(caps.wantsPlaylist('remux', 'ios'), true)
+
+  // Which is what lets a phone carrying an OLDER app, whose shim knows nothing of
+  // `.m4s` or `#EXT-X-MAP`, keep working against a host that has this change.
 })
 
 test('the codec decides, so no television and no re-encode is dragged onto this path', () => {

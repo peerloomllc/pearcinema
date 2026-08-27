@@ -4,9 +4,19 @@
 //
 // The inherited rule is that revoke kills LIVE connections rather than only future ones
 // (CLAUDE.md, from PearTune), and the App Store listing says it out loud: the owner can
-// cut a device off "in a second - mid-film, not on next login". Hanging up the socket is
-// not enough to make that true, and Tim found the gap filming the revoke for App Review
-// on 2026-08-27: the film carried on to the end.
+// cut a device off "within seconds - mid-film, not on next login". Hanging up the socket
+// is not enough to make that true, and Tim found the gap filming the revoke for App
+// Review on 2026-08-27: the film carried on to the end.
+//
+// THE LISTING SAID "IN A SECOND" UNTIL LATER THAT DAY, and the wording was changed rather
+// than the code, because two different things were being measured as one. The CONNECTION
+// dies within a second and always did - that is CLAUDE.md's acceptance test, asserted as
+// a number in test/relay-revoke.test.js. The PLAYER stops when the goodbye reaches the
+// phone, and the goodbye can only ride the phone's next knock, which was measured at
+// 6.4 s. Sending it down the connection that is already open would close that gap, and it
+// is a change to @peerloom/host - which PearTune ships too - on a path where the grant is
+// read once at connect rather than per call. Not worth opening days before a submission
+// to save five seconds on a claim that can simply be accurate.
 //
 // TWO REASONS IT CARRIED ON, and they need different answers:
 //
