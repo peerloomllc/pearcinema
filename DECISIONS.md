@@ -2,6 +2,40 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-27 - A REVOKED LIBRARY'S FILMS STOP, INCLUDING THE ONES ALREADY ON THE PHONE
+Tier: T2 (it changes what a revoke does, which is one of the two inherited rules that are
+security bugs if broken). Tim, 2026-08-27, deciding it while it was in front of him.
+
+FOUND BY FILMING IT. The App Review video's last shot is the owner revoking a phone
+mid-film. Tim revoked, and the film carried on to the end. Two separate reasons, and
+hanging up the socket - which the app already did correctly - answers neither:
+
+1. THE PLAYER HAD ALREADY BEEN HANDED THE BYTES. On a home network the file is fetched far
+   ahead of the picture, often all of it, so closing the connection reaches nothing.
+2. THE PHONE HAD KEPT THEM. Playback writes through to the cache, so the film plays again
+   from disk with no host in the path at all.
+
+THE LISTING ALREADY PROMISED OTHERWISE, in so many words: "can revoke one, or everything
+one person holds, in a second - mid-film, not on next login". So this was a shipped claim
+the app did not honour, not a missing feature.
+
+WHAT WAS CHOSEN, of three: stop at the revoke. PearTune's answer is a 14-day lease on
+downloaded music, and the middle option was to copy it. Tim took the strict reading -
+what a library gave this phone stops playing the moment that library says no.
+
+WHAT IT COSTS, said plainly: somebody revoked while they are away from home loses the film
+they downloaded for the flight, at the moment of the revoke rather than at the end of a
+lease. That is the intended behaviour and it is the price of the sentence in the listing.
+
+NOTHING IS DELETED. The verdict is a note, written down (src/bare.js, revoked.json) so it
+survives a relaunch in airplane mode - which in-memory did not - and cleared by the next
+dial that lands, because a dial landing IS a grant existing. A library that changes its
+mind needs nobody to do anything.
+
+WHAT IT DOES NOT GATE: artwork. A grid of grey rectangles teaches nobody why their library
+stopped working; the film refusing to play, with a sentence naming the library, is the
+message.
+
 ## 2026-08-26 - THE DEMO FILMS ARE SERVED FROM THE APP BUNDLE, NOT COPIED INTO THE CACHE
 Tier: T2 (part of the approved app-review demo, proposal 2026-08-26-app-review-demo).
 Decided while building it, and written down because it departs from both the proposal's

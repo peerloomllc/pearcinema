@@ -1114,6 +1114,24 @@ export default function App () {
       on('pair-link', (url) => { setPairLink(url); setAddingLibrary(true) }),
       on('hosts:changed', () => reload().catch(() => {})),
       on('merged:changed', () => setMergedTick((t) => t + 1)),
+      // THE FILM STOPS WHEN THE LIBRARY SAYS NO, which hanging up cannot do on its own:
+      // by the time a revoke lands the player has usually been handed the whole file, so
+      // it would otherwise play happily to the end of something nobody is allowed to
+      // watch any more. Found filming exactly this for App Review (Tim, 2026-08-27), and
+      // the store listing promises it in so many words - "mid-film, not on next login".
+      on('access:revoked', (d) => {
+        call('shell.stop').catch(() => {})
+        setSeries(null); setSeason(null); setTitle(null)
+        setErr(`${d?.libraryName || 'That library'} is no longer shared with this device.`)
+        reload().catch(() => {})
+      }),
+      // Let back in. The shelves are empty from the revoke and nothing else asks again -
+      // the active library never changed - so this is what refills them.
+      on('access:restored', () => {
+        setErr('')
+        setMergedTick((t) => t + 1)
+        reload().catch(() => {})
+      }),
       on('host:connected', () => { setLinkUp(true); refreshRelay() }),
       on('host:disconnected', () => { setLinkUp(false); refreshRelay() }),
       // A punch that landed late moved a live connection off the relay. The marker and
