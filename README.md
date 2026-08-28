@@ -45,13 +45,13 @@ of one library on a machine would corrupt each other.
 ### With Docker
 
 ```
-docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:0.1.1
+docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:0.1.5
 ```
 
 There is deliberately no `latest` tag. A version is what an install can be reproduced
 from and rolled back to, and `umbrel/docker-compose.yml` goes further and pins the digest.
 Published tags are listed at
-[ghcr.io/peerloomllc/pearcinema-host](https://github.com/peerloomllc/pearcinema/pkgs/container/pearcinema-host).
+[ghcr.io/peerloomllc/pearcinema-host](https://github.com/orgs/peerloomllc/packages/container/package/pearcinema-host).
 
 Build that image yourself with `bash host/build-image.sh <version>`, which works with
 docker or podman and always builds x86 and arm64 together.
@@ -96,15 +96,21 @@ so a laptop can serve a library without a terminal. See `desktop/README.md`.
 
 ## Getting the app
 
-PearCinema is not in the app stores yet. Today you build it:
+**Android**: install it from [Zapstore](https://zapstore.dev/apps/com.pearcinema), or
+take the `.apk` from the [latest release](https://github.com/peerloomllc/pearcinema/releases/latest).
+
+**iPhone**: with Apple review. **Google Play**: on the way.
+
+**A browser**: no app needed at all. The dashboard at `http://localhost:8751` plays the
+library itself, on the machine or across the house.
+
+To build either app yourself:
 
 - **Android**: `npx expo prebuild` then `cd android && ./gradlew assembleDebug`, and
   install the APK.
 - **iOS**: `bash scripts/ios-sim-build.sh` for a Simulator, or
   `bash scripts/ios-device-build.sh` for a signed build on a real iPhone. Both build on a
   Mac over ssh; read the headers, which carry everything the first attempt got wrong.
-- **A browser**: no app needed at all. The dashboard at `http://localhost:8751` plays the
-  library itself, on the machine or across the house.
 
 ## Pairing a phone
 
@@ -188,15 +194,20 @@ into the app, and yours is the one that gets used.
 
 ## Status
 
-**It works, and it is not released.** The server runs a real 3,000-item library on a real
-Umbrel; there are Android, iOS and desktop clients, a browser player, casting, downloads
-for offline, subtitles, multiple libraries blended into one, and hardware conversion on
-three vendors' chips.
+**Released, on one store of three.** 1.1.0 is on
+[Zapstore](https://zapstore.dev/apps/com.pearcinema) and on
+[GitHub](https://github.com/peerloomllc/pearcinema/releases/latest) with the Android app
+and desktop installers for Linux, Windows and macOS. The iPhone build is with Apple
+review; Google Play is on the way.
 
-It is a real Umbrel app now rather than a hand-run container, published for both x86 and
-arm64 machines, so the platform owns it and brings it back after a restart. What is left
-before it can be called released is paperwork rather than features: store listings for the
-phone apps, and the App Review trip. `TODO.md` is the honest list.
+The server runs a real 3,000-item library on a real Umbrel; there are Android, iOS and
+desktop clients, a browser player, casting, downloads for offline, subtitles, multiple
+libraries blended into one, and hardware conversion on three vendors' chips.
+
+It is a real Umbrel app rather than a hand-run container, published for both x86 and
+arm64, so the platform owns it and brings it back after a restart.
+
+`TODO.md` is the honest list of what is still open.
 
 ## Developing
 
