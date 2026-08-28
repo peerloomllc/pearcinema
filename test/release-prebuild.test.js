@@ -94,3 +94,21 @@ test('the script no longer TELLS the operator the native trees are checked in', 
     'scripts/release.sh must not tell the operator android/ and ios/ are checked in - neither is'
   )
 })
+
+test('EVERY SCRIPT THE RELEASE INVOKES IS ACTUALLY IN THE TREE', () => {
+  // `scripts/release.sh` called `scripts/ios-appstore.sh` for the whole of this
+  // project's life and the file was never ported from PearTune. The failure would
+  // have landed AFTER the tree was synced to the Mac, the bundles rebuilt, a full
+  // CocoaPods install run and the operator had confirmed - about the most expensive
+  // place a "No such file or directory" can appear. Found 2026-08-27 by checking the
+  // Mac's prerequisites before the first run, not by running it.
+  //
+  // Deliberately a spelling check rather than a behaviour one: it cannot tell whether
+  // a script works, only that release.sh is not naming one that is not there. That is
+  // the failure that actually happened.
+  const called = new Set(release.match(/scripts\/[a-z0-9-]+\.(?:sh|mjs|js)/g) || [])
+  assert.ok(called.size > 0, 'expected release.sh to invoke at least one script')
+
+  const missing = [...called].filter((rel) => !fs.existsSync(path.join(ROOT, rel)))
+  assert.deepEqual(missing, [], 'scripts/release.sh names files that are not in the tree')
+})
