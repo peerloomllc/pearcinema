@@ -79,58 +79,80 @@ repo: https://github.com/peerloomllc/pearcinema
 support: https://github.com/peerloomllc/pearcinema/issues
 gallery: []
 releaseNotes: |-
-  Bug Fixes
-  - Films and shows in the HEVC format now show a picture on iPhones and iPads. They
-    played the sound with a black screen where the picture should have been, which
-    affected more than half of a typical collection. Nothing about the picture is
-    changed to fix it - it is sent in a wrapper Apple devices can open.
-
-  Earlier improvements
-  - Saving a change to which folder your films are in now answers straight away. It
-    used to sit there while every file was read, which on a big collection is minutes
-    of a page that looks stuck. It still checks the new folder is really there first,
-    so a wrong one is refused and your library keeps playing from the old one.
-
-  Earlier fixes
-  - The Specials fix below now reaches libraries that were already up and running.
-    Without this, only a library that happened to re-read its files from scratch would
-    have seen any change.
-  - A documentary or featurette sitting in a show's folder now appears as "Specials",
-    the way Kodi and Jellyfin file them. Before this it turned up as a second season
-    with no number and no artwork, sitting next to the real one.
-  - Changing which folder your films are in now updates the library straight away, and
-    shows you how far it has got while it reads. Before this it read the new folder
-    correctly and then carried on showing the old one, with nothing to say it had
-    finished.
-
-  First release, just before this one.
-
-  New features
-  - Play your films and shows from a Jellyfin or Emby server, or straight from a
-    folder of files.
-  - Watch in this dashboard, on any computer on your network, with nothing to install.
-  - Files that will not play on your phone are repackaged or converted here as they
-    play, on the machine's graphics chip.
-  - Subtitles, including the picture subtitles from discs.
-  - Download a film to a phone and watch it with everything switched off.
-  - Cast to a Roku or a Samsung TV, and drive it from your phone's lock screen.
-  - Where you stopped follows you between your own devices, and everyone in the house
-    has their own list.
-  - Pair with more than one machine and they look like one library.
-  - Someone you have shared with can ask for a film you do not have.
-
-  Sharing and safety
-  - Pair a device by scanning a code. Revoke it and playback stops within seconds,
-    mid-film.
-  - Guest passes that expire by themselves.
-  - Nothing about your library is uploaded anywhere, and nobody you share with gets a
-    copy of a file.
-
-  Good to know
-  - The phone apps are not in the app stores yet.
-  - Films kept on an external drive work, including drives you plug in later.
-  - Away from home on mobile data, playback is held to a lower quality so it does not
-    eat a data plan.
+  # PearCinema 1.1.0
+  Your film and television collection, playable anywhere, without exposing your server to
+  the internet.
+  PearCinema plays video straight off a computer you own: an Umbrel, a NAS, an old desktop.
+  Your phone reaches it directly over an encrypted connection. No port forwarding, no VPN,
+  no dynamic DNS, no account, and no copy of your files on anyone else's server.
+  And that machine does not have to be yours. If a friend or a family member lets you into
+  theirs, their library simply appears in your app, with no login handed out and nothing
+  copied.
+  Getting started:
+  1. Install the host on the machine with your films (macOS, Windows, Linux, Umbrel or Docker).
+  2. Open the dashboard and point it at your library.
+  3. Scan the QR code with the app on your phone. That is the setup.
+  Watch your library from anywhere. Browse films and shows with posters, descriptions and
+  episode thumbnails, search the whole collection, and skip to any point in a film without
+  downloading it first. When an episode ends the next one is offered.
+  Watch it here too. The dashboard is a player, so any laptop or desktop on your network can
+  open the library and start a film without installing anything.
+  Let people in, and cut them off. Access is per person and per device: your phone, your
+  tablet, a friend. Revoke any one of them without disturbing the others, and it takes
+  effect within seconds, mid-film rather than on next login. It also stops a television that
+  device had started. Guest passes expire on their own after a time you set.
+  Take films with you. Keep a film on the phone for a flight, converted in advance if your
+  device needs it.
+  Pick up where you left off. Resume points and watchlists follow you between your own
+  devices, and everyone you let in has their own rather than sharing yours.
+  Send it to a television. Play on a Roku or a Samsung and drive it from your phone's lock
+  screen.
+  More than one library at once. If you are let into several, they blend into one.
+  Ask for something you cannot find. Anyone you have let in can request a film, and the
+  owner works through the queue in the app.
+  Your films, wherever they already live:
+  Point the host at a Jellyfin or an Emby server you already run and PearCinema uses its
+  library, artwork, seasons and episodes. Point it at a plain folder of files instead and it
+  reads them itself: it works out films from shows, sorts episodes into seasons, and picks
+  up the descriptions and posters that Kodi, Sonarr or Radarr already left on the disk. So a
+  folder is a real library rather than a list of filenames, and it needs no internet lookup
+  and no account with anyone.
+  It makes your files play:
+  Files your phone can already handle go straight through untouched. Anything it cannot, the
+  machine holding the films repackages or converts as you watch, using its own graphics chip
+  (Intel, AMD, NVIDIA or Apple), so it costs that machine very little and never changes your
+  original file. Subtitles come along, including the picture subtitles from discs, which are
+  drawn onto the film where a phone cannot show them by itself.
+  Staying connected:
+  Most of the time your phone talks straight to your host. Some mobile carriers and
+  locked-down wifi refuse a direct connection, and PearCinema then falls back to a relay run
+  by PeerLoom. The relay only passes along traffic that is already encrypted: it can see
+  that your device is talking to your host and how much data moves, never what is in it, and
+  it keeps no copy. While a film is coming through the relay its quality is held down so
+  that watching away from home does not quietly consume a data plan. You can turn the relay
+  off, or paste in your own.
+  Keeping it running:
+  On Linux the host installs as a proper background service: your library keeps serving
+  after you log out and starts again by itself when the machine reboots. On macOS and
+  Windows it runs while you are signed in.
+  Downloads:
+  | Your machine | File |
+  | --- | --- |
+  | macOS (Apple Silicon) | `PearCinema-1.1.0-arm64.dmg` |
+  | macOS (Intel) | `PearCinema-1.1.0.dmg` |
+  | Windows | `PearCinema-Setup-1.1.0.exe` |
+  | Linux | `PearCinema-1.1.0.AppImage` or `pearcinema-desktop_1.1.0_amd64.deb` |
+  | Android | `pearcinema-v1.1.0.apk` |
+  | Umbrel | Add the PeerLoom community app store and install from there |
+  The macOS app is signed and notarized by Apple, so it opens normally.
+  Windows will show a warning. The installer is not signed with a certificate yet, so
+  SmartScreen says "unknown publisher". Choose More info, then Run anyway.
+  Good to know:
+  - PearCinema provides no content. It is a player for files you already have: it hosts nothing, indexes nothing and has no catalogue of its own.
+  - The phone apps are not in the app stores yet. iOS is with App Review; on Android, install the `.apk` above or get it on Zapstore.
+  - On Linux the `.deb` sets up the background service for you. The AppImage can do the same with `--install-service`, and otherwise runs when you log in.
+  - On an Umbrel, plug an external drive in and PearCinema can see it, including a drive connected after the app started.
+  - The host tells you where to find new versions, but does not update itself yet.
 path: ""
 defaultUsername: ""
 # umbrelOS replaces defaultPassword with the derived value when this is set - it is
