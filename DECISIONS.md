@@ -2,6 +2,46 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-28 - THE STORE SCREENSHOTS SHOW REAL FILMS, AND THAT IS THE CHOICE
+Tier: T2 (a published-artwork call with an IP question in it, recorded rather than made
+quietly). Tim's call, put to him with the alternative.
+
+WHAT THEY ARE. `metadata/store/android/` and `metadata/store/ios/` are captures of Tim's
+own 3 TB library, so the library screens are a grid of real cover art - 2001: A Space
+Odyssey, 300, The Amazing Spider-Man, Annihilation, Army of Darkness. They are committed
+to a public MIT repo, they are in the Play listing, four of them went to App Store Connect
+for 1.1.0 on 2026-08-28, and `zapstore.yaml` now points at them too.
+
+WHY IT WAS RAISED AT ALL. The sibling app answered the identical question the other way,
+and said so at length in its own `zapstore.yaml`: PearTune's first Zapstore listing shipped
+with NO pictures because the only screenshots that existed rendered real commercial ALBUM
+art, which "cannot live in a public MIT repo". It was fixed by INVENTING the library -
+`scripts/make-screenshot-fixture.js` draws 40 albums that belong to nobody,
+deterministically, so anyone can regenerate exactly what shipped. A repo that took that
+much trouble over album art has not been careless about poster art by accident.
+
+THE CHOICE, AND ITS REASONING. A media player's screenshots showing media is what the app
+does. Plex, Jellyfin and Infuse all ship listings of exactly this shape, so it is ordinary
+practice for the category rather than an outlier. A grid of grey rectangles, or of four
+public-domain films nobody recognises, shows almost nothing about a product whose whole
+claim is "your collection, playable anywhere".
+
+WHAT IS BEING ACCEPTED. This is a risk weighed rather than a risk absent. Apple can reject
+metadata over third-party content it judges the developer has no rights to, and the repo
+is MIT and public, so the frames are redistributable by anyone who clones it. Both were
+stated before the choice was made.
+
+THE OTHER ROUTE STAYS OPEN and is in TODO.md: a fixture library of invented titles and
+artwork, captured and framed the same way, then re-uploaded to all three stores. It is
+PearTune's answer and it works; it is simply not the one taken here.
+
+RELATED, AND THE REASON THIS FILE GETS AN ENTRY AT ALL: DECISIONS 2026-08-25 kept riff
+mode out of everything a store sees precisely because the MST3K silhouettes carry an open
+IP question. That decision and this one point opposite ways, which is worth a reader
+noticing - the silhouettes are ART WE DREW that imitates somebody's protected characters,
+and these are other people's artwork shown as the contents of a library. Tim drew the line
+between imitating and depicting.
+
 ## 2026-08-27 - HEVC LEAVES FOR AN APPLE DEVICE IN A FRAGMENTED MP4, NEVER IN MPEG-TS
 Tier: T2 (a mechanism change on the segment path, recorded rather than made quietly).
 Found by finally doing the thing TODO.md had been asking for since 2026-08-26: watching

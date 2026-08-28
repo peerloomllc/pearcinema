@@ -70,23 +70,32 @@ tags:
 license: MIT
 website: https://peerloomllc.com/pearcinema/
 
-# NO `images:` BLOCK, AND THAT IS A DECISION RATHER THAN AN OMISSION.
+images:
+  - metadata/store/android/01-library.png
+  - metadata/store/android/02-shows.png
+  - metadata/store/android/04-episodes.png
+  - metadata/store/android/05-player.png
+
+# THESE SHOW REAL FILMS, AND THAT IS TIM'S CALL RATHER THAN AN OVERSIGHT (2026-08-28).
 #
-# PearTune's own zapstore.yaml carries the reasoning for the sibling case: its first
-# listing went up with no pictures because the only screenshots that existed rendered REAL
-# commercial album art out of a real library, which cannot live in a public MIT repo. It
-# was fixed by INVENTING a library - scripts/make-screenshot-fixture.js draws 40 albums
-# belonging to nobody - and pointing this file at the framed output.
+# The library frames are a grid of real cover art - 2001, 300, The Amazing Spider-Man,
+# Annihilation, Army of Darkness - captured from a real 3 TB library. It was put to him
+# with the alternative, and he chose to ship them.
 #
-# PearCinema's committed frames under metadata/store/android/ are the same shape of
-# problem and worse: they are a grid of real film posters (2001, 300, The Amazing
-# Spider-Man, Annihilation, Army of Darkness) captured from Tim's own library. Pointing a
-# public listing at them would be publishing that artwork from this repo.
+# WHY IT IS DEFENSIBLE: a media player's screenshots showing media is what the app does,
+# and Plex, Jellyfin and Infuse all ship listings of exactly this shape. A grid of grey
+# rectangles would show nothing about the product.
 #
-# So the listing ships without pictures rather than with those, which is the lesser of the
-# two faults and the one that is reversible. The fix is PearTune's: a fixture library of
-# invented titles and artwork that belongs to nobody, captured and framed the same way.
-# Logged in TODO.md.
+# WHY THE SIBLING WENT THE OTHER WAY, so nobody reads this as ignorance of it: PearTune's
+# zapstore.yaml explains that its first listing shipped with no pictures because real
+# commercial ALBUM art "cannot live in a public MIT repo", and it was fixed by inventing a
+# library - scripts/make-screenshot-fixture.js draws 40 albums belonging to nobody. That
+# route stays open here and is in TODO.md; it is a different answer to the same question,
+# not a correction to this one.
+#
+# THE SAME FRAMES are in the Play listing and, as of 2026-08-28, in App Store Connect for
+# 1.1.0 - so this file is consistent with what the other two stores already show rather
+# than a fourth opinion.
 
 metadata_sources:
   - github
