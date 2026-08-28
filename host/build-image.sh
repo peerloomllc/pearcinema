@@ -148,8 +148,98 @@ if [ "$PUSH" = "--push" ]; then
   fi
   echo
   echo "pushed $IMAGE:$VERSION"
-  echo "PIN IT BY DIGEST in umbrel/docker-compose.yml - the digest is the rollback plan:"
-  echo "  image: $IMAGE:$VERSION@$DIGEST"
+
+  # ---------------------------------------------------------------------------
+  # PIN THE NEW TAG AND DIGEST INTO EVERY FILE THAT NAMES THE IMAGE.
+  #
+  # This used to PRINT the line and leave a person to paste it, which is how
+  # README.md came to tell newcomers to run 0.1.1 while the Umbrel listing was on
+  # 0.1.5 - four versions of drift in a file whose whole job is to be correct for
+  # somebody who has never seen this project. `scripts/release.sh` already told
+  # the operator this step pins them, which was the donor's behaviour and not
+  # ours; now it is true here too.
+  #
+  # The digest is the rollback plan: a tag can be moved, a digest cannot.
+  if [ -n "${DIGEST:-}" ]; then
+    sed -i -E "s|image: ${IMAGE}:[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]+)?|image: ${IMAGE}:${VERSION}@${DIGEST}|g" umbrel/docker-compose.yml
+  fi
+  # The README's `docker run` one-liner takes the tag alone - a digest there would
+  # be unreadable in a command somebody is meant to copy, and it is a starting
+  # point rather than a pinned deployment.
+  sed -i -E "s|${IMAGE}:[0-9]+\.[0-9]+\.[0-9]+|${IMAGE}:${VERSION}|g" README.md
+
+  # ---------------------------------------------------------------------------
+  # The PeerLoom community app store (STORE_DIR), if a clone is pointed at us.
+  #
+  # SYNCED, NOT BUMPED, which is the donor's hard-won rule and worth keeping: a
+  # builder that surgically edits `version:` and `image:` in the store copy is
+  # fine while the two copies are otherwise identical, and silently wrong the
+  # moment they are not. PearTune's store copy turned out to be an old SNAPSHOT
+  # on 2026-07-31, and a version bump would have published it with a fresh digest
+  # on top. So `umbrel/` is the source of truth and the store copy is overwritten
+  # wholesale - anything stale in the store cannot survive a release.
+  #
+  # AND ONE THING THE DONOR DOES THAT THIS MUST NOT. PearTune rewrites the store
+  # listing's `version:` from app.json, on the rule that one number moves across
+  # the App Store, Play and Umbrel. That is not true here and has not been for a
+  # while: the host shipped to 1.0.5 while the phone app sat at 0.1.0, because
+  # this listing versions the HOST. Copying the donor would set the listing to
+  # the app's number and publish a DOWNGRADE - which is the exact failure its own
+  # header warns about, where umbrelOS offers an "update" that goes backwards.
+  #
+  # So the version comes from umbrel/umbrel-app.yml, where it is already managed,
+  # and this refuses to publish one that goes backwards against what the store is
+  # serving right now.
+  #
+  # Committing and pushing that repo stays MANUAL - it publishes to real users -
+  # and release.sh's step 13c refuses to call the run clean until it is done.
+  # ---------------------------------------------------------------------------
+  if [ -n "${STORE_DIR:-}" ] && [ -d "${STORE_DIR}" ]; then
+    DEST="${STORE_DIR}/peerloom-pearcinema"
+    _ver_of () { grep -m1 -E '^version:' "$1" 2>/dev/null | sed -E 's|^version: *"?([^"]*)"?|\1|'; }
+    # Read BEFORE the copy overwrites it, or there is nothing to compare against.
+    PREV_STORE_VER="$(_ver_of "$DEST/umbrel-app.yml")"
+    NEW_STORE_VER="$(_ver_of umbrel/umbrel-app.yml)"
+
+    # A LOWER number than the store is serving is refused rather than warned about.
+    # umbrelOS reads `version:` alone, so a backwards one is an "update" that
+    # downgrades every installed user - and it is not hypothetical: the store repo
+    # was found carrying exactly that for a sibling app on 2026-08-27.
+    if [ -n "$PREV_STORE_VER" ] && [ -n "$NEW_STORE_VER" ] \
+       && [ "$PREV_STORE_VER" != "$NEW_STORE_VER" ] \
+       && [ "$(printf '%s\n%s\n' "$PREV_STORE_VER" "$NEW_STORE_VER" | sort -V | tail -1)" != "$NEW_STORE_VER" ]; then
+      echo
+      echo "== community store NOT synced: that would be a DOWNGRADE =="
+      echo "   the store serves $PREV_STORE_VER and umbrel/umbrel-app.yml says $NEW_STORE_VER."
+      echo "   umbrelOS reads version: alone, so publishing this offers every installed"
+      echo "   user an update that goes backwards. Fix umbrel/umbrel-app.yml first."
+    else
+      mkdir -p "$DEST"
+      cp umbrel/umbrel-app.yml umbrel/docker-compose.yml umbrel/icon.svg "$DEST/"
+      # A HOST-ONLY FIX SHIPS TO NOBODY, said out loud rather than discovered by a
+      # user who never got an update: umbrelOS keys "update available" off
+      # `version:`, so a new image under an unchanged listing version reaches no
+      # existing install. The host has had many image versions to the app's few.
+      if [ -n "$PREV_STORE_VER" ] && [ "$PREV_STORE_VER" = "$NEW_STORE_VER" ]; then
+        echo
+        echo "   !! WARNING: the listing version is still $NEW_STORE_VER while the image moved to $VERSION."
+        echo "      umbrelOS compares version: only, so INSTALLED USERS WILL NOT BE OFFERED THIS."
+        echo "      Bump version: in umbrel/umbrel-app.yml before publishing."
+      fi
+      echo
+      echo "== community store synced from umbrel/ =="
+      echo "   $DEST  (listing $NEW_STORE_VER, image pinned to ${VERSION}@${DIGEST})"
+      git -C "$STORE_DIR" status --porcelain -- '*pearcinema*' | sed 's/^/   /'
+      echo "   commit + push that repo to publish - release.sh step 13c checks it"
+    fi
+  else
+    echo
+    echo "== community store NOT synced (set STORE_DIR to a local clone to auto-sync) =="
+  fi
+
+  echo
+  echo "== pinned to $VERSION =="
+  grep -n "${IMAGE}:" umbrel/docker-compose.yml README.md
 else
   FORMAT=""
   [ "$ENGINE" = "podman" ] && FORMAT="--format docker"
