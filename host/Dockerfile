@@ -76,6 +76,31 @@ RUN apt-get update \
     fi \
  && rm -rf /var/lib/apt/lists/*
 
+# WHAT THIS IMAGE IS, in the labels the registry reads.
+#
+# `org.opencontainers.image.source` is the one that does work rather than decorate:
+# GitHub links a container package to a repository from it, and without it the package
+# floats unattached. That is why
+# github.com/peerloomllc/pearcinema/pkgs/container/pearcinema-host returned 404 while the
+# image itself was public and pullable the whole time - the package existed, it just
+# belonged to nothing. PearTune's had the same gap.
+#
+# Linking also gives the package page this repo's README instead of a bare listing, puts
+# it in the repo sidebar, and lets it inherit the repo's visibility rather than carrying
+# its own.
+#
+# A LABEL ONLY REACHES THE REGISTRY ON THE NEXT PUSH, so this fixes nothing until the
+# image after 0.1.5 ships. The README links to the org-scoped package URL, which works
+# either way.
+#
+# No version label: the tag and the digest already carry that, and a hardcoded one here
+# would be a second place to forget.
+LABEL org.opencontainers.image.source="https://github.com/peerloomllc/pearcinema" \
+      org.opencontainers.image.url="https://peerloomllc.com/pearcinema/" \
+      org.opencontainers.image.title="PearCinema host" \
+      org.opencontainers.image.description="Serves a self-hosted film and TV library to the PearCinema apps over a direct encrypted peer-to-peer connection." \
+      org.opencontainers.image.licenses="MIT"
+
 WORKDIR /app
 
 # The shared host package first, and INSTALLED IN PLACE, so the `file:` dependency
