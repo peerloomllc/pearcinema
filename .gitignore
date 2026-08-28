@@ -65,6 +65,14 @@ scripts/.env
 # would silently drop it from every commit.
 /android/
 
+# The generated Xcode project, for the same reason and by the same rule. It was
+# NEITHER committed nor ignored until 2026-08-27, which is a state that only looks
+# fine while nobody generates it: `scripts/release.sh` prebuilds ios/ on the way to
+# an App Store build, so the first release would have left several hundred untracked
+# files behind and no way to tell them from work in progress.
+# Anchored to the root, like android/, so a local module's own ios/ stays SOURCE.
+/ios/
+
 # A local module's android/ is SOURCE, but its android/build is gradle's output -
 # a few hundred .dex files that turn up in `git status` after every APK build and
 # have no business in a commit.

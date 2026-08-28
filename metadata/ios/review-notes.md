@@ -31,7 +31,8 @@ The app ships with four short public-domain films so it works with nothing set u
 reach them:
 
 1. Open the app. On the first screen, tap "Get started".
-2. Type any name in "Your name", then tap "Continue".
+2. Type any name in "Your name". Dismiss the keyboard, which is covering the button,
+   then tap "Continue".
 3. The next screen asks whose library it is. Tap "I don't have one yet".
 4. The library appears. Tap any film, then tap "Watch".
 

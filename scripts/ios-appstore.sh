@@ -1,0 +1,301 @@
+#!/usr/bin/env bash
+# iOS App Store archive + upload. Runs ON the Mac mini, not over here.
+#
+# scripts/release.sh step 11 rsyncs the tree to the Mac, rebuilds the bundles
+# there, runs pod install, then ssh's in and calls this. It is also runnable by
+# hand on the Mac:
+#
+#   cd ~/pearcinema-ios && ./scripts/ios-appstore.sh
+#
+# Required env vars (or set in scripts/.env) - one of these auth methods:
+#
+#   Preferred (API key via asc CLI):
+#     ASC_KEY_ID           - App Store Connect API key ID
+#     ASC_ISSUER_ID        - App Store Connect API issuer ID
+#     ASC_APP_ID           - Numeric App Store app ID (from `asc apps list`)
+#     ASC_PRIVATE_KEY_PATH - Path to .p8 key (default: ~/.appstoreconnect/AuthKey_<KEY_ID>.p8)
+#
+#   Legacy (app-specific password via altool):
+#     ASC_APPLE_ID         - Apple ID email
+#     ASC_APP_PASSWORD     - App-specific password (appleid.apple.com -> App-Specific Passwords)
+#
+# Optional env vars:
+#   ASC_TEAM_ID        - Team ID (default: G79ALD29NA)
+#   ARCHIVE_PATH       - Path to an existing .xcarchive to skip the rebuild
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Load app config and env
+if [ -f "$SCRIPT_DIR/app.conf" ]; then
+  set -a; source "$SCRIPT_DIR/app.conf"; set +a
+fi
+if [ -f "$SCRIPT_DIR/.env" ]; then
+  set -a; source "$SCRIPT_DIR/.env"; set +a
+fi
+
+: "${APP_NAME:?APP_NAME is not set - check scripts/app.conf}"
+: "${BUNDLE_ID:?BUNDLE_ID is not set - check scripts/app.conf}"
+
+# HOMEBREW ON THE PATH, AND THIS IS THE BUG THAT HID THE WHOLE ASC ROUTE. `asc` is installed
+# on the Mac (1.1.1, via brew) but brew's bin is not on a NON-INTERACTIVE ssh PATH, so the
+# `command -v asc` test below quietly answered no and the script fell through to altool - which
+# then failed for want of an app-specific password nobody had set. Found 2026-07-31 while
+# wiring the first upload; the fix is one line and the diagnosis was the expensive part.
+#
+# It composes with XCODE_PATH further down, which STRIPS this same directory back out: Xcode's
+# packaging step shells out to rsync, and Homebrew's GNU rsync breaks it. Both are needed.
+export PATH="/opt/homebrew/bin:$PATH"
+
+# NEITHER ios/ NOR THE WORKSPACE IS COMMITTED HERE, which differs from the donor.
+# PearTune commits its ios/ tree; PearCinema generates it with `expo prebuild` and
+# CocoaPods writes the .xcworkspace on top, so both only exist once release.sh's
+# step 2 has prebuilt and `pod install` has run on THIS machine. If the rsync
+# brought no project, or pod install has not run, there is nothing to archive, and
+# saying so beats a wall of xcodebuild output.
+if [ ! -f "$REPO_ROOT/${XCODE_WORKSPACE}" ] && [ ! -d "$REPO_ROOT/${XCODE_WORKSPACE}" ]; then
+  echo "Error: $REPO_ROOT/${XCODE_WORKSPACE} not found." >&2
+  echo "  ios/ is generated here, not committed: release.sh step 2 prebuilds it and" >&2
+  echo "  \`pod install\` writes ${XCODE_WORKSPACE} on this machine. Check the prebuild ran" >&2
+  echo "  and the rsync brought ios/ over, then run pod install in ios/." >&2
+  exit 1
+fi
+
+# ── Determine upload method ─────────────────────────────────────────────────
+# Prefer asc CLI (API key auth), fall back to altool (app-specific password)
+USE_ASC=false
+if command -v asc &>/dev/null \
+   && [ -n "${ASC_KEY_ID:-}" ] \
+   && [ -n "${ASC_ISSUER_ID:-}" ] \
+   && [ -n "${ASC_APP_ID:-}" ]; then
+  USE_ASC=true
+  echo "Upload method: asc CLI (API key auth)"
+elif [ -n "${ASC_APPLE_ID:-}" ] && [ -n "${ASC_APP_PASSWORD:-}" ]; then
+  echo "Upload method: altool (app-specific password, legacy)"
+else
+  # NOT an exit. Preflight below reports every missing thing in ONE run - being told about the
+  # credentials, fixing them, and only then being told the provisioning profile is missing too
+  # is two round trips for no reason.
+  NO_CREDS=1
+fi
+
+# ── Preflight ───────────────────────────────────────────────────────────────
+#
+# EVERYTHING HERE IS CHECKED BEFORE THE ARCHIVE, and that is the entire point. An archive is
+# ~10 minutes of arm64 compilation; the export that follows it is where a missing provisioning
+# profile surfaces, and the upload after that is where a missing credential surfaces. Finding
+# out at either of those is finding out at the most expensive possible moment. The keychain
+# comment further down was written after exactly that afternoon.
+preflight_fail=0
+say_missing () { echo "  ✗ $1" >&2; preflight_fail=1; }
+
+echo "==> Preflight"
+
+# The provisioning profile, BY NAME, because ExportOptions.plist names it explicitly and manual
+# signing will not go and find one for you. Profiles live in two places depending on the Xcode
+# version that installed them, so look in both and match on the decoded Name.
+profile_installed () {
+  local want="$1" d f
+  for d in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+           "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*.mobileprovision; do
+      [ -e "$f" ] || continue
+      if [ "$(security cms -D -i "$f" 2>/dev/null | plutil -extract Name raw - 2>/dev/null)" = "$want" ]; then
+        return 0
+      fi
+    done
+  done
+  return 1
+}
+if [ -n "${IOS_PROVISIONING_PROFILE:-}" ] && profile_installed "$IOS_PROVISIONING_PROFILE"; then
+  echo "  ✓ profile: $IOS_PROVISIONING_PROFILE"
+else
+  say_missing "no installed provisioning profile named \"${IOS_PROVISIONING_PROFILE:-<unset>}\""
+  echo "     Create an App Store distribution profile for $BUNDLE_ID at" >&2
+  echo "     developer.apple.com -> Profiles -> +, name it exactly that, download it and" >&2
+  echo "     double-click it on this Mac. Or archive from Xcode once and let automatic" >&2
+  echo "     signing make one." >&2
+fi
+
+# A signing identity to sign WITH. Distribution, not Development - the export names it.
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "Apple Distribution"; then
+  echo "  ✓ signing identity: Apple Distribution"
+else
+  say_missing "no Apple Distribution certificate in the keychain"
+fi
+
+# Credentials for the upload, checked HERE rather than after the IPA exists.
+if $USE_ASC; then
+  ASC_KEY_FILE="${ASC_PRIVATE_KEY_PATH:-$HOME/.appstoreconnect/AuthKey_${ASC_KEY_ID}.p8}"
+  if [ -f "$ASC_KEY_FILE" ]; then
+    echo "  ✓ api key: $ASC_KEY_FILE"
+  else
+    say_missing "no .p8 at $ASC_KEY_FILE (set ASC_PRIVATE_KEY_PATH)"
+  fi
+  echo "  ✓ app id: $ASC_APP_ID"
+elif [ -n "${NO_CREDS:-}" ]; then
+  say_missing "no upload credentials"
+  echo "     Preferred: ASC_KEY_ID, ASC_ISSUER_ID and ASC_APP_ID in scripts/.env (asc 1.1.1 is" >&2
+  echo "     installed on this Mac, and AuthKey_28U2P9D99H.p8 is already in ~/.appstoreconnect)." >&2
+  echo "     The only one you have to go and fetch is the Issuer ID: App Store Connect ->" >&2
+  echo "     Users and Access -> Integrations -> App Store Connect API. ASC_APP_ID is the" >&2
+  echo "     numeric id in the App Information page URL." >&2
+  echo "     Legacy: ASC_APPLE_ID and ASC_APP_PASSWORD. See scripts/.env.example." >&2
+else
+  echo "  ✓ credentials: altool as ${ASC_APPLE_ID}"
+  echo "    NOTE altool is the legacy path. asc is installed on this Mac and is preferred -" >&2
+  echo "    set ASC_KEY_ID, ASC_ISSUER_ID and ASC_APP_ID in scripts/.env to use it." >&2
+fi
+
+# The Bare bundle has a HOST-SPECIFIC addon suffix baked in (.so on Linux, .dylib on macOS), so
+# a tree rsynced from the Linux box carries a bundle that crash-lands at launch on require.addon.
+# release.sh runs the rebuild before calling this; a by-hand run has to be told.
+#
+# CHECK THE BUNDLE THAT EXISTS. The first version of this checked assets/bare-ios.bundle, which
+# this project has not produced since it moved to a single universal bundle - and bash's `-ot`
+# is true when the first file is ABSENT, so the warning fired on every run and meant nothing.
+# A check that cannot pass is not a check.
+BARE_BUNDLE="$REPO_ROOT/assets/bare-universal.bundle"
+if [ ! -f "$BARE_BUNDLE" ]; then
+  say_missing "no assets/bare-universal.bundle - run: npm run build:ui && npm run build:bare"
+elif [ "$BARE_BUNDLE" -ot "$REPO_ROOT/src/bare.js" ]; then
+  echo "  ! bare-universal.bundle is older than src/bare.js - run: npm run build:ui && npm run build:bare" >&2
+else
+  echo "  ✓ bare bundle newer than src/bare.js"
+fi
+
+if [ "$preflight_fail" != "0" ]; then
+  echo "" >&2
+  echo "Preflight failed. Nothing was built - fix the above and run again." >&2
+  exit 1
+fi
+echo ""
+
+TEAM_ID="${ASC_TEAM_ID:-G79ALD29NA}"
+ARCHIVE_PATH="${ARCHIVE_PATH:-/tmp/${APP_NAME}.xcarchive}"
+EXPORT_PATH="/tmp/${APP_NAME}-appstore"
+EXPORT_OPTIONS="/tmp/${APP_NAME}-ExportOptions.plist"
+
+# ── Write ExportOptions.plist ───────────────────────────────────────────────
+cat > "$EXPORT_OPTIONS" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>app-store-connect</string>
+  <key>teamID</key>
+  <string>${TEAM_ID}</string>
+  <key>provisioningProfiles</key>
+  <dict>
+    <key>${BUNDLE_ID}</key>
+    <string>${IOS_PROVISIONING_PROFILE}</string>
+  </dict>
+  <key>signingCertificate</key>
+  <string>Apple Distribution</string>
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>uploadSymbols</key>
+  <false/>
+</dict>
+</plist>
+EOF
+
+# ── Unlock the signing keychain and grant codesign access ───────────────────
+# THE ONE THAT COSTS AN AFTERNOON. codesign over ssh dies with
+# errSecInternalComponent at the embed-frameworks phase - AFTER all of arm64 has
+# compiled, ~10 minutes in - unless the keychain holding the private key is
+# unlocked AND that key's ACL grants codesign non-interactive use.
+#
+# It is NOT the login keychain. This Mac has a dedicated buildkey.keychain that
+# comes FIRST in the search list, and that is the one codesign resolves the
+# identity from; unlocking login.keychain-db changes nothing and fails
+# identically every time. The tell is that `security find-identity -v` lists
+# every identity TWICE, once per keychain. (Same trap, same fix, as
+# scripts/ios-device-build.sh - read its comment before touching this.)
+#
+# Empty password by convention, shared with the sibling apps. Nothing here
+# should ever ask for one.
+#   unlock-keychain         allows access in this session
+#   list-keychains -s       makes it visible to child processes
+#   set-key-partition-list  grants apple-tool/codesign access to private keys
+security unlock-keychain -p "" ~/Library/Keychains/buildkey.keychain
+security list-keychains -s \
+  ~/Library/Keychains/buildkey.keychain \
+  ~/Library/Keychains/login.keychain-db \
+  /Library/Keychains/System.keychain
+security set-key-partition-list \
+  -S apple-tool:,apple:,codesign: \
+  -s -k "" \
+  ~/Library/Keychains/buildkey.keychain
+
+# ── Xcode PATH ─────────────────────────────────────────────────────────────
+# Xcode's distribution pipeline invokes rsync internally. If Homebrew's GNU
+# rsync (3.4.x) is on PATH it conflicts with Apple's built-in openrsync and
+# causes "Copy failed" during IPA packaging. Strip /opt/homebrew/bin from PATH
+# for the xcodebuild invocations so the system rsync is found instead.
+XCODE_PATH=$(printf '%s' "$PATH" | sed 's|/opt/homebrew/bin:||g; s|:/opt/homebrew/bin||g')
+
+# ── Archive ─────────────────────────────────────────────────────────────────
+rm -rf "$ARCHIVE_PATH"
+echo "Archiving..."
+PATH="$XCODE_PATH" xcodebuild \
+  -workspace "$REPO_ROOT/${XCODE_WORKSPACE}" \
+  -scheme "$XCODE_SCHEME" \
+  -configuration Release \
+  -destination "generic/platform=iOS" \
+  -archivePath "$ARCHIVE_PATH" \
+  DEVELOPMENT_TEAM="$TEAM_ID" \
+  OTHER_CODE_SIGN_FLAGS="--keychain ~/Library/Keychains/buildkey.keychain" \
+  archive | grep -E "^(error:|warning:|note:|.*ARCHIVE)" || true
+
+if [ ! -d "$ARCHIVE_PATH" ]; then
+  echo "Error: archive failed - no .xcarchive at $ARCHIVE_PATH" >&2
+  exit 1
+fi
+echo "Archive complete: $ARCHIVE_PATH"
+
+# ── Export ──────────────────────────────────────────────────────────────────
+echo "Exporting..."
+rm -rf "$EXPORT_PATH"
+PATH="$XCODE_PATH" xcodebuild \
+  -exportArchive \
+  -archivePath "$ARCHIVE_PATH" \
+  -exportPath "$EXPORT_PATH" \
+  -exportOptionsPlist "$EXPORT_OPTIONS" \
+  2>&1 | grep -v "^2[0-9][0-9][0-9]-" || true  # suppress timestamp lines
+
+IPA_PATH=$(find "$EXPORT_PATH" -name "*.ipa" | head -1)
+if [ -z "$IPA_PATH" ]; then
+  echo "Error: export failed - no .ipa found in $EXPORT_PATH" >&2
+  exit 1
+fi
+echo "Export complete: $IPA_PATH"
+
+# ── Upload ──────────────────────────────────────────────────────────────────
+echo "Uploading to App Store Connect..."
+if $USE_ASC; then
+  ASC_KEY_FILE="${ASC_PRIVATE_KEY_PATH:-$HOME/.appstoreconnect/AuthKey_${ASC_KEY_ID}.p8}"
+  asc auth login \
+    --bypass-keychain \
+    --name "${APP_NAME}-CI" \
+    --key-id "$ASC_KEY_ID" \
+    --issuer-id "$ASC_ISSUER_ID" \
+    --private-key "$ASC_KEY_FILE"
+
+  asc builds upload --app "$ASC_APP_ID" --ipa "$IPA_PATH"
+else
+  xcrun altool \
+    --upload-app \
+    --type ios \
+    --file "$IPA_PATH" \
+    --username "$ASC_APPLE_ID" \
+    --password "$ASC_APP_PASSWORD" \
+    --show-progress
+fi
+
+echo ""
+echo "Upload complete. Build is processing on App Store Connect."
