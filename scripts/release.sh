@@ -1309,6 +1309,41 @@ export APP_VERSION APP_VERSION_CODE
 # exactly one file - project.pbxproj alone was tracked - and a comment that is
 # 6/7 true is how the 2026-08-17 upload bug survived: ios/ was reasoned about as
 # disposable output, so nobody asked which file the IPA actually reads.
+# THE SAME SYNC FOR ANDROID, and its absence published an APK stamped 0.1.0 inside a
+# file called pearcinema-v1.1.0.apk (2026-08-28).
+#
+# android/ is GENERATED here, and step 2 only prebuilds it when it is ABSENT. On any
+# machine that has one - which is every machine that has ever run a build - the tree is
+# reused, so build.gradle keeps the versionCode and versionName it was generated with and
+# the bump above never reaches it. Exporting APP_VERSION does nothing: this repo has no
+# `with-android-version-from-env` plugin, which is PearTune's answer to the same problem
+# and exists there because PearTune COMMITS android/. release.sh's own comment further
+# down claimed we had one. We did not.
+#
+# THE COST, and only one of the three destinations caught it. Play rejects a duplicate
+# versionCode outright, so the second release would have failed rather than the first.
+# Zapstore refused to publish and named the mismatch, which is the only reason this was
+# found at all. GitHub took the APK without a word, because a release asset is just a
+# file with a name somebody chose.
+#
+# Done as a sed rather than by prebuilding every release: deterministic, fast, and the
+# same shape as the iOS sync directly below, which has worked since 2026-08-18.
+if [ -f android/app/build.gradle ]; then
+  sed -i \
+    "s/^\( *\)versionCode [0-9][0-9]*/\1versionCode ${APP_VERSION_CODE}/; \
+     s/^\( *\)versionName \"[0-9][0-9.]*\"/\1versionName \"${APP_VERSION}\"/" \
+    android/app/build.gradle
+  _gradle_vn=$(grep -m1 -oE 'versionName "[0-9.]+"' android/app/build.gradle | grep -oE '[0-9.]+')
+  _gradle_vc=$(grep -m1 -oE 'versionCode [0-9]+' android/app/build.gradle | grep -oE '[0-9]+')
+  if [ "$_gradle_vn" != "$APP_VERSION" ] || [ "$_gradle_vc" != "$APP_VERSION_CODE" ]; then
+    echo "ERROR: android/app/build.gradle still reads $_gradle_vn ($_gradle_vc) after the sync," >&2
+    echo "       not $APP_VERSION ($APP_VERSION_CODE). The APK would ship the wrong version" >&2
+    echo "       inside a correctly named file, which is what happened to v1.1.0." >&2
+    exit 1
+  fi
+  echo "    Synced android/app/build.gradle to $APP_VERSION ($APP_VERSION_CODE)"
+fi
+
 if [ -f "$XCODE_PROJECT" ]; then
   _ios_build_number=$(node -p "require('./app.json').expo.ios.buildNumber")
   sed -i \
