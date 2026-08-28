@@ -202,7 +202,13 @@ test('build a real film for the remux route to repackage', async () => {
         '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast',
         '-c:a', 'ac3', '-ac', '2', '-shortest', FIXTURE_MKV, '-y'
-      ], (e) => e ? reject(e) : resolve())
+      // BOUNDED, for the reason test/subtitles.test.js spells out at length: this same
+      // shape of command - lavfi sources, `-shortest` - deadlocked during the v1.1.0
+      // release and again in a run the day before, and an unbounded execFile turns that
+      // into a verify gate that never returns. The catch below already treats a failure
+      // as "no ffmpeg here" and skips; without a timeout a HANG is not a failure, so it
+      // never reaches the catch at all.
+      ], { timeout: 60_000, killSignal: 'SIGKILL' }, (e) => e ? reject(e) : resolve())
     })
     ffmpegOk = true
   } catch {
