@@ -1,0 +1,101 @@
+repository: https://github.com/peerloomllc/pearcinema
+
+name: PearCinema
+summary: Your film and television collection, playable anywhere, without exposing your server to the internet
+description: |
+  PearCinema plays the film and television collection on a machine you own - an
+  Umbrel, a NAS, an old desktop - from anywhere, over a direct encrypted
+  connection between your phone and that machine.
+
+  No port forwarding, no VPN, no dynamic DNS, no account, and no copy of your
+  library in anyone's cloud. Your files never leave your hardware: they stream
+  through the live connection while they play, and you can skip to any point in
+  a film without downloading it first.
+
+  It reads the library you already have. Point it at the Jellyfin or Emby you
+  already run and it uses that library, its artwork, its seasons and its
+  episodes. Or point it at a plain folder of files and PearCinema reads them
+  itself: it works out films from shows, sorts episodes into seasons, and picks
+  up the descriptions and posters that Kodi, Sonarr or Radarr already left on
+  the disk. So a folder is a real library rather than a list of filenames, and
+  it needs no internet lookup and no account with anyone.
+
+  It makes your files play. Anything your phone can already handle goes straight
+  through untouched. Anything it cannot, the machine holding the films
+  repackages or converts as you watch, using its own graphics chip - Intel, AMD,
+  NVIDIA or Apple - so it costs that machine very little and never changes your
+  original file. Subtitles come along, including the picture subtitles from
+  discs, which are drawn onto the film where a phone cannot show them by itself.
+
+  Features:
+  - Browse films and shows with posters, descriptions and episode thumbnails
+  - Search the whole library
+  - Carry on where you stopped, and when an episode ends the next one is offered
+  - Resume points and watchlists that follow you between your own devices
+  - Everyone in the house has their own list rather than sharing yours
+  - Downloads: keep a film on the phone for a flight, converted in advance if
+    your device needs it
+  - Send a film to a Roku or a Samsung television and drive it from your lock
+    screen
+  - Pair with more than one machine and they look like one library
+  - Ask the owner for something you cannot find, and see what they did with it
+  - Pair a phone by scanning a QR code - there is no password to type
+
+  The library does not have to be yours. Someone can let a friend or a family
+  member in, each as their own person with their own devices, their own place in
+  whatever they were watching, and no login to pass around. The owner sees every
+  device and can revoke one, or everything one person holds, within seconds -
+  mid-film, not "on next login", and it stops a television that device had
+  started. Nobody who is let in ever receives a copy of a file.
+
+  Two things worth stating plainly. First, PearCinema needs that machine running
+  the free PearCinema host - it is the source of the films, so this is not a
+  player for files on your phone, and it comes with nothing to watch. Second,
+  some mobile networks and locked-down wifi stop a phone and a host connecting
+  directly. When that happens PearCinema can fall back to a relay PeerLoom runs,
+  which forwards encrypted data it cannot read and keeps no copy of it. Your
+  phone always tries a direct connection first, and while a film is coming
+  through the relay its quality is held down so that watching away from home
+  does not quietly consume a data plan. One switch in Settings turns the relay
+  off, and you can paste in your own instead.
+
+tags:
+  - video
+  - movies
+  - selfhosted
+  - privacy
+  - p2p
+  - nostr
+
+license: MIT
+website: https://peerloomllc.com/pearcinema/
+
+images:
+  - metadata/store/android/01-library.png
+  - metadata/store/android/02-shows.png
+  - metadata/store/android/04-episodes.png
+  - metadata/store/android/05-player.png
+
+# THESE SHOW REAL FILMS, AND THAT IS TIM'S CALL RATHER THAN AN OVERSIGHT (2026-08-28).
+#
+# The library frames are a grid of real cover art - 2001, 300, The Amazing Spider-Man,
+# Annihilation, Army of Darkness - captured from a real 3 TB library. It was put to him
+# with the alternative, and he chose to ship them.
+#
+# WHY IT IS DEFENSIBLE: a media player's screenshots showing media is what the app does,
+# and Plex, Jellyfin and Infuse all ship listings of exactly this shape. A grid of grey
+# rectangles would show nothing about the product.
+#
+# WHY THE SIBLING WENT THE OTHER WAY, so nobody reads this as ignorance of it: PearTune's
+# zapstore.yaml explains that its first listing shipped with no pictures because real
+# commercial ALBUM art "cannot live in a public MIT repo", and it was fixed by inventing a
+# library - scripts/make-screenshot-fixture.js draws 40 albums belonging to nobody. That
+# route stays open here and is in TODO.md; it is a different answer to the same question,
+# not a correction to this one.
+#
+# THE SAME FRAMES are in the Play listing and, as of 2026-08-28, in App Store Connect for
+# 1.1.0 - so this file is consistent with what the other two stores already show rather
+# than a fourth opinion.
+
+metadata_sources:
+  - github
