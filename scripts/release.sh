@@ -1367,6 +1367,23 @@ _confirm "app.json version looks correct — proceed with bundle builds?"
 # Run unpiped, deliberately. `npm run verify | tail` reports TAIL's exit status,
 # not npm's, so a red suite reads as green and set -e never fires.
 # ---------------------------------------------------------------------------
+# THE VERSION BUMP INVALIDATES THE BUILT PHONE PAGE, so rebuild before the gate
+# reads it. `npm run verify` deliberately runs the TESTS FIRST and the builds after,
+# because test/phone-renders.test.js reads the BUILT page and exists to catch a UI
+# change nobody rebuilt. Step 0 just rewrote app.json's version, which is an input to
+# that page - so on a release the tests would read a page still carrying the previous
+# number and fail, every time, on the one thing the release itself just changed.
+#
+# Found on the first real run, 2026-08-27: v1.1.0 aborted here with "the built phone UI
+# does not carry app.json's version (1.1.0)". PearTune has no such test, which is why
+# its releases never met this.
+#
+# NOT fixed by making verify build first - that would make the check vacuous for the
+# developers it is actually for. The release rebuilds because the release changed the
+# input, which is what any person editing app.json would do.
+echo "==> Rebuilding the phone UI for $APP_VERSION before the gate reads it..."
+npm run build:ui
+
 echo "==> Running the canonical verify gate (tests + every shipped bundle)..."
 npm run verify
 
