@@ -63,6 +63,10 @@ trap 'echo; echo "Interrupted (SIGINT) - aborting release."; exit 130' INT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# The suite directory holding pearcinema, peerloom-client and peerloom-host side by side.
+# The app depends on the latter two as `file:../` paths, so anywhere the tree is copied
+# has to keep that shape - see the App Store sync in step 11.
+SUITE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 # Pin JDK 21 for the Android build. RN 0.81's Gradle plugin doesn't support
 # JDK 25 (system default on Fedora 44), and Fedora's repos don't ship 21.
@@ -2965,19 +2969,56 @@ else
   # UNLIKE the sibling apps this is an rsync TARGET, not a git clone. Nothing
   # here may `git pull` on the Mac: the tree over there only ever contains what
   # the rsync below puts in it. See scripts/app.conf and scripts/ios-device-build.sh.
-  MAC_MINI_REPO_PATH="${MAC_MINI_REPO_PATH:-pearcinema-ios}"
+  MAC_MINI_REPO_PATH="${MAC_MINI_REPO_PATH:-pearcinema-release/pearcinema}"
 
-  # ── Step 1: Sync repo to Mac Mini ──
-  # NO --delete: ios/Pods, node_modules and the running host's data live there
-  # too, and blowing them away turns every release into a full CocoaPods install.
-  echo "    Syncing repo to $MAC_MINI:$MAC_MINI_REPO_PATH ..."
-  rsync -az --rsync-path=/opt/homebrew/bin/rsync \
-    --exclude='.git' --exclude='node_modules' --exclude='android' \
-    --exclude='ios/build' --exclude='ios/Pods' \
-    --exclude='desktop/dist' --exclude='desktop/node_modules' \
-    --exclude='host/node_modules' \
-    "$REPO_ROOT/" "${MAC_MINI}:${MAC_MINI_REPO_PATH}/"
+  # Node is a Homebrew install and a non-interactive ssh shell does not get it on PATH;
+  # the UTF-8 locale is what stops CocoaPods dying with "Unicode Normalization not
+  # appropriate for ASCII-8BIT". Defined here rather than further down because the
+  # install below the sync needs it too.
+  _REMOTE_ENV='export PATH=/opt/homebrew/bin:$PATH LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8;'
+
+  # ── Step 1: Sync the app AND ITS TWO SIBLING PACKAGES to the Mac Mini ──
+  #
+  # THREE DIRECTORIES, SIDE BY SIDE, because package.json depends on
+  # `@peerloom/client` and `@peerloom/host` as `file:../` paths. A tree synced on its
+  # own has nothing for those to resolve to, and `npm install` there fails outright -
+  # which is how the v1.1.0 App Store step died on a fresh Mac tree with
+  # "Cannot find package 'esbuild'": no install had ever succeeded, so node_modules
+  # did not exist at all. scripts/ios-device-build.sh has always synced all three and
+  # says why; the release step was written as if one were enough.
+  #
+  # $MAC_MINI_REPO_PATH therefore names a path INSIDE a suite-shaped parent
+  # (pearcinema-release/pearcinema), so every later step that cd's into it still works
+  # unchanged, and the siblings land beside it where npm can see them.
+  #
+  # NO --delete: ios/Pods and node_modules live there too, and blowing them away turns
+  # every release into a full CocoaPods and npm install.
+  _mac_suite="$(dirname "$MAC_MINI_REPO_PATH")"
+  # rsync will create the LAST directory of a destination but not a missing parent, and
+  # this destination is two deep. Caught by running it: three "mkdir failed: No such file
+  # or directory" errors on a Mac that had never held this tree.
+  ssh "$MAC_MINI" "mkdir -p ${_mac_suite}"
+  echo "    Syncing the app and its two sibling packages to $MAC_MINI:$_mac_suite/ ..."
+  for _dir in pearcinema peerloom-client peerloom-host; do
+    [ -d "$SUITE_ROOT/$_dir" ] || { echo "ERROR: missing $SUITE_ROOT/$_dir - the Mac needs all three side by side." >&2; exit 1; }
+    rsync -az --rsync-path=/opt/homebrew/bin/rsync \
+      --exclude='.git' --exclude='node_modules' --exclude='android' \
+      --exclude='ios/build' --exclude='ios/Pods' \
+      --exclude='desktop/dist' --exclude='desktop/node_modules' \
+      --exclude='host/node_modules' \
+      "$SUITE_ROOT/$_dir/" "${MAC_MINI}:${_mac_suite}/${_dir}/"
+  done
   echo "    Sync complete."
+  echo ""
+
+  # ── Step 1a: npm install ON the Mac ──
+  #
+  # The rsync deliberately excludes node_modules - they carry native binaries built for
+  # THIS machine's architecture - so the Mac has to resolve its own. Skipped by nothing:
+  # npm is fast when the tree is already up to date, and the failure it prevents is a
+  # build that dies several minutes in on a missing package.
+  echo "    Installing dependencies on $MAC_MINI (slow the first time)..."
+  ssh "$MAC_MINI" "$_REMOTE_ENV cd ${MAC_MINI_REPO_PATH} && npm install --no-audit --no-fund --loglevel=error"
   echo ""
 
   # ── Step 1b: rebuild the bundles ON the Mac ──
@@ -2989,7 +3030,7 @@ else
   # Node is a Homebrew install and a non-interactive ssh shell does not get it
   # on PATH; the UTF-8 locale is what stops CocoaPods dying with "Unicode
   # Normalization not appropriate for ASCII-8BIT".
-  _REMOTE_ENV='export PATH=/opt/homebrew/bin:$PATH LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8;'
+  : "${_REMOTE_ENV:?_REMOTE_ENV must be set before the sync}"
   echo "    Rebuilding the UI + macOS-flavoured Bare bundle on $MAC_MINI..."
   ssh "$MAC_MINI" "$_REMOTE_ENV cd ${MAC_MINI_REPO_PATH} && npm run build:ui && npm run build:bare"
   echo ""
