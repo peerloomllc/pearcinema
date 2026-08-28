@@ -2419,7 +2419,16 @@ print(m.get(os.environ['ASSET_NAME'], ''))" 2>/dev/null || echo "")
       --data-binary "@${_a}" \
       -o "${_UPLOAD_DIR}/${_slot}.body" \
       -w '%{http_code} %{speed_upload}' 2>/dev/null) || _res="000 0"
-    printf '%s %s' "$_res" "$_n" > "${_UPLOAD_DIR}/${_slot}.meta"
+    # THE TRAILING NEWLINE IS LOAD-BEARING, and its absence killed the v1.1.0 release
+    # after every asset had already uploaded. `read` returns 1 when it reaches EOF
+    # without one - it still assigns the fields, but the status is a failure - and under
+    # `set -e` that aborts the script on the FIRST .meta file the check loop opens.
+    #
+    # The symptom is the worst kind: twelve "done:" lines, then a shell prompt. No error,
+    # no "All 12 assets uploaded", nothing to search for. The GitHub release was complete
+    # and correct; everything after it - Zapstore, the App Store, the community store
+    # gate - simply never ran.
+    printf '%s %s\n' "$_res" "$_n" > "${_UPLOAD_DIR}/${_slot}.meta"
     set -- $_res
     if [ "$1" = "201" ]; then
       echo "    done: $_n  ($(python3 -c "print(f'{$2*8/1e6:.1f}')" 2>/dev/null || echo '?') Mbps)"
@@ -2445,7 +2454,10 @@ print(m.get(os.environ['ASSET_NAME'], ''))" 2>/dev/null || echo "")
   _UPLOAD_FAILED=""
   for _m in "${_UPLOAD_DIR}"/*.meta; do
     [ -f "$_m" ] || continue
-    read -r _code _spd _name < "$_m"
+    # `|| true` as well as the newline above: belt and braces, because a truncated or
+    # empty .meta (a job killed mid-write) would otherwise reintroduce the same silent
+    # exit, and the loop below already treats a missing code as a failure.
+    read -r _code _spd _name < "$_m" || true
     if [ "$_code" != "201" ]; then
       _UPLOAD_FAILED="yes"
       echo ""
