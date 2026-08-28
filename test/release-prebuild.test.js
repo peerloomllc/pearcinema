@@ -130,3 +130,46 @@ test('THE VERSION-BUMP COMMIT SKIPS WHAT GIT IGNORES, or it stages nothing at al
   assert.match(loop[0], /git check-ignore/,
     'the bump loop must skip ignored paths, or git add stages nothing and the tag misses the bump')
 })
+
+test('THE IMAGE BUILD PINS WHAT IT PUSHED, rather than printing a line to paste', () => {
+  // README.md told newcomers to run image 0.1.1 while the Umbrel listing was on 0.1.5 -
+  // four versions of drift in the one file whose whole job is to be right for somebody
+  // who has never seen this project. The builder had always PRINTED the pin line and
+  // left a person to paste it, while release.sh told the operator it pinned them: the
+  // donor's behaviour, not ours, until 2026-08-27.
+  const img = fs.readFileSync(path.join(ROOT, 'host', 'build-image.sh'), 'utf8')
+
+  assert.match(img, /sed -i[\s\S]{0,200}umbrel\/docker-compose\.yml/,
+    'the pushed tag and digest must be written into umbrel/docker-compose.yml')
+  assert.match(img, /sed -i[\s\S]{0,200}README\.md/,
+    'the README run command must be moved to the tag that was pushed')
+
+  // And the store copy is written from umbrel/ wholesale. release.sh's step 13c refuses
+  // to call a run clean while the store has unpublished changes - but nothing had ever
+  // WRITTEN any, so the gate saw a clean tree and passed while the store served the old
+  // version. A gate that cannot fire is not a gate.
+  assert.match(img, /STORE_DIR/,
+    'build-image.sh must sync the community store, which release.sh already claims it does')
+  assert.match(img, /cp umbrel\/umbrel-app\.yml/,
+    'the store copy is overwritten from umbrel/, so nothing stale in it survives a release')
+})
+
+test('the store sync REFUSES a version that goes backwards', () => {
+  // umbrelOS keys "update available" off `version:` alone, so a listing that moves
+  // backwards offers every installed user an update that downgrades them. Not
+  // hypothetical: the store repo was found carrying exactly that for a sibling app on
+  // 2026-08-27.
+  //
+  // This is also where the donor could not be copied. PearTune rewrites the listing
+  // version from app.json, on the rule that one number moves everywhere. Here the host
+  // listing reached 1.0.5 while the phone app sat at 0.1.0, so copying that would have
+  // published a downgrade on the first release.
+  const img = fs.readFileSync(path.join(ROOT, 'host', 'build-image.sh'), 'utf8')
+
+  assert.match(img, /DOWNGRADE/, 'a backwards listing version must be refused, not warned about')
+  assert.match(img, /sort -V/, 'the comparison must order versions, not compare them as strings')
+  assert.ok(
+    !/require\(.\.\/app\.json.\)\.expo\.version|app\.json.*expo\.version/.test(img),
+    'the listing version must come from umbrel/umbrel-app.yml, not from the app version'
+  )
+})
