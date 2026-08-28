@@ -1,0 +1,59 @@
+version: "3.7"
+
+services:
+  # NO app_proxy, and that is not an oversight.
+  #
+  # PearCinema's host MUST run with network_mode: host. Measured on a real Umbrel,
+  # twice, with the real image: under Docker's default bridge the firewall admits
+  # the phone (gate:allow-for-pairing) and the connection then dies before the pair
+  # channel opens. Bridge NAT is a second layer of NAT and holepunching does not
+  # survive it.
+  #
+  # app_proxy is a container on a bridge network, so it cannot front a
+  # host-networked service - which is why Umbrel's own host-networked apps (Plex,
+  # Home Assistant) do not use it either. The proxy WAS the only thing standing in
+  # for our missing auth, so the dashboard has its own: PEARCINEMA_PASSWORD, which
+  # umbrelOS fills with the app password shown next to PearCinema in the app list.
+  # The host refuses to start on a non-loopback bind without it.
+  app:
+    image: ghcr.io/peerloomllc/pearcinema-host:0.1.5@sha256:83783c1a1f90ce7a909dafd88bdd0bd6248ed60930c50669f8c98dc3ed55dd7d
+    restart: on-failure
+    stop_grace_period: 1m
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      PEARCINEMA_HTTP_HOST: 0.0.0.0
+      PEARCINEMA_HTTP_PORT: "8751"
+      PEARCINEMA_PASSWORD: ${APP_PASSWORD}
+      PEARCINEMA_NAME: My Library
+      PEARCINEMA_DATA: /data
+      # The DEFAULT library, for an install with no dashboard choice yet. These are
+      # paths INSIDE the container. The operator can point it somewhere else in the
+      # dashboard - it browses whatever the container can see, including an external
+      # drive mounted below.
+      PEARCINEMA_FOLDERS: /library/Movies:/library/TV Shows
+    volumes:
+      # The host identity seed and the grant store. Losing this means every device
+      # must re-pair; leaking it means someone can impersonate your library.
+      - ${APP_DATA_DIR}/data:/data
+      # WHERE AN UMBREL USER'S FILMS ACTUALLY LIVE.
+      #
+      # Not ${UMBREL_ROOT}/data/storage/downloads, which is a different and EMPTY
+      # directory on a real Umbrel - verified on hardware for the sibling app
+      # (1357 tracks in home/Downloads, 0 in the old path), so an install pointed
+      # there lands on an empty library and looks broken.
+      - ${UMBREL_ROOT}/home/Downloads:/library
+      # AN EXTERNAL DRIVE, because a film collection does not fit on the internal
+      # one. A 3 TB USB disk is the ordinary case for this app rather than an edge
+      # case, and rslave propagation is what makes a drive plugged in AFTER the
+      # container started visible to it - without it the mount appears on the host
+      # and the container sees an empty directory until it is restarted.
+      - ${UMBREL_ROOT}/external:/external:rslave
+    devices:
+      # Hardware video conversion. A phone that cannot decode a file is served a
+      # converted stream, and doing that on the CPU costs roughly 11x more (measured
+      # at 1080p; 45x at 4K) - which is what decides how many people can watch at
+      # once. Absent /dev/dri the host measures its own engine at startup, finds
+      # none, and falls back to serving only what a device can already play.
+      - /dev/dri:/dev/dri

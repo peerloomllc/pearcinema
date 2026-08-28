@@ -168,6 +168,17 @@ if [ "$PUSH" = "--push" ]; then
   # point rather than a pinned deployment.
   sed -i -E "s|${IMAGE}:[0-9]+\.[0-9]+\.[0-9]+|${IMAGE}:${VERSION}|g" README.md
 
+  # AND THE OFFICIAL-STORE SUBMISSION, which is a third copy of this listing and
+  # therefore a third thing that can go stale. It carries the same image and the
+  # same version as umbrel/ by design - test/official-store.test.js fails when they
+  # part - so a release that moved one and not the other would break the gate on
+  # its next run rather than at the moment the drift happened.
+  if [ -f umbrel/official/docker-compose.yml ]; then
+    [ -n "${DIGEST:-}" ] && sed -i -E "s|image: ${IMAGE}:[0-9]+\.[0-9]+\.[0-9]+(@sha256:[0-9a-f]+)?|image: ${IMAGE}:${VERSION}@${DIGEST}|g" umbrel/official/docker-compose.yml
+    _listing_ver="$(grep -m1 -E '^version:' umbrel/umbrel-app.yml | sed -E 's|^version: *"?([^"]*)"?|\1|')"
+    [ -n "$_listing_ver" ] && sed -i -E "s|^version: \".*\"|version: \"${_listing_ver}\"|" umbrel/official/umbrel-app.yml
+  fi
+
   # ---------------------------------------------------------------------------
   # The PeerLoom community app store (STORE_DIR), if a clone is pointed at us.
   #
@@ -239,7 +250,7 @@ if [ "$PUSH" = "--push" ]; then
 
   echo
   echo "== pinned to $VERSION =="
-  grep -n "${IMAGE}:" umbrel/docker-compose.yml README.md
+  grep -n "${IMAGE}:" umbrel/docker-compose.yml README.md umbrel/official/docker-compose.yml 2>/dev/null
 else
   FORMAT=""
   [ "$ENGINE" = "podman" ] && FORMAT="--format docker"
