@@ -224,3 +224,22 @@ test('THE HOST IMAGE VERSION IS DECIDED IN ONE PLACE, not two that disagree', ()
   assert.ok(!/HOST_IMAGE_VERSION:-\$APP_VERSION/.test(script),
     'no call site falls back to the app version for the host image tag')
 })
+
+test('THE EXPORT COMPLIANCE ANSWER IS IN THE BUILD, not asked at every upload', () => {
+  // Apple asks whether the app uses non-exempt encryption for EVERY build uploaded, and
+  // a build sits unsubmittable until somebody notices the question. The answer belongs in
+  // Info.plist, where the upload reads it and never asks.
+  //
+  // FALSE, matching the three PearTune builds already through App Review on the same
+  // crypto stack (checked against App Store Connect, 2026-08-27). Same company, same
+  // Noise channel, same blind relay - two sibling apps giving Apple different answers
+  // about the same encryption would be the thing worth explaining.
+  //
+  // Pinned here rather than trusted because it lives only in app.json: ios/ is generated,
+  // so a regenerate that dropped it would restore the per-upload prompt silently, which
+  // is exactly how the local network purpose string went missing.
+  const ios = app.ios.infoPlist
+  assert.equal('ITSAppUsesNonExemptEncryption' in ios, true,
+    'app.json must answer export compliance, or every upload stops to ask')
+  assert.equal(ios.ITSAppUsesNonExemptEncryption, false)
+})
