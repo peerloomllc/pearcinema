@@ -1,0 +1,93 @@
+manifestVersion: 1
+id: pearcinema
+category: media
+name: PearCinema
+version: "1.0.5"
+tagline: Your films and shows, playable anywhere - and shareable with family
+description: >-
+  Watch the films and shows on your Umbrel from anywhere, without exposing your
+  server to the internet.
+
+
+  PearCinema connects your phone straight to this machine over an encrypted
+  peer-to-peer connection (the Hypercore Protocol). No port forwarding, no VPN, no
+  dynamic DNS, no account, and no copy of your library in anyone's cloud. Your files
+  never leave your hardware: they stream through the live connection while they play,
+  and you can skip to any point in a film without downloading it first.
+
+
+  It reads your library where it already is. Point it at the Jellyfin or Emby you
+  already run and it uses that - your posters, your descriptions, your seasons and
+  episodes. Or point it at a plain folder of files and PearCinema reads them itself:
+  it works out films from shows, sorts episodes into seasons, and picks up the
+  descriptions and posters that Kodi, Sonarr or Radarr already left on the disk. That
+  means a folder is a real library rather than a list of filenames - and it needs no
+  internet lookup and no account with anyone, so nothing about what you own leaves
+  this machine.
+
+
+  YOU CAN ALSO JUST WATCH IT HERE. This dashboard is a player, so a laptop or a
+  desktop on your network can open the library and start a film without installing
+  anything at all.
+
+
+  IT MAKES YOUR FILES PLAY, whatever they are. Files your phone can already handle go
+  straight through untouched. Anything it cannot, this machine repackages or converts
+  as it plays, using the graphics chip it has - Intel, AMD, NVIDIA or Apple - so it
+  costs the processor almost nothing. Subtitles come along, including the picture
+  subtitles from discs, which are drawn onto the film where a phone cannot show them
+  by itself.
+
+
+  KEEP A FILM FOR THE PLANE. Download it to a phone and it plays with everything
+  switched off, converted in advance if that device needs it. On a train or in a car
+  it works over mobile data too, at a lower quality so it does not eat a data plan.
+
+
+  PUT IT ON THE TELEVISION. Cast to a Roku or a Samsung TV on your network and drive
+  it from your phone, including from the lock screen. When an episode ends, the next
+  one is offered.
+
+
+  EVERYBODY GETS THEIR OWN PLACE IN IT. Where you stopped follows you from your phone
+  to your laptop and back, and every person in the house has their own list rather
+  than sharing yours. Have more than one machine running PearCinema? Pair with both
+  and they look like one library.
+
+
+  YOU decide who gets in. Every device that pairs appears here with a name it chose
+  and a person it belongs to. Revoke a device and playback stops within seconds,
+  mid-film - not "on next login". Revoke a person and every device they hold dies at
+  once. There are no shared passwords or bearer tokens anywhere in the design: every
+  connection is authenticated by the device's own key.
+
+
+  That is what makes SHARING safe. Let a friend or a family member in and they get
+  their own place here, with their own devices and their own place in whatever they
+  were watching - and no login to pass around. Hand out a guest pass that expires by
+  itself, or cut someone off the moment you want to. They never get a copy of a
+  single file. If they want something you do not have, they can ask, and the ask
+  arrives here.
+
+
+  Pair a device by scanning the QR code on this dashboard with the PearCinema app.
+releaseNotes: ""
+
+developer: PeerLoom
+website: https://peerloomllc.com/pearcinema/
+dependencies: []
+repo: https://github.com/peerloomllc/pearcinema
+support: https://github.com/peerloomllc/pearcinema/issues
+
+port: 8751
+permissions:
+  - STORAGE_DOWNLOADS
+  - GPU
+gallery: []
+path: ""
+
+defaultUsername: ""
+deterministicPassword: true
+
+submitter: PeerLoom
+submission: https://github.com/peerloomllc/pearcinema
