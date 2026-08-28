@@ -23,8 +23,27 @@ const { execFile } = require('child_process')
 
 const subtitles = require('../host/subtitles')
 
-const run = (cmd, args) => new Promise((resolve, reject) => {
-  execFile(cmd, args, { maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) =>
+// EVERY ffmpeg HERE IS BOUNDED, and that is not defensive programming - it is the
+// difference between a release that fails and a release that never returns.
+//
+// ffmpeg deadlocked building the four-second fixture below during the v1.1.0 release
+// (2026-08-27): zero CPU, blocked on a futex, and it stayed that way. An identical one
+// from a run the day before was still wedged 24 hours later. Because `execFile` had no
+// timeout, the whole verify gate waited on it for ever, so the release neither passed
+// nor failed - it just stopped, several minutes into a step that normally takes one.
+//
+// The deadlock itself is ffmpeg's (8.1.2, `-shortest` across sparse subtitle inputs) and
+// it is a RACE: the same command run six times in a row by hand succeeded every time. It
+// shows under the load of `--test-concurrency=4` on a busy machine, which is exactly the
+// condition a release runs in.
+//
+// SIGKILL rather than the default SIGTERM, because a process stuck in a futex wait is not
+// reliably reachable by a catchable signal - the wedged one had ignored everything short
+// of -9.
+const RUN_TIMEOUT_MS = 60_000
+
+const run = (cmd, args, { timeout = RUN_TIMEOUT_MS } = {}) => new Promise((resolve, reject) => {
+  execFile(cmd, args, { maxBuffer: 32 * 1024 * 1024, timeout, killSignal: 'SIGKILL' }, (err, stdout, stderr) =>
     err ? reject(err) : resolve({ stdout, stderr }))
 })
 
@@ -101,7 +120,7 @@ async function clip (t) {
   await fsp.writeFile(fr, '1\n00:00:00,500 --> 00:00:02,000\nBonjour\n\n2\n00:00:02,500 --> 00:00:03,500\nDeuxieme\n')
 
   const file = path.join(dir, 'An Episode - s01e01.mkv')
-  await run('ffmpeg', [
+  const args = [
     '-hide_banner', '-loglevel', 'error',
     '-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=12:duration=4',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4',
@@ -111,7 +130,29 @@ async function clip (t) {
     '-c:a', 'aac', '-c:s', 'srt',
     '-metadata:s:s:0', 'language=eng', '-metadata:s:s:1', 'language=fre',
     '-shortest', file, '-y'
-  ])
+  ]
+
+  // ONE RETRY, because the deadlock above is a race rather than a broken command. The
+  // same argv succeeds by hand every time and wedged twice under a concurrent run, so a
+  // second attempt on a fresh process is the honest response - where failing the release
+  // would blame the change being released for something ffmpeg did.
+  //
+  // Exactly one. A retry loop would turn a genuinely broken ffmpeg into a slow hang
+  // again, which is the failure this whole block exists to remove.
+  try {
+    await run('ffmpeg', args)
+  } catch (first) {
+    await fsp.rm(file, { force: true })
+    try {
+      await run('ffmpeg', args)
+    } catch (second) {
+      // BOTH failures reported. The first is the interesting one when this is the race;
+      // the second is the interesting one when the command is actually wrong, and a
+      // reader cannot tell which they have without seeing both.
+      second.message = `building the subtitle fixture failed twice.\nfirst:  ${first.message}\nsecond: ${second.message}`
+      throw second
+    }
+  }
   return { dir, file }
 }
 
