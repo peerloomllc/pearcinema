@@ -48,6 +48,7 @@
       "bundleIdentifier": "com.pearcinema",
       "supportsTablet": false,
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": [
           "lightning"
         ],
