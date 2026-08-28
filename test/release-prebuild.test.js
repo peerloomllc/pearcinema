@@ -112,3 +112,21 @@ test('EVERY SCRIPT THE RELEASE INVOKES IS ACTUALLY IN THE TREE', () => {
   const missing = [...called].filter((rel) => !fs.existsSync(path.join(ROOT, rel)))
   assert.deepEqual(missing, [], 'scripts/release.sh names files that are not in the tree')
 })
+
+test('THE VERSION-BUMP COMMIT SKIPS WHAT GIT IGNORES, or it stages nothing at all', () => {
+  // `git add` refuses the WHOLE invocation when any one path is ignored: it exits 1 and
+  // stages nothing, not even the paths it could have. release.sh runs under `set -e`, so
+  // that aborts the release after the verify gate, the APK, the release notes and the
+  // desktop installers, and immediately before the tag.
+  //
+  // The allowlist names the two generated iOS files because the donor commits its ios/
+  // tree. This repo does not, and /ios/ joined /android/ in .gitignore on 2026-08-27 -
+  // which turned a list that had always been safe into a release that could not finish.
+  //
+  // Filtering by what git ignores, rather than by name, is what lets the list stay
+  // readable as "everything a version bump touches" in both repos.
+  const loop = release.match(/_bump_existing=\(\)[\s\S]{0,400}?done/)
+  assert.ok(loop, 'expected the version-bump allowlist loop in release.sh')
+  assert.match(loop[0], /git check-ignore/,
+    'the bump loop must skip ignored paths, or git add stages nothing and the tag misses the bump')
+})

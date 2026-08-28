@@ -2156,8 +2156,26 @@ _bump_paths=(
   docs/host-linux.md
   start9/README.md
 )
+# EXISTS **AND** IS NOT IGNORED. The existence test alone was enough while every
+# path here was committed; it stopped being enough when /ios/ joined /android/ in
+# .gitignore on 2026-08-27, because the two iOS paths above are generated in THIS
+# repo and committed in the donor.
+#
+# `git add` REFUSES THE WHOLE INVOCATION when any one path is ignored - it exits 1
+# and stages NOTHING, not even the paths it could have staged. Under `set -e` that
+# aborts the release here, after the verify gate, the APK, the release notes and
+# the desktop installers, and immediately before the tag. Measured rather than
+# reasoned about.
+#
+# Filtering by what git ignores rather than by name keeps the list above readable
+# as "everything a version bump touches", and lets a repo that generates a tree
+# skip it without the list having to know which repo it is in.
 _bump_existing=()
-for _p in "${_bump_paths[@]}"; do [ -e "$_p" ] && _bump_existing+=("$_p"); done
+for _p in "${_bump_paths[@]}"; do
+  [ -e "$_p" ] || continue
+  git check-ignore -q -- "$_p" && continue
+  _bump_existing+=("$_p")
+done
 if [ ${#_bump_existing[@]} -gt 0 ] \
    && [ -n "$(git status --porcelain -- "${_bump_existing[@]}")" ]; then
   echo "==> Committing version bumps for $APP_VERSION..."
