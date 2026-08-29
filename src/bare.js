@@ -2170,7 +2170,18 @@ const methods = {
     // open, because it is the same kind of fact and the two have to agree. A transcode is
     // always a playlist; a remux is one on iOS, and on Android too when it rebuilds the
     // sound - direct play of that file is a film in silence.
-    if (caps.wantsPlaylist(verdict?.mode, PLATFORM, verdict?.audio)) {
+    //
+    // A HOST FROM BEFORE 2026-08-29 answers a remux without saying what it did to the
+    // sound. The phone then applies the host's own rule to the file's facts: a
+    // soundtrack this device never declared is one that host is rebuilding. This is
+    // what lets an app update alone fix the silent film, without waiting on the host.
+    let audioVerdict = verdict?.audio
+    if (verdict?.mode === 'remux' && audioVerdict === undefined) {
+      const item = await c.get({ id: itemId }).catch(() => null)
+      audioVerdict = caps.soundRebuilt(item?.media, sending) ? 'aac' : 'copy'
+      log('stream:audio-inferred', { itemId, audio: audioVerdict, audioCodec: item?.media?.audioCodec || null })
+    }
+    if (caps.wantsPlaylist(verdict?.mode, PLATFORM, audioVerdict)) {
       return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: verdict.mode }
     }
     return { url: shim.urlFor(itemId), mode: verdict?.mode || 'direct' }

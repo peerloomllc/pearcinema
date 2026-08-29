@@ -187,6 +187,18 @@ function withoutAudio (caps, audioCodec) {
   }
 }
 
+// WOULD THE HOST HAVE TO REBUILD THIS FILE'S SOUND for a device described by `caps`?
+// The phone's own reading of the rule host/remux.js applies, for a host from before
+// 2026-08-29 that answers a remux verdict without saying what it did to the sound. A
+// file whose soundtrack this device never declared is one the host rebuilds; an
+// unknown codec is left alone, as decide() leaves it alone.
+function soundRebuilt (media, caps) {
+  const norm = String(media?.audioCodec || '').toLowerCase().replace(/\s+/g, '')
+  if (!norm) return false
+  const a = AUDIO_ALIAS[norm] || norm
+  return !(caps?.audioCodecs || []).includes(a)
+}
+
 // HOW A CONVERTED FILM REACHES THIS PLAYER, which is a fact about the player and belongs
 // beside what it can open.
 //
@@ -214,4 +226,4 @@ function wantsPlaylist (mode, platform, audio = null) {
   return String(platform || '').toLowerCase() === 'ios'
 }
 
-module.exports = { fromProbe, without, withoutAudio, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }
+module.exports = { fromProbe, without, withoutAudio, soundRebuilt, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }

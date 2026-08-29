@@ -322,3 +322,21 @@ test('the decoder probe module compiles against the media3 expo-video ships', ()
   assert.match(ts, /export async function audioSelection/)
   assert.match(ts, /return null/, 'absent module reads as "cannot tell", never as silent')
 })
+
+test('AGAINST AN OLDER HOST the phone works out the sound verdict itself', () => {
+  // The field report's phone: GrapheneOS, no Dolby decoder, an x265 MKV with E-AC-3 5.1.
+  // Its host may be updated weeks after its app is. That host answers `remux` with no
+  // `audio` at all, so the phone applies the host's own rule to the file's facts.
+  const graphene = caps.staticFor('android')
+  const film = { container: 'matroska', videoCodec: 'hevc', audioCodec: 'eac3', audioChannels: 6 }
+  assert.strictEqual(caps.soundRebuilt(film, graphene), true, 'E-AC-3 was never declared, so the host is rebuilding it')
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: 'ec-3' }, graphene), true, "Jellyfin's spelling")
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: 'aac' }, graphene), false)
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: null }, graphene), false, 'an unknown soundtrack is left alone, as decide() leaves it')
+  assert.strictEqual(caps.soundRebuilt(null, graphene), false)
+  // And the two sides agree: what the phone infers is what the host would have said.
+  const v = decide(film, { ...graphene, videoCodecs: [...graphene.videoCodecs, 'hevc'] })
+  assert.strictEqual(v.mode, 'remux')
+  assert.strictEqual(v.audio, 'aac')
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android', caps.soundRebuilt(film, graphene) ? 'aac' : 'copy'), true)
+})
