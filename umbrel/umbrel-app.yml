@@ -93,8 +93,11 @@ gallery:
   - https://peerloomllc.com/assets/gallery-pearcinema-2.jpg
   - https://peerloomllc.com/assets/gallery-pearcinema-3.jpg
 releaseNotes: |-
-  Bug Fixes:
-  - Fixed a crash that closed the app after a few minutes of watching. While a film played, the app kept hold of far more of it than it needed, until the phone ran out of memory and shut the app down. It now keeps only the part it is about to play, so a film runs as long as you want to watch it.
+  Bug Fixes
+  - Films with Dolby Digital or Dolby Digital Plus sound (common on x265 downloads) now play with sound on Android phones that cannot decode Dolby themselves. The host converts the soundtrack on the way; the picture is untouched.
+  - If a film ever starts playing with no sound on Android, the app now notices, asks the host for a converted copy and picks up where it was.
+  Improvements
+  - When a Roku is on your network but is not ready for casting, the television picker now names it and tells you the one step needed: install the free Media Assistant channel from the Roku channel store.
 path: ""
 defaultUsername: ""
 # umbrelOS replaces defaultPassword with the derived value when this is set - it is

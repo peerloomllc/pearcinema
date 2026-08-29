@@ -2,14 +2,14 @@
   "expo": {
     "name": "PearCinema",
     "slug": "pearcinema",
-    "version": "1.1.1",
+    "version": "1.1.2",
     "newArchEnabled": true,
     "orientation": "portrait",
     "scheme": "pear",
     "userInterfaceStyle": "automatic",
     "android": {
       "package": "com.pearcinema",
-      "versionCode": 1001008,
+      "versionCode": 1001009,
       "permissions": [
         "CAMERA",
         "INTERNET",
@@ -62,7 +62,7 @@
           }
         }
       },
-      "buildNumber": "10"
+      "buildNumber": "11"
     },
     "plugins": [
       [
