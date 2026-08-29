@@ -1284,6 +1284,40 @@ if [ -f "$_DTP" ]; then
   fi
 fi
 
+# The Umbrel listing version moves with app.json too (Tim, 2026-08-28: "Umbrel
+# should be using same version as desktop and mobile").
+#
+# THIS REVERSES A DELIBERATE DECISION, so the old reasoning is worth stating rather
+# than deleting. host/build-image.sh argued that this listing versions the HOST, not
+# the app, because the host had shipped to 1.0.5 while the phone sat at 0.1.0 -
+# stamping the app's number would then have published a DOWNGRADE, and umbrelOS
+# reads `version:` alone, so a backwards number offers every installed user an
+# update that takes them back.
+#
+# What changed is that the two lines have converged: the app passed the host at
+# 1.1.1, so there is no longer a gap to fall into. The guard in build-image.sh that
+# refuses a backwards sync STAYS - it is the thing that makes this safe rather than
+# the assumption that it cannot happen, and if the two ever diverge again it will
+# refuse the sync instead of shipping a downgrade.
+#
+# Left BEHIND rather than in front of that guard on purpose: this only writes
+# umbrel/, and build-image.sh still decides whether the store copy may move.
+_UMB="$REPO_ROOT/${UMBREL_DIR:-umbrel}/umbrel-app.yml"
+if [ -f "$_UMB" ]; then
+  _UMB_NOW=$(grep -m1 -E '^version:' "$_UMB" | sed -E 's|^version: *"?([^"]*)"?||')
+  if [ "$_UMB_NOW" = "$APP_VERSION" ]; then
+    echo "    Umbrel listing already at $APP_VERSION."
+  elif [ "$(printf '%s
+%s
+' "$_UMB_NOW" "$APP_VERSION" | sort -V | tail -1)" != "$APP_VERSION" ]; then
+    echo "    WARNING: umbrel/umbrel-app.yml is at $_UMB_NOW, AHEAD of app.json's $APP_VERSION."
+    echo "             Left alone: writing it would publish a downgrade to every Umbrel install."
+  else
+    sed -i -E "s|^version: *\".*\"|version: \"$APP_VERSION\"|" "$_UMB"
+    echo "    Updated umbrel/umbrel-app.yml to $APP_VERSION (was ${_UMB_NOW:-unknown})."
+  fi
+fi
+
 # Derive APP_VERSION_CODE from the version string for Gradle.
 #
 # android/ is GENERATED here (/android/ is in .gitignore, per suite rule 5), and
