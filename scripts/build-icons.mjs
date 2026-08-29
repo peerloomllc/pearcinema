@@ -20,7 +20,7 @@
 // square icon instead is how a pear ends up with its leaf sliced off.
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -148,7 +148,15 @@ tray('trayTemplate@2x.png', 44, { template: true })
 // --- the Umbrel's app listing ------------------------------------------------
 // It takes the drawing itself, so it stays sharp at whatever size the store
 // renders it.
-magick([MASTER, out('umbrel/icon.svg')])
-console.log('wrote umbrel/icon.svg')
+//
+// A COPY, NOT A CONVERSION, and the difference is the whole icon. `magick in.svg
+// out.svg` does not pass an SVG through: it rasterises the input and then hands
+// the pixels to ImageMagick's SVG writer, which traces them back into paths with
+// potrace. What came out was a 1024x1024 BLACK SQUARE with the pear as a
+// barely-darker counter-path - invisible against the store's dark listing, which
+// is how it shipped and how it looked until somebody opened it (2026-08-28).
+// Nothing here needs converting: the master already IS the format the store wants.
+copyFileSync(MASTER, out('umbrel/icon.svg'))
+console.log('wrote umbrel/icon.svg (copied verbatim from the master drawing)')
 
 console.log('\nall icons rebuilt from assets/icon.svg')
