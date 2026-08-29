@@ -1416,8 +1416,19 @@ function HostPanel ({ state, reload }) {
             <span class={`rowname ${engineTone}`}>Video engine</span>
             <span class='rowsub'>{engineSub}</span>
             {t.available && <span class='rowsub'>{measuredSub}</span>}
-            {!t.available && !t.probing && t.reason && (
-              <span class='rowsub dim'>The converter said: {t.reason}</span>
+            {/* EVERY ENGINE TRIED, EACH IN ITS OWN WORDS. One line used to stand for all of
+                them and it was the first engine's - on Linux that is VAAPI, which fails on
+                every NVIDIA-only box for a reason that is expected, and said nothing about
+                why NVIDIA failed too (a user's 4080 on Mint, 2026-08-29: the real reason was
+                a driver older than the shipped converter needs). Where the host knows what a
+                line means, the plain sentence comes first and ffmpeg's words follow. */}
+            {!t.available && !t.probing && (t.tried || []).length > 1 && (t.tried || []).map((a) => (
+              <span class='rowsub dim' key={a.engine}>
+                {a.label || a.engine}: {a.plain ? `${a.plain} The converter said: ${a.reason}` : `The converter said: ${a.reason}`}
+              </span>
+            ))}
+            {!t.available && !t.probing && (t.tried || []).length <= 1 && t.reason && (
+              <span class='rowsub dim'>{t.plain ? `${t.plain} ` : ''}The converter said: {t.reason}</span>
             )}
           </span>
           {/* TWO CONTROLS, STACKED, and the number on top. Side by side they read as one

@@ -3650,6 +3650,33 @@ test('A HOST WITH NO VIDEO ENGINE SAYS WHAT THAT MEANS, NOT WHAT FFMPEG SAID', a
   assert.match(text(), /The converter said: Error parsing global options/, 'ffmpeg keeps its say, in its place')
 })
 
+test('EVERY ENGINE TRIED IS ON THE PAGE, in its own words, plain where the host knows what they mean', async (t) => {
+  // A user's Ryzen 5900X with a 4080 on Linux Mint (2026-08-29): the page showed only
+  // VAAPI's failure, which is expected on an NVIDIA-only box, and nothing about NVIDIA.
+  // The real reason - a driver older than the shipped converter needs - was never shown.
+  const twoEngines = {
+    ...STATE,
+    transcode: {
+      available: false,
+      engine: null,
+      device: '/dev/dri/renderD128',
+      reason: 'Error parsing global options: Input/output error',
+      plain: null,
+      tried: [
+        { engine: 'vaapi', label: 'Intel or AMD graphics', device: '/dev/dri/renderD128', available: false, reason: 'Error parsing global options: Input/output error', plain: null },
+        { engine: 'nvenc', label: 'NVIDIA graphics', device: null, available: false, reason: '[h264_nvenc @ 0x1] The minimum required Nvidia driver for nvenc is 610.00 or newer', plain: "This machine's NVIDIA driver is older than this build of the converter needs. It needs driver 610 or newer (the driver offers encoding interface 13.0, the converter was built for 13.1)." }
+      ],
+      label: null,
+      nodes: ['/dev/dri/renderD128']
+    }
+  }
+  const { text } = await openHost(t, twoEngines)
+  assert.match(text(), /did not pass the conversion test/)
+  assert.match(text(), /Intel or AMD graphics: The converter said: Error parsing global options/, 'the first engine, named')
+  assert.match(text(), /NVIDIA graphics: This machine's NVIDIA driver is older than this build of the converter needs\. It needs driver 610 or newer/, 'the second engine, in plain words first')
+  assert.match(text(), /The converter said: \[h264_nvenc @ 0x1\] The minimum required Nvidia driver/, 'with ffmpeg\'s words kept underneath')
+})
+
 test('A MACHINE WITH NOTHING TO TRY IS NOT ACCUSED OF FAILING A TEST', async (t) => {
   // No render node, no Mac engine, nothing offered: there was no test to fail, and
   // saying one was failed would send somebody hunting a driver that was never asked for.
