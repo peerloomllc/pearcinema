@@ -51,8 +51,28 @@ no Dolby), and through the host the Dolby film's stream.url came back `remux` wi
 `/hls/` URL, played 13.5 seconds with no silent event and no error, the host cutting
 copy segments. The AAC film stayed `direct`.
 
-WHAT IS NOT PROVEN: the lying-chip retry end to end against a host, because the emulator
-declares honestly and the systematic fix now covers the honest case. It needs a phone
+THE USER'S FACTS, which arrived after the fix: GrapheneOS, E-AC-3, 6 channels, 48 kHz,
+256 kb/s. Dolby Digital Plus 5.1, the most common soundtrack on an x265 web rip, on an
+OS that ships no Dolby decoder. The systematic case exactly. And a phone gets its app
+update weeks before its host gets updated, so the phone now works the sound verdict out
+itself when a host from before this change answers a remux with no `audio`:
+`soundRebuilt(media, caps)` in src/capabilities.js applies decide()'s own rule - a
+soundtrack this device never declared is one the host is rebuilding - and that remux
+travels as a playlist. Proven on the emulator against a host running master: the reply
+had no `audio`, the worklet logged `stream:audio-inferred {audio: aac, audioCodec: ac3}`
+and the playlist played.
+
+THEN TIM'S OWN PIXEL 9, WHICH RUNS GRAPHENEOS. It declares `aac, ac3, eac3, flac, mp3,
+opus, vorbis` off its probe, and an E-AC-3 5.1 x265 MKV matching the user's file played
+direct with sound through `c2.dolby.eac3.decoder` - a real Dolby decoder on Pixel
+hardware, present under GrapheneOS. So "GrapheneOS has no Dolby decoder" was wrong for
+a Pixel 9, and which of the two holes the user fell through is not known: an older Pixel
+without the Dolby codec (the honest remux, fixed by the transport), a probe that failed
+and left the static floor (the same), or a decoder list that lies (the retry). All three
+are covered; the user's phone model would say which.
+
+WHAT IS NOT PROVEN: the lying-chip retry end to end against a host, because every device
+here declares honestly and the systematic fix now covers the honest case. It needs a phone
 that over-declares. In TODO.
 
 DTS-HD WAS RAISED AND DROPPED THE SAME DAY. The worry: host/probe.js reads codec_name
