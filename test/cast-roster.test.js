@@ -120,3 +120,28 @@ test('the phone is offered neither the hidden nor the unreachable', async (t) =>
   assert.ok(!names.includes('Unplugged'), 'HA cannot reach it, so it is not a button')
   assert.deepEqual(names, ['Bedroom TV', 'Living Room TV', 'Study Amp', 'Voice Thing'])
 })
+
+test('A ROKU WAITING ON ITS CHANNEL TRAVELS TO THE PHONE BY NAME', async () => {
+  // A support email, 2026-08-29: someone could not cast to their Roku and had no way to
+  // learn why - the dashboard knew (one free channel, Media Assistant) but the phone's
+  // picker just showed nothing. cast.list now carries the host's list, so the picker
+  // can name the Roku and the step.
+  const s = {
+    enabled: true,
+    list: async () => [],
+    needsChannel: [{ host: '10.0.0.7', name: 'Living Room' }]
+  }
+  const m = createMethods({
+    getAdapter: () => ({}),
+    getLibraryName: () => 'L',
+    cast: () => ({ speakers: s, active: () => [] })
+  })
+  const ctx = { params: {}, isOwner: true, deviceKey: 'phone-1', notFound: (x) => new Error(x), forbidden: (x) => new Error(x) }
+  const out = await m['cast.list'](ctx)
+  assert.deepEqual(out.targets, [])
+  assert.deepEqual(out.needsChannel, [{ host: '10.0.0.7', name: 'Living Room' }])
+
+  // And a speakers object with no such list (an older backend) reads as none, not a crash.
+  const m2 = createMethods({ getAdapter: () => ({}), getLibraryName: () => 'L', cast: () => ({ speakers: { enabled: true, list: async () => [] }, active: () => [] }) })
+  assert.deepEqual((await m2['cast.list'](ctx)).needsChannel, [])
+})

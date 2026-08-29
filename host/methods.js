@@ -540,10 +540,14 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       } catch (e) {
         // HA down is a state, not a crash: the phone shows "not reachable"
         // instead of a stack.
-        return { enabled: true, targets: [], problem: e.message }
+        return { enabled: true, targets: [], problem: e.message, needsChannel: casts.speakers.needsChannel || [] }
       }
       return {
         enabled: true,
+        // Rokus the host found that cannot be offered, and why: no Media Assistant
+        // channel. The phone says so by name, the way the dashboard does, because a
+        // television missing from a picker explains nothing (a support email, 2026-08-29).
+        needsChannel: casts.speakers.needsChannel || [],
         // `unavailable` means HA cannot reach the device, so offering it is
         // offering a button that does nothing. `hidden` is the operator's own
         // pruning, done in the dashboard's Casting panel - a house has far more

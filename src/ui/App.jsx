@@ -568,11 +568,23 @@ function CastSheet ({ sheet, hostCount, onPick, onClose }) {
         {sheet.targets !== null && !sheet.enabled && (
           <p className='muted'>
             No TVs are set up. Casting is turned on at the library's dashboard,
-            under Settings, Casting. It needs the Home Assistant on that machine.
+            under Settings, Casting.
           </p>
         )}
-        {sheet.targets !== null && sheet.enabled && sheet.targets.length === 0 && (
-          <p className='muted'>Home Assistant reports no TVs right now.</p>
+        {sheet.targets !== null && sheet.enabled && sheet.targets.length === 0 && !(sheet.needsChannel || []).length && (
+          <p className='muted'>No TVs were found on the library's network right now.</p>
+        )}
+        {/* THE ONE STEP NOBODY COULD GUESS. A Roku is found on the wire but cannot be
+            told to play until the free Media Assistant channel is on it, so the host
+            names each such Roku and the picker says so here - a television missing
+            from this list explains nothing (a support email, 2026-08-29). */}
+        {(sheet.needsChannel || []).length > 0 && (
+          <p className='muted'>
+            {sheet.needsChannel.length === 1
+              ? `Found ${sheet.needsChannel[0].name}, but it has no Media Assistant channel yet.`
+              : `Found ${sheet.needsChannel.map((d) => d.name).join(', ')}, but they have no Media Assistant channel yet.`}
+            {' '}Install the free Media Assistant channel from the Roku channel store, then open this again.
+          </p>
         )}
         <div className='acts'>
           {(sheet.targets || []).map((t) => (
@@ -1100,7 +1112,7 @@ export default function App () {
       // the player opens, because that path deliberately does nothing that
       // could delay first frames. Refreshed whenever the picker actually runs,
       // so configuring Home Assistant shows up without a reinstall.
-      call('cast.list').then((r) => setCanCast(!!r?.enabled && (r.targets || []).length > 0)).catch(() => {})
+      call('cast.list').then((r) => setCanCast(!!r?.enabled && ((r.targets || []).length > 0 || (r.needsChannel || []).length > 0))).catch(() => {})
       refreshRelay()
       call('storage.stats').then(setStorage).catch(() => {})
     }
@@ -1713,9 +1725,11 @@ export default function App () {
     setCastSheet({ item, targets: null, enabled: false, atMs })
     try {
       const r = await call('cast.list', { itemId: item.id })
-      setCanCast(!!r?.enabled && (r.targets || []).length > 0)
+      // A Roku waiting on its channel keeps the button: the picker is where the
+      // one-step fix is explained, and hiding it explains nothing.
+      setCanCast(!!r?.enabled && ((r.targets || []).length > 0 || (r.needsChannel || []).length > 0))
       setCastSheet((s) => (s && s.item.id === item.id
-        ? { ...s, targets: r?.targets || [], enabled: !!r?.enabled }
+        ? { ...s, targets: r?.targets || [], enabled: !!r?.enabled, needsChannel: r?.needsChannel || [] }
         : s))
     } catch (e) {
       setCastSheet(null)

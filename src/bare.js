@@ -1806,7 +1806,7 @@ const methods = {
   // cannot serve another server's file. That is also the merged-mode copy-pick
   // rule in cast.play below.
   'cast.list': async (args) => {
-    const out = { enabled: false, targets: [], active: [] }
+    const out = { enabled: false, targets: [], active: [], needsChannel: [] }
     // Asked FOR a film, only libraries holding a copy answer - a television
     // whose host cannot serve the film is a button that ends in an error.
     let libsWithCopy = null
@@ -1821,6 +1821,8 @@ const methods = {
         if (r?.enabled) out.enabled = true
         for (const t of r?.targets || []) out.targets.push({ ...t, libraryId: h.libraryId, libraryName: h.libraryName })
         for (const a of r?.active || []) out.active.push({ ...a, libraryId: h.libraryId, libraryName: h.libraryName })
+        // Rokus found without their channel, named per library so the picker can say so.
+        for (const n of r?.needsChannel || []) out.needsChannel.push({ ...n, libraryId: h.libraryId, libraryName: h.libraryName })
       } catch {}
     }))
     return out
