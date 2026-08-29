@@ -383,3 +383,66 @@ test('PEARCINEMA_ENGINE can pin either NVIDIA lane', async () => {
     assert.equal(pinned.tried.every((t) => t.engine === id), true, 'nothing else is even asked')
   }
 })
+
+// THE FIELD REPORT OF 2026-08-29, verbatim: a Ryzen 5900X with a 4080 on Linux Mint,
+// NVIDIA driver 580, and the engine test saying "did not pass" with VAAPI's error as the
+// only explanation. The real reason was four lines into NVENC's stderr.
+const MINT_4080_STDERR = `[h264_nvenc @ 0x628e690c4cc0] Driver does not support the required nvenc API version. Required: 13.1 Found: 13.0
+[h264_nvenc @ 0x628e690c4cc0] The minimum required Nvidia driver for nvenc is 610.00 or newer
+[vost#0:0/h264_nvenc @ 0x628e690c47c0] [enc:h264_nvenc @ 0x628e690c4c00] Error while opening encoder - maybe incorrect parameters such as bit_rate, rate, width or height.
+[vf#0:0 @ 0x628e690e0200] Error sending frames to consumers: Function not implemented
+[out#0/null @ 0x628e690c4400] Nothing was written into output file, because at least one of its streams received no packets.`
+
+test('THE REASON IS THE CAUSE, NOT THE LAST LINE, and the NVIDIA driver case gets a sentence', () => {
+  const out = engines.explain(MINT_4080_STDERR)
+  assert.match(out.reason, /minimum required Nvidia driver for nvenc is 610\.00/)
+  assert.match(out.plain, /driver is older than this build of the converter needs/)
+  assert.match(out.plain, /driver 610 or newer/)
+  assert.match(out.plain, /encoding interface 13\.0, the converter was built for 13\.1/)
+  // The symptom line never wins on its own.
+  assert.equal(engines.explain('a\nNothing was written into output file').reason, 'Nothing was written into output file')
+  assert.equal(engines.explain('a\nNothing was written into output file').plain, null)
+  assert.match(engines.explain('').reason, /no output/)
+  // VAAPI's own words keep their meaning.
+  assert.match(engines.explain('[AVHWDeviceContext @ 0x1] Failed to initialise VAAPI connection: -1 (unknown libva error).\nDevice creation failed: -5.\nError parsing global options: Input/output error').reason, /VAAPI connection/)
+})
+
+test('EVERY ENGINE TRIED IS NAMED WITH ITS OWN REASON, so the second one is not hidden behind the first', async () => {
+  // VAAPI fails as it does on every NVIDIA-only Linux box, then NVENC fails for the
+  // driver. The summary keeps VAAPI's line (the first candidate), and `tried` carries
+  // NVENC's plain sentence and label for the dashboard to show.
+  const bin = await fakeFfmpeg(`#!/bin/sh
+case "$*" in
+  *h264_nvenc*) cat >&2 <<'ERR'
+${MINT_4080_STDERR}
+ERR
+    exit 1 ;;
+  *) echo "Error parsing global options: Input/output error" >&2; exit 1 ;;
+esac`)
+  const out = await engines.pickEngine({
+    ffmpeg: bin,
+    candidates: [
+      { engine: engines.engineFor('vaapi'), device: '/dev/dri/renderD128' },
+      { engine: engines.engineFor('nvenc-cuda'), device: null },
+      { engine: engines.engineFor('nvenc'), device: null }
+    ]
+  })
+  assert.equal(out.available, false)
+  assert.match(out.reason, /Error parsing global options/)
+  const nv = out.tried.find((t) => t.engine === 'nvenc')
+  assert.equal(nv.label, 'NVIDIA graphics')
+  assert.match(nv.plain, /driver 610 or newer/)
+  assert.match(nv.reason, /minimum required Nvidia driver/)
+  assert.equal(out.tried[0].plain, null, 'a cause with no plain sentence carries none')
+})
+
+test('THE SHIPPED FFMPEG IS THE 8.1 RELEASE LINE, which NVIDIA driver 570 satisfies', () => {
+  // BtbN builds master against encoding interface 13.1 (driver 610+) and the release
+  // lines up to 8.1 against 13.0 (driver 570+). Mint and Ubuntu offer 580 today.
+  const fs = require('fs')
+  const script = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'scripts', 'fetch-ffmpeg.sh'), 'utf8')
+  assert.ok(!script.includes('ffmpeg-master-latest'), 'never the development tip')
+  assert.match(script, /FF_LINE="\$\{FF_LINE:-8\.1\}"/)
+  assert.match(script, /ffmpeg-n\$\{FF_LINE\}-latest-linux64-lgpl-\$\{FF_LINE\}\.tar\.xz/)
+  assert.match(script, /ffmpeg-n\$\{FF_LINE\}-latest-win64-lgpl-\$\{FF_LINE\}\.zip/)
+})

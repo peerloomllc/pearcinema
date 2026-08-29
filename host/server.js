@@ -1265,7 +1265,10 @@ class PearCinemaHost {
       available: this.transcode.available,
       engine: this.transcode.engine || undefined,
       device: this.transcode.device || undefined,
-      reason: this.transcode.reason || undefined
+      reason: this.transcode.reason || undefined,
+      // Every engine's own words when none worked: the field report of 2026-08-29 had
+      // only the first (VAAPI on an NVIDIA box) and could not be diagnosed from it.
+      tried: this.transcode.available ? undefined : (this.transcode.tried || []).map((t) => `${t.engine}: ${t.plain || t.reason}`)
     })
     return this.transcode
   }

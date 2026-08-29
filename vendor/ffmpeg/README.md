@@ -25,3 +25,15 @@ friends) are never invoked - remux is stream copy plus the built-in AAC
 encoder, and transcode is hardware only (VAAPI, VideoToolbox). Shipping LGPL
 builds keeps the app's MIT licensing posture clean instead of leaning on the
 separate-process argument. Decided 2026-08-14, recorded in DECISIONS.md.
+
+## Which build, and the NVIDIA driver it needs
+
+`desktop/scripts/fetch-ffmpeg.sh` takes BtbN's build of the ffmpeg **8.1 release line**,
+not the master development build. Both are LGPL and both carry every engine PearCinema
+uses (VAAPI, NVENC with `scale_cuda`, Quick Sync, AMF). The one difference that matters
+is the NVIDIA header they are compiled against: master uses encoding interface 13.1,
+which needs NVIDIA driver 610 or newer, and 8.1 uses 13.0, which driver 570 satisfies.
+Linux Mint and Ubuntu install 580 through their driver managers, so a master build
+fails the engine test on all of them with "The minimum required Nvidia driver for
+nvenc is 610.00 or newer" (field report 2026-08-29). The requirement is fixed at build
+time and cannot be relaxed at run time.

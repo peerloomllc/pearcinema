@@ -305,13 +305,47 @@ function tryEngine ({ ffmpeg = 'ffmpeg', engine, device = null, timeoutMs = 1500
     proc.stderr.on('data', (c) => { if (stderr.length < 4096) stderr += c.toString() })
     proc.on('error', (e) => settle({ available: false, reason: `ffmpeg would not start: ${e.message}` }))
     proc.on('close', (code) => {
-      if (code === 0 && bytes > 0) return settle({ available: true, reason: null })
-      settle({
-        available: false,
-        reason: (stderr.trim().split('\n').pop() || `probe exited ${code} with ${bytes} bytes`).slice(0, 300)
-      })
+      if (code === 0 && bytes > 0) return settle({ available: true, reason: null, plain: null })
+      settle({ available: false, ...explain(stderr, `probe exited ${code} with ${bytes} bytes`) })
     })
   })
+}
+
+// WHAT FFMPEG'S STDERR ACTUALLY MEANS. The last line used to be the reason, and the
+// last line is usually "Nothing was written into output file", which is the symptom.
+// The cause is a few lines up, so the first line matching a known cause wins, and where
+// that cause has a plain sentence a person can act on, it rides beside ffmpeg's words.
+//
+// The NVIDIA one is the field report of 2026-08-29: a Ryzen 5900X with a 4080 on Linux
+// Mint, driver 580, and a shipped ffmpeg built against encoding interface 13.1 that
+// wants driver 610. Nothing on that machine was wrong; the sentence has to say so.
+const CAUSES = [
+  {
+    match: /minimum required Nvidia driver for nvenc is ([\d.]+)/i,
+    plain: (m, all) => {
+      const found = all.match(/Required: ([\d.]+) Found: ([\d.]+)/i)
+      return `This machine's NVIDIA driver is older than this build of the converter needs. It needs driver ${m[1].replace(/\.00$/, '')} or newer` +
+        (found ? ` (the driver offers encoding interface ${found[2]}, the converter was built for ${found[1]}).` : '.')
+    }
+  },
+  { match: /Driver does not support the required nvenc API version/i, plain: () => "This machine's NVIDIA driver is older than this build of the converter needs." },
+  { match: /Cannot load (libcuda|libnvidia-encode|nvcuda|nvEncodeAPI)[^\s]*/i, plain: () => 'No NVIDIA driver is installed, or it is the open-source one, which cannot encode video.' },
+  { match: /No such filter: '?scale_cuda/i, plain: null },
+  { match: /Failed to (initialise|initialize) VAAPI connection|No VA display|vaapi_device/i, plain: null },
+  { match: /Cannot open the device|No such file or directory/i, plain: null },
+  { match: /Failed to set value/i, plain: null }
+]
+
+function explain (stderr, fallback = 'the probe produced no output') {
+  const all = String(stderr || '')
+  const lines = all.trim().split('\n').map((l) => l.trim()).filter(Boolean)
+  for (const cause of CAUSES) {
+    const line = lines.find((l) => cause.match.test(l))
+    if (!line) continue
+    const m = line.match(cause.match)
+    return { reason: line.slice(0, 300), plain: cause.plain ? cause.plain(m, all) : null }
+  }
+  return { reason: (lines[lines.length - 1] || fallback).slice(0, 300), plain: null }
 }
 
 // EVERY CANDIDATE, IN ORDER, UNTIL ONE ACTUALLY WORKS - and what each one said when it
@@ -330,22 +364,26 @@ async function pickEngine ({ ffmpeg = 'ffmpeg', candidates = [], only = null, ti
   const tried = []
   for (const { engine, device } of list) {
     const out = await tryEngine({ ffmpeg, engine, device, timeoutMs })
-    tried.push({ engine: engine.id, device, available: out.available, reason: out.reason })
+    tried.push({ engine: engine.id, label: engine.label, device, available: out.available, reason: out.reason, plain: out.plain || null })
     if (out.available) {
-      return { available: true, engine: engine.id, label: engine.label, device, reason: null, tried }
+      return { available: true, engine: engine.id, label: engine.label, device, reason: null, plain: null, tried }
     }
   }
 
   // Nothing worked, so the reason is the FIRST candidate's - the one the machine was
-  // most likely meant to use - rather than the last thing tried.
+  // most likely meant to use - rather than the last thing tried. Every candidate's own
+  // words are in `tried`, and the dashboard shows all of them: on Linux the first is
+  // VAAPI, whose failure on an NVIDIA-only box is expected and said nothing about why
+  // NVIDIA failed too (2026-08-29).
   const first = tried[0]
   return {
     available: false,
     engine: null,
     device: list[0]?.device || null,
     reason: first ? first.reason : 'no video engine was found to try',
+    plain: first ? first.plain : null,
     tried
   }
 }
 
-module.exports = { ENGINES, VAAPI, NVENC_CUDA, NVENC, VIDEOTOOLBOX, QSV, AMF, engineFor, tryEngine, pickEngine }
+module.exports = { ENGINES, VAAPI, NVENC_CUDA, NVENC, VIDEOTOOLBOX, QSV, AMF, engineFor, tryEngine, pickEngine, explain }
