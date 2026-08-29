@@ -190,17 +190,21 @@ if [ "$PUSH" = "--push" ]; then
   # on top. So `umbrel/` is the source of truth and the store copy is overwritten
   # wholesale - anything stale in the store cannot survive a release.
   #
-  # AND ONE THING THE DONOR DOES THAT THIS MUST NOT. PearTune rewrites the store
-  # listing's `version:` from app.json, on the rule that one number moves across
-  # the App Store, Play and Umbrel. That is not true here and has not been for a
-  # while: the host shipped to 1.0.5 while the phone app sat at 0.1.0, because
-  # this listing versions the HOST. Copying the donor would set the listing to
-  # the app's number and publish a DOWNGRADE - which is the exact failure its own
-  # header warns about, where umbrelOS offers an "update" that goes backwards.
+  # THE VERSION NOW MOVES WITH app.json, as PearTune's does (Tim, 2026-08-28:
+  # "Umbrel should be using same version as desktop and mobile"). release.sh stamps
+  # umbrel/umbrel-app.yml in the same step that bumps app.json and desktop.
   #
-  # So the version comes from umbrel/umbrel-app.yml, where it is already managed,
-  # and this refuses to publish one that goes backwards against what the store is
-  # serving right now.
+  # THIS FILE USED TO ARGUE THE OPPOSITE and the reasoning is kept because it is
+  # what makes the guard below load-bearing rather than decoration: this listing
+  # versioned the HOST, which had shipped to 1.0.5 while the phone app sat at
+  # 0.1.0, so stamping the app's number would have published a DOWNGRADE - and
+  # umbrelOS reads `version:` alone, so a backwards number offers every installed
+  # user an update that takes them back. What changed is that the two lines
+  # converged at 1.1.1, so there is no gap left to fall into.
+  #
+  # THE DOWNGRADE REFUSAL STAYS regardless. It is what makes the new rule safe
+  # instead of merely currently-true: if the two ever diverge again, this refuses
+  # the sync rather than shipping the downgrade.
   #
   # Committing and pushing that repo stays MANUAL - it publishes to real users -
   # and release.sh's step 13c refuses to call the run clean until it is done.

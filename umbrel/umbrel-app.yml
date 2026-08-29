@@ -10,7 +10,7 @@ name: PearCinema
 icon: https://peerloomllc.com/assets/icon-pearcinema.svg
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "1.0.5"
+version: "1.1.1"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -84,7 +84,14 @@ website: https://peerloomllc.com
 dependencies: []
 repo: https://github.com/peerloomllc/pearcinema
 support: https://github.com/peerloomllc/pearcinema/issues
-gallery: []
+# Full URLs, not filenames: umbrelOS renders a community app's gallery entry
+# straight into an <img src> (CommunityAppStoreAppGalleryImage.vue), the same way
+# it does the icon. Filenames only work for OFFICIAL-store apps, where it builds a
+# CDN path from the app id.
+gallery:
+  - https://peerloomllc.com/assets/gallery-pearcinema-1.jpg
+  - https://peerloomllc.com/assets/gallery-pearcinema-2.jpg
+  - https://peerloomllc.com/assets/gallery-pearcinema-3.jpg
 releaseNotes: |-
   Bug Fixes:
   - Fixed a crash that closed the app after a few minutes of watching. While a film played, the app kept hold of far more of it than it needed, until the phone ran out of memory and shut the app down. It now keeps only the part it is about to play, so a film runs as long as you want to watch it.
