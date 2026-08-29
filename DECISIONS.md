@@ -2,6 +2,69 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-29 - A REMUX THAT REBUILDS THE SOUND IS A PLAYLIST ON ANDROID TOO
+Tier: T1 (the transport a verdict takes changes; the wire shape gains one field, `audio`,
+that an older phone ignores). Field report the same day: an x265 MKV on Android, picture
+and no sound.
+
+THE RULE THAT WAS WRONG BY HALF. "A remux collapses to direct play on Android, because
+ExoPlayer opens the container" (2026-08-20) was true of the container and said nothing
+about the sound. host/remux.js hands out `remux` for two different reasons: the box has
+to change, or the soundtrack has to be rebuilt because the client said it cannot decode
+it. The phone read only the mode, took every remux as "play the file as it is" and
+streamed the raw bytes. For an AC-3, E-AC-3 or DTS track on a phone with no such decoder
+- which is any phone whose declaration came off a MediaCodecList without a Dolby licence,
+the TCL included - that is ExoPlayer playing the picture and SELECTING NO AUDIO TRACK,
+with no error raised. x265 releases carry Dolby sound more often than not.
+
+THE FIX IS TWO LINES OF POLICY. `decideFor` now returns `audio` beside `mode` and
+`reason`, and `wantsPlaylist(mode, platform, audio)` sends a remux whose audio is not
+`copy` as HLS on every platform: the picture copied per segment, the sound rebuilt to
+AAC, the same path an iPhone has taken for 2,482 titles since 2026-08-20. A remux that
+only changes the container is still direct play on Android. A host from before this
+change sends no `audio` and the phone behaves exactly as before, which is the wrong
+behaviour but not a new one.
+
+THE NET FOR THE OTHER HALF. A decoder list can claim a codec ExoPlayer then cannot use
+(DTS-HD arrives from ffprobe as the same `dts` a core-DTS decoder would satisfy), and
+there is no player error to retry from. expo-video's own `audioTrack` cannot tell either:
+on Android it reports a track only when a language preference or an override names one,
+never ExoPlayer's real pick. So `modules/decoder-probe` gained `audioSelection(player)`,
+which reads ExoPlayer's track groups on the main thread and reports tracks, selected and
+supported. The shell asks once the film is ready and again when the track list changes;
+audio tracks present and none selected goes to the page as `player:silent`, the page
+re-asks stream.url with `deviceRefusedAudio: true`, the worklet remembers the codec per
+item exactly as it does for video, and the host decides again - now a rebuild. A film
+with no audio track at all is silent by design and never flagged.
+
+MEASURED ON THE PIXEL_9 EMULATOR, the first time this app ran on one: a generated
+H.264 + AC-3 5.1 MKV played raw raised `player:silent` with `audio/ac3, 6 channels,
+supported: false` and the page went straight to the retry; the AAC control raised
+nothing. Against a real host over that folder, the Dolby film's stream.url came back
+`mode: remux` with an `/hls/` URL and the AAC film `direct`; the playlist played 13
+seconds with no silent event, and segment 0 pulled back through the shim probed as
+`h264` + `aac` stereo.
+
+THEN ON THE TCL, at Tim's ask: the raw AC-3 film raised `player:silent` with the same
+facts on real hardware (its declaration off the probe is `aac, flac, mp3, opus, vorbis`,
+no Dolby), and through the host the Dolby film's stream.url came back `remux` with an
+`/hls/` URL, played 13.5 seconds with no silent event and no error, the host cutting
+copy segments. The AAC film stayed `direct`.
+
+WHAT IS NOT PROVEN: the lying-chip retry end to end against a host, because the emulator
+declares honestly and the systematic fix now covers the honest case. It needs a phone
+that over-declares. In TODO.
+
+DTS-HD WAS RAISED AND DROPPED THE SAME DAY. The worry: host/probe.js reads codec_name
+only, ffprobe says `dts` for DTS-HD MA as for DTS core, so a phone declaring `dts` off a
+core decoder would be handed a DTS-HD file. Checked against media3 1.8.0's own
+MatroskaExtractor: `A_DTS` maps to audio/vnd.dts and only `A_DTS/LOSSLESS` and
+`A_DTS/EXPRESS` to the DTS-HD mime types, and mkvmerge labels every DTS variant `A_DTS`.
+A DTS-HD MA or HRA track carries a DTS core stream, so the core decoder plays those
+files with sound and the current decision is right for them. Splitting the name would
+have rebuilt sound for files the phone plays. The rare lossless-labelled file starts
+silent and the retry above catches it. Tim chose to drop the item, 2026-08-29.
+
 ## 2026-08-28 - THE STORE SCREENSHOTS SHOW REAL FILMS, AND THAT IS THE CHOICE
 Tier: T2 (a published-artwork call with an IP question in it, recorded rather than made
 quietly). Tim's call, put to him with the alternative.

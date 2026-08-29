@@ -20,3 +20,20 @@ android {
     abortOnError false
   }
 }
+
+// audioSelection() reads ExoPlayer's track groups through expo-video's player
+// object. The media3 version MUST match expo-video's own (its build.gradle
+// declares androidxMedia3Version); test/capabilities.test.js checks the two agree.
+dependencies {
+  def video = rootProject.findProject(':expo-video')
+  if (video != null) {
+    compileOnly video
+  } else {
+    // Autolinking consumed expo-video as its prebuilt AAR (node_modules/expo-video/
+    // local-maven-repo), so there is no Gradle project to name; the classes are in
+    // the app either way and this only needs them at compile time.
+    compileOnly "host.exp.exponent:expo.modules.video:3.0.16"
+  }
+  compileOnly "androidx.media3:media3-common:1.8.0"
+  compileOnly "androidx.media3:media3-exoplayer:1.8.0"
+}

@@ -1050,6 +1050,8 @@ export default function App () {
   const [linkUp, setLinkUp] = useState(false)
 
   const retried = useRef(new Set())
+  // Its own set: a film may need the sound corrected and, later, the picture.
+  const silenced = useRef(new Set())
   // What sits on either side of the playing episode, kept here because the
   // native player's Previous/Next buttons only hand back an intent - the UI
   // owns which episode that intent lands on.
@@ -1292,6 +1294,22 @@ export default function App () {
           if (retry?.needsRelayConsent) setErr('This one needs converting, and this library has not been cleared for the relay yet.')
           else if (mode === 'transcode') await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
           else setErr('This one failed to play on this device, and the host cannot convert it.')
+        } catch (e) { setErr(e.message) }
+      }),
+      // THE SAME NET FOR SOUND. The shell saw a film playing with audio tracks and none
+      // of them selected, which is how ExoPlayer answers a soundtrack it cannot decode -
+      // no error, just silence. Re-ask with the honest declaration; the host rebuilds the
+      // sound and the same film restarts where it was, now audible. Once per item.
+      on('player:silent', async (d) => {
+        if (!d?.itemId) return
+        if (silenced.current.has(d.itemId)) return
+        silenced.current.add(d.itemId)
+        try {
+          const retry = await call('stream.url', { itemId: d.itemId, deviceRefusedAudio: true })
+          const { url, mode } = retry
+          if (retry?.needsRelayConsent) setErr('This one needs its sound converting, and this library has not been cleared for the relay yet.')
+          else if (mode === 'transcode' || mode === 'remux') await call('shell.play', { itemId: d.itemId, url, title: d.title || '', startMs: d.positionMs || 0 })
+          else setErr('This one plays without sound on this device, and the host cannot convert it.')
         } catch (e) { setErr(e.message) }
       })
     ]

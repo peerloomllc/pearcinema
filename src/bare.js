@@ -368,6 +368,13 @@ let capabilities = caps.staticFor(PLATFORM)
 // process retries direct play once and re-learns in one failed attempt.
 const refusedVideo = new Map()
 
+// The same for sound, per item. ExoPlayer raises no error for a soundtrack it
+// cannot decode - it plays the picture with no audio track selected - so this
+// one is fed by the shell noticing that, not by a player error. Consulted in the
+// same capsFor, for the same reason: the retry's playlist and segments must
+// describe the device the way the retry's stream.url did.
+const refusedAudio = new Map()
+
 // The image subtitle track the viewer chose for an item, to be BURNED into the
 // picture by the host - per item, set and cleared by stream.url. Rides the
 // capability declaration for the same reason data saver does: one seam covers
@@ -379,7 +386,9 @@ const DATA_SAVER_KBPS = 2500
 
 function capsFor (itemId) {
   const bad = refusedVideo.get(itemId)
-  const base = bad ? caps.without(capabilities, bad) : capabilities
+  let base = bad ? caps.without(capabilities, bad) : capabilities
+  const badAudio = refusedAudio.get(itemId)
+  if (badAudio) base = caps.withoutAudio(base, badAudio)
   const settings = readSettings()
   let out = settings.dataSaver ? { ...base, maxKbps: DATA_SAVER_KBPS } : base
   // The 35mm skin's tone rides the declaration like data saver does: a fact
@@ -2078,7 +2087,7 @@ const methods = {
   // this item's video codec, so the device re-describes itself without it and
   // the host decides again - usually landing on transcode. The client still
   // never ASKS for a mode; it only tells the truth about itself.
-  'stream.url': async ({ itemId, deviceRefusedVideo = false, burnSubtitleId = null }) => {
+  'stream.url': async ({ itemId, deviceRefusedVideo = false, deviceRefusedAudio = false, burnSubtitleId = null }) => {
     // A DEMO FILM NEEDS NOTHING: no host, no capability negotiation, no relay consent
     // and no network of any kind. It is H.264 in MP4 already - which is a constraint on
     // what may ship in the demo rather than a lucky fact - so it plays directly, from
@@ -2100,7 +2109,7 @@ const methods = {
       throw new Error('this library is no longer shared with you')
     }
 
-    if (!deviceRefusedVideo && !burnSubtitleId && cache.has(String(itemId))) {
+    if (!deviceRefusedVideo && !deviceRefusedAudio && !burnSubtitleId && cache.has(String(itemId))) {
       burnSub.delete(itemId)
       return { url: shim.urlFor(itemId), mode: 'download' }
     }
@@ -2138,12 +2147,17 @@ const methods = {
       }
     }
 
-    if (deviceRefusedVideo) {
+    if (deviceRefusedVideo || deviceRefusedAudio) {
       const item = await c.get({ id: itemId }).catch(() => null)
-      const bad = item?.media?.videoCodec
-      if (bad) {
-        refusedVideo.set(itemId, bad)
-        log('stream:device-refused', { itemId, videoCodec: bad })
+      const bad = deviceRefusedVideo ? item?.media?.videoCodec : null
+      if (bad) refusedVideo.set(itemId, bad)
+      // A film whose soundtrack the host never identified cannot be corrected
+      // this way - there is no codec to take back - so the log says so and the
+      // host is asked again with the declaration it already had.
+      const badAudio = deviceRefusedAudio ? item?.media?.audioCodec : null
+      if (badAudio) refusedAudio.set(itemId, badAudio)
+      if (bad || badAudio || deviceRefusedAudio) {
+        log('stream:device-refused', { itemId, videoCodec: bad || null, audioCodec: badAudio || null, unknownAudio: deviceRefusedAudio && !badAudio })
       }
     }
     // Logged at the moment it is DECIDED, not asserted from settings: this is the line a
@@ -2154,8 +2168,20 @@ const methods = {
     const verdict = await c.request('media.decide', { itemId, capabilities: sending }).catch(() => null)
     // WHICH TRANSPORT THIS PLAYER TAKES, decided in src/capabilities.js beside what it can
     // open, because it is the same kind of fact and the two have to agree. A transcode is
-    // always a playlist; a remux is one on iOS and direct play on Android.
-    if (caps.wantsPlaylist(verdict?.mode, PLATFORM)) {
+    // always a playlist; a remux is one on iOS, and on Android too when it rebuilds the
+    // sound - direct play of that file is a film in silence.
+    //
+    // A HOST FROM BEFORE 2026-08-29 answers a remux without saying what it did to the
+    // sound. The phone then applies the host's own rule to the file's facts: a
+    // soundtrack this device never declared is one that host is rebuilding. This is
+    // what lets an app update alone fix the silent film, without waiting on the host.
+    let audioVerdict = verdict?.audio
+    if (verdict?.mode === 'remux' && audioVerdict === undefined) {
+      const item = await c.get({ id: itemId }).catch(() => null)
+      audioVerdict = caps.soundRebuilt(item?.media, sending) ? 'aac' : 'copy'
+      log('stream:audio-inferred', { itemId, audio: audioVerdict, audioCodec: item?.media?.audioCodec || null })
+    }
+    if (caps.wantsPlaylist(verdict?.mode, PLATFORM, audioVerdict)) {
       return { url: `http://127.0.0.1:${shimPort}/hls/${itemId}.m3u8`, mode: verdict.mode }
     }
     return { url: shim.urlFor(itemId), mode: verdict?.mode || 'direct' }

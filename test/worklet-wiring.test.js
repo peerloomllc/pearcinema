@@ -87,3 +87,21 @@ test('THE REVOKE GATE SITS IN FRONT OF THE CACHE, not behind it', () => {
   assert.ok(gate > 0, 'stream.url must refuse a revoked library')
   assert.ok(gate < cacheHit, 'and refuse it BEFORE answering from the cache')
 })
+
+test('A SILENT FILM IS RETRIED WITHOUT ITS SOUND CODEC, and the whole session describes the device that way', () => {
+  // Field report 2026-08-29: an x265 MKV on Android, picture and no sound. ExoPlayer
+  // raises no error for a soundtrack it cannot decode, so the shell's player:silent is
+  // the signal and stream.url takes deviceRefusedAudio the way it took the video one.
+  const body = method('stream.url')
+  assert.match(body, /deviceRefusedAudio = false/, 'stream.url takes the audio refusal')
+  assert.match(body, /refusedAudio\.set\(itemId, badAudio\)/, 'and remembers the codec per item')
+  assert.match(body, /!deviceRefusedAudio && !burnSubtitleId && cache\.has/, 'a downloaded copy does not swallow the retry')
+  assert.match(body, /wantsPlaylist\(verdict\?\.mode, PLATFORM, audioVerdict\)/, 'the transport sees the audio verdict')
+  assert.match(body, /audioVerdict === undefined/, 'and an older host that sends none has it inferred')
+  assert.match(body, /caps\.soundRebuilt\(item\?\.media, sending\)/, 'from the file and this device, by the host\'s own rule')
+  const at = src.indexOf('function capsFor (itemId)')
+  assert.ok(at > 0)
+  const capsFor = src.slice(at, at + 900)
+  assert.match(capsFor, /refusedAudio\.get\(itemId\)/, 'the playlist and segment calls describe the device the same way')
+  assert.match(capsFor, /caps\.withoutAudio\(/)
+})

@@ -152,6 +152,16 @@ const VIDEO_ALIAS = {
   av01: 'av1'
 }
 
+// The sound half, the same way: ffprobe says `dca` for DTS and `mlp` for TrueHD,
+// Jellyfin spells Dolby with the hyphen. Mirrors host/remux.js's ALIAS entries.
+const AUDIO_ALIAS = {
+  mp4a: 'aac',
+  'ac-3': 'ac3',
+  'ec-3': 'eac3',
+  dca: 'dts',
+  mlp: 'truehd'
+}
+
 // The retry declaration: this device just proved, decoder error in hand, that
 // its claim to one video codec was a lie - describe it without that codec so
 // the host decides again honestly. Never mutates the input.
@@ -162,6 +172,31 @@ function without (caps, videoCodec) {
     ...caps,
     videoCodecs: (caps.videoCodecs || []).filter((c) => c !== bad)
   }
+}
+
+// The same correction for sound. ExoPlayer does not ERROR on a soundtrack it has no
+// decoder for: it plays the picture and selects no audio track at all, so the signal
+// is the shell noticing that a film with audio tracks is playing with none chosen.
+// The device then describes itself without that codec and the host rebuilds the sound.
+function withoutAudio (caps, audioCodec) {
+  const norm = String(audioCodec || '').toLowerCase().replace(/\s+/g, '')
+  const bad = AUDIO_ALIAS[norm] || norm
+  return {
+    ...caps,
+    audioCodecs: (caps.audioCodecs || []).filter((c) => c !== bad)
+  }
+}
+
+// WOULD THE HOST HAVE TO REBUILD THIS FILE'S SOUND for a device described by `caps`?
+// The phone's own reading of the rule host/remux.js applies, for a host from before
+// 2026-08-29 that answers a remux verdict without saying what it did to the sound. A
+// file whose soundtrack this device never declared is one the host rebuilds; an
+// unknown codec is left alone, as decide() leaves it alone.
+function soundRebuilt (media, caps) {
+  const norm = String(media?.audioCodec || '').toLowerCase().replace(/\s+/g, '')
+  if (!norm) return false
+  const a = AUDIO_ALIAS[norm] || norm
+  return !(caps?.audioCodecs || []).includes(a)
 }
 
 // HOW A CONVERTED FILM REACHES THIS PLAYER, which is a fact about the player and belongs
@@ -177,9 +212,18 @@ function without (caps, videoCodec) {
 // length-less stream with no byte ranges is exactly what AVFoundation will not take. So
 // on iOS the repackage travels as HLS - Apple's own format, cut by the host without
 // re-encoding (`plan.engine === 'copy'`, the same path a Roku gets).
-function wantsPlaylist (mode, platform) {
+//
+// EXCEPT WHEN THE REMUX REBUILDS THE SOUND. "ExoPlayer opens the container" was only
+// ever true of the container: a verdict of remux with `audio` other than copy means
+// the host judged the soundtrack unplayable here, and playing the raw file anyway is
+// a film in silence - ExoPlayer selects no audio track and raises no error. So that
+// remux is a playlist on every platform, picture copied and sound rebuilt per segment.
+// Field report 2026-08-29: an x265 MKV with Dolby sound, silent on Android.
+function wantsPlaylist (mode, platform, audio = null) {
   if (mode === 'transcode') return true
-  return mode === 'remux' && String(platform || '').toLowerCase() === 'ios'
+  if (mode !== 'remux') return false
+  if (audio && String(audio).toLowerCase() !== 'copy') return true
+  return String(platform || '').toLowerCase() === 'ios'
 }
 
-module.exports = { fromProbe, without, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }
+module.exports = { fromProbe, without, withoutAudio, soundRebuilt, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }

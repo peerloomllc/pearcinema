@@ -1226,3 +1226,17 @@ test('THE VERSION IN THE APP IS app.json\'s, not a literal somebody has to remem
     'the built page fell back to the dev version, so the bundler never defined __APP_VERSION__'
   )
 })
+
+test('THE SHELL NOTICES A FILM PLAYING WITH NO SOUND TRACK, and the page retries it', () => {
+  // Field report 2026-08-29. ExoPlayer plays the picture and selects no audio track for
+  // a soundtrack it cannot decode, with no error to catch, so the shell asks the native
+  // side what was selected and the page re-asks the host without that codec.
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.tsx'), 'utf8')
+  assert.match(shell, /audioSelection\(player\)/, 'the shell reads what ExoPlayer chose')
+  assert.match(shell, /sel\.tracks === 0 \|\| sel\.selected/, 'a film with no audio track at all is not silent, it is silent by design')
+  assert.match(shell, /addListener\('availableAudioTracksChange'/, 'and looks again when the track list changes')
+  assert.match(shell, /__pearEvent\('player:silent'/, 'the page hears it as player:silent')
+  assert.ok(PAGE.includes('player:silent'), 'the built page listens for it')
+  assert.ok(PAGE.includes('deviceRefusedAudio'), 'and asks stream.url again with the audio refusal')
+  assert.ok(PAGE.includes('This one plays without sound on this device, and the host cannot convert it.'))
+})

@@ -27,7 +27,7 @@ import * as Clipboard from 'expo-clipboard'
 import * as SystemUI from 'expo-system-ui'
 import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
-import { probe as probeDecoders } from '../modules/decoder-probe'
+import { probe as probeDecoders, audioSelection } from '../modules/decoder-probe'
 import * as CastRemote from '../modules/cast-remote'
 
 import { DEMO_MANIFEST, DEMO_FILES, DEMO_POSTERS, DEMO_SUBTITLES } from '../shell/demo-assets'
@@ -608,6 +608,30 @@ export default function App () {
       })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:error', ${payload})`)
     })
+    // THE NET FOR A SILENT FILM. ExoPlayer raises no error for a soundtrack it
+    // has no decoder for: it plays the picture with no audio track selected. So
+    // once the film is ready, and again whenever its track list changes, ask the
+    // native side what was chosen; tracks present and none selected goes to the
+    // UI as player:silent, which re-asks the host without that codec. Once per
+    // play, and never for a film that genuinely has no audio track.
+    const silent = { sent: false }
+    const checkSound = async () => {
+      const p = playingRef.current
+      if (!p || silent.sent) return
+      const sel = await audioSelection(player)
+      if (!sel || sel.tracks === 0 || sel.selected) return
+      if (silent.sent || playingRef.current?.itemId !== p.itemId) return
+      silent.sent = true
+      const payload = JSON.stringify({
+        itemId: p.itemId,
+        title: p.title,
+        positionMs: Math.round(lastPos.current * 1000),
+        audio: sel.formats.map((f) => ({ mime: f.mime, codecs: f.codecs, channels: f.channels, supported: f.supported }))
+      })
+      feedWebView(`window.__pearEvent && window.__pearEvent('player:silent', ${payload})`)
+    }
+    const readySub = player.addListener('statusChange', (s: any) => { if (s?.status === 'readyToPlay') checkSound() })
+    const tracksSub = player.addListener('availableAudioTracksChange', () => { checkSound() })
     // THE FILM RAN OUT. Only ever the card, never the next episode straight
     // away - a cut from the last frame of one to the first of the next, with
     // no way to stop it, is the thing everybody turns autoplay off to escape.
@@ -628,7 +652,7 @@ export default function App () {
       const payload = JSON.stringify({ itemId: p.itemId, positionMs: Math.round(lastPos.current * 1000) })
       feedWebView(`window.__pearEvent && window.__pearEvent('player:tick', ${payload})`)
     }, 15000)
-    return () => { sub.remove(); playSub.remove(); errSub.remove(); endSub.remove(); clearInterval(tick) }
+    return () => { sub.remove(); playSub.remove(); errSub.remove(); readySub.remove(); tracksSub.remove(); endSub.remove(); clearInterval(tick) }
   }, [playing])
 
   // The countdown, one second at a time. It exists only while `left` is a

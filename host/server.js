@@ -943,7 +943,11 @@ class PearCinemaHost {
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
     const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
-    return { mode: verdict.mode, reason: verdict.reason }
+    // `audio` travels with the mode because the phone needs it to pick a transport:
+    // a remux that only changes the container is direct play on Android, a remux
+    // that REBUILDS THE SOUND is not - the raw file would play in silence. Field
+    // report 2026-08-29, an x265 MKV with no sound on Android, was exactly that.
+    return { mode: verdict.mode, reason: verdict.reason, audio: verdict.audio || null }
   }
 
   // ONE PLAN, TWO ENGINES, and the whole reason the segment path stopped being

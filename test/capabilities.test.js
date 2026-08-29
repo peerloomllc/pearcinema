@@ -217,3 +217,126 @@ test('a repackaged film reaches an iPhone as a playlist, and an Android as itsel
   assert.strictEqual(caps.wantsPlaylist('direct', 'android'), false)
   assert.strictEqual(caps.wantsPlaylist(undefined, 'ios'), false)
 })
+
+// FIELD REPORT 2026-08-29: an x265 MKV plays on Android with no sound. Two holes, both
+// closed here. The first was systematic: a remux verdict collapsed to direct play on
+// Android whatever its reason, and "the soundtrack has to be rebuilt" is a reason the
+// raw file cannot answer - ExoPlayer plays the picture and selects no audio track. The
+// second is the lying chip, sound edition: a decoder list that claims a codec ExoPlayer
+// then cannot use, which raises no error to retry from.
+
+test('A REMUX THAT REBUILDS THE SOUND IS A PLAYLIST ON ANDROID TOO', () => {
+  // A phone whose chip proved Main 10 HEVC and, like the TCL, carries no Dolby licence.
+  const android = caps.staticFor('android')
+  const hevcPhone = { ...android, videoCodecs: [...android.videoCodecs, 'hevc'] }
+  const x265 = { container: 'matroska', videoCodec: 'hevc', audioCodec: 'eac3', audioChannels: 6 }
+  const v = decide(x265, hevcPhone, { transcode: true })
+  assert.strictEqual(v.mode, 'remux', 'the picture is fine as it is')
+  assert.strictEqual(v.audio, 'aac', 'and the sound is rebuilt')
+  assert.strictEqual(caps.wantsPlaylist(v.mode, 'android', v.audio), true, 'so the phone must not play the raw file')
+
+  // A remux that only changes the container is still direct play on Android - ExoPlayer
+  // opens the container, which is why the phone declared it.
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android', 'copy'), false)
+  // A host from before this change sends no audio verdict at all: unchanged behaviour.
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android'), false)
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android', null), false)
+  // iOS was already a playlist for every remux, and stays one.
+  assert.strictEqual(caps.wantsPlaylist('remux', 'ios', 'copy'), true)
+  assert.strictEqual(caps.wantsPlaylist('remux', 'ios', 'aac'), true)
+  // The audio verdict never turns a direct play into a playlist.
+  assert.strictEqual(caps.wantsPlaylist('direct', 'android', 'aac'), false)
+})
+
+test('and the host TELLS the phone the audio verdict, which is what the transport turns on', async () => {
+  const fs = require('node:fs/promises')
+  const os = require('node:os')
+  const path = require('node:path')
+  const { PearCinemaHost } = require('../host/server')
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pearcinema-decide-'))
+  const host = new PearCinemaHost({ dataDir: dir, libraryName: 'Decide', log: () => {} })
+  const dolby = { id: 'dolby', type: 'movie', title: 'Dolby', media: { container: 'matroska', videoCodec: 'h264', audioCodec: 'ac3', audioChannels: 6 } }
+  const plain = { id: 'plain', type: 'movie', title: 'Plain', media: { container: 'matroska', videoCodec: 'h264', audioCodec: 'aac', audioChannels: 2 } }
+  host.adapter = { get: async ({ id }) => [dolby, plain].find((r) => r.id === id) || null }
+  const android = caps.staticFor('android')
+
+  const v = await host.decideFor({ itemId: 'dolby', capabilities: android })
+  assert.strictEqual(v.mode, 'remux')
+  assert.strictEqual(v.audio, 'aac', 'the reply carries the audio verdict')
+  const direct = await host.decideFor({ itemId: 'plain', capabilities: android })
+  assert.strictEqual(direct.mode, 'direct')
+  assert.strictEqual(direct.audio, null, 'and says so plainly when nothing is rebuilt')
+  await host.close().catch(() => {})
+  await fs.rm(dir, { recursive: true, force: true })
+})
+
+test('withoutAudio() removes the codec the player played in silence, aliases included', () => {
+  const declared = { ...caps.staticFor('android'), audioCodecs: ['aac', 'mp3', 'ac3', 'eac3', 'dts', 'opus'] }
+  assert.ok(!caps.withoutAudio(declared, 'dts').audioCodecs.includes('dts'))
+  assert.ok(!caps.withoutAudio(declared, 'dca').audioCodecs.includes('dts'), "ffprobe's name for DTS")
+  assert.ok(!caps.withoutAudio(declared, 'ac-3').audioCodecs.includes('ac3'), "Jellyfin's spelling")
+  assert.ok(!caps.withoutAudio(declared, 'ec-3').audioCodecs.includes('eac3'))
+  assert.deepStrictEqual(caps.withoutAudio(declared, 'dts').videoCodecs, declared.videoCodecs, 'the picture half is untouched')
+  assert.ok(declared.audioCodecs.includes('dts'), 'never mutates the input')
+  assert.deepStrictEqual(caps.withoutAudio(declared, '').audioCodecs, declared.audioCodecs, 'no codec named, nothing removed')
+})
+
+test('the lying chip, sound edition: the retry moves a DTS film to a rebuilt soundtrack', () => {
+  // A MediaCodecList that lists a DTS decoder ExoPlayer then cannot use for this file
+  // (a Matroska track labelled A_DTS/LOSSLESS wants the DTS-HD decoder, not the core one).
+  const liar = { ...caps.staticFor('android'), audioCodecs: [...caps.STATIC.audioCodecs, 'dts'] }
+  const film = { container: 'matroska', videoCodec: 'h264', audioCodec: 'dts', audioChannels: 6 }
+  assert.strictEqual(decide(film, liar).mode, 'direct', 'the declaration says it plays as it is')
+  // The shell saw audio tracks with none selected; the device re-describes itself.
+  const honest = caps.withoutAudio(liar, film.audioCodec)
+  const v = decide(film, honest)
+  assert.strictEqual(v.mode, 'remux')
+  assert.strictEqual(v.audio, 'aac')
+  assert.strictEqual(caps.wantsPlaylist(v.mode, 'android', v.audio), true)
+})
+
+test('the decoder probe module compiles against the media3 expo-video ships', () => {
+  // audioSelection() reads ExoPlayer's track groups through expo-video's player object,
+  // so the two must agree on media3 - a drift is a class-not-found at launch, on the
+  // real phone, not in Node.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const ours = fs.readFileSync(path.join(__dirname, '..', 'modules', 'decoder-probe', 'android', 'build.gradle'), 'utf8')
+  const theirs = fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'expo-video', 'android', 'build.gradle'), 'utf8')
+  const shipped = theirs.match(/androidxMedia3Version = "([^"]+)"/)?.[1]
+  assert.ok(shipped, 'expo-video names its media3 version')
+  const pinned = [...ours.matchAll(/androidx\.media3:media3-[a-z]+:([0-9.]+)/g)].map((m) => m[1])
+  assert.ok(pinned.length >= 1, 'the module pins media3')
+  for (const v of pinned) assert.strictEqual(v, shipped, 'the module pins the media3 expo-video ships')
+  // Autolinking consumes expo-video as a prebuilt AAR here, so there is no `:expo-video`
+  // Gradle project; the module takes it when it exists and the AAR coordinate when not.
+  assert.match(ours, /findProject\(':expo-video'\)/, 'takes the expo-video project when autolinking makes one')
+  const videoVersion = fs.readFileSync(path.join(__dirname, '..', 'node_modules', 'expo-video', 'package.json'), 'utf8').match(/"version":\s*"([^"]+)"/)[1]
+  assert.ok(ours.includes(`host.exp.exponent:expo.modules.video:${videoVersion}`), 'and pins the prebuilt AAR to the expo-video installed')
+
+  const kt = fs.readFileSync(path.join(__dirname, '..', 'modules', 'decoder-probe', 'android', 'src', 'main', 'java', 'expo', 'modules', 'decoderprobe', 'DecoderProbeModule.kt'), 'utf8')
+  assert.match(kt, /AsyncFunction\("audioSelection"\)/)
+  assert.match(kt, /isTrackSelected\(i\)/, 'reads what ExoPlayer chose, not what expo-video guesses')
+  assert.match(kt, /runOnQueue\(Queues\.MAIN\)/, 'on the player thread, or ExoPlayer throws')
+  const ts = fs.readFileSync(path.join(__dirname, '..', 'modules', 'decoder-probe', 'index.ts'), 'utf8')
+  assert.match(ts, /export async function audioSelection/)
+  assert.match(ts, /return null/, 'absent module reads as "cannot tell", never as silent')
+})
+
+test('AGAINST AN OLDER HOST the phone works out the sound verdict itself', () => {
+  // The field report's phone: GrapheneOS, no Dolby decoder, an x265 MKV with E-AC-3 5.1.
+  // Its host may be updated weeks after its app is. That host answers `remux` with no
+  // `audio` at all, so the phone applies the host's own rule to the file's facts.
+  const graphene = caps.staticFor('android')
+  const film = { container: 'matroska', videoCodec: 'hevc', audioCodec: 'eac3', audioChannels: 6 }
+  assert.strictEqual(caps.soundRebuilt(film, graphene), true, 'E-AC-3 was never declared, so the host is rebuilding it')
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: 'ec-3' }, graphene), true, "Jellyfin's spelling")
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: 'aac' }, graphene), false)
+  assert.strictEqual(caps.soundRebuilt({ ...film, audioCodec: null }, graphene), false, 'an unknown soundtrack is left alone, as decide() leaves it')
+  assert.strictEqual(caps.soundRebuilt(null, graphene), false)
+  // And the two sides agree: what the phone infers is what the host would have said.
+  const v = decide(film, { ...graphene, videoCodecs: [...graphene.videoCodecs, 'hevc'] })
+  assert.strictEqual(v.mode, 'remux')
+  assert.strictEqual(v.audio, 'aac')
+  assert.strictEqual(caps.wantsPlaylist('remux', 'android', caps.soundRebuilt(film, graphene) ? 'aac' : 'copy'), true)
+})
