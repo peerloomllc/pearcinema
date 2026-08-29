@@ -158,6 +158,10 @@ if you like. Two kinds are found on your own network with no configuration: **Ro
 **DLNA televisions** (most Samsungs, LGs and Sonys). Anything else your server cannot find
 by itself can come through **Home Assistant**, if you run it.
 
+A Roku also needs the free **Media Assistant** channel from the Roku channel store, which is
+what lets it be told to play. Until it is installed the Roku is found but not offered, and
+both the dashboard's Casting page and the phone's television picker name it and say so.
+
 Each television is asked what it plays and what it takes for sound, and remembered, so a
 film that suits it goes untouched rather than being converted for a device that never
 needed it.

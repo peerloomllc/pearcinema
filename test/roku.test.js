@@ -581,3 +581,16 @@ test('and a Roku keeps its Home Assistant row, because that one works', async ()
   const rows = await new CastTargets({ configured: fakeHa(), discovered: [found] }).list()
   assert.deepEqual(rows.map((r) => r.entityId), ['media_player.living_room'])
 })
+
+test('CastTargets unions the Rokus waiting on their channel across every discovery backend', () => {
+  const targets = new CastTargets({
+    configured: null,
+    discovered: [
+      { needsChannel: [{ host: '10.0.0.7', name: 'Living Room' }] },
+      { needsChannel: [{ host: '10.0.0.9', name: 'Bedroom' }] },
+      { enabled: true } // DLNA has no such list
+    ]
+  })
+  assert.deepEqual(targets.needsChannel.map((d) => d.name), ['Living Room', 'Bedroom'])
+  assert.deepEqual(new CastTargets({ configured: null, discovered: [] }).needsChannel, [])
+})

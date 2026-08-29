@@ -105,3 +105,9 @@ test('A SILENT FILM IS RETRIED WITHOUT ITS SOUND CODEC, and the whole session de
   assert.match(capsFor, /refusedAudio\.get\(itemId\)/, 'the playlist and segment calls describe the device the same way')
   assert.match(capsFor, /caps\.withoutAudio\(/)
 })
+
+test('THE PICKER LEARNS WHICH ROKU IS WAITING ON ITS CHANNEL, from every library', () => {
+  const body = method('cast.list')
+  assert.match(body, /needsChannel: \[\]/, 'the merged answer has the list')
+  assert.match(body, /out\.needsChannel\.push\(\{ \.\.\.n, libraryId: h\.libraryId/, 'each Roku is named with the library that found it')
+})

@@ -1240,3 +1240,19 @@ test('THE SHELL NOTICES A FILM PLAYING WITH NO SOUND TRACK, and the page retries
   assert.ok(PAGE.includes('deviceRefusedAudio'), 'and asks stream.url again with the audio refusal')
   assert.ok(PAGE.includes('This one plays without sound on this device, and the host cannot convert it.'))
 })
+
+test('THE TELEVISION PICKER NAMES A ROKU WAITING ON ITS CHANNEL, and says which channel', async (t) => {
+  // A support email, 2026-08-29: a Roku on the network, nothing in the picker, no clue.
+  // The dashboard had always said "install Media Assistant"; the phone now does too.
+  const h = await open({
+    'library.get': LIBRARY[0],
+    'cast.list': { enabled: true, targets: [], active: [], needsChannel: [{ host: '10.0.0.7', name: 'Living Room', libraryId: 'lib-1' }] }
+  })
+  t.after(() => h.dom.window.close())
+  h.win.__pearEvent('player:cast', { itemId: 'metropolis', title: 'Metropolis', positionMs: 0 })
+  await h.settle(200)
+  const text = h.text()
+  assert.ok(text.includes('Found Living Room, but it has no Media Assistant channel yet.'), 'names the Roku and the channel')
+  assert.ok(text.includes('Install the free Media Assistant channel from the Roku channel store'), 'and says where to get it')
+  assert.ok(!text.includes('No TVs were found'), 'which is not the same as finding nothing')
+})

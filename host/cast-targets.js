@@ -67,6 +67,14 @@ class CastTargets {
   // found television was whatever answered this minute, so there was nowhere to write
   // the choice down. host/televisions.js is that somewhere, and a person with three
   // Rokus can now stop two of them being offered.
+  // ROKUS FOUND WITHOUT THE ONE FREE CHANNEL that lets them be told to play. Each
+  // discovery backend keeps its own list (host/roku.js); this is the union, so the
+  // wire and the dashboard read one place. Nobody could guess the channel's name
+  // from a Roku missing from a picker, which is why it travels to the phone at all.
+  get needsChannel () {
+    return this.discovered.flatMap((b) => (Array.isArray(b?.needsChannel) ? b.needsChannel : []))
+  }
+
   isHidden (entityId) {
     return isDiscovered(entityId)
       ? !!this._discoveredFor(entityId)?.isHidden?.(entityId)
