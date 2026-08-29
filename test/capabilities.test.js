@@ -283,7 +283,7 @@ test('withoutAudio() removes the codec the player played in silence, aliases inc
 
 test('the lying chip, sound edition: the retry moves a DTS film to a rebuilt soundtrack', () => {
   // A MediaCodecList that lists a DTS decoder ExoPlayer then cannot use for this file
-  // (DTS-HD arrives as the same `dts` from ffprobe and wants a different decoder).
+  // (a Matroska track labelled A_DTS/LOSSLESS wants the DTS-HD decoder, not the core one).
   const liar = { ...caps.staticFor('android'), audioCodecs: [...caps.STATIC.audioCodecs, 'dts'] }
   const film = { container: 'matroska', videoCodec: 'h264', audioCodec: 'dts', audioChannels: 6 }
   assert.strictEqual(decide(film, liar).mode, 'direct', 'the declaration says it plays as it is')
