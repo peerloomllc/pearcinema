@@ -3789,21 +3789,33 @@ test('A DEVICE CAN BE LET IN NARROWLY, chosen before it pairs rather than after'
   const pair = [...doc.querySelectorAll('button')].find(b => /Pair a device/.test(b.textContent))
   pair.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 80))
-  assert.match(text(), /Can see: everything/, 'the pairing dialog says what the device will see')
+  assert.match(text(), /What will this device be able to see\?/, 'the dialog ASKS rather than defaulting')
 
-  // Owners are never filtered, so the line is not offered for one.
+  // THE GATE: no code until the question is answered. A default nobody notices is how a
+  // device meant to be narrowed gets the whole library (Tim, 2026-08-30).
+  const showBtn = () => [...doc.querySelectorAll('button')].find(b => /Show pairing code/.test(b.textContent))
+  assert.ok(showBtn().disabled, 'the code cannot be shown before the question is answered')
+  assert.match(text(), /Choose what they can see first/)
+
+  // Owners are never filtered, so the question is not asked for one - and their code is
+  // available at once.
   const ownerTab = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Owner')
   ownerTab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
-  assert.ok(!/Can see:/.test(text()), 'an owner sees everything by definition')
+  assert.ok(!/What will this device be able to see/.test(text()), 'an owner sees everything by definition')
+  assert.ok(!showBtn().disabled, 'so nothing gates an owner')
   const fullTab = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Full access')
   fullTab.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  // Choose one folder, then open the window.
-  const line = [...doc.querySelectorAll('button')].find(b => /^Can see:/.test(b.textContent.trim()))
-  line.dispatchEvent(new win.Event('click', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 100))
+  // Choosing "only some folders" is not an answer until some are chosen: an empty list
+  // means everything, and handing over the library while somebody believes they narrowed
+  // it is the one outcome this feature exists to prevent.
+  const someBtn = [...doc.querySelectorAll('button')].find(b => /Only some folders/.test(b.textContent))
+  someBtn.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+  assert.ok(showBtn().disabled, 'no code while "some folders" names none')
+  assert.match(text(), /Pick at least one folder/)
   const openRoot = [...doc.querySelectorAll('button')].find(b => /Show what is inside Films/.test(b.getAttribute('aria-label') || ''))
   openRoot.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 100))
@@ -3814,9 +3826,10 @@ test('A DEVICE CAN BE LET IN NARROWLY, chosen before it pairs rather than after'
   const done = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Done')
   done.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
-  assert.match(text(), /Can see: 1 folder/, 'the line carries the choice')
+  assert.match(text(), /1 folder chosen/, 'the line carries the choice')
+  assert.ok(!showBtn().disabled, 'and now the code can be shown')
 
-  const show = [...doc.querySelectorAll('button')].find(b => /Show pairing code/.test(b.textContent))
+  const show = showBtn()
   show.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 160))
   const sent = asked.find(a => a.paths)
