@@ -3875,3 +3875,45 @@ test("THE SHARING WINDOW SHOWS WHAT IS ALREADY CHOSEN, however deep it sits", as
   const rootBox = [...doc.querySelectorAll('input[type=checkbox]')].find(b => /Movies/.test(b.closest('label')?.textContent || ''))
   assert.ok(rootBox && !rootBox.checked, 'while the root above it is not, which is the truth')
 })
+
+test('GIVING SOMEBODY THE WHOLE LIBRARY IS CONFIRMED, and narrowing them is not', async (t) => {
+  // The one choice on these screens with no undo (Tim, 2026-08-30). A prompt in front of
+  // every pairing teaches people to dismiss prompts, so only this one asks.
+  const asked = []
+  const routes = {
+    '/api/sharing/folders': () => ({ roots: [{ root: '/library/Movies', label: 'Movies', holds: 'movies' }], folders: [], supported: true }),
+    '/api/pair/start': (body) => { asked.push(body); return { link: 'pear://x', svg: '<svg/>', ttlMs: 300000 } }
+  }
+  const { dom, doc, win, text } = await open(STATE, routes)
+  t.after(() => dom.window.close())
+
+  const pair = [...doc.querySelectorAll('button')].find(b => /Pair a device/.test(b.textContent))
+  pair.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+  const whole = [...doc.querySelectorAll('button')].find(b => /The whole library/.test(b.textContent))
+  whole.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const show = [...doc.querySelectorAll('button')].find(b => /Show pairing code/.test(b.textContent))
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  assert.match(text(), /Give this device the whole library\?/, 'it asks before handing over everything')
+  assert.equal(asked.length, 0, 'and nothing is opened until the answer')
+
+  // Saying no leaves the panel exactly as it was.
+  const no = [...doc.querySelectorAll('button')].find(b => /^(Cancel|No)$/i.test(b.textContent.trim()))
+  no.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+  assert.equal(asked.length, 0, 'declining opens no window')
+  assert.match(text(), /What will this device be able to see\?/, 'and the question is still there')
+
+  // Saying yes opens it, with no narrowing attached.
+  const show2 = [...doc.querySelectorAll('button')].find(b => /Show pairing code/.test(b.textContent))
+  show2.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+  const yes = [...doc.querySelectorAll('button')].find(b => /Yes, the whole library/.test(b.textContent))
+  yes.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 200))
+  assert.equal(asked.length, 1, 'the window is opened')
+  assert.ok(!asked[0].paths, 'with no folders named, which is everything')
+})

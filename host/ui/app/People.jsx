@@ -433,6 +433,19 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
 
   const save = async () => {
+    // WIDENING SOMEBODY BACK TO EVERYTHING is the one save here that gives access rather
+    // than taking it away, so it is confirmed out loud (Tim, 2026-08-30). Narrowing is
+    // not: it can only ever show somebody less, and it is undone by opening this window
+    // again. Somebody who already sees everything is not asked - nothing changes.
+    const wasNarrowed = devices.some(d => Array.isArray(d.paths) && d.paths.length)
+    if (!picked.length && wasNarrowed) {
+      const ok = await askConfirm({
+        title: `Give ${person.label} the whole library?`,
+        message: 'Every film and every show, including anything added later. They can be narrowed again here at any time.',
+        confirmLabel: 'Yes, the whole library'
+      })
+      if (!ok) return
+    }
     setBusy(true)
     const res = await api('/api/sharing/set', { personId: person.id, paths: picked.length ? picked : null })
     setBusy(false)
