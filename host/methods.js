@@ -18,6 +18,7 @@ const items = require('./items')
 const watch = require('./watch')
 const { siblings } = require('./siblings')
 const { notifyOwners, confirmedClaim } = require('@peerloom/host')
+const visibility = require('./visibility')
 
 // The most positions one clear will forget. Far above any real shelf - the
 // point is that it is bounded rather than an unbounded scan somebody could
@@ -63,6 +64,24 @@ function requireScope (ctx, type) {
 // devices over P2P; the operator's own dashboard is not one of them, and it was
 // the surface most likely to be open when an ask arrives.
 function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceError = () => null, state = null, leave = null, media = null, avatars = null, revoke = null, seen = null, cast = null, events = () => {}, log = () => {} }) {
+  // WHAT THIS CONNECTION MAY SEE. proposals/2026-08-30-per-person-folders.md: a
+  // grant's `paths` narrows a person to chosen folders, and the rule has to hold on
+  // every way of reaching content or a hidden film is one guessed id away. So every
+  // handler reads the adapter through `adapterFor(ctx)` rather than getAdapter()
+  // directly - the view filters list, get, search and stats, and an unnarrowed grant
+  // (every grant until now, and every owner) gets the real adapter back unwrapped.
+  const adapterFor = (ctx) => visibility.viewOf(getAdapter(), ctx?.grant)
+
+  // Is this item visible to this connection? For the handlers that do not read an
+  // item themselves - a stream, a segment, a cast - and must still refuse a hidden id.
+  const canSee = async (ctx, itemId) => {
+    const a = adapterFor(ctx)
+    // A source with no item lookup narrows nothing - there is no location to test and
+    // no view to read through, so the call proceeds exactly as it did before.
+    if (typeof a?.get !== 'function') return true
+    return !!(await a.get({ id: String(itemId) }))
+  }
+
   // EVERY PUSH SAYS HOW MANY IT ACTUALLY REACHED, because a host that told nobody
   // looks exactly like a host that told everybody.
   //
@@ -84,13 +103,13 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
   return {
     // --- the library ------------------------------------------------------
 
-    'library.stats': async () => {
-      const stats = await getAdapter().stats()
+    'library.stats': async (ctx) => {
+      const stats = await adapterFor(ctx).stats()
       return {
         ...stats,
         // A film library's two roots, named plainly, so a client does not have to
         // infer "is this a films library or a shows library" - it is usually both.
-        source: getAdapter().kind,
+        source: adapterFor(ctx).kind,
         sourceError: getSourceError()
       }
     },
@@ -100,7 +119,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!items.LIST_TYPES.has(type)) throw ctx.badParams(`unknown list type: ${type}`)
       requireScope(ctx, type)
 
-      return getAdapter().list({
+      return adapterFor(ctx).list({
         type,
         seriesId: ctx.params.seriesId || null,
         seasonId: ctx.params.seasonId || null,
@@ -116,7 +135,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       const type = ctx.params.type ? String(ctx.params.type) : null
       if (type && !items.ITEM_TYPES.has(type)) throw ctx.badParams(`unknown item type: ${type}`)
 
-      const item = await getAdapter().get({ id: String(ctx.params.id), type })
+      const item = await adapterFor(ctx).get({ id: String(ctx.params.id), type })
       if (!item) throw ctx.notFound('no such item')
       return item
     },
@@ -125,7 +144,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       const q = String(ctx.params.q || '').trim()
       // An empty search is an empty result, not an error and not the whole library.
       if (!q) return { items: [] }
-      return getAdapter().search({ q, limit: ctx.params.limit })
+      return adapterFor(ctx).search({ q, limit: ctx.params.limit })
     },
 
     // THE EPISODE ON EITHER SIDE, for the player's next and previous buttons
@@ -135,7 +154,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     // is one copy that cannot drift.
     'library.siblings': async (ctx) => {
       if (!ctx.params.id) throw ctx.badParams('id required')
-      const out = await siblings(getAdapter(), ctx.params.id)
+      const out = await siblings(adapterFor(ctx), ctx.params.id)
       if (!out) throw ctx.notFound('no such item')
       return out
     },
@@ -144,7 +163,11 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
 
     'art.get': async (ctx) => {
       if (!ctx.params.artId) throw ctx.badParams('artId required')
-      const stream = await getAdapter().art({
+      // A poster is a film: an art id belongs to an item, so a narrowed person
+      // asking for a hidden film's poster gets the same nothing the list gave them.
+      const owner = typeof getAdapter().itemForArt === 'function' ? getAdapter().itemForArt(String(ctx.params.artId)) : null
+      if (owner && !(await canSee(ctx, owner))) throw ctx.notFound('no artwork')
+      const stream = await adapterFor(ctx).art({
         artId: String(ctx.params.artId),
         size: ctx.params.size
       })
@@ -167,6 +190,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'media.decide': async (ctx) => {
       if (!media) throw ctx.notFound('this host cannot decide modes')
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
       const out = await media.decide({ itemId: String(ctx.params.itemId), capabilities: ctx.params.capabilities || {} })
       if (!out) throw ctx.notFound('no such item')
       return out
@@ -175,6 +199,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'media.playlist': async (ctx) => {
       if (!media) throw ctx.notFound('this host serves no playlists')
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
       const out = await media.playlist({ itemId: String(ctx.params.itemId), capabilities: ctx.params.capabilities || {} })
       if (!out) throw ctx.notFound('no such item')
       return out
@@ -185,6 +210,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'media.segment': async (ctx) => {
       if (!media) throw ctx.notFound('this host serves no segments')
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such segment')
       let session
       try {
         session = await media.segment({
@@ -211,6 +237,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'media.init': async (ctx) => {
       if (!media || !media.init) throw ctx.notFound('this host serves no segments')
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
       let session
       try {
         session = await media.init({
@@ -232,6 +259,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'media.export': async (ctx) => {
       if (!media || !media.export) throw ctx.notFound('this host cannot convert for download')
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
       let out
       try {
         out = await media.export({
@@ -250,7 +278,8 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
 
     'subtitle.list': async (ctx) => {
       if (!ctx.params.itemId) throw ctx.badParams('itemId required')
-      const adapter = getAdapter()
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
+      const adapter = adapterFor(ctx)
       if (!adapter.subtitles) return { items: [] }
       const items = await adapter.subtitles({ itemId: String(ctx.params.itemId) })
       // `burnable`: an unplayable IMAGE track this host could press into the
@@ -269,7 +298,8 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!ctx.params.itemId || !ctx.params.subtitleId) {
         throw ctx.badParams('itemId and subtitleId required')
       }
-      const adapter = getAdapter()
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
+      const adapter = adapterFor(ctx)
       if (!adapter.subtitle) throw ctx.notFound('no subtitles')
       const stream = await adapter.subtitle({
         itemId: String(ctx.params.itemId),
@@ -299,7 +329,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       // The RUNTIME comes from the library, never from the client. A client that
       // could name its own duration could mark anything watched by claiming a film
       // is one second long.
-      const item = await getAdapter().get({ id: itemId })
+      const item = await adapterFor(ctx).get({ id: itemId })
       if (!item) throw ctx.notFound('no such item')
 
       const verdict = watch.decide({
@@ -342,7 +372,10 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'resume.list': async (ctx) => {
       if (!state) return { items: [] }
       const rows = await state.listResume(ctx.owner, Number(ctx.params.limit) || 20)
-      const adapter = getAdapter()
+      // Through the person's own view: a shelf row for a film they may no longer see
+      // is dropped on the way out, exactly as a row for a film that left the library
+      // is. The stored position is not touched - a narrowing is not a deletion.
+      const adapter = adapterFor(ctx)
       const out = []
       for (const r of rows) {
         const item = await adapter.get({ id: r.itemId })
@@ -421,7 +454,7 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
     'fav.list': async (ctx) => {
       if (!state) return { items: [] }
       const byKind = await state.listFavs(ctx.owner)
-      const adapter = getAdapter()
+      const adapter = adapterFor(ctx)
       const out = []
       for (const [kind, ids] of Object.entries(byKind)) {
         for (const id of ids) {
@@ -563,6 +596,9 @@ function createMethods ({ getAdapter, getLibraryName, grants = null, getSourceEr
       if (!casts) throw ctx.notFound('casting unavailable')
       if (!ctx.isOwner) throw ctx.forbidden('owner only')
       if (!ctx.params.entityId || !ctx.params.itemId) throw ctx.badParams('entityId and itemId required')
+      // A television is the owner's, but the film still has to be one this person may
+      // see - the picker is not the only way to reach cast.play.
+      if (!(await canSee(ctx, ctx.params.itemId))) throw ctx.notFound('no such item')
       // deviceKey comes from the Noise-authenticated grant, never from params -
       // a device can only ever cast as itself, which is what makes revoke able
       // to find it.

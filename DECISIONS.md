@@ -19,6 +19,15 @@ hidden film is not listed, not found by id, not streamed, not cast and has no ar
 devices are never filtered. Downloads already on a phone are left alone in v1 and the
 People page says so; narrowing is not revoke, and live casts are not stopped by it.
 
+BUILT THE SAME DAY (#225). Two things the build taught. AN ADAPTER THAT CANNOT PLACE AN
+ITEM NARROWS NOTHING rather than hiding everything: a source with no item lookup has no
+location to test, and failing closed there breaks a working host instead of protecting
+anything - the hiding rule is for an item a placing adapter could not place. And THE
+CHECKS ARE MODULE-LEVEL FUNCTIONS, not methods on the host: two test rigs call these
+paths as detached functions, and a `this._maySee` would have passed the suite while
+throwing in any caller that did the same. Verified against a real host over the DHT,
+28 of 28 checks, the stream bytes included.
+
 ## 2026-08-29 - A REMUX THAT REBUILDS THE SOUND IS A PLAYLIST ON ANDROID TOO
 Tier: T1 (the transport a verdict takes changes; the wire shape gains one field, `audio`,
 that an older phone ignores). Field report the same day: an x265 MKV on Android, picture

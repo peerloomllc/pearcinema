@@ -35,6 +35,7 @@ const subtitles = require('./subtitles')
 const hls = require('./hls')
 const fmp4 = require('./fmp4')
 const keyframes = require('./keyframes')
+const visibility = require('./visibility')
 
 // THE FIELD'S CEILING WHEN THIS BOX HAS NEVER BEEN MEASURED. A round number chosen
 // for the machine this was built on: a cap of 200 is a typo rather than a plan, and
@@ -66,6 +67,23 @@ const PROTOCOL = createProtocol({
   displayName: 'PearCinema',
   relayKey: null
 })
+
+// THE ONE PLACE THE MEDIA PATHS ASK "may this caller see this film"
+// (proposals/2026-08-30-per-person-folders.md). Module-level rather than a method, so
+// it holds for any caller of these functions. An absent grant is the dashboard's own
+// owner session and sees everything, exactly as the browser player always has; a wire
+// call always carries one. An adapter with no item lookup narrows nothing.
+async function itemFor (adapter, grant, itemId) {
+  const view = visibility.viewOf(adapter, grant)
+  if (typeof view?.get !== 'function') return null
+  return view.get({ id: String(itemId) })
+}
+
+async function maySee (adapter, grant, itemId) {
+  if (!visibility.narrowed(grant)) return true
+  if (typeof adapter?.get !== 'function') return true
+  return !!(await itemFor(adapter, grant, itemId))
+}
 
 class PearCinemaHost {
   constructor ({ dataDir, libraryName = 'My Library', dht = null, bootstrap = null, dhtPort = null, log = () => {} } = {}) {
@@ -241,7 +259,9 @@ class PearCinemaHost {
         // direct-play only.
         openStream: async (params, ctx) => {
           if (!params.itemId) throw ctx.badParams('itemId required')
-          return this.openStream(params)
+          // The caller's live grant rides with it: a narrowed person gets no bytes
+          // of a film they may not see (2026-08-30).
+          return this.openStream({ ...params, grant: ctx.grant })
         }
       })
     })
@@ -385,7 +405,15 @@ class PearCinemaHost {
   //
   // offset and length ride through untouched, which is why seeking inside a
   // two-hour film needed no protocol change and why direct-play v1 is viable.
-  async openStream ({ itemId, offset = 0, length } = {}) {
+  // THE ONE PLACE THE MEDIA PATHS ASK "may this caller see this film". An absent
+  // grant is the dashboard's own owner session and sees everything, exactly as the
+  // browser player always has; a wire call always carries one.
+  // `grant` is the caller's live grant, present for every wire and dashboard call.
+  // A narrowed person asking for bytes of a film they may not see gets nothing here,
+  // not just a shorter list - this is the method where a mistake hands out the
+  // library (proposals/2026-08-30-per-person-folders.md).
+  async openStream ({ itemId, offset = 0, length, grant = null } = {}) {
+    if (!(await maySee(this.adapter, grant, itemId))) return null
     return this.adapter.stream({
       itemId: String(itemId),
       offset: Number(offset) || 0,
@@ -403,8 +431,8 @@ class PearCinemaHost {
   //
   // THE HOST DECIDES. `capabilities` is what the client says it can open; direct play
   // always wins where it works, because it is free and it is the actual file.
-  async openRemux ({ itemId, at = 0, capabilities = {} } = {}) {
-    const item = await this.adapter.get({ id: String(itemId) })
+  async openRemux ({ itemId, at = 0, capabilities = {}, grant = null } = {}) {
+    const item = (await itemFor(this.adapter, grant, itemId)) || (visibility.narrowed(grant) ? null : await this.adapter.get({ id: String(itemId) }))
     if (!item) return null
 
     // The transcode flag is rule 2's gate reaching the decision: false until the
@@ -938,8 +966,8 @@ class PearCinemaHost {
     return this._inner.subtitleBurnTarget({ itemId: String(itemId), subtitleId: String(subtitleId) })
   }
 
-  async decideFor ({ itemId, capabilities = {} }) {
-    const item = await this.adapter.get({ id: String(itemId) })
+  async decideFor ({ itemId, capabilities = {}, grant = null }) {
+    const item = (await itemFor(this.adapter, grant, itemId)) || (visibility.narrowed(grant) ? null : await this.adapter.get({ id: String(itemId) }))
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
     const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
@@ -984,8 +1012,10 @@ class PearCinemaHost {
     return plan
   }
 
-  async _hlsContext ({ itemId, capabilities }) {
-    const item = await this.adapter.get({ id: String(itemId) })
+  async _hlsContext ({ itemId, capabilities, grant = null }) {
+    // The playlist, every segment and the init header all come through here, so the
+    // visibility check is here rather than three times over.
+    const item = (await itemFor(this.adapter, grant, itemId)) || (visibility.narrowed(grant) ? null : await this.adapter.get({ id: String(itemId) }))
     if (!item) return null
     const burn = this._burnTarget(itemId, capabilities)
     const verdict = remux.decide(item.media, capabilities, { transcode: this.transcodeOn(), fileKbps: this._fileKbps(item), burn: !!burn })
@@ -1006,8 +1036,8 @@ class PearCinemaHost {
     return { item, verdict, burn, source, plan, container }
   }
 
-  async hlsPlaylist ({ itemId, capabilities = {} }) {
-    const ctx = await this._hlsContext({ itemId, capabilities })
+  async hlsPlaylist ({ itemId, capabilities = {}, grant = null }) {
+    const ctx = await this._hlsContext({ itemId, capabilities, grant })
     if (!ctx) return null
     const { item, verdict, plan } = ctx
     if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') {
@@ -1040,8 +1070,8 @@ class PearCinemaHost {
     }
   }
 
-  async hlsSegment ({ itemId, seq, capabilities = {} }) {
-    const ctx = await this._hlsContext({ itemId, capabilities })
+  async hlsSegment ({ itemId, seq, capabilities = {}, grant = null }) {
+    const ctx = await this._hlsContext({ itemId, capabilities, grant })
     if (!ctx) return null
     const { item, verdict, burn, source, plan, container } = ctx
     if (verdict.mode !== 'transcode' && verdict.mode !== 'remux') return null
@@ -1108,8 +1138,8 @@ class PearCinemaHost {
   //
   // Runs through the same pool as everything else, so it is capped, it dies on a
   // revoke, and a busy host refuses it the same way.
-  async hlsInit ({ itemId, capabilities = {} }) {
-    const ctx = await this._hlsContext({ itemId, capabilities })
+  async hlsInit ({ itemId, capabilities = {}, grant = null }) {
+    const ctx = await this._hlsContext({ itemId, capabilities, grant })
     if (!ctx) return null
     const { item, verdict, source, plan, container } = ctx
     if (container !== 'fmp4') return null
@@ -1136,8 +1166,8 @@ class PearCinemaHost {
   // answers { direct: true } and the byte-exact path applies instead - the host
   // never converts what needs no converting. Runs through the transcoder pool,
   // so it shares the engine cap, the BUSY message and revoke's killAll.
-  async exportFor ({ itemId, capabilities = {} }) {
-    const item = await this.adapter.get({ id: String(itemId) })
+  async exportFor ({ itemId, capabilities = {}, grant = null }) {
+    const item = (await itemFor(this.adapter, grant, itemId)) || (visibility.narrowed(grant) ? null : await this.adapter.get({ id: String(itemId) }))
     if (!item) return null
     // A download is the film, not the viewing session - a subtitle choice or
     // a skin's tone made in the player must not bake itself into the copy the
@@ -1388,6 +1418,7 @@ class PearCinemaHost {
   // (grant:changed), so a phone watching mid-assignment files its very next
   // position under the new person.
   assignDevice (deviceKey, personId) { return this.host.assignDevice(deviceKey, personId) }
+  setPersonPaths (personId, paths) { return this.host.setPersonPaths(personId, paths) }
 
   async close () {
     if (this._rescanTimer) { clearInterval(this._rescanTimer); this._rescanTimer = null }
