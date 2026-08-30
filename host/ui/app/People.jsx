@@ -34,7 +34,7 @@
 import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { Modal, askConfirm, notify } from './ui'
-import { Blocked, Check, ChevronDown, Eye, Pencil, Plus, Trash } from './icons'
+import { Blocked, Check, ChevronDown, Pencil, Plus, Trash } from './icons'
 
 // One device, as a row. `nested` is a device sitting under the person who holds it,
 // where the name is already known and the row is one step in.
@@ -584,13 +584,20 @@ export default function People ({ state, reload }) {
                     {[
                       mine.length ? `${mine.length} device${mine.length === 1 ? '' : 's'}` : 'No devices',
                       on ? `${on} connected now` : null,
-                      waiting ? `${waiting} waiting to be confirmed` : null,
-                      // WHAT THEY CAN SEE, said on the row rather than hidden behind the
-                      // sheet: "everything" is the answer for almost everybody, and a
-                      // narrowed person is exactly the one worth noticing at a glance.
-                      narrowedTo(mine) ? `sees ${narrowedTo(mine)} folder${narrowedTo(mine) === 1 ? '' : 's'}` : 'sees everything'
+                      waiting ? `${waiting} waiting to be confirmed` : null
                     ].filter(Boolean).join(', ')}
                   </span>
+                  {/* WHAT THEY CAN SEE, ON ITS OWN LINE AND TAPPABLE, which is what the
+                      proposal asked for and what the first build got wrong: the control
+                      was an unlabelled eye among three other icons and Tim could not find
+                      it on his own dashboard (2026-08-30). A sentence that says the
+                      current answer and opens the chooser is a control somebody can see. */}
+                  <button class='seeline' onClick={() => setSharing(p)}>
+                    Can see: {narrowedTo(mine)
+                      ? `${narrowedTo(mine)} folder${narrowedTo(mine) === 1 ? '' : 's'}`
+                      : 'everything'}
+                    <span class='seechev'><ChevronDown size={13} /></span>
+                  </button>
                 </span>
                 <span class='rowctl'>
                   <button
@@ -599,12 +606,6 @@ export default function People ({ state, reload }) {
                     title={`Rename ${p.label}`}
                     aria-label={`Rename ${p.label}`}
                   ><Pencil size={16} /></button>
-                  <button
-                    class='iconbtn'
-                    onClick={() => setSharing(p)}
-                    title={`Choose what ${p.label} can see`}
-                    aria-label={`Choose what ${p.label} can see`}
-                  ><Eye size={16} /></button>
                   {/* CUT OFF CUTS EVERY DEVICE THEY HOLD, which is the action somebody
                       means when they say take Sam off. Somebody holding nothing has
                       nothing to cut, so that row offers Delete instead - a different

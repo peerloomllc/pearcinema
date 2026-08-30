@@ -1811,3 +1811,15 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
   word-break: break-all;
   user-select: all;
 }
+
+/* "Can see: everything" - the sharing control on a person's row. A sentence rather
+   than an icon, because the icon version was invisible to the person who asked for the
+   feature (Tim, on his own dashboard, 2026-08-30). Quiet at rest, underlined on hover
+   so it reads as the control it is. */
+.seeline {
+  background: none; border: none; padding: 0; margin: .15rem 0 0;
+  font: inherit; font-size: .85rem; color: var(--muted);
+  display: inline-flex; align-items: center; gap: .15rem; cursor: pointer;
+}
+.seeline:hover, .seeline:focus-visible { color: var(--fg); text-decoration: underline }
+.seechev { transform: rotate(-90deg); line-height: 0; opacity: .7 }
