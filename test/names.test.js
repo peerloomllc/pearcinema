@@ -367,3 +367,69 @@ test('DELIBERATELY NARROW: a name that says nothing gets no type', () => {
     assert.equal(names.rootTypeFromName(name), null, String(name))
   }
 })
+
+// A USER'S 17,000-FILE LIBRARY, 2026-08-30. They diffed their whole disk against the
+// host's scan record and sent the result: 8,183 of 15,603 episodes (52%) were indexed
+// with no season or episode number at all - One Piece 1,284, Pokemon 1,213, Detective
+// Conan 672. Every shape below is theirs, verbatim. Re-running the fixed parser over
+// their 8,183 rows recovers 5,159 of them (63%).
+
+test('A BARE E01 IS EPISODE ONE, not an unnumbered file', () => {
+  const r = names.parseEpisode('Confidence.Man.JP.E01.720p-[KoreanDramaX.me].mkv', {
+    seriesFolder: 'The Confidence Man JP (2018)', television: true
+  })
+  assert.equal(r.season, 1, 'no season in the name means the folder\'s, or one')
+  assert.equal(r.episode, 1)
+  // The season folder still wins where there is one.
+  const s2 = names.parseEpisode('Show.E04.mkv', { seriesFolder: 'Show', seasonFolder: 'Season 2', television: true })
+  assert.equal(s2.season, 2)
+  assert.equal(s2.episode, 4)
+  // And a release tag that merely contains an e-and-digits is not an episode.
+  assert.equal(names.parseEpisode('Film.2019.1080p.x264-E5.mkv', { television: true })?.episode, undefined)
+})
+
+test('ABSOLUTE NUMBERING IS AN EPISODE NUMBER: the anime half of the library', () => {
+  const cases = [
+    ['Great_Teacher_Onizuka_01.mp4', 'Great Teacher Onizuka (1998)', 1],
+    ['One Piece - 0001.mkv', 'One Piece', 1],
+    ['Pokemon 001.mkv', 'Pokemon', 1],
+    ['[HorribleSubs] Naruto Shippuden - 500 [1080p].mkv', 'Naruto Shippuden', 500],
+    // The number sits after the title, and the fansub tail after it is unreadable
+    // noise this parser deliberately never has to understand.
+    ['Mobile Fighter G Gundam (1994) - 07 VOSTFR BDrip 1080p FLAC x265 v2-GundamGuy.mkv', 'Mobile Fighter G Gundam (1994)', 7]
+  ]
+  for (const [file, folder, episode] of cases) {
+    const r = names.parseEpisode(file, { seriesFolder: folder, television: true })
+    assert.ok(r, file + ' should parse')
+    assert.equal(r.episode, episode, file)
+    assert.equal(r.season, 1, file + ' has no season, so it is one')
+  }
+})
+
+test('A YEAR IS NOT AN EPISODE, and a film in an auto root is not an episode at all', () => {
+  // Under a declared shows root a trailing year is skipped, not taken.
+  assert.equal(names.parseEpisode('Firefly 2002 1080p BluRay.mkv', { seriesFolder: 'Firefly', television: true }), null)
+  // THE GUARD THAT MATTERS. Absolute numbering runs ONLY where the operator declared
+  // television. A folder is not a promise: these are films, and reading the number in
+  // their titles as an episode would be the worst kind of wrong.
+  for (const [file, folder] of [['Blade 2 (2002).mkv', 'Blade 2 (2002)'], ["Ocean's 11 (2001).mkv", "Ocean's 11 (2001)"], ['Apollo 13.mkv', 'Apollo 13']]) {
+    assert.equal(names.parseEpisode(file, { seriesFolder: folder, television: false }), null, file + ' is a film')
+  }
+})
+
+test('a fansub version suffix and a glued series abbreviation still carry a code', () => {
+  // 27 Bleach files: S17E14v2, a re-release. The v2 broke the word boundary.
+  const b = names.parseEpisode('[Judas] Bleach - Thousand Year Blood War - S17E14v2.mkv', { television: true })
+  assert.equal(b.season, 17)
+  assert.equal(b.episode, 14)
+  // 251 Godzilla Island files: GI01x01, the series' initials glued to the code.
+  const g = names.parseEpisode('GI01x01 - Mecha-King Ghidorah.mkv', { seriesFolder: 'Godzilla Island', television: true })
+  assert.equal(g.season, 1)
+  assert.equal(g.episode, 1)
+})
+
+test('a bracketed number is the episode where the tail is all brackets', () => {
+  const r = names.parseEpisode('[DBD-Raws][Boku no Hero Academia S6][12][1080P][BDRip][HEVC-10bit][FLAC].mkv', { television: true })
+  assert.ok(r, 'the bracketed release shape parses')
+  assert.equal(r.episode, 12)
+})

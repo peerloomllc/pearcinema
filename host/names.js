@@ -150,11 +150,16 @@ const EPISODE_PATTERNS = [
   //
   // So only the explicit form is recognised. A `S01E02-03` release parses as the
   // single episode 2, which is a small loss and not a wrong one.
-  /\bs(\d{1,2})[\s._-]*e(\d{1,3})[\s._-]*e(\d{1,3})\b/i,
-  // S01E02 / s01e02 / S1E2
-  /\bs(\d{1,2})[\s._-]*e(\d{1,3})\b/i,
-  // 1x02
-  /\b(\d{1,2})x(\d{1,3})\b/i,
+  /\bs(\d{1,2})[\s._-]*e(\d{1,3})[\s._-]*e(\d{1,3})(?:v\d)?\b/i,
+  // S01E02 / s01e02 / S1E2, with an optional fansub version suffix: `S17E14v2` is
+  // episode 14 re-released, and without the `v2` here 27 files of one user's Bleach
+  // parsed as nothing at all (field report 2026-08-30).
+  /\bs(\d{1,2})[\s._-]*e(\d{1,3})(?:v\d)?\b/i,
+  // 1x02, and `GI01x01` - a short series abbreviation glued to the front, which is
+  // how 251 Godzilla Island files are named (field report 2026-08-30). The digits
+  // either side of the `x` are unambiguous enough to allow up to four letters in
+  // front; anything longer is a word and not an abbreviation.
+  /(?:^|[\s._-]|\b[a-z]{1,4})(\d{1,2})x(\d{1,3})\b/i,
   // Season 1 Episode 2, spelled out
   /\bseason[\s._-]*(\d{1,2})[\s._-]*episode[\s._-]*(\d{1,3})\b/i
 ]
@@ -275,6 +280,101 @@ function parseMovie (filename) {
 // episode of itself.
 const LOOSE_EPISODE = /\b(?:chapter|part|episode|ep|pt)[\s._-]*(\d{1,3})\b/i
 
+// A BARE `E01` WITH NO SEASON. Real and common: `Confidence.Man.JP.E01.720p.mkv`,
+// eleven files in one folder from a user's library (2026-08-30), all indexed with no
+// number at all. The season is whatever the folder says, or 1 - a show that numbers
+// its files E01 upward has one season as far as the files are concerned.
+//
+// Tight on purpose: the `e` must be its own token (a separator or the start before it,
+// a separator or the end after it), so a release tag like `x264-E5` or a hash cannot
+// pose as an episode.
+const BARE_EPISODE = /(?:^|[\s._-])e(\d{1,3})(?=$|[\s._-])/i
+
+// ...except where the separator is a hyphen glued to the token before it, which is how
+// a release group is joined: `Film.2019.1080p.x264-E5` is the group E5, not episode 5.
+// A dot, an underscore, a space or a spaced hyphen are all fine - `Confidence.Man.JP.E01`,
+// `Show - E01` - because no group is written that way.
+const GLUED_GROUP = /[a-z0-9]-$/i
+
+// ABSOLUTE NUMBERING, which is how most anime on disk is named:
+//
+//   Great_Teacher_Onizuka_01.mp4      One Piece - 0001.mkv      Pokemon 001.mkv
+//
+// 8,183 of one user's 15,603 episodes (52%) had no number, and this shape is most of
+// them - One Piece 1,284, Pokemon 1,213, Detective Conan 672 (field report 2026-08-30).
+// The number is the episode; there is no season, so the folder's season or 1 stands.
+//
+// THREE GUARDS, because a number in a filename is usually not an episode:
+//   - Only in a television context, where a film cannot be the answer.
+//   - Only the LAST number, and only if everything after it is release noise. A number
+//     in the middle of a title (`Ocean's 11 Redux`) is part of the title.
+//   - Never a 4-digit year (1900-2099). `Firefly 2002 1080p` is a year and a tag, not
+//     episode 2002. Anime absolute numbering has not reached 1900 and will not soon.
+const YEARISH = (n, digits) => digits === 4 && n >= 1900 && n <= 2099
+
+// The number that comes straight after the series title, which is where absolute
+// numbering actually lives: `Mobile Fighter G Gundam (1994) - 01 VOSTFR BDrip x265
+// v2-GundamGuy.mkv`. Reading it from the front means the release tags after it never
+// have to be understood - and there are always more fansub words than any list holds.
+function findEpisodeAfterTitle (normalised, seriesFolder) {
+  if (!seriesFolder) return null
+  const key = (x) => toWords(String(x)).toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const title = parseShowFolder(seriesFolder).title
+  const want = key(title)
+  if (want.length < 3) return null
+  const words = normalised.split(' ').filter(Boolean)
+  // Walk the title's words off the front of the filename, ignoring anything the title
+  // does not have (a `[Group]` prefix, a `(1994)` year).
+  let i = 0
+  let seen = ''
+  while (i < words.length && seen.length < want.length) {
+    const next = seen + key(words[i])
+    if (want.startsWith(next)) { seen = next; i++; continue }
+    if (!seen && (isTag(words[i]) || /^[([]/.test(words[i]) || /^\d{4}$/.test(key(words[i])))) { i++; continue }
+    return null
+  }
+  if (seen !== want) return null
+  // Then the first bare number after it, skipping a year in brackets.
+  for (let j = i; j < words.length; j++) {
+    const w = words[j].replace(/^[([]+|[)\]]+$/g, '')
+    if (!/^\d{1,4}$/.test(w)) {
+      if (isTag(words[j]) || /^[([]/.test(words[j]) || /^[-–]$/.test(words[j])) continue
+      return null
+    }
+    const n = +w
+    if (!n) return null
+    if (YEARISH(n, w.length)) continue
+    const index = words.slice(0, j).join(' ').length + (j ? 1 : 0)
+    return { episode: n, index, length: words[j].length }
+  }
+  return null
+}
+
+function findAbsoluteEpisode (normalised) {
+  // `[DBD-Raws][Show][12][1080P][BDRip]` is one "word" until the groups are parted.
+  const words = normalised.replace(/\]\s*\[/g, '] [').split(' ').filter(Boolean)
+  for (let i = words.length - 1; i >= 0; i--) {
+    const w = words[i]
+    // A bracketed token is release metadata whatever is inside it - `[1080P]`,
+    // `[HEVC-10bit]`, `[FLAC]` - and a bracketed NUMBER is how a lot of fansub
+    // releases write the episode: `[DBD-Raws][Show][01][1080P][BDRip]`.
+    const bare = w.replace(/^[([]+|[)\]]+$/g, '')
+    if (!/^\d{1,4}$/.test(bare)) {
+      if (!isTag(w) && !/^[([].*[)\]]$/.test(w)) return null
+      continue
+    }
+    const n = +bare
+    if (!n) return null
+    // A year is not an episode, and it is not a reason to give up either: `Show
+    // (1994) - 01` has both, and the one further left is the answer.
+    if (YEARISH(n, bare.length)) continue
+    // Where it sits, so the episode's own title can be read off what follows.
+    const index = words.slice(0, i).join(' ').length + (i ? 1 : 0)
+    return { episode: n, index, length: w.length }
+  }
+  return null
+}
+
 // `television` is the second way a caller can say "I already know this is a show":
 // the file sits under a root the operator DECLARED as television. Same guard, said
 // out loud rather than inferred from a folder being present, which matters for a
@@ -285,6 +385,25 @@ function parseEpisode (filename, { seriesFolder = null, seasonFolder = null, tel
 
   let code = parseEpisodeCode(normalised)
   let loose = false
+
+  // A bare `E01`: the same shape as `S01E01` with the season left off, so it is read
+  // the same way and the season comes from the folder (or 1).
+  if (!code && (seriesFolder || television)) {
+    const bare = normalised.match(BARE_EPISODE)
+    // Everything up to and including the separator: `x264-` is a glued group, `JP.` is not.
+    const upTo = bare ? normalised.slice(0, bare.index + (bare[0][0].match(/[\s._-]/) ? 1 : 0)) : ''
+    if (bare && !GLUED_GROUP.test(upTo)) {
+      const folderSeason = seasonFolder !== null ? parseSeasonFolder(seasonFolder) : null
+      const at = bare.index + bare[0].length - bare[1].length - 1
+      code = {
+        season: folderSeason ?? 1,
+        episode: +bare[1],
+        episodeEnd: null,
+        index: at,
+        length: bare[0].length - (bare.index === 0 ? 0 : 1)
+      }
+    }
+  }
 
   if (!code && (seriesFolder || television)) {
     const m = normalised.match(LOOSE_EPISODE)
@@ -307,6 +426,29 @@ function parseEpisode (filename, { seriesFolder = null, seasonFolder = null, tel
         episodeEnd: null,
         index: m.index,
         length: m[0].length
+      }
+      loose = true
+    }
+  }
+
+  // ABSOLUTE NUMBERING, last of all: it is the loosest rule here, so every named
+  // shape gets its chance first.
+  //
+  // ONLY UNDER A ROOT THE OPERATOR DECLARED AS TELEVISION, never on the strength of a
+  // series folder alone. A folder is not a promise: `Movies/Blade 2 (2002)/Blade 2.mkv`
+  // in an `auto` root has a "series folder" too, and this rule would read it as episode
+  // 2 - along with `Ocean's 11` and `Apollo 13`. Where the root says shows, a film
+  // cannot be the answer and the number is safe to take.
+  if (!code && television) {
+    const abs = findEpisodeAfterTitle(normalised, seriesFolder) || findAbsoluteEpisode(stripTagParens(normalised))
+    if (abs) {
+      const folderSeason = seasonFolder !== null ? parseSeasonFolder(seasonFolder) : null
+      code = {
+        season: folderSeason ?? 1,
+        episode: abs.episode,
+        episodeEnd: null,
+        index: abs.index,
+        length: abs.length
       }
       loose = true
     }
