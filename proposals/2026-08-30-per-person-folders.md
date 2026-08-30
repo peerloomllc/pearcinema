@@ -1,7 +1,14 @@
 # Per-person folders: choose what each person can see
 
-Status: APPROVED 2026-08-30 by Tim, with open question 2 answered the other way: any
-folder depth is tickable from v1. Tier T3: it adds a rule to the authorisation surface, and a
+Status: BUILT 2026-08-30 (PR #225, shared host #14). APPROVED the same day by Tim, with
+open question 2 answered the other way: any folder depth is tickable from v1.
+
+VERIFIED against a real host over a real folder tree and a real DHT: 28 of 28 checks in
+the list below, including every refusal (list, id, search, counts, art, decide, playlist,
+export, subtitles and the stream bytes themselves), a narrowing landing on a live
+connection with no reconnect, widening back, an unnarrowed second person unaffected, and
+revoke still cutting a narrowed device off. Open question 1 (guest windows) and the
+pairing-flow choice are NOT built: a person is narrowed after they are let in. Tier T3: it adds a rule to the authorisation surface, and a
 rule that lets one film through by mistake is a security bug of the same class as the two
 inherited ones in CLAUDE.md.
 
