@@ -72,7 +72,7 @@ const CACHE_VERSION = 7
 //       grouping and is served for up to SCAN_TTL_MS. Deployed to a real Umbrel on
 //       2026-08-26 and the phantom season was still there, which is how the miss was
 //       found.
-const INDEX_VERSION = 3
+const INDEX_VERSION = 4
 
 // How many files to stat at once when deciding which of them need probing. A stat is
 // nothing next to an ffprobe, but three thousand at once is three thousand open file
@@ -184,6 +184,8 @@ class FolderAdapter {
 
     this.scannedAt = null
     this.scanError = null
+    // Video files ffprobe could not read on the last scan: kept, reported, retried.
+    this.unreadable = []
     // How many files claimed an id another file already had. See _index.
     this.idCollisions = 0
 
@@ -293,7 +295,7 @@ class FolderAdapter {
     if (!this.roots.length) throw new Error('no folders configured')
 
     if (!force && await this._loadCache()) {
-      this.log('folder:cache-loaded', { items: this._byId.size, scannedAt: this.scannedAt })
+      this.log('folder:cache-loaded', { items: this._byId.size, scannedAt: this.scannedAt, unreadable: (this.unreadable || []).length })
       return this._movies.length + this._episodeCount()
     }
 
@@ -387,7 +389,14 @@ class FolderAdapter {
         if (onProgress) onProgress(reused.length + n, reused.length + total)
       }
     })
-    if (failed.length) this.log('folder:unreadable', { count: failed.length })
+    // A FILE THAT WOULD NOT PROBE USED TO VANISH WITHOUT TRACE. Only this count was
+    // logged, nothing was stored and nothing reached the dashboard, so 13 files of a
+    // user's library were simply absent and the only way to find out was to diff the
+    // whole disk against the scan record by hand - which is what they did (field
+    // report 2026-08-30). The paths are kept now, so the dashboard can say how many
+    // and which, and a later scan tries them again rather than caching the absence.
+    this.unreadable = failed.map((f) => ({ file: f, at: Date.now() }))
+    if (failed.length) this.log('folder:unreadable', { count: failed.length, first: failed.slice(0, 5) })
 
     const media = new Map([...reused, ...results].map(r => [r.file, r]))
     // Held for the cache write below: only what this walk found, so a file that has
@@ -985,6 +994,9 @@ class FolderAdapter {
 
       this._index(raw.movies || [], raw.episodes || [])
       this.scannedAt = raw.scannedAt
+      // What would not read last time, so a restart still knows and the dashboard
+      // still says so without a rescan.
+      this.unreadable = Array.isArray(raw.unreadable) ? raw.unreadable : []
       return true
     } catch {
       return false
@@ -1019,7 +1031,10 @@ class FolderAdapter {
         scannedAt: this.scannedAt,
         movies,
         episodes,
-        probes: Object.fromEntries(this._probes || [])
+        probes: Object.fromEntries(this._probes || []),
+        // Kept so the count survives a restart, and so the dashboard can name them
+        // without a rescan. Never sent to a phone - see the note on `stats`.
+        unreadable: this.unreadable || []
       }))
     } catch (e) {
       // A cache that cannot be written is slow, not broken.
@@ -1056,7 +1071,12 @@ class FolderAdapter {
       // the same collection. A COUNT, not the paths, for the same reason as above.
       // Reported rather than repaired: the answer is to drop one of the roots, and
       // that is the operator's call.
-      duplicates: this.idCollisions
+      duplicates: this.idCollisions,
+      // HOW MANY FILES ARE ON DISK AND NOT IN THE LIBRARY, because a silent zero is
+      // indistinguishable from a silent thirteen. A COUNT here, for the same reason
+      // the duplicate paths are a count: this answers any paired phone, and the
+      // dashboard reads the paths off the adapter directly.
+      unreadable: (this.unreadable || []).length
     }
   }
 

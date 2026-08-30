@@ -56,6 +56,9 @@ class RemoteLibraries {
   _loadIdentity () {
     try {
       const raw = JSON.parse(fs.readFileSync(this.identityFile, 'utf8'))
+      // An identity written before 2026-08-30 is 0664 on disk; fix it in place the
+      // first time it is read rather than leaving every existing install exposed.
+      this._tighten(this.identityFile)
       return {
         publicKey: b4a.from(raw.publicKey, 'hex'),
         secretKey: b4a.from(raw.secretKey, 'hex')
@@ -63,18 +66,38 @@ class RemoteLibraries {
     } catch {
       const kp = hcrypto.keyPair()
       fs.mkdirSync(this.dataDir, { recursive: true })
+      // 0600, LIKE THE HOST'S OWN SEED. This file holds a secretKey in plain text and
+      // was written 0664 - world-readable on a normal Linux box, while host.seed beside
+      // it was 0600. Found by a user reading their own data folder (field report,
+      // 2026-08-30) and reported rather than exploited. Anyone who can read this file
+      // can be this client to every host it has paired with.
       fs.writeFileSync(this.identityFile, JSON.stringify({
         publicKey: b4a.toString(kp.publicKey, 'hex'),
         secretKey: b4a.toString(kp.secretKey, 'hex')
-      }))
+      }), { mode: 0o600 })
       this.log('remote:identity-created', {})
       return kp
     }
   }
 
+  // AN EXISTING FILE KEEPS ITS OLD MODE: `mode` on writeFileSync only applies when the
+  // file is created, so every install that already wrote 0664 would stay 0664 forever.
+  // Tightened on read instead, once, in place.
+  _tighten (file) {
+    try {
+      const mode = fs.statSync(file).mode & 0o777
+      if (mode & 0o077) {
+        fs.chmodSync(file, 0o600)
+        this.log('remote:tightened', { file: path.basename(file), was: mode.toString(8) })
+      }
+    } catch {}
+  }
+
   _readHosts () {
     try {
-      return H.normalize(JSON.parse(fs.readFileSync(this.hostsFile, 'utf8')))
+      const out = H.normalize(JSON.parse(fs.readFileSync(this.hostsFile, 'utf8')))
+      this._tighten(this.hostsFile)
+      return out
     } catch {
       return H.empty()
     }
@@ -82,7 +105,9 @@ class RemoteLibraries {
 
   _writeHosts () {
     fs.mkdirSync(this.dataDir, { recursive: true })
-    fs.writeFileSync(this.hostsFile, JSON.stringify(this.state))
+    // The host keys this client has been let into. Not secret the way a secretKey is,
+    // but it is the map of somebody's private libraries and it keeps the same mode.
+    fs.writeFileSync(this.hostsFile, JSON.stringify(this.state), { mode: 0o600 })
     if (this.onchange) this.onchange()
   }
 

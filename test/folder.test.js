@@ -1211,3 +1211,26 @@ test('a show whose filenames ALL fail to parse is left alone', async (t) => {
       `nothing should be promoted with no real season beside it, got ${JSON.stringify(titles)}`)
   }
 })
+
+test('A FILE THAT WILL NOT PROBE IS KEPT AND COUNTED, not silently dropped', async (t) => {
+  // A user diffed their whole 17,000-file disk against the scan record to discover that
+  // 13 files were simply absent (field report 2026-08-30). The only trace was a log line
+  // with a count in it. Now the paths are kept, the count reaches the dashboard, and the
+  // next scan tries them again rather than remembering the absence.
+  const { root, dataDir } = await library(t, {
+    extra: {
+      'Shows/Good Show/Good Show S01E01.mkv': 'video',
+      'Shows/Good Show/Good Show S01E02.mkv': 'BROKEN'
+    }
+  })
+  const a = adapter({ root, dataDir, roots: [{ path: path.join(root, 'Shows'), type: 'shows' }] })
+  // The stub says "unreadable" for anything whose bytes are BROKEN.
+  await a.scan({ force: true })
+  const stats = await a.stats()
+  assert.equal(typeof stats.unreadable, 'number', 'the count is part of stats')
+  assert.ok(Array.isArray(a.unreadable), 'and the paths are kept on the adapter')
+  for (const row of a.unreadable) {
+    assert.ok(row.file && row.at, 'each one says which file and when')
+    assert.ok(!JSON.stringify(stats).includes(row.file), 'but the paths never ride in stats, which any phone can ask for')
+  }
+})

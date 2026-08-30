@@ -541,6 +541,22 @@ export function SourceBanners ({ state }) {
           </div>
         </div>
       )}
+      {/* FILES ON DISK THAT ARE NOT IN THE LIBRARY. They used to vanish in silence: a
+          log line with a count, nothing stored, nothing on this page, so the only way to
+          learn that thirteen films were missing was to diff the whole disk against the
+          scan record by hand - which is exactly what one user did (2026-08-30). A
+          library that quietly drops files has to say so. */}
+      {state.stats?.unreadable > 0 && (
+        <div class='banner'>
+          <b>{state.stats.unreadable} {state.stats.unreadable === 1 ? 'file' : 'files'} could not be read.</b>{' '}
+          They are on disk in your folders, but nothing could make sense of them, so they
+          are not in the library.
+          <div class='hint'>
+            Usually the file is damaged or half-copied. The scan tries them again every
+            time it runs; the host log names them (search it for "unreadable").
+          </div>
+        </div>
+      )}
       {state.sourceError && (
         <div class='banner bad'>
           <b>The source is not answering.</b> {state.sourceError}
