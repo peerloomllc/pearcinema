@@ -3727,11 +3727,16 @@ test('THE PEOPLE PAGE SAYS WHAT EACH PERSON CAN SEE, and the sheet picks folders
   access.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 60))
 
-  assert.match(text(), /sees everything/, 'the unnarrowed person says so')
-  assert.match(text(), /sees 1 folder/, 'and the narrowed one says how many')
+  assert.match(text(), /Can see: everything/, 'the unnarrowed person says so')
+  assert.match(text(), /Can see: 1 folder/, 'and the narrowed one says how many')
 
-  const pick = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Choose what Sam can see')
-  assert.ok(pick, 'every person has the control')
+  // THE CONTROL IS A SENTENCE, not an icon. The first build hid it as an unlabelled eye
+  // among three other icons and Tim could not find it on his own dashboard (2026-08-30).
+  const lines = [...doc.querySelectorAll('button')].filter(b => /^Can see:/.test(b.textContent.trim()))
+  assert.equal(lines.length, 2, 'every person has a visible control saying what they can see')
+  const pick = lines.find(b => /everything/.test(b.textContent))
+  assert.ok(pick, 'the unnarrowed person\'s line says everything')
+  assert.ok(lines.some(b => /1 folder/.test(b.textContent)), 'and the narrowed one says how many')
   pick.dispatchEvent(new win.Event('click', { bubbles: true }))
   await new Promise(r => setTimeout(r, 80))
   assert.match(text(), /What Sam can see/, 'the sheet opens')
