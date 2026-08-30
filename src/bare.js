@@ -571,6 +571,14 @@ async function connectedLib (libraryId) {
     // A host coming online that the merged index has not heard from yet is
     // catalog we are not showing - rebuild (debounced, and a no-op single-host).
     if (mergedOn() && !contributedLibs.has(libraryId)) buildSoon('host-online')
+    // AND A HOST WE HAVE HEARD FROM MAY HAVE CHANGED ITS MIND ABOUT US. A library can
+    // narrow what this device may see (per-person folders), and the catalogue in hand
+    // was built under the old answer. Seen on the TCL against the real Umbrel library
+    // 2026-08-30: pairing through a window that named ONE folder left the grid drawing
+    // the 13 films of the previous narrowing until something else forced a rebuild.
+    // The films were unreachable throughout - the host refused every one - but a list
+    // that lies is its own bug. Debounced, so a reconnect storm still builds once.
+    else if (mergedOn()) buildSoon('host-reconnect')
     return c
   })()
 

@@ -122,3 +122,15 @@ test('A NARROWED PERSON GETS A FRESH CATALOGUE, not the one built before the nar
   assert.match(body, /grant:changed/, 'a grant change is noticed')
   assert.match(body, /buildSoon\('grant'\)/, 'and rebuilds the merged catalogue')
 })
+
+test('A LIBRARY COMING BACK REBUILDS THE CATALOGUE, because it may have narrowed us', () => {
+  // TCL against the real Umbrel library, 2026-08-30: pairing through a window that named
+  // one folder left the grid drawing the previous narrowing's films until something forced
+  // a rebuild. Unreachable throughout - the host refused each one - but a list that lies
+  // is its own bug.
+  const at = src.indexOf("emit('host:connected'")
+  assert.ok(at > 0)
+  const body = src.slice(at, at + 1200)
+  assert.match(body, /buildSoon\('host-online'\)/, 'a host we have never heard from still rebuilds')
+  assert.match(body, /buildSoon\('host-reconnect'\)/, 'and so does one we have')
+})
