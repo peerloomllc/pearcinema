@@ -7,8 +7,9 @@ VERIFIED against a real host over a real folder tree and a real DHT: 28 of 28 ch
 the list below, including every refusal (list, id, search, counts, art, decide, playlist,
 export, subtitles and the stream bytes themselves), a narrowing landing on a live
 connection with no reconnect, widening back, an unnarrowed second person unaffected, and
-revoke still cutting a narrowed device off. Open question 1 (guest windows) and the
-pairing-flow choice are NOT built: a person is narrowed after they are let in. Tier T3: it adds a rule to the authorisation surface, and a
+revoke still cutting a narrowed device off. Open question 1 and the pairing-flow
+choice were built the same day (#230, #231) and proven on the TCL against the real
+Umbrel library. Tier T3: it adds a rule to the authorisation surface, and a
 rule that lets one film through by mistake is a security bug of the same class as the two
 inherited ones in CLAUDE.md.
 
@@ -160,8 +161,11 @@ returns true and the host is exactly today's. No migration in either direction.
 ## Open questions
 
 1. Should a guest window default to narrowed (a guest sees only what was chosen) or to
-   everything, as today? Recommendation: everything, and the pairing dialog offers the
-   choice, so nobody is surprised by a guest seeing less than they were told.
+   everything, as today? ANSWERED AND BUILT 2026-08-30 (#230, #231), and neither way:
+   there is no default at all. The pairing panel asks, with neither answer preselected
+   and no pairing code until it is answered, because Tim's reading of the first build was
+   that "Can see: everything" is a line somebody has to notice and disagree with. An
+   empty folder list is not an answer either - it means everything.
 2. Is the top-level-folder granularity enough, or should any depth be tickable?
    ANSWERED 2026-08-30 (Tim): any depth in v1. The field is a prefix list, so this is
    the tree control opening folders on demand rather than any change to the check.
