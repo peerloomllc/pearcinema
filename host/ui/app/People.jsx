@@ -31,7 +31,7 @@
 // The nesting stays, because the nesting IS the model: a person is one row until you
 // open them, so a household of four is four rows rather than a wall of keys.
 
-import { useRef, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { Modal, askConfirm, notify } from './ui'
 import { Blocked, Check, ChevronDown, Pencil, Plus, Trash } from './icons'
@@ -323,6 +323,32 @@ export function FolderPicker ({ picked, onChange, who, prompt = null }) {
   }
   if (roots === null && supported) load()
 
+  // WHAT IS ALREADY CHOSEN HAS TO BE VISIBLE. A person narrowed to `Movies/HD-DVDs` and
+  // `TV Shows/Frasier` opened this window on two unticked roots, because their ticks are
+  // a level or two down and the tree starts closed - which reads as "nothing is chosen"
+  // (Tim, 2026-08-30). Every branch holding a stored prefix is opened on the way in, so
+  // the window shows the truth rather than a collapsed version of it.
+  const expanded = useRef(false)
+  useEffect(() => {
+    if (expanded.current || roots === null || !picked.length) return
+    expanded.current = true
+    const branches = new Map()
+    for (const p of picked) {
+      const parts = String(p.rel || '').split('/').filter(Boolean)
+      // The root itself, then every folder ABOVE the one that is ticked. The ticked
+      // folder is not opened: its own row is what there is to see.
+      branches.set(keyOf(p.root, ''), { root: p.root, rel: '' })
+      for (let i = 1; i < parts.length; i++) {
+        const rel = parts.slice(0, i).join('/')
+        branches.set(keyOf(p.root, rel), { root: p.root, rel })
+      }
+    }
+    if (!branches.size) return
+    setOpenDirs(o => { const next = { ...o }; for (const k of branches.keys()) next[k] = true; return next })
+    // Read them in parallel: the tree is a handful of levels, not a walk of the disk.
+    Promise.all([...branches.values()].map(b => load(b.root, b.rel))).catch(() => {})
+  }, [roots])
+
   const isPicked = (root, rel) => picked.some(p => p.root === root && (p.rel || '') === (rel || ''))
   // A ticked ancestor already covers this folder, so its own tick is implied and its box
   // is shown ticked and disabled - ticking it again would store a redundant prefix.
@@ -336,6 +362,10 @@ export function FolderPicker ({ picked, onChange, who, prompt = null }) {
       // thing, and a stored list of overlapping prefixes is one nobody can read back.
       : [...picked.filter(p => !(p.root === root && (p.rel || '') !== '' && String(p.rel).startsWith((rel || '') + '/'))), { root, rel: rel || '' }])
   }
+  // How many stored prefixes sit BENEATH this folder (not this folder itself).
+  const inside = (root, rel) => picked.filter(p => p.root === root && (p.rel || '') !== (rel || '') &&
+    ((rel || '') === '' || String(p.rel || '').startsWith(rel + '/'))).length
+
   const openFolder = async (root, rel) => {
     const k = keyOf(root, rel)
     setOpenDirs(o => ({ ...o, [k]: !o[k] }))
@@ -354,6 +384,11 @@ export function FolderPicker ({ picked, onChange, who, prompt = null }) {
               {' '}{name}
             </label>
             {covered && <span class='rowsub dim'>Included already</span>}
+            {/* AND A CLOSED FOLDER SAYS WHAT IS CHOSEN INSIDE IT, so a tree collapsed by
+                hand still tells the truth about the whole choice. */}
+            {!covered && !isPicked(root, rel) && !openDirs[k] && inside(root, rel) > 0 && (
+              <span class='rowsub dim'>{inside(root, rel)} chosen inside</span>
+            )}
           </span>
           <span class='rowctl'>
             <button
@@ -398,6 +433,19 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
   const [busy, setBusy] = useState(false)
 
   const save = async () => {
+    // WIDENING SOMEBODY BACK TO EVERYTHING is the one save here that gives access rather
+    // than taking it away, so it is confirmed out loud (Tim, 2026-08-30). Narrowing is
+    // not: it can only ever show somebody less, and it is undone by opening this window
+    // again. Somebody who already sees everything is not asked - nothing changes.
+    const wasNarrowed = devices.some(d => Array.isArray(d.paths) && d.paths.length)
+    if (!picked.length && wasNarrowed) {
+      const ok = await askConfirm({
+        title: `Give ${person.label} the whole library?`,
+        message: 'Every film and every show, including anything added later. They can be narrowed again here at any time.',
+        confirmLabel: 'Yes, the whole library'
+      })
+      if (!ok) return
+    }
     setBusy(true)
     const res = await api('/api/sharing/set', { personId: person.id, paths: picked.length ? picked : null })
     setBusy(false)

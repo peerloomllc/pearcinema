@@ -28,7 +28,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { api, copyText, fmtDur } from './api'
 import { Check, ChevronDown, Close } from './icons'
-import { Modal, notify } from './ui'
+import { Modal, askConfirm, notify } from './ui'
 import { FolderPicker } from './People'
 
 const DAY_MS = 86400e3
@@ -119,6 +119,18 @@ export default function Pair ({ state, reload, onClose }) {
   }, [win, outcome])
 
   const open = async () => {
+    // GIVING SOMEBODY THE WHOLE LIBRARY IS THE ONE CHOICE HERE WITH NO UNDO, so it is
+    // confirmed out loud (Tim, 2026-08-30). The narrow choices are not: they are the
+    // careful answer, and a prompt in front of every pairing teaches people to dismiss
+    // prompts. An owner window says what it is on its own tab and is not asked twice.
+    if (kind !== 'owner' && access === 'all') {
+      const ok = await askConfirm({
+        title: 'Give this device the whole library?',
+        message: `Everything in ${state?.library || 'this library'} - every film and every show, including anything added later. You can narrow it afterwards on the People page.`,
+        confirmLabel: 'Yes, the whole library'
+      })
+      if (!ok) return
+    }
     setBusy(true)
     const st = await api('/api/state').catch(() => null)
     before.current = new Map((st?.devices || []).map(d => [d.deviceKey, sig(d)]))
