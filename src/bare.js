@@ -222,6 +222,7 @@ function markRevoked (libraryId, reason = 'device-revoked') {
   if (slot?.client) { try { slot.client.close() } catch {} }
   hostConns.delete(libraryId)
   contributedLibs.delete(libraryId)
+  lastCatalogs.delete(libraryId)
   // STOP THE FILM, which is the half hanging up cannot do. On a home network the player
   // has been handed the whole file long before this arrives, so nothing about closing a
   // socket reaches the picture - the UI has to be told (Tim, 2026-08-27, filming exactly
@@ -554,7 +555,12 @@ async function connectedLib (libraryId) {
       // film, but the merged index had been built before it, so the grid went on
       // showing 240 films that could no longer be opened. The host is the authority
       // and it already said so; this is the phone catching up without a restart.
-      if (m?.kind === 'grant:changed') buildSoon('grant')
+      if (m?.kind === 'grant:changed') {
+        // Logged with its arrival, because "how long after the operator saved does the
+        // phone know" is a question only these two timestamps answer (TCL, 2026-08-30).
+        log('grant:changed', { libraryId, paths: Array.isArray(m.data?.paths) ? m.data.paths.length : null })
+        buildSoon('grant', libraryId)
+      }
     }
     c.conn.once('close', () => {
       // Fold in this connection's last stretch BEFORE forgetting it was relayed - a film
@@ -571,6 +577,14 @@ async function connectedLib (libraryId) {
     // A host coming online that the merged index has not heard from yet is
     // catalog we are not showing - rebuild (debounced, and a no-op single-host).
     if (mergedOn() && !contributedLibs.has(libraryId)) buildSoon('host-online')
+    // AND A HOST WE HAVE HEARD FROM MAY HAVE CHANGED ITS MIND ABOUT US. A library can
+    // narrow what this device may see (per-person folders), and the catalogue in hand
+    // was built under the old answer. Seen on the TCL against the real Umbrel library
+    // 2026-08-30: pairing through a window that named ONE folder left the grid drawing
+    // the 13 films of the previous narrowing until something else forced a rebuild.
+    // The films were unreachable throughout - the host refused every one - but a list
+    // that lies is its own bug. Debounced, so a reconnect storm still builds once.
+    else if (mergedOn()) buildSoon('host-reconnect', libraryId)
     return c
   })()
 
@@ -662,7 +676,14 @@ let buildTimer = null
 function mergedOn () { return hostsState.hosts.length > 1 }
 function libraryFilter () { return readSettings().libraryFilter || '_all' }
 
+// THE LAST CATALOGUE EACH LIBRARY GAVE US, so a change in ONE of them does not cost a
+// full re-drain of all the others. Rebuilding everything took 10 to 16 seconds against
+// three hosts and 2,742 episodes (measured on the TCL, 2026-08-30), which is why adding
+// a folder to somebody looked like it needed a pull-to-refresh.
+let lastCatalogs = new Map()
+
 function adoptCatalogs (catalogs) {
+  for (const c of catalogs) lastCatalogs.set(c.libraryId, c)
   mergedIndex = merge.buildIndex(catalogs)
   owners = new Map()
   artOwners = new Map()
@@ -711,12 +732,26 @@ async function fetchCatalog (c, libraryId) {
   return { libraryId, movies, series, episodes }
 }
 
-async function buildMerged (reason) {
+async function buildMerged (reason, only = null) {
   if (!mergedOn()) return
   if (buildFlight) return buildFlight
   buildFlight = (async () => {
     const cats = []
-    await Promise.all(hostsState.hosts.map(async (h) => {
+    // ONE LIBRARY CHANGED ITS MIND, so only that one is re-read and the rest are the
+    // catalogues they last gave us. A grant change or a reconnect is per library by
+    // construction; a first build, a refresh or a new host still reads everything.
+    // A host with no cached catalogue contributed nothing to the index we are holding,
+    // which on this phone is any host that is switched off - and requiring one to be
+    // cached made the reuse never happen at all: with two of five libraries offline,
+    // every grant change re-drained the three that answer (11 seconds, TCL 2026-08-30).
+    // An absent host stays absent; its own next connect triggers a full build.
+    const reusable = !!(only && lastCatalogs.has(only))
+    if (reusable) {
+      for (const h of hostsState.hosts) {
+        if (h.libraryId !== only && lastCatalogs.has(h.libraryId)) cats.push(lastCatalogs.get(h.libraryId))
+      }
+    }
+    await Promise.all(hostsState.hosts.filter((h) => !reusable || h.libraryId === only).map(async (h) => {
       try {
         cats.push(await raced((async () => {
           const c = await connectedLib(h.libraryId)
@@ -734,16 +769,30 @@ async function buildMerged (reason) {
       fs.mkdirSync(MERGED_DIR, { recursive: true })
       fs.writeFileSync(CATALOGS_FILE, JSON.stringify(cats))
     } catch {}
-    log('merged:built', { reason, hosts: cats.length, movies: mergedIndex.movies.length, series: mergedIndex.series.length, episodes: mergedIndex.episodes.length })
+    log('merged:built', { reason, only: only || undefined, reused: only ? reusable : undefined, hosts: cats.length, movies: mergedIndex.movies.length, series: mergedIndex.series.length, episodes: mergedIndex.episodes.length })
     emit('merged:changed', { reason })
   })().finally(() => { buildFlight = null })
   return buildFlight
 }
 
-function buildSoon (reason) {
+// `only` names the one library worth re-reading, where the caller knows. A second call
+// naming a different library before the timer fires falls back to reading everything,
+// because two libraries changed and neither answer alone is right.
+let buildOnly = null
+function buildSoon (reason, only = null) {
   if (!mergedOn()) return
+  if (buildTimer) buildOnly = buildOnly === only ? only : null
+  else buildOnly = only
   clearTimeout(buildTimer)
-  buildTimer = setTimeout(() => buildMerged(reason).catch((e) => log('merged:build-failed', { err: e.message })), 800)
+  buildTimer = setTimeout(() => {
+    // CLEARED WHEN IT FIRES, or the next call reads a spent timer id as "a build is
+    // already pending", decides two libraries are in flight and re-reads everything.
+    // That is exactly what happened on the TCL: the targeted refresh never engaged.
+    buildTimer = null
+    const one = buildOnly
+    buildOnly = null
+    buildMerged(reason, one).catch((e) => log('merged:build-failed', { err: e.message }))
+  }, 800)
 }
 
 // A fan-out branch must not wait forever. A host that is DOWN fails its

@@ -303,18 +303,15 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
 // sent as one payload, and most narrowings open one branch. Everything is the default
 // and the state of every grant until now, so the sheet opens on "Everything" with
 // nothing ticked and saving nothing keeps it that way.
-function SharingSheet ({ person, devices, onClose, onSaved }) {
+// THE FOLDER TREE, shared by the People page and the pairing dialog. Read one level at
+// a time, on demand: a 16,000-file library cannot be sent as one payload, and most
+// narrowings open one branch. Ticking nothing means everything, which is the default
+// and the state of every grant until now.
+export function FolderPicker ({ picked, onChange, who }) {
   const [roots, setRoots] = useState(null)
   const [supported, setSupported] = useState(true)
-  // rel by root for what is open, and the folders each level returned.
   const [kids, setKids] = useState({})
   const [openDirs, setOpenDirs] = useState({})
-  // The chosen prefixes, as the grant stores them: { root, rel }.
-  const [picked, setPicked] = useState(() => {
-    const held = devices.find(d => Array.isArray(d.paths) && d.paths.length)
-    return held ? held.paths.map(p => ({ root: p.root, rel: p.rel || '' })) : []
-  })
-  const [busy, setBusy] = useState(false)
 
   const keyOf = (root, rel) => root + '\u0000' + (rel || '')
   const load = async (root = null, rel = '') => {
@@ -327,34 +324,22 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
   if (roots === null && supported) load()
 
   const isPicked = (root, rel) => picked.some(p => p.root === root && (p.rel || '') === (rel || ''))
-  // A ticked ancestor already covers this folder, so its own tick is implied and its
-  // box is shown ticked and disabled - ticking it again would store a redundant prefix.
+  // A ticked ancestor already covers this folder, so its own tick is implied and its box
+  // is shown ticked and disabled - ticking it again would store a redundant prefix.
   const coveredBy = (root, rel) => picked.find(p => p.root === root && (p.rel || '') !== (rel || '') &&
     ((p.rel || '') === '' || String(rel || '').startsWith(p.rel + '/')))
   const toggle = (root, rel) => {
     if (coveredBy(root, rel)) return
-    setPicked(cur => isPicked(root, rel)
-      ? cur.filter(p => !(p.root === root && (p.rel || '') === (rel || '')))
+    onChange(isPicked(root, rel)
+      ? picked.filter(p => !(p.root === root && (p.rel || '') === (rel || '')))
       // Ticking a folder drops anything beneath it: the shorter prefix says the same
-      // thing and a stored list of overlapping prefixes is a list nobody can read back.
-      : [...cur.filter(p => !(p.root === root && (p.rel || '') !== '' && String(p.rel).startsWith((rel || '') + '/'))), { root, rel: rel || '' }])
+      // thing, and a stored list of overlapping prefixes is one nobody can read back.
+      : [...picked.filter(p => !(p.root === root && (p.rel || '') !== '' && String(p.rel).startsWith((rel || '') + '/'))), { root, rel: rel || '' }])
   }
   const openFolder = async (root, rel) => {
     const k = keyOf(root, rel)
     setOpenDirs(o => ({ ...o, [k]: !o[k] }))
     if (!kids[k]) await load(root, rel)
-  }
-
-  const save = async () => {
-    setBusy(true)
-    const res = await api('/api/sharing/set', { personId: person.id, paths: picked.length ? picked : null })
-    setBusy(false)
-    if (res?.error) return notify('Not saved', res.error)
-    notify(picked.length ? `${person.label} sees ${picked.length} folder${picked.length === 1 ? '' : 's'}` : `${person.label} sees everything`,
-      picked.length
-        ? 'Films they have already downloaded stay on their phone.'
-        : 'The whole library, as before.')
-    onSaved()
   }
 
   const Row = ({ root, rel, name, depth }) => {
@@ -365,12 +350,8 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
         <div class='setrow' style={{ paddingLeft: (0.6 + depth * 1.1) + 'rem' }}>
           <span class='rowmain'>
             <label class='rowname'>
-              <input
-                type='checkbox'
-                checked={!!covered || isPicked(root, rel)}
-                disabled={!!covered}
-                onChange={() => toggle(root, rel)}
-              />{' '}{name}
+              <input type='checkbox' checked={!!covered || isPicked(root, rel)} disabled={!!covered} onChange={() => toggle(root, rel)} />
+              {' '}{name}
             </label>
             {covered && <span class='rowsub dim'>Included already</span>}
           </span>
@@ -395,28 +376,55 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
     )
   }
 
+  if (!supported) return <p class='hint'>This library's source cannot list folders, so sharing stays all or nothing here.</p>
+  return (
+    <>
+      <p class='hint'>
+        Tick the drives or folders {who} may watch. Tick nothing and they see everything,
+        which is how it has always been.
+      </p>
+      {roots === null && <p class='hint'>Reading the library…</p>}
+      {(roots || []).map(r => <Row key={r.root} root={r.root} rel='' name={r.label} depth={0} />)}
+    </>
+  )
+}
+
+function SharingSheet ({ person, devices, onClose, onSaved }) {
+  const [picked, setPicked] = useState(() => {
+    const held = devices.find(d => Array.isArray(d.paths) && d.paths.length)
+    return held ? held.paths.map(p => ({ root: p.root, rel: p.rel || '' })) : []
+  })
+  const [busy, setBusy] = useState(false)
+
+  const save = async () => {
+    setBusy(true)
+    const res = await api('/api/sharing/set', { personId: person.id, paths: picked.length ? picked : null })
+    setBusy(false)
+    if (res?.error) return notify('Not saved', res.error)
+    notify(picked.length ? `${person.label} sees ${picked.length} folder${picked.length === 1 ? '' : 's'}` : `${person.label} sees everything`,
+      picked.length
+        ? 'Films they have already downloaded stay on their phone.'
+        : 'The whole library, as before.')
+    onSaved()
+  }
+
   return (
     <Modal title={`What ${person.label} can see`} onClose={onClose}>
-      {!supported && <p class='hint'>This library's source cannot list folders, so sharing stays all or nothing here.</p>}
-      {supported && (
-        <>
-          <p class='hint'>
-            Tick the drives or folders {person.label} may watch. Tick nothing and they see everything,
-            which is how it has always been. Films they have already downloaded stay on their phone.
-          </p>
-          {roots === null && <p class='hint'>Reading the library…</p>}
-          {(roots || []).map(r => (
-            <Row key={r.root} root={r.root} rel='' name={r.label} depth={0} />
-          ))}
-          <div class='acts' style='justify-content:flex-end;margin-top:.8rem'>
-            <button class='ghost' onClick={onClose}>Cancel</button>
-            <button disabled={busy} onClick={save}>{picked.length ? 'Save' : 'Let them see everything'}</button>
-          </div>
-        </>
-      )}
+      <FolderPicker picked={picked} onChange={setPicked} who={person.label} />
+      <p class='hint'>Films they have already downloaded stay on their phone.</p>
+      {/* THE HOUSE SHAPE FOR A WINDOW'S BUTTONS: centred, one width, no inline style.
+          Every other window in this dashboard uses it (`.confirm-actions`), and these
+          two were shipped right-aligned with a hand-written margin (Tim, 2026-08-30). */}
+      <div class='confirm-actions'>
+        <button class='ghost' onClick={onClose}>Cancel</button>
+        {/* One word, so both buttons are the width `.confirm-actions` gives them. What
+            saving nothing means is the sentence at the top of the window, not a label. */}
+        <button disabled={busy} onClick={save}>Save</button>
+      </div>
     </Modal>
   )
 }
+
 
 export default function People ({ state, reload }) {
   const [open, setOpen] = useState({})
