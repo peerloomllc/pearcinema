@@ -48,6 +48,10 @@ export default function Pair ({ state, reload, onClose }) {
   // which is the default and what every pairing did before.
   const [paths, setPaths] = useState([])
   const [choosing, setChoosing] = useState(false)
+  // A DECISION, NOT A DEFAULT. "Can see: everything" was a line somebody had to notice
+  // and disagree with, which is the same mistake the eye icon made (Tim, 2026-08-30).
+  // Nothing is selected until it is chosen, and the code cannot be shown before that.
+  const [access, setAccess] = useState(null) // null | 'all' | 'some'
   const [win, setWin] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -120,7 +124,7 @@ export default function Pair ({ state, reload, onClose }) {
     before.current = new Map((st?.devices || []).map(d => [d.deviceKey, sig(d)]))
 
     // An owner is never filtered, so the choice is not offered for one and not sent.
-    const seeing = kind !== 'owner' && paths.length ? { paths } : {}
+    const seeing = kind !== 'owner' && access === 'some' && paths.length ? { paths } : {}
     const res = await api('/api/pair/start',
       kind === 'owner' ? { owner: true } : kind === 'guest' ? { expiresMs: durMs, ...seeing } : seeing)
     setBusy(false)
@@ -204,18 +208,39 @@ export default function Pair ({ state, reload, onClose }) {
           <p class='hint center'>Permanent access. Scan the code in PearCinema on your phone.</p>
         )}
 
-        {/* THE SAME SENTENCE THE PEOPLE PAGE USES, for the same reason: an unlabelled
-            icon is a control nobody finds (Tim, 2026-08-30). An owner sees everything by
-            definition, so the line is not offered for one. */}
+        {/* WHAT THIS DEVICE WILL BE ABLE TO SEE, ASKED RATHER THAN ASSUMED. An owner is
+            never filtered, so an owner window skips the question entirely. */}
         {kind !== 'owner' && (
-          <button class='seeline' onClick={() => setChoosing(true)}>
-            Can see: {paths.length ? `${paths.length} folder${paths.length === 1 ? '' : 's'}` : 'everything'}
-            <span class='seechev'><ChevronDown size={13} /></span>
-          </button>
+          <>
+            <p class='hint center'>What will this device be able to see?</p>
+            <div class='seg wide'>
+              <button
+                class={access === 'all' ? 'on' : ''}
+                onClick={() => { setAccess('all'); setPaths([]) }}
+              >The whole library</button>
+              <button
+                class={access === 'some' ? 'on' : ''}
+                onClick={() => { setAccess('some'); setChoosing(true) }}
+              >Only some folders</button>
+            </div>
+            {access === 'some' && (
+              <button class='seeline center-self' onClick={() => setChoosing(true)}>
+                {paths.length
+                  ? `${paths.length} folder${paths.length === 1 ? '' : 's'} chosen - change`
+                  : 'Choose the folders'}
+                <span class='seechev'><ChevronDown size={13} /></span>
+              </button>
+            )}
+          </>
         )}
         {choosing && (
           <Modal title='What this device can see' onClose={() => setChoosing(false)}>
-            <FolderPicker picked={paths} onChange={setPaths} who='this device' />
+            <FolderPicker
+              picked={paths}
+              onChange={setPaths}
+              who='this device'
+              prompt='Tick the drives or folders this device may watch. Everything inside a ticked folder is included.'
+            />
             {/* The house shape for a window's buttons: centred, one width, no inline
                 style - `.confirm-actions`, which every other window here uses. */}
             <div class='confirm-actions'>
@@ -224,7 +249,15 @@ export default function Pair ({ state, reload, onClose }) {
           </Modal>
         )}
 
-        <button onClick={open} disabled={busy}>{busy ? 'Starting…' : 'Show pairing code'}</button>
+        {/* THE GATE. No code until the question is answered, and no code for "only some
+            folders" until some are actually chosen - an empty list means everything, and
+            handing somebody the whole library while they believe they narrowed it is the
+            one outcome this whole feature exists to prevent. */}
+        <button onClick={open} disabled={busy || (kind !== 'owner' && (!access || (access === 'some' && !paths.length)))}>
+          {busy ? 'Starting…' : 'Show pairing code'}
+        </button>
+        {kind !== 'owner' && !access && <p class='hint center'>Choose what they can see first.</p>}
+        {kind !== 'owner' && access === 'some' && !paths.length && <p class='hint center'>Pick at least one folder.</p>}
       </div>
     )
   }

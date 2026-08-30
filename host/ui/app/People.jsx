@@ -307,7 +307,7 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
 // a time, on demand: a 16,000-file library cannot be sent as one payload, and most
 // narrowings open one branch. Ticking nothing means everything, which is the default
 // and the state of every grant until now.
-export function FolderPicker ({ picked, onChange, who }) {
+export function FolderPicker ({ picked, onChange, who, prompt = null }) {
   const [roots, setRoots] = useState(null)
   const [supported, setSupported] = useState(true)
   const [kids, setKids] = useState({})
@@ -377,15 +377,16 @@ export function FolderPicker ({ picked, onChange, who }) {
   }
 
   if (!supported) return <p class='hint'>This library's source cannot list folders, so sharing stays all or nothing here.</p>
+  // THE WRAPPER IS NOT DECORATION. This tree is rendered in two places, and the pairing
+  // panel centres its text - so the same rows came out centred there and left-aligned on
+  // the People page (Tim, 2026-08-30, looking at both). The class pins the alignment to
+  // the picker rather than to wherever it happens to be standing.
   return (
-    <>
-      <p class='hint'>
-        Tick the drives or folders {who} may watch. Tick nothing and they see everything,
-        which is how it has always been.
-      </p>
+    <div class='folderpick'>
+      {prompt && <p class='hint'>{prompt}</p>}
       {roots === null && <p class='hint'>Reading the library…</p>}
       {(roots || []).map(r => <Row key={r.root} root={r.root} rel='' name={r.label} depth={0} />)}
-    </>
+    </div>
   )
 }
 
@@ -410,7 +411,12 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
 
   return (
     <Modal title={`What ${person.label} can see`} onClose={onClose}>
-      <FolderPicker picked={picked} onChange={setPicked} who={person.label} />
+      <FolderPicker
+        picked={picked}
+        onChange={setPicked}
+        who={person.label}
+        prompt={`Tick the drives or folders ${person.label} may watch. Tick nothing and they see everything, which is how it has always been.`}
+      />
       <p class='hint'>Films they have already downloaded stay on their phone.</p>
       {/* THE HOUSE SHAPE FOR A WINDOW'S BUTTONS: centred, one width, no inline style.
           Every other window in this dashboard uses it (`.confirm-actions`), and these

@@ -1823,3 +1823,12 @@ aside.sheet h3, .sheet-head h3 { text-align: center }
 }
 .seeline:hover, .seeline:focus-visible { color: var(--fg); text-decoration: underline }
 .seechev { transform: rotate(-90deg); line-height: 0; opacity: .7 }
+
+/* The folder tree, wherever it is standing. The pairing panel centres its own text, so
+   without this the same rows read centred there and left-aligned on the People page
+   (Tim, 2026-08-30). One tree, one shape. */
+.folderpick { text-align: left }
+.folderpick .setrow { text-align: left }
+.folderpick .rowname { display: inline-flex; align-items: center; gap: .35rem }
+/* The "n folders chosen" line under the segmented choice, centred with the panel. */
+.seeline.center-self { align-self: center }
