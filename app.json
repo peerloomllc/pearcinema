@@ -4,7 +4,7 @@
     "slug": "pearcinema",
     "version": "1.1.2",
     "newArchEnabled": true,
-    "orientation": "portrait",
+    "orientation": "default",
     "scheme": "pear",
     "userInterfaceStyle": "automatic",
     "android": {
@@ -46,7 +46,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.pearcinema",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "LSApplicationQueriesSchemes": [
