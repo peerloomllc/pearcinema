@@ -118,9 +118,9 @@ test('A NARROWED PERSON GETS A FRESH CATALOGUE, not the one built before the nar
   // built before it, so the grid went on drawing 240 films that could no longer open.
   const at = src.indexOf('c.onPush = (m) => {')
   assert.ok(at > 0, 'the push handler is still there')
-  const body = src.slice(at, at + 1400)
+  const body = src.slice(at, at + 1800)
   assert.match(body, /grant:changed/, 'a grant change is noticed')
-  assert.match(body, /buildSoon\('grant'\)/, 'and rebuilds the merged catalogue')
+  assert.match(body, /buildSoon\('grant', libraryId\)/, 'and rebuilds that library\'s catalogue')
 })
 
 test('A LIBRARY COMING BACK REBUILDS THE CATALOGUE, because it may have narrowed us', () => {
@@ -132,5 +132,24 @@ test('A LIBRARY COMING BACK REBUILDS THE CATALOGUE, because it may have narrowed
   assert.ok(at > 0)
   const body = src.slice(at, at + 1200)
   assert.match(body, /buildSoon\('host-online'\)/, 'a host we have never heard from still rebuilds')
-  assert.match(body, /buildSoon\('host-reconnect'\)/, 'and so does one we have')
+  assert.match(body, /buildSoon\('host-reconnect', libraryId\)/, 'and so does one we have')
+})
+
+test('A CHANGE IN ONE LIBRARY RE-READS ONE LIBRARY, not all of them', () => {
+  // Measured on the TCL against three hosts and 2,742 episodes (2026-08-30): adding a
+  // folder to somebody took 10 to 16 seconds to reach the phone, because a grant change
+  // re-drained every library's whole catalogue. The push says which library changed.
+  assert.match(src, /let lastCatalogs = new Map\(\)/, 'each library\'s last catalogue is kept')
+  assert.match(src, /async function buildMerged \(reason, only = null\)/)
+  assert.match(src, /buildSoon\('grant', libraryId\)/, 'a grant change names its library')
+  assert.match(src, /buildSoon\('host-reconnect', libraryId\)/, 'and so does a reconnect')
+  // Two different libraries inside one debounce window fall back to reading everything.
+  const at = src.indexOf('function buildSoon (reason, only = null)')
+  const body = src.slice(at, at + 600)
+  assert.match(body, /buildOnly = buildOnly === only \? only : null/)
+  // And the timer is cleared when it fires, or a spent id reads as "a build is pending"
+  // and every later change re-reads everything (seen on the TCL, 2026-08-30).
+  assert.match(body, /buildTimer = null/)
+  // A library that goes away must not be served from the cache.
+  assert.match(src, /lastCatalogs\.delete\(libraryId\)/)
 })

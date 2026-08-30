@@ -216,7 +216,9 @@ export default function Pair ({ state, reload, onClose }) {
         {choosing && (
           <Modal title='What this device can see' onClose={() => setChoosing(false)}>
             <FolderPicker picked={paths} onChange={setPaths} who='this device' />
-            <div class='acts' style='justify-content:flex-end;margin-top:.8rem'>
+            {/* The house shape for a window's buttons: centred, one width, no inline
+                style - `.confirm-actions`, which every other window here uses. */}
+            <div class='confirm-actions'>
               <button onClick={() => setChoosing(false)}>Done</button>
             </div>
           </Modal>

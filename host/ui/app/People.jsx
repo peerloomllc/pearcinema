@@ -412,9 +412,14 @@ function SharingSheet ({ person, devices, onClose, onSaved }) {
     <Modal title={`What ${person.label} can see`} onClose={onClose}>
       <FolderPicker picked={picked} onChange={setPicked} who={person.label} />
       <p class='hint'>Films they have already downloaded stay on their phone.</p>
-      <div class='acts' style='justify-content:flex-end;margin-top:.8rem'>
+      {/* THE HOUSE SHAPE FOR A WINDOW'S BUTTONS: centred, one width, no inline style.
+          Every other window in this dashboard uses it (`.confirm-actions`), and these
+          two were shipped right-aligned with a hand-written margin (Tim, 2026-08-30). */}
+      <div class='confirm-actions'>
         <button class='ghost' onClick={onClose}>Cancel</button>
-        <button disabled={busy} onClick={save}>{picked.length ? 'Save' : 'Let them see everything'}</button>
+        {/* One word, so both buttons are the width `.confirm-actions` gives them. What
+            saving nothing means is the sentence at the top of the window, not a label. */}
+        <button disabled={busy} onClick={save}>Save</button>
       </div>
     </Modal>
   )
