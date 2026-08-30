@@ -2,6 +2,34 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-30 - NO PHOTOS, AND NO HOME MOVIES CATEGORY
+Tier: T1 (a scope boundary, not a change to anything shipped). Tim asked whether to add
+Home Movies and Photos the way Plex does, since Plex is branded as a media server and
+this is branded as a films and television one. The answer is no to both, for two
+different reasons, recorded so the question is settled rather than reopened.
+
+PHOTOS ARE A DIFFERENT PRODUCT WEARING THE SAME WORD. They need thumbnails at scale,
+date and album browsing, faces, EXIF and a grid that stays usable at tens of thousands
+of items. Nothing this app is built from helps: the transcoder, the resume positions,
+the season shelves and the cast path all assume a thing with a RUNTIME. Adding photos
+means starting a second app inside this one and competing with Immich, which is free,
+good and does nothing else.
+
+HOME MOVIES ARE CLOSER AND STILL WRONG. They are video, and the player would show them
+today. What they break is the two things this app is actually built on: a name parser
+that expects a title and a year, and metadata that comes from a database. `IMG_4021.mp4`
+has neither, and what somebody wants from home video is browsing by date and by person -
+which is the photos problem again, arriving through a different door.
+
+WHERE THE SAME EFFORT GOES INSTEAD: the field report of 2026-08-30 had 8,183 episodes
+with no number and 13 files that vanished silently. The folder adapter is the moat
+(CLAUDE.md), and it has real work left in it.
+
+THE CHEAP VERSION IF THIS RETURNS, and it is not this feature: a folder the operator
+marks as "just play these, do not try to identify them", listed by filename and folder
+with no matching attempted. Small, honest about what it is, and it does not promise
+parity with a photo manager.
+
 ## 2026-08-30 - A GRANT CAN BE NARROWED TO FOLDERS, PER PERSON
 Tier: T3 (a rule on the authorisation surface). Proposal
 proposals/2026-08-30-per-person-folders.md, approved by Tim the same day with one change:
