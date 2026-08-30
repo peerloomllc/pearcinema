@@ -164,7 +164,13 @@ async function open (state = STATE, extraRoutes = {}, asked = null, delay = 0) {
     const key = Object.keys(ROUTES).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
     const routes = { ...ROUTES, ...extraRoutes }
     const hit = Object.keys(routes).find(k => String(url).startsWith(k.split('?')[0]) && String(url).includes(k.split('?')[1] || ''))
-    const body = hit === '/api/state' ? state : (hit ? routes[hit] : {})
+    // A route may be a fixed body or a FUNCTION of the posted body, which is what a
+    // route whose answer depends on the question needs (the sharing tree asks for one
+    // level at a time, and each level is a different answer).
+    const found = hit ? routes[hit] : {}
+    let posted = {}
+    if (opts && opts.body) { try { posted = JSON.parse(opts.body) } catch {} }
+    const body = hit === '/api/state' ? state : (typeof found === 'function' ? found(posted) : found)
     return { status: 200, ok: true, json: async () => body }
   }
 
@@ -3689,4 +3695,72 @@ test('A MACHINE WITH NOTHING TO TRY IS NOT ACCUSED OF FAILING A TEST', async (t)
   assert.match(text(), /no graphics chip PearCinema can convert with/)
   assert.doesNotMatch(text(), /did not pass the conversion test/)
   assert.doesNotMatch(text(), /The converter said/, 'nothing said anything, so nothing is quoted')
+})
+
+test('THE PEOPLE PAGE SAYS WHAT EACH PERSON CAN SEE, and the sheet picks folders to any depth', async (t) => {
+  // proposals/2026-08-30-per-person-folders.md, approved 2026-08-30. Everything is the
+  // default and the answer for almost everybody, so the row says which it is at a
+  // glance and the sheet is where the narrowing happens.
+  const ROOT = '/srv/films'
+  const asked = []
+  const state = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Sam', label: 'Sam' }, { id: 'p2', name: 'Alex', label: 'Alex' }],
+    devices: [
+      { deviceKey: 'dk1', label: 'phone', platform: 'android', online: true, personId: 'p1', confirmed: true, scope: 'full', paths: null },
+      { deviceKey: 'dk2', label: 'tablet', platform: 'android', online: false, personId: 'p2', confirmed: true, scope: 'full', paths: [{ root: ROOT, rel: 'kids' }] }
+    ]
+  }
+  const routes = {
+    '/api/sharing/folders': (body) => {
+      asked.push(body)
+      if (!body.root) return { roots: [{ root: ROOT, label: 'Films', holds: 'movies' }], folders: [], supported: true }
+      if (!body.rel) return { roots: [{ root: ROOT, label: 'Films', holds: 'movies' }], folders: [{ root: ROOT, rel: 'kids', name: 'kids' }], supported: true }
+      return { roots: [{ root: ROOT, label: 'Films', holds: 'movies' }], folders: [{ root: ROOT, rel: 'kids/Pixar', name: 'Pixar' }], supported: true }
+    },
+    '/api/sharing/set': (body) => { asked.push(body); return { ok: true, devices: 1, refreshed: 1 } }
+  }
+  const { dom, doc, win, text } = await open(state, routes)
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.match(text(), /sees everything/, 'the unnarrowed person says so')
+  assert.match(text(), /sees 1 folder/, 'and the narrowed one says how many')
+
+  const pick = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Choose what Sam can see')
+  assert.ok(pick, 'every person has the control')
+  pick.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+  assert.match(text(), /What Sam can see/, 'the sheet opens')
+  assert.match(text(), /Films/, 'and lists the roots')
+  assert.match(text(), /already downloaded stay on their phone/, 'and says what a narrowing does not do')
+
+  // Any depth: open the root, then open the folder inside it (Tim, 2026-08-30).
+  const openRoot = [...doc.querySelectorAll('button')].find(b => /Show what is inside Films/.test(b.getAttribute('aria-label') || ''))
+  openRoot.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+  assert.match(text(), /kids/, 'one level down')
+  const openKids = [...doc.querySelectorAll('button')].find(b => /Show what is inside kids/.test(b.getAttribute('aria-label') || ''))
+  openKids.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+  assert.match(text(), /Pixar/, 'and another, on demand')
+  assert.ok(asked.some(a => a.rel === 'kids'), 'the deeper level was asked for by path')
+
+  // Tick the kids folder and save.
+  const boxes = [...doc.querySelectorAll('input[type=checkbox]')]
+  const kidsBox = boxes.find(b => /kids/.test(b.closest('label')?.textContent || ''))
+  assert.ok(kidsBox, 'the folder has a tick')
+  kidsBox.checked = true
+  kidsBox.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+  const save = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save')
+  save.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 120))
+
+  const saved = asked.find(a => a.personId === 'p1')
+  assert.ok(saved, 'the save reached the host')
+  assert.deepEqual(saved.paths, [{ root: ROOT, rel: 'kids' }], 'as the prefix the grant stores')
 })
