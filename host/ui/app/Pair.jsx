@@ -27,7 +27,9 @@
 
 import { useState, useEffect, useRef } from 'preact/hooks'
 import { api, copyText, fmtDur } from './api'
-import { Check, Close } from './icons'
+import { Check, ChevronDown, Close } from './icons'
+import { Modal, notify } from './ui'
+import { FolderPicker } from './People'
 
 const DAY_MS = 86400e3
 const GUEST_DURATIONS = [
@@ -39,6 +41,13 @@ const GUEST_DURATIONS = [
 
 export default function Pair ({ state, reload, onClose }) {
   const [kind, setKind] = useState('full') // full | guest | owner
+  // WHAT THIS DEVICE WILL BE ABLE TO SEE, chosen BEFORE it is let in
+  // (proposals/2026-08-30-per-person-folders.md, open question 1). Until now a person was
+  // let in with the whole library and narrowed on the People page afterwards, which leaves
+  // a window - however short - where they can see everything. Empty means everything,
+  // which is the default and what every pairing did before.
+  const [paths, setPaths] = useState([])
+  const [choosing, setChoosing] = useState(false)
   const [win, setWin] = useState(null)
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -110,8 +119,10 @@ export default function Pair ({ state, reload, onClose }) {
     const st = await api('/api/state').catch(() => null)
     before.current = new Map((st?.devices || []).map(d => [d.deviceKey, sig(d)]))
 
+    // An owner is never filtered, so the choice is not offered for one and not sent.
+    const seeing = kind !== 'owner' && paths.length ? { paths } : {}
     const res = await api('/api/pair/start',
-      kind === 'owner' ? { owner: true } : kind === 'guest' ? { expiresMs: durMs } : {})
+      kind === 'owner' ? { owner: true } : kind === 'guest' ? { expiresMs: durMs, ...seeing } : seeing)
     setBusy(false)
     if (res.error) return
     setWin({ ...res, until: Date.now() + (res.ttlMs || 0) })
@@ -191,6 +202,24 @@ export default function Pair ({ state, reload, onClose }) {
         )}
         {kind === 'full' && (
           <p class='hint center'>Permanent access. Scan the code in PearCinema on your phone.</p>
+        )}
+
+        {/* THE SAME SENTENCE THE PEOPLE PAGE USES, for the same reason: an unlabelled
+            icon is a control nobody finds (Tim, 2026-08-30). An owner sees everything by
+            definition, so the line is not offered for one. */}
+        {kind !== 'owner' && (
+          <button class='seeline' onClick={() => setChoosing(true)}>
+            Can see: {paths.length ? `${paths.length} folder${paths.length === 1 ? '' : 's'}` : 'everything'}
+            <span class='seechev'><ChevronDown size={13} /></span>
+          </button>
+        )}
+        {choosing && (
+          <Modal title='What this device can see' onClose={() => setChoosing(false)}>
+            <FolderPicker picked={paths} onChange={setPaths} who='this device' />
+            <div class='acts' style='justify-content:flex-end;margin-top:.8rem'>
+              <button onClick={() => setChoosing(false)}>Done</button>
+            </div>
+          </Modal>
         )}
 
         <button onClick={open} disabled={busy}>{busy ? 'Starting…' : 'Show pairing code'}</button>

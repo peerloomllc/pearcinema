@@ -3769,3 +3769,57 @@ test('THE PEOPLE PAGE SAYS WHAT EACH PERSON CAN SEE, and the sheet picks folders
   assert.ok(saved, 'the save reached the host')
   assert.deepEqual(saved.paths, [{ root: ROOT, rel: 'kids' }], 'as the prefix the grant stores')
 })
+
+test('A DEVICE CAN BE LET IN NARROWLY, chosen before it pairs rather than after', async (t) => {
+  // proposals/2026-08-30-per-person-folders.md, open question 1: until now somebody was
+  // let in with the whole library and narrowed on the People page afterwards, which
+  // leaves a window - however short - where they can see everything.
+  const ROOT = '/srv/films'
+  const asked = []
+  const routes = {
+    '/api/sharing/folders': (body) => {
+      if (!body.root) return { roots: [{ root: ROOT, label: 'Films', holds: 'movies' }], folders: [], supported: true }
+      return { roots: [{ root: ROOT, label: 'Films', holds: 'movies' }], folders: [{ root: ROOT, rel: 'kids', name: 'kids' }], supported: true }
+    },
+    '/api/pair/start': (body) => { asked.push(body); return { link: 'pear://x', svg: '<svg/>', ttlMs: 300000 } }
+  }
+  const { dom, doc, win, text } = await open(STATE, routes)
+  t.after(() => dom.window.close())
+
+  const pair = [...doc.querySelectorAll('button')].find(b => /Pair a device/.test(b.textContent))
+  pair.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 80))
+  assert.match(text(), /Can see: everything/, 'the pairing dialog says what the device will see')
+
+  // Owners are never filtered, so the line is not offered for one.
+  const ownerTab = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Owner')
+  ownerTab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.ok(!/Can see:/.test(text()), 'an owner sees everything by definition')
+  const fullTab = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Full access')
+  fullTab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  // Choose one folder, then open the window.
+  const line = [...doc.querySelectorAll('button')].find(b => /^Can see:/.test(b.textContent.trim()))
+  line.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+  const openRoot = [...doc.querySelectorAll('button')].find(b => /Show what is inside Films/.test(b.getAttribute('aria-label') || ''))
+  openRoot.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 100))
+  const box = [...doc.querySelectorAll('input[type=checkbox]')].find(b => /kids/.test(b.closest('label')?.textContent || ''))
+  box.checked = true
+  box.dispatchEvent(new win.Event('change', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const done = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Done')
+  done.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  assert.match(text(), /Can see: 1 folder/, 'the line carries the choice')
+
+  const show = [...doc.querySelectorAll('button')].find(b => /Show pairing code/.test(b.textContent))
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 160))
+  const sent = asked.find(a => a.paths)
+  assert.ok(sent, 'the pairing window is opened with the narrowing')
+  assert.deepEqual(sent.paths, [{ root: ROOT, rel: 'kids' }])
+})

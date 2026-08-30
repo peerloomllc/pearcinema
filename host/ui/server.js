@@ -2227,7 +2227,7 @@ async function startDashboard ({
         // owner:true opens an OWNER window. Only this password-gated page can ask for
         // one, which is what keeps owner scope rooted in dashboard access.
         // startPairing enforces owner XOR guest.
-        const link = host.startPairing({ expiresMs, owner: !!body.owner })
+        const link = host.startPairing({ expiresMs, owner: !!body.owner, paths: body.paths ?? undefined })
         const svg = await QRCode.toString(link, { type: 'svg', margin: 4, errorCorrectionLevel: 'M' })
         openQr = { link, svg }
         return json(res, 200, {
