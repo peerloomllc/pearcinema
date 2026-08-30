@@ -2327,6 +2327,39 @@ async function startDashboard ({
       //
       // Detaching does the opposite: with nobody to belong to there is nothing
       // settled, so the claim goes back to pending and the confirm button returns.
+      // WHAT ONE PERSON MAY SEE. proposals/2026-08-30-per-person-folders.md.
+      //
+      // The tree is read on demand, one level at a time and to any depth (Tim,
+      // 2026-08-30), because a 16,000-file library cannot be sent as one payload and
+      // most narrowings only ever open one branch.
+      if (req.method === 'POST' && url.pathname === '/api/sharing/folders') {
+        const { root, rel } = await readBody(req)
+        const adapter = host.adapter
+        if (!adapter || typeof adapter.rootsForSharing !== 'function') {
+          return json(res, 200, { roots: [], folders: [], supported: false })
+        }
+        const roots = await adapter.rootsForSharing()
+        if (!root) return json(res, 200, { roots, folders: [], supported: true })
+        const folders = typeof adapter.foldersUnder === 'function'
+          ? await adapter.foldersUnder({ root: String(root), rel: String(rel || '') })
+          : []
+        return json(res, 200, { roots, folders, supported: true })
+      }
+
+      // Save it, for every device this person holds at once. null is everything.
+      if (req.method === 'POST' && url.pathname === '/api/sharing/set') {
+        const { personId, paths } = await readBody(req)
+        if (!personId) return json(res, 400, { error: 'personId required' })
+        try {
+          // Through the host, so every LIVE connection of theirs is narrowed now
+          // rather than at its next reconnect - the same reason assign goes this way.
+          const out = await host.setPersonPaths(personId, paths ?? null)
+          return json(res, 200, { ok: true, devices: out.grants.length, refreshed: out.refreshed })
+        } catch (e) {
+          return json(res, 400, { error: e.message })
+        }
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/assign') {
         const { deviceKey, personId } = await readBody(req)
         if (!deviceKey) return json(res, 400, { error: 'deviceKey required' })

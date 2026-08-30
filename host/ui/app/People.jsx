@@ -34,7 +34,7 @@
 import { useRef, useState } from 'preact/hooks'
 import { api, ago, until, shortKey, platformLabel } from './api'
 import { Modal, askConfirm, notify } from './ui'
-import { Blocked, Check, ChevronDown, Pencil, Plus, Trash } from './icons'
+import { Blocked, Check, ChevronDown, Eye, Pencil, Plus, Trash } from './icons'
 
 // One device, as a row. `nested` is a device sitting under the person who holds it,
 // where the name is already known and the row is one step in.
@@ -296,11 +296,134 @@ function DeviceRow ({ d, persons, reload, nested = false }) {
   )
 }
 
+// WHAT ONE PERSON MAY SEE, chosen here. proposals/2026-08-30-per-person-folders.md,
+// approved 2026-08-30 with any folder depth from v1.
+//
+// The tree is read one level at a time, on demand: a 16,000-file library cannot be
+// sent as one payload, and most narrowings open one branch. Everything is the default
+// and the state of every grant until now, so the sheet opens on "Everything" with
+// nothing ticked and saving nothing keeps it that way.
+function SharingSheet ({ person, devices, onClose, onSaved }) {
+  const [roots, setRoots] = useState(null)
+  const [supported, setSupported] = useState(true)
+  // rel by root for what is open, and the folders each level returned.
+  const [kids, setKids] = useState({})
+  const [openDirs, setOpenDirs] = useState({})
+  // The chosen prefixes, as the grant stores them: { root, rel }.
+  const [picked, setPicked] = useState(() => {
+    const held = devices.find(d => Array.isArray(d.paths) && d.paths.length)
+    return held ? held.paths.map(p => ({ root: p.root, rel: p.rel || '' })) : []
+  })
+  const [busy, setBusy] = useState(false)
+
+  const keyOf = (root, rel) => root + '\u0000' + (rel || '')
+  const load = async (root = null, rel = '') => {
+    const res = await api('/api/sharing/folders', { root, rel })
+    if (res?.error) return notify('Not read', res.error)
+    if (res.supported === false) setSupported(false)
+    setRoots(res.roots || [])
+    if (root) setKids(k => ({ ...k, [keyOf(root, rel)]: res.folders || [] }))
+  }
+  if (roots === null && supported) load()
+
+  const isPicked = (root, rel) => picked.some(p => p.root === root && (p.rel || '') === (rel || ''))
+  // A ticked ancestor already covers this folder, so its own tick is implied and its
+  // box is shown ticked and disabled - ticking it again would store a redundant prefix.
+  const coveredBy = (root, rel) => picked.find(p => p.root === root && (p.rel || '') !== (rel || '') &&
+    ((p.rel || '') === '' || String(rel || '').startsWith(p.rel + '/')))
+  const toggle = (root, rel) => {
+    if (coveredBy(root, rel)) return
+    setPicked(cur => isPicked(root, rel)
+      ? cur.filter(p => !(p.root === root && (p.rel || '') === (rel || '')))
+      // Ticking a folder drops anything beneath it: the shorter prefix says the same
+      // thing and a stored list of overlapping prefixes is a list nobody can read back.
+      : [...cur.filter(p => !(p.root === root && (p.rel || '') !== '' && String(p.rel).startsWith((rel || '') + '/'))), { root, rel: rel || '' }])
+  }
+  const openFolder = async (root, rel) => {
+    const k = keyOf(root, rel)
+    setOpenDirs(o => ({ ...o, [k]: !o[k] }))
+    if (!kids[k]) await load(root, rel)
+  }
+
+  const save = async () => {
+    setBusy(true)
+    const res = await api('/api/sharing/set', { personId: person.id, paths: picked.length ? picked : null })
+    setBusy(false)
+    if (res?.error) return notify('Not saved', res.error)
+    notify(picked.length ? `${person.label} sees ${picked.length} folder${picked.length === 1 ? '' : 's'}` : `${person.label} sees everything`,
+      picked.length
+        ? 'Films they have already downloaded stay on their phone.'
+        : 'The whole library, as before.')
+    onSaved()
+  }
+
+  const Row = ({ root, rel, name, depth }) => {
+    const k = keyOf(root, rel)
+    const covered = coveredBy(root, rel)
+    return (
+      <>
+        <div class='setrow' style={{ paddingLeft: (0.6 + depth * 1.1) + 'rem' }}>
+          <span class='rowmain'>
+            <label class='rowname'>
+              <input
+                type='checkbox'
+                checked={!!covered || isPicked(root, rel)}
+                disabled={!!covered}
+                onChange={() => toggle(root, rel)}
+              />{' '}{name}
+            </label>
+            {covered && <span class='rowsub dim'>Included already</span>}
+          </span>
+          <span class='rowctl'>
+            <button
+              class='iconbtn'
+              onClick={() => openFolder(root, rel)}
+              aria-label={openDirs[k] ? `Hide what is inside ${name}` : `Show what is inside ${name}`}
+              aria-expanded={!!openDirs[k]}
+            ><span class={'turn' + (openDirs[k] ? ' on' : '')}><ChevronDown size={16} /></span></button>
+          </span>
+        </div>
+        {openDirs[k] && (kids[k] || []).map(f => (
+          <Row key={f.root + f.rel} root={f.root} rel={f.rel} name={f.name} depth={depth + 1} />
+        ))}
+        {openDirs[k] && kids[k] && kids[k].length === 0 && (
+          <div class='setrow' style={{ paddingLeft: (1.7 + depth * 1.1) + 'rem' }}>
+            <span class='rowsub dim'>No folders inside this one.</span>
+          </div>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <Modal title={`What ${person.label} can see`} onClose={onClose}>
+      {!supported && <p class='hint'>This library's source cannot list folders, so sharing stays all or nothing here.</p>}
+      {supported && (
+        <>
+          <p class='hint'>
+            Tick the drives or folders {person.label} may watch. Tick nothing and they see everything,
+            which is how it has always been. Films they have already downloaded stay on their phone.
+          </p>
+          {roots === null && <p class='hint'>Reading the library…</p>}
+          {(roots || []).map(r => (
+            <Row key={r.root} root={r.root} rel='' name={r.label} depth={0} />
+          ))}
+          <div class='acts' style='justify-content:flex-end;margin-top:.8rem'>
+            <button class='ghost' onClick={onClose}>Cancel</button>
+            <button disabled={busy} onClick={save}>{picked.length ? 'Save' : 'Let them see everything'}</button>
+          </div>
+        </>
+      )}
+    </Modal>
+  )
+}
+
 export default function People ({ state, reload }) {
   const [open, setOpen] = useState({})
   const [showRevoked, setShowRevoked] = useState(false)
   const [renaming, setRenaming] = useState(null)
   const [adding, setAdding] = useState(null)
+  const [sharing, setSharing] = useState(null)
   // ONE SUBMIT PER FIELD, and this is a real bug Tim found by using it (2026-08-20:
   // adding "Asa" made two of them). A field that saves on Enter AND on blur saves
   // twice, because removing the focused input fires the blur - and Preact's state
@@ -313,6 +436,12 @@ export default function People ({ state, reload }) {
   const persons = (state.persons || []).filter(p => !p.revokedAt)
 
   const byPerson = (id) => devices.filter(d => d.personId === id)
+  // How many folders a person is narrowed to, or 0 for everything. Read off their
+  // devices, which all carry the same value (the host writes them together).
+  const narrowedTo = (theirs) => {
+    const held = theirs.find(d => !d.revokedAt && Array.isArray(d.paths) && d.paths.length)
+    return held ? held.paths.length : 0
+  }
   // A device whose claim nobody has agreed to yet. Pulled out into its own group so
   // every ordinary row stays uniform.
   //
@@ -455,7 +584,11 @@ export default function People ({ state, reload }) {
                     {[
                       mine.length ? `${mine.length} device${mine.length === 1 ? '' : 's'}` : 'No devices',
                       on ? `${on} connected now` : null,
-                      waiting ? `${waiting} waiting to be confirmed` : null
+                      waiting ? `${waiting} waiting to be confirmed` : null,
+                      // WHAT THEY CAN SEE, said on the row rather than hidden behind the
+                      // sheet: "everything" is the answer for almost everybody, and a
+                      // narrowed person is exactly the one worth noticing at a glance.
+                      narrowedTo(mine) ? `sees ${narrowedTo(mine)} folder${narrowedTo(mine) === 1 ? '' : 's'}` : 'sees everything'
                     ].filter(Boolean).join(', ')}
                   </span>
                 </span>
@@ -466,6 +599,12 @@ export default function People ({ state, reload }) {
                     title={`Rename ${p.label}`}
                     aria-label={`Rename ${p.label}`}
                   ><Pencil size={16} /></button>
+                  <button
+                    class='iconbtn'
+                    onClick={() => setSharing(p)}
+                    title={`Choose what ${p.label} can see`}
+                    aria-label={`Choose what ${p.label} can see`}
+                  ><Eye size={16} /></button>
                   {/* CUT OFF CUTS EVERY DEVICE THEY HOLD, which is the action somebody
                       means when they say take Sam off. Somebody holding nothing has
                       nothing to cut, so that row offers Delete instead - a different
@@ -588,6 +727,15 @@ export default function People ({ state, reload }) {
           </div>
         </>
       )}
+      {sharing && (
+        <SharingSheet
+          person={sharing}
+          devices={byPerson(sharing.id)}
+          onClose={() => setSharing(null)}
+          onSaved={() => { setSharing(null); reload() }}
+        />
+      )}
+
     </>
   )
 }

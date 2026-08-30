@@ -29,7 +29,8 @@ const items = require('../items')
 const names = require('../names')
 const nfo = require('../nfo')
 const subtitles = require('../subtitles')
-const { walkVideos, probeAll } = require('../probe')
+const { walkVideos, probeAll, SKIP_DIRS } = require('../probe')
+const visibility = require('../visibility')
 
 // How long a scan's results stand before a rescan is worth doing. A film library
 // changes slowly, and a rescan of 12,000 files is twenty minutes of a spinning
@@ -200,6 +201,7 @@ class FolderAdapter {
     // A poster and a film are different things to hand out, so they are different
     // maps rather than one with a type tag somebody can get wrong.
     this._artPaths = new Map()
+    this._artOwners = new Map()
     this._subPaths = new Map()
     // subtitleId -> { file, index } for a track that lives INSIDE a video, which is
     // resolved by asking ffmpeg for it rather than by opening a file of its own.
@@ -852,6 +854,7 @@ class FolderAdapter {
     this._byId = new Map()
     this._paths = new Map()
     this._artPaths = new Map()
+    this._artOwners = new Map()
     this._subPaths = new Map()
     this._subTracks = new Map()
     this._subs = new Map()
@@ -875,7 +878,12 @@ class FolderAdapter {
       if (this._paths.has(clean.id)) collisions++
       this._byId.set(clean.id, clean)
       if (raw._file) this._paths.set(clean.id, raw._file)
-      if (raw._artFile && clean.artId) this._artPaths.set(clean.artId, raw._artFile)
+      if (raw._artFile && clean.artId) {
+        this._artPaths.set(clean.artId, raw._artFile)
+        // WHOSE POSTER THIS IS. A poster is a film: art.get must be able to refuse a
+        // hidden film's artwork to a narrowed person, and an art id is all it has.
+        if (!this._artOwners.has(clean.artId)) this._artOwners.set(clean.artId, clean.id)
+      }
 
       if (raw._subs?.length) {
         // Strip the internals off each track on the way into the public list, and
@@ -1052,7 +1060,7 @@ class FolderAdapter {
     }
   }
 
-  async list ({ type = 'movies', seriesId = null, seasonId = null, limit, cursor, sort, order } = {}) {
+  async list ({ type = 'movies', seriesId = null, seasonId = null, limit, cursor, sort, order, visible = null } = {}) {
     let pool = []
 
     if (type === 'movies') pool = this._movies
@@ -1065,6 +1073,10 @@ class FolderAdapter {
       }
     }
 
+    // A narrowed grant's predicate (host/visibility.js) is applied BEFORE paging, so
+    // a person who may see a tenth of the library still gets full pages and a
+    // cursor that means what it says.
+    if (typeof visible === 'function') pool = pool.filter(visible)
     const sorted = sort ? items.sortItems(pool, sort, order) : pool
     return items.page(sorted, { limit, cursor })
   }
@@ -1139,6 +1151,60 @@ class FolderAdapter {
   // Null for anything the disk cannot place: an id that is gone, an episode
   // sitting directly in a root (no show folder exists to receive a tvshow.nfo)
   // or a season the tree keyed by folder rather than number.
+  // WHERE AN ITEM SITS UNDER THE ROOTS, for the visibility check: { root, rel } or
+  // null. Answered from the maps the scan already built, never from the disk. A film
+  // or episode is its file; a show or season is its folder, found the way locate()
+  // finds it (the first episode that places it). Null means "cannot place it", which
+  // host/visibility.js treats as hidden from anyone narrowed - the safe direction.
+  // Which item an art id belongs to, for art.get's visibility check. Null for an id
+  // this scan never issued, which art.get already answers as no artwork.
+  itemForArt (artId) {
+    return this._artOwners.get(String(artId)) || null
+  }
+
+  locationOf (id, item = null) {
+    const row = item || this._byId.get(String(id)) || null
+    if (!row) return null
+    if (row.type === 'series' || row.type === 'season') {
+      const where = this.locate(row.id)
+      if (!where) return null
+      // A season folder is its own prefix; a season without one (episodes loose in
+      // the show folder) is the show folder.
+      return visibility.locate(where.type === 'season' ? (where.dir || where.seriesDir) : where.dir, this.roots)
+    }
+    return visibility.locate(this._paths.get(String(row.id)) || null, this.roots)
+  }
+
+  // THE ROOTS AS THE PEOPLE PAGE LISTS THEM: an absolute path is the id (it is what a
+  // grant's prefix names, so a drive that moves mount point is a different root and a
+  // narrowing neither reopens nor closes by accident), a label to show, and what it
+  // holds.
+  rootsForSharing () {
+    return this.roots.map((r) => ({ root: r.path, label: r.label || path.basename(r.path) || r.path, holds: r.holds }))
+  }
+
+  // THE FOLDERS UNDER A PREFIX, one level, for the People page's tree - opened on
+  // demand, to any depth (Tim, 2026-08-30). Only directories, only under a configured
+  // root, junk directories skipped the way the scan skips them. Files are never
+  // listed: the tree chooses folders, and a film is its folder.
+  async foldersUnder ({ root, rel = '' } = {}) {
+    const r = this.roots.find((x) => x.path === root)
+    if (!r) return []
+    const at = path.resolve(r.path, visibility.normalRel(rel))
+    if (at !== r.path && !at.startsWith(r.path + path.sep)) return []
+    let entries
+    try {
+      entries = await fsp.readdir(at, { withFileTypes: true })
+    } catch {
+      return []
+    }
+    return entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && !SKIP_DIRS.has(e.name))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true }))
+      .map((name) => ({ root: r.path, rel: visibility.normalRel(path.join(visibility.normalRel(rel), name)), name }))
+  }
+
   locate (id) {
     const item = this._byId?.get(String(id))
     if (!item) return null

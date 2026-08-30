@@ -31,6 +31,7 @@
 
 const crypto = require('crypto')
 const items = require('../items')
+const visibility = require('../visibility')
 
 const CLIENT = 'PearCinema'
 const VERSION = '0.1.0'
@@ -75,6 +76,11 @@ class JellyfinAdapter {
   // responses instead of a live server. Nothing else should pass it.
   constructor ({ url, username, password, libraryId, ids, log = () => {}, fetchImpl = null }) {
     if (!ids) throw new Error('JellyfinAdapter needs the protocol id factory')
+    // our id -> the path Jellyfin reports for the item, kept as items pass through
+    // _map so the visibility check can place a film the way the folder adapter does.
+    // Server-side paths, never sent to a client.
+    this._paths = new Map()
+    this._roots = null
 
     this.base = String(url || '').replace(/\/+$/, '')
     this.username = username
@@ -295,13 +301,67 @@ class JellyfinAdapter {
   // Jellyfin's Type -> ours. Anything else in a mixed library (a music album, a
   // photo, a book) is not ours and is dropped rather than mapped into a wrong shape.
   _map (item) {
+    let out = null
     switch (item.Type) {
-      case 'Movie': return this._movie(item)
-      case 'Series': return this._series(item)
-      case 'Season': return this._season(item)
-      case 'Episode': return this._episode(item)
+      case 'Movie': out = this._movie(item); break
+      case 'Series': out = this._series(item); break
+      case 'Season': out = this._season(item); break
+      case 'Episode': out = this._episode(item); break
       default: return null
     }
+    if (out && item.Path) this._paths.set(out.id, String(item.Path))
+    return out
+  }
+
+  // WHERE AN ITEM SITS, for the visibility check: Jellyfin reports every item's path
+  // on the server, and its libraries' locations are the roots. An item this adapter
+  // has not yet seen pass through _map cannot be placed and reads as hidden to a
+  // narrowed grant; the view resolves items through get() first, which fills the map.
+  locationOf (id) {
+    const roots = (this._roots || []).map((r) => r.root)
+    return visibility.locate(this._paths.get(String(id)) || null, roots)
+  }
+
+  // Jellyfin's libraries, each location a root of its own, labelled by the library's
+  // name. Cached for the process; the People page asks rarely.
+  async rootsForSharing () {
+    if (this._roots) return this._roots
+    const body = await this._call('/Library/VirtualFolders', {}).catch(() => null)
+    const out = []
+    for (const lib of Array.isArray(body) ? body : []) {
+      for (const loc of lib.Locations || []) {
+        out.push({ root: String(loc), label: (lib.Locations || []).length > 1 ? `${lib.Name} (${loc})` : lib.Name, holds: lib.CollectionType === 'tvshows' ? 'shows' : lib.CollectionType === 'movies' ? 'movies' : 'auto' })
+      }
+    }
+    this._roots = out
+    return out
+  }
+
+  // THE FOLDERS UNDER A PREFIX, one level. Jellyfin has no folder listing by path, so
+  // this reads the library's items with their paths (once per call, bounded) and takes
+  // the next path segment under the prefix. The owner's dashboard is the only caller.
+  async foldersUnder ({ root, rel = '' } = {}) {
+    const roots = await this.rootsForSharing()
+    if (!roots.some((r) => r.root === root)) return []
+    const want = visibility.normalRel(rel)
+    const body = await this._call('/Items', {
+      Recursive: true,
+      IncludeItemTypes: 'Movie,Series,Season,Episode',
+      Fields: 'Path',
+      Limit: 50000
+    }).catch(() => null)
+    const seen = new Map()
+    for (const item of body?.Items || []) {
+      const loc = visibility.locate(item.Path, [root])
+      if (!loc) continue
+      const under = want === '' ? loc.rel : (loc.rel === want ? '' : loc.rel.startsWith(want + '/') ? loc.rel.slice(want.length + 1) : null)
+      if (!under) continue
+      const name = under.split('/')[0]
+      // A film is its folder; a file loose in the prefix is not a folder to offer.
+      if (!name || under.indexOf('/') === -1) continue
+      if (!seen.has(name)) seen.set(name, { root, rel: want ? `${want}/${name}` : name, name })
+    }
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }))
   }
 
   // --- the interface --------------------------------------------------------
