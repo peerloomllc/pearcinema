@@ -171,3 +171,18 @@ test('a missing ffprobe fails the file rather than the run', async (t) => {
   const file = path.join(root, 'a.mkv')
   assert.equal(await probeFile(file, { ffprobe: 'definitely-not-a-real-binary' }), null)
 })
+
+test('CREDITLESS OPENINGS, ENDINGS AND DISC MENUS ARE EXTRAS, even when they are files', () => {
+  // The extras rule was folder-based; anime releases put these beside the episodes, so
+  // 41 of one user's files were indexed as episodes with no number - which is how a disc
+  // menu reaches somebody's Continue Watching (field report 2026-08-30).
+  const { EXTRA_FILE_RE } = require('../host/probe')
+  for (const f of ['[DBD-Raws][Show][NCED1][1080P][BDRip].mkv', '[DBD-Raws][Show][menu][1080P].mkv', 'S01OP-Daten [Creepy Nuts].mkv', 'Show NCOP.mkv', 'Creditless Opening.mkv']) {
+    assert.ok(EXTRA_FILE_RE.test(f), f + ' is an extra')
+  }
+  // AND THE TITLES THESE WORDS ALSO BELONG TO. `The Menu` is a film; `menu` counts only
+  // inside brackets, which is the fansub convention and not something a title does.
+  for (const f of ['The Menu (2022).mkv', 'Menu Rouge (1998).mkv', 'The Preview Man (2011).mkv', 'Show - Operation Overlord.mkv', 'Show S01E01.mkv']) {
+    assert.ok(!EXTRA_FILE_RE.test(f), f + ' is not an extra')
+  }
+})

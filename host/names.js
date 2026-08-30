@@ -150,11 +150,11 @@ const EPISODE_PATTERNS = [
   //
   // So only the explicit form is recognised. A `S01E02-03` release parses as the
   // single episode 2, which is a small loss and not a wrong one.
-  /\bs(\d{1,2})[\s._-]*e(\d{1,3})[\s._-]*e(\d{1,3})(?:v\d)?\b/i,
+  /\bs(\d{1,2})[\s._-]*ep?(\d{1,3})[\s._-]*ep?(\d{1,3})(?:v\d)?\b/i,
   // S01E02 / s01e02 / S1E2, with an optional fansub version suffix: `S17E14v2` is
   // episode 14 re-released, and without the `v2` here 27 files of one user's Bleach
   // parsed as nothing at all (field report 2026-08-30).
-  /\bs(\d{1,2})[\s._-]*e(\d{1,3})(?:v\d)?\b/i,
+  /\bs(\d{1,2})[\s._-]*ep?(\d{1,3})(?:v\d)?\b/i,
   // 1x02, and `GI01x01` - a short series abbreviation glued to the front, which is
   // how 251 Godzilla Island files are named (field report 2026-08-30). The digits
   // either side of the `x` are unambiguous enough to allow up to four letters in
@@ -322,7 +322,7 @@ function findEpisodeAfterTitle (normalised, seriesFolder) {
   const title = parseShowFolder(seriesFolder).title
   const want = key(title)
   if (want.length < 3) return null
-  const words = normalised.split(' ').filter(Boolean)
+  const words = partBrackets(normalised).split(' ').filter(Boolean)
   // Walk the title's words off the front of the filename, ignoring anything the title
   // does not have (a `[Group]` prefix, a `(1994)` year).
   let i = 0
@@ -336,7 +336,7 @@ function findEpisodeAfterTitle (normalised, seriesFolder) {
   if (seen !== want) return null
   // Then the first bare number after it, skipping a year in brackets.
   for (let j = i; j < words.length; j++) {
-    const w = words[j].replace(/^[([]+|[)\]]+$/g, '')
+    const w = words[j].replace(/^[([]+|[)\]]+$/g, '').replace(/v\d$/i, '')
     if (!/^\d{1,4}$/.test(w)) {
       if (isTag(words[j]) || /^[([]/.test(words[j]) || /^[-–]$/.test(words[j])) continue
       return null
@@ -350,15 +350,21 @@ function findEpisodeAfterTitle (normalised, seriesFolder) {
   return null
 }
 
+// A bracketed group glued to its neighbours is one "word" to a space-split, which hides
+// both the title and the number: `[T-N]Densha_Otoko_01[5740B853]` reads as three tokens
+// only once the brackets are parted. Underscores are already spaces by here.
+function partBrackets (s) {
+  return s.replace(/([)\]])(?=[^\s)\]])/g, '$1 ').replace(/(?<=[^\s([])([([])/g, ' $1').replace(/\s+/g, ' ').trim()
+}
+
 function findAbsoluteEpisode (normalised) {
-  // `[DBD-Raws][Show][12][1080P][BDRip]` is one "word" until the groups are parted.
-  const words = normalised.replace(/\]\s*\[/g, '] [').split(' ').filter(Boolean)
+  const words = partBrackets(normalised).split(' ').filter(Boolean)
   for (let i = words.length - 1; i >= 0; i--) {
     const w = words[i]
     // A bracketed token is release metadata whatever is inside it - `[1080P]`,
     // `[HEVC-10bit]`, `[FLAC]` - and a bracketed NUMBER is how a lot of fansub
     // releases write the episode: `[DBD-Raws][Show][01][1080P][BDRip]`.
-    const bare = w.replace(/^[([]+|[)\]]+$/g, '')
+    const bare = w.replace(/^[([]+|[)\]]+$/g, '').replace(/v\d$/i, '')
     if (!/^\d{1,4}$/.test(bare)) {
       if (!isTag(w) && !/^[([].*[)\]]$/.test(w)) return null
       continue
@@ -427,6 +433,19 @@ function parseEpisode (filename, { seriesFolder = null, seasonFolder = null, tel
         index: m.index,
         length: m[0].length
       }
+      loose = true
+    }
+  }
+
+  // A SPECIAL IS SEASON ZERO, which is what Plex, Jellyfin and Kodi all call it and
+  // what a `Specials/` folder already parses to here. `ATARU - SP1.mp4`,
+  // `Show Special 2.mkv`: numbered where the name carries a number, and left unnumbered
+  // where it does not, because two unnumbered specials in one folder would otherwise
+  // both claim episode one.
+  if (!code && television) {
+    const sp = normalised.match(/(?:^|[\s._\-[(])(?:sp|special|ova|oad)[\s._-]*(\d{1,3})(?=$|[\s._\-)\]])/i)
+    if (sp) {
+      code = { season: 0, episode: +sp[1], episodeEnd: null, index: sp.index, length: sp[0].length }
       loose = true
     }
   }

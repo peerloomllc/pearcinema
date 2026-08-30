@@ -433,3 +433,27 @@ test('a bracketed number is the episode where the tail is all brackets', () => {
   assert.ok(r, 'the bracketed release shape parses')
   assert.equal(r.episode, 12)
 })
+
+test('A SPECIAL IS SEASON ZERO, the way every other player files it', () => {
+  // 75 files of the same user's library are SP/special/OVA and had no number at all,
+  // so they sorted nowhere. Season 0 is what Plex, Jellyfin and Kodi call these, and
+  // what a `Specials/` folder already parses to here.
+  for (const [file, episode] of [['ATARU - SP1.mp4', 1], ['Show Special 2.mkv', 2], ['Show - OVA 3.mkv', 3]]) {
+    const r = names.parseEpisode(file, { seriesFolder: 'Show', television: true })
+    assert.equal(r.season, 0, file)
+    assert.equal(r.episode, episode, file)
+  }
+  // Unnumbered stays unnumbered: two `SP.mp4` files in one folder must not both
+  // claim episode one.
+  assert.equal(names.parseEpisode('Aozora no Tamago SP.mp4', { seriesFolder: 'Show', television: true }), null)
+})
+
+test('a fansub release with the brackets glued together still gives up its number', () => {
+  // `[T-N]Densha_Otoko_01[5740B853].avi` - a group tag, underscores, and a CRC hash
+  // welded to the episode number. Parted, it is episode 1.
+  const r = names.parseEpisode('[T-N]Densha_Otoko_01[5740B853].avi', { seriesFolder: 'Densha Otoko', television: true })
+  assert.equal(r.episode, 1)
+  // `S1EP01` (EP rather than E) and a version suffix on a bare number.
+  assert.equal(names.parseEpisode('99.9.Keiji.Senmon.Bengoshi.S1EP01.720p.mkv', { television: true }).episode, 1)
+  assert.equal(names.parseEpisode('99_Nen_No_Ai_02v4.mkv', { seriesFolder: '99 Nen No Ai', television: true }).episode, 2)
+})

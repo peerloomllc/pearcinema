@@ -48,6 +48,23 @@ const isExtra = (name) => EXTRA_DIRS.has(name.toLowerCase())
 
 // A sample clip sitting beside the film. Small, and named for it.
 const SAMPLE_RE = /(^|[.\-_ ])sample([.\-_ ]|$)/i
+
+// EXTRAS THAT ARE FILES RATHER THAN FOLDERS. The folder rule above catches
+// `Extras/`, `Featurettes/`, `Trailers/`; anime releases put the same things beside
+// the episodes instead, named by convention:
+//
+//   [DBD-Raws][Show][NCED1][1080P][BDRip].mkv     creditless ending
+//   [DBD-Raws][Show][menu][1080P][BDRip].mkv      a disc menu
+//   S01OP-Daten [Creepy Nuts].mkv                 the opening theme on its own
+//
+// 41 files of one user's library (2026-08-30) were indexed as episodes with no
+// number, which is how a menu ends up in somebody's Continue Watching. NC(OP|ED) is
+// "non-credit", the standard tag; a bare `OP`/`ED` counts only with a season prefix
+// or on its own, because `OP` is also a word.
+// TIGHT, because these words are also film titles: `The Menu (2022)` is a film and
+// `The Preview Man` could be. `menu` counts only inside brackets, which is the fansub
+// convention and nothing a title does; `preview` is not in the list at all.
+const EXTRA_FILE_RE = /(^|[.\-_ [(])(nc(op|ed)\d*|creditless)([.\-_ )\]]|$)|[[(](menu|ncop|nced|creditless)[)\]]|^s\d{1,2}(op|ed)\d*[.\-_]/i
 const MIN_FEATURE_BYTES = 20 * 1024 * 1024 // 20 MB - below this it is a clip, not a film
 
 async function * walkVideos (root, { includeExtras = false, depth = 0 } = {}) {
@@ -78,6 +95,7 @@ async function * walkVideos (root, { includeExtras = false, depth = 0 } = {}) {
     if (entry.name.startsWith('.')) continue
     if (!VIDEO_EXT.has(path.extname(entry.name).toLowerCase())) continue
     if (!includeExtras && SAMPLE_RE.test(entry.name)) continue
+    if (!includeExtras && EXTRA_FILE_RE.test(entry.name)) continue
 
     yield full
   }
@@ -299,4 +317,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { walkVideos, probeFile, probeAll, VIDEO_EXT, SKIP_DIRS, EXTRA_DIRS, MIN_FEATURE_BYTES }
+module.exports = { walkVideos, probeFile, probeAll, VIDEO_EXT, SKIP_DIRS, EXTRA_DIRS, EXTRA_FILE_RE, MIN_FEATURE_BYTES }
