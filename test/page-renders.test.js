@@ -3836,3 +3836,42 @@ test('A DEVICE CAN BE LET IN NARROWLY, chosen before it pairs rather than after'
   assert.ok(sent, 'the pairing window is opened with the narrowing')
   assert.deepEqual(sent.paths, [{ root: ROOT, rel: 'kids' }])
 })
+
+test("THE SHARING WINDOW SHOWS WHAT IS ALREADY CHOSEN, however deep it sits", async (t) => {
+  // A person narrowed to `Movies/HD-DVDs` opened this window on an unticked `Movies` row,
+  // because the tick is a level down and the tree starts closed - which reads as "nothing
+  // is chosen" (Tim, 2026-08-30).
+  const ROOT = '/library/Movies'
+  const asked = []
+  const routes = {
+    '/api/sharing/folders': (body) => {
+      asked.push(body)
+      const roots = [{ root: ROOT, label: 'Movies', holds: 'movies' }]
+      if (!body.root) return { roots, folders: [], supported: true }
+      if (!body.rel) return { roots, folders: [{ root: ROOT, rel: 'HD-DVDs', name: 'HD-DVDs' }, { root: ROOT, rel: 'Blurays', name: 'Blurays' }], supported: true }
+      return { roots, folders: [], supported: true }
+    }
+  }
+  const state = {
+    ...STATE,
+    persons: [{ id: 'p1', name: 'Sam', label: 'Sam' }],
+    devices: [{ deviceKey: 'dk1', label: 'phone', platform: 'android', online: true, personId: 'p1', confirmed: true, scope: 'full', paths: [{ root: ROOT, rel: 'HD-DVDs' }] }]
+  }
+  const { dom, doc, win, text } = await open(state, routes)
+  t.after(() => dom.window.close())
+
+  const access = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'People and devices')
+  access.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+  const line = [...doc.querySelectorAll('button')].find(b => /^Can see:/.test(b.textContent.trim()))
+  line.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 300))
+
+  // The window opened the branch that holds the choice, without a click.
+  assert.ok(asked.some(a => a.root === ROOT && !a.rel), 'the root was read on the way in')
+  assert.match(text(), /HD-DVDs/, 'the chosen folder is on screen straight away')
+  const box = [...doc.querySelectorAll('input[type=checkbox]')].find(b => /HD-DVDs/.test(b.closest('label')?.textContent || ''))
+  assert.ok(box?.checked, 'and it is ticked')
+  const rootBox = [...doc.querySelectorAll('input[type=checkbox]')].find(b => /Movies/.test(b.closest('label')?.textContent || ''))
+  assert.ok(rootBox && !rootBox.checked, 'while the root above it is not, which is the truth')
+})
