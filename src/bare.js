@@ -548,6 +548,13 @@ async function connectedLib (libraryId) {
       if (m?.kind === 'request:resolved' && m.data?.status === 'added') reconcileRequests().catch(() => {})
       // The last frame this library will ever send us.
       if (m?.kind === 'access:revoked') markRevoked(libraryId, m.data?.reason)
+      // WHAT THIS PERSON MAY SEE HAS CHANGED, so the catalogue this phone is holding
+      // is wrong. Found on the TCL against the real Umbrel library, 2026-08-30: a
+      // narrowing landed on the live connection and the host refused every hidden
+      // film, but the merged index had been built before it, so the grid went on
+      // showing 240 films that could no longer be opened. The host is the authority
+      // and it already said so; this is the phone catching up without a restart.
+      if (m?.kind === 'grant:changed') buildSoon('grant')
     }
     c.conn.once('close', () => {
       // Fold in this connection's last stretch BEFORE forgetting it was relayed - a film

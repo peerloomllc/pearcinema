@@ -111,3 +111,14 @@ test('THE PICKER LEARNS WHICH ROKU IS WAITING ON ITS CHANNEL, from every library
   assert.match(body, /needsChannel: \[\]/, 'the merged answer has the list')
   assert.match(body, /out\.needsChannel\.push\(\{ \.\.\.n, libraryId: h\.libraryId/, 'each Roku is named with the library that found it')
 })
+
+test('A NARROWED PERSON GETS A FRESH CATALOGUE, not the one built before the narrowing', () => {
+  // Found on the TCL against the real Umbrel library, 2026-08-30: the host narrowed the
+  // live connection and refused every hidden film, but the phone's merged index had been
+  // built before it, so the grid went on drawing 240 films that could no longer open.
+  const at = src.indexOf('c.onPush = (m) => {')
+  assert.ok(at > 0, 'the push handler is still there')
+  const body = src.slice(at, at + 1400)
+  assert.match(body, /grant:changed/, 'a grant change is noticed')
+  assert.match(body, /buildSoon\('grant'\)/, 'and rebuilds the merged catalogue')
+})

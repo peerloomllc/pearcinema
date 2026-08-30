@@ -1183,6 +1183,10 @@ export default function App () {
           // shelves on screen are somebody else's now.
           setContinueRows(null)
           if (u.tab === 'you') loadYouRef.current?.(u.youView)
+          // WHAT THEY MAY SEE MAY HAVE CHANGED WITH IT, and the worklet rebuilds its
+          // merged catalogue on this same push - which arrives back here as
+          // `merged:changed` and re-asks every list on screen. Nothing more is needed
+          // here; this note exists because it looks like an omission (TCL, 2026-08-30).
         }
         if (m?.kind === 'resume:changed') {
           // Another of this person's devices moved a film. Put a phone down
