@@ -2,6 +2,23 @@
 
 Append-only, newest on top. Per Constitution §4.
 
+## 2026-08-30 - A GRANT CAN BE NARROWED TO FOLDERS, PER PERSON
+Tier: T3 (a rule on the authorisation surface). Proposal
+proposals/2026-08-30-per-person-folders.md, approved by Tim the same day with one change:
+any folder depth is tickable from v1, not only roots and their top-level folders.
+
+THE SHAPE CHOSEN, of four discussed: by drive and folder. It is always answerable (every
+file has a path), it matches how libraries are organised, and the grant record has held
+a reserved `paths` null for it since the store was designed. An age-rating ceiling waits
+on data most libraries lack (`mpaa` comes only from .nfo sidecars); a films-or-shows
+switch is trivial once this exists; hand-picked title lists do not scale to 16,000 files.
+
+THE RULE IS ONE FUNCTION IN ONE PLACE, `visibleTo(grant, item)`, applied by wrapping the
+adapter per call so every wire method that hands out content sees the same view - a
+hidden film is not listed, not found by id, not streamed, not cast and has no art. Owner
+devices are never filtered. Downloads already on a phone are left alone in v1 and the
+People page says so; narrowing is not revoke, and live casts are not stopped by it.
+
 ## 2026-08-29 - A REMUX THAT REBUILDS THE SOUND IS A PLAYLIST ON ANDROID TOO
 Tier: T1 (the transport a verdict takes changes; the wire shape gains one field, `audio`,
 that an older phone ignores). Field report the same day: an x265 MKV on Android, picture
