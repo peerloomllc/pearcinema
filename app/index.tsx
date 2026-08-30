@@ -563,25 +563,20 @@ export default function App () {
     return () => sub.remove()
   }, [])
 
-  // THE PLAYER MAY ROTATE; THE REST OF THE APP MAY NOT. The app is locked to
-  // portrait in app.json, which locked the PLAYER too - a film could only ever
-  // be a letterboxed band across a portrait screen, and the phone ignored being
-  // turned (Tim, 2026-08-14: "it doesn't look right"). While a film runs the
-  // orientation unlocks and the sensor decides; closing the player locks
-  // portrait back. This deliberately does NOT use the native fullscreen
-  // activity, which would rotate but is a separate screen the external-subtitle
-  // overlay and the Subtitles button cannot follow into.
+  // THE WHOLE APP MAY ROTATE. Until 2026-08-30 only the player could: the app was
+  // locked to portrait in app.json, which had locked the player too (Tim, 2026-08-14:
+  // "it doesn't look right"), so the shell unlocked while a film ran and locked
+  // portrait back on close. Now app.json says "default", the page lays itself out
+  // for a wide screen (styles.css, the wide-viewport rules) and the sensor decides
+  // everywhere - on a tablet landscape is the normal way to hold it. The one-time
+  // unlock below is belt and braces for a build whose manifest still says portrait.
+  // The player still deliberately does NOT use the native fullscreen activity,
+  // which is a separate screen the external-subtitle overlay cannot follow into.
   useEffect(() => {
-    if (playing) {
-      ScreenOrientation.unlockAsync()
-        .then(() => console.log('[shell] orientation unlocked'))
-        .catch((e) => console.log('[shell] orientation unlock failed: ' + (e?.message || e)))
-    } else {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP)
-        .then(() => console.log('[shell] orientation locked portrait'))
-        .catch((e) => console.log('[shell] orientation lock failed: ' + (e?.message || e)))
-    }
-  }, [!!playing])
+    ScreenOrientation.unlockAsync()
+      .then(() => console.log('[shell] orientation unlocked'))
+      .catch((e) => console.log('[shell] orientation unlock failed: ' + (e?.message || e)))
+  }, [])
 
   useEffect(() => { navRef.current = nav }, [nav])
 
@@ -1084,8 +1079,11 @@ export default function App () {
   // which is the same bug twice at two brightnesses.
   useEffect(() => { SystemUI.setBackgroundColorAsync(shellBg).catch(() => {}) }, [shellBg])
 
+  // THE SIDE INSETS TOO. In landscape the camera cutout is on the left or right, and
+  // the WebView cannot see it (env(safe-area-inset-*) is 0 in an Android WebView), so
+  // the shell keeps the page out from under it the way it already did for the top.
   return (
-    <View style={[styles.root, { paddingTop: insets.top, backgroundColor: shellBg }]}>
+    <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: shellBg }]}>
       {uri && (
         <WebView
           ref={webref}

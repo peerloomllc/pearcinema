@@ -1256,3 +1256,19 @@ test('THE TELEVISION PICKER NAMES A ROKU WAITING ON ITS CHANNEL, and says which 
   assert.ok(text.includes('Install the free Media Assistant channel from the Roku channel store'), 'and says where to get it')
   assert.ok(!text.includes('No TVs were found'), 'which is not the same as finding nothing')
 })
+
+test('THE APP TURNS SIDEWAYS, and a wide screen gets a wider page rather than a narrow column', () => {
+  // Tim, 2026-08-30: landscape everywhere, not only in the player, and tablets. The
+  // shell no longer locks portrait between films, the manifest says so, and the page
+  // grows past 560px while keeping the tile size the person chose.
+  const app = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'app.json'), 'utf8'))
+  assert.equal(app.expo.orientation, 'default', 'the manifest allows every orientation')
+  assert.equal(app.expo.ios?.supportsTablet, true)
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.tsx'), 'utf8')
+  assert.ok(!shell.includes('OrientationLock.PORTRAIT_UP'), 'nothing locks portrait back')
+  assert.match(shell, /paddingLeft: insets\.left, paddingRight: insets\.right/, 'the side insets keep the page out from under a sideways cutout')
+  // The page is minified, so the rules are matched loosely on whitespace.
+  assert.match(PAGE, /@media ?\(min-width: ?720px\)/, 'the built page carries the wide-screen rule')
+  assert.match(PAGE, /\.app, ?\.dock, ?\.sheet ?\{ ?max-width: ?960px/, 'the column grows to 960px')
+  assert.match(PAGE, /repeat\(auto-fill, ?minmax\(calc\(560px ?\/ ?var\(--cols, ?2\) ?- ?\.9rem\), ?1fr\)\)/, 'and the grid keeps the tile size, fitting as many as the width takes')
+})

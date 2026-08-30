@@ -494,6 +494,7 @@ summary { cursor: pointer; padding: .5rem; }
   display: grid; grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
   gap: 1rem .9rem; margin-top: .5rem;
 }
+
 .album { min-width: 0; position: relative; }
 /* the favorite heart floats over the cover corner; a scrim keeps it readable on any art */
 .tileheart {
@@ -1759,3 +1760,18 @@ label.flabel { display: block; margin-top: .6rem; }
 }
 .titlescreen .tspecs dt { color: var(--color-text-dim); font-size: 0.82rem; }
 .titlescreen .tspecs dd { margin: 0; font-size: 0.88rem; }
+
+/* --- a wide screen: a phone turned sideways, or a tablet ------------------- */
+/* Everything above lays out a 560px column, which is a phone held upright. Past
+   720px the column is allowed to grow to 960px, and the grid stops counting the
+   columns the person chose and instead keeps their TILE SIZE: a 2-column choice is
+   a 280px tile, a 3-column choice a 187px tile, and a wide screen fits as many of
+   those as it can. Nothing under 720px changes at all (Tim, 2026-08-30).
+   LAST IN THE FILE ON PURPOSE: it ties on specificity with .dock and .sheet, and the
+   later rule wins, so it has to come after them. */
+@media (min-width: 720px) {
+  .app, .dock, .sheet { max-width: 960px; }
+  .grid:not(.aslist) {
+    grid-template-columns: repeat(auto-fill, minmax(calc(560px / var(--cols, 2) - .9rem), 1fr));
+  }
+}
