@@ -1,6 +1,7 @@
 # Per-person folders: choose what each person can see
 
-Status: PROPOSED 2026-08-30. Tier T3: it adds a rule to the authorisation surface, and a
+Status: APPROVED 2026-08-30 by Tim, with open question 2 answered the other way: any
+folder depth is tickable from v1. Tier T3: it adds a rule to the authorisation surface, and a
 rule that lets one film through by mistake is a security bug of the same class as the two
 inherited ones in CLAUDE.md.
 
@@ -26,10 +27,12 @@ On the dashboard's People page, each person gets one line under their name:
 
     Can see: everything
 
-Tapping it opens a list of the library's roots (each `--folder`, `--movies` and
-`--shows` root, by the label the person gave it) and, under each root, its top-level
-folders. Ticks. "Everything" is the default and the state of every existing grant.
-Untick the Kids drive's sibling and Sam sees the Kids drive only.
+Tapping it opens a tree of the library's roots (each `--folder`, `--movies` and
+`--shows` root, by the label the person gave it) and the folders under them, to any
+depth, each folder opening on demand. Ticks. A ticked folder covers everything beneath
+it. "Everything" is the default and the state of every existing grant. Untick the Kids
+drive's sibling and Sam sees the Kids drive only; tick one season folder inside a show
+and Sam sees that season.
 
 A guest window and a pairing link can carry the same choice, so a person can be let in
 narrowly from the start rather than let in and then narrowed.
@@ -153,6 +156,6 @@ returns true and the host is exactly today's. No migration in either direction.
    everything, as today? Recommendation: everything, and the pairing dialog offers the
    choice, so nobody is surprised by a guest seeing less than they were told.
 2. Is the top-level-folder granularity enough, or should any depth be tickable?
-   Recommendation: roots and their top-level folders in v1; the field is a prefix list,
-   so deeper is a UI change only.
+   ANSWERED 2026-08-30 (Tim): any depth in v1. The field is a prefix list, so this is
+   the tree control opening folders on demand rather than any change to the check.
 3. Whether "narrowing is not revoke" for downloads survives the first real use.
