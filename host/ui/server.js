@@ -113,6 +113,58 @@ async function readBody (req) {
   }
 }
 
+// THE PASSWORDLESS DASHBOARD IS STILL REACHABLE FROM A WEB PAGE, and that is what
+// these two headers are for (found 2026-08-31 by an audit an app-store comment
+// prompted; see TODO).
+//
+// Two different attacks, which is why it takes two checks:
+//
+//   - ORIGIN closes plain cross-site requests. A page on evil.example can POST to
+//     http://127.0.0.1:8751/api/source with content-type text/plain, which is a CORS
+//     "simple" request: no preflight, and readBody above does not care about the
+//     content type. The Host header on that request is OURS, so Host alone would not
+//     see it. It cannot read the answer, but /api/source, /api/pair/start and
+//     /api/watch/clear all do their damage on the way in.
+//   - HOST closes DNS rebinding, where evil.example re-resolves to 127.0.0.1 so the
+//     browser believes the page and the dashboard are the same origin and hands the
+//     answers over. Then Origin says evil.example and looks legitimate to a
+//     same-origin check, but the Host header still carries the attacker's name.
+//
+// ONLY WHEN THERE IS NO PASSWORD, deliberately. With one, the session cookie is
+// SameSite=Strict, which is the control for both cases: a cross-site request never
+// carries it, and a rebound page is a DIFFERENT origin from the one the cookie was
+// set on, so it does not carry it either. And a password means the dashboard may be
+// on a LAN, where the legitimate name is umbrel.local or a bare IP and nothing here
+// can know it. Refusing those would break the Umbrel install to fix the desktop one.
+const LOOPBACK_NAMES = new Set(['localhost', '::1', '[::1]', '0000:0000:0000:0000:0000:0000:0000:0001'])
+
+function isLoopbackName (value) {
+  const name = String(value || '').trim().toLowerCase()
+  if (!name) return false
+  // Strip the port. An IPv6 literal keeps its brackets, which is what the set holds.
+  const host = name.startsWith('[') ? name.slice(0, name.indexOf(']') + 1) : name.split(':')[0]
+  if (LOOPBACK_NAMES.has(host)) return true
+  // The whole 127/8 block, not just 127.0.0.1 - a rebind to 127.0.0.2 is the same host.
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+}
+
+// True when the request may proceed. `origin` absent is normal and fine: a browser
+// omits it on same-origin GETs, on <video src> and on EventSource, and a terminal
+// (curl, a script, a test) sends neither header we would object to.
+function sameHostRequest (req) {
+  if (!isLoopbackName(req.headers.host)) return false
+
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  // A sandboxed iframe and a file:// page both send "null". Neither is our dashboard.
+  if (origin === 'null') return false
+  try {
+    return isLoopbackName(new URL(origin).hostname)
+  } catch {
+    return false
+  }
+}
+
 // An adapter hands back either a Node Readable (the folder source, off disk) or a
 // web ReadableStream (the Jellyfin source, straight off fetch). Both are async
 // iterable, which is how the P2P side consumes them, but only one can be piped at
@@ -423,6 +475,15 @@ async function startDashboard ({
     const url = new URL(req.url, 'http://localhost')
 
     try {
+      // BEFORE ANYTHING ELSE, and only when nothing else guards this port. See
+      // sameHostRequest: without a password there is no cookie, so SameSite protects
+      // nothing and a web page the operator visits can drive this dashboard.
+      if (!auth.enabled && !sameHostRequest(req)) {
+        log('dashboard:foreign-request', { host: req.headers.host || null, origin: req.headers.origin || null, path: url.pathname })
+        res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' })
+        return res.end('reach this dashboard at http://127.0.0.1 or http://localhost\n')
+      }
+
       // Login, logout and the 401 for everything else - including /api/stream, so
       // there is no unauthenticated path to a single byte of the library. Returns
       // true if it dealt with the request itself.
