@@ -1761,6 +1761,11 @@ label.flabel { display: block; margin-top: .6rem; }
 .titlescreen .tspecs dt { color: var(--color-text-dim); font-size: 0.82rem; }
 .titlescreen .tspecs dd { margin: 0; font-size: 0.88rem; }
 
+/* The two-column wrappers exist only for a wide screen (the media block at the end
+ * of the file). On a phone they are display:contents - not boxes at all - so every
+ * rule above styles the same flat column it always did. */
+.titlescreen .tcols, .titlescreen .tbody { display: contents; }
+
 /* --- a wide screen: a phone turned sideways, or a tablet ------------------- */
 /* Everything above lays out a 560px column, which is a phone held upright. Past
    720px the column is allowed to grow to 960px, and the grid stops counting the
@@ -1774,4 +1779,21 @@ label.flabel { display: block; margin-top: .6rem; }
   .grid:not(.aslist) {
     grid-template-columns: repeat(auto-fill, minmax(calc(560px / var(--cols, 2) - .9rem), 1fr));
   }
+
+  /* The detail page splits: poster on the left, everything about the film on the
+     right, instead of a poster with the Watch button below the fold. The centred
+     phone styling turns left-aligned because the text now sits BESIDE the poster
+     rather than under it. */
+  .titlescreen .tcols {
+    display: grid; grid-template-columns: minmax(12rem, 16rem) 1fr;
+    gap: 0 2.2rem; align-items: start; padding: 0 1rem;
+  }
+  .titlescreen .tbody { display: block; }
+  .titlescreen .tposter { width: 100%; max-width: none; margin: 0.4rem 0 0; }
+  .titlescreen .ttitle { text-align: left; margin: 0.4rem 0 0; font-size: 1.55rem; }
+  .titlescreen .tfacts { text-align: left; margin: 0.35rem 0 0; }
+  .titlescreen .twatch { margin: 1.1rem 0 0; width: 100%; max-width: 24rem; }
+  .titlescreen .tacts { justify-content: flex-start; margin: 1.1rem 0 0; }
+  .titlescreen .tsum { margin: 1.4rem 0 0; }
+  .titlescreen .tspecs { margin: 1.4rem 0 0; }
 }

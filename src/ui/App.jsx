@@ -2099,10 +2099,16 @@ export default function App () {
 
       {err && <div className='error'>{err}</div>}
 
+      {/* A wide screen puts the poster BESIDE the facts (#223 follow-up). Both
+          wrappers are display:contents on a phone, so the upright layout does
+          not know they exist and every rule that styled the flat column still
+          applies. */}
+      <div className='tcols'>
       <div className='tposter'>
         <Cover src={title.artId && artBase ? `${artBase}${encodeURIComponent(title.artId)}?s=350` : null} title={title.title} />
       </div>
 
+      <div className='tbody'>
       <h2 className='ttitle'>{title.title}</h2>
       <p className='tfacts'>
         {[title.year, fmtPart(title.part), fmtRuntime(title.runtime), (title.genres || []).slice(0, 2).join(', ')].filter(Boolean).join(' · ')}
@@ -2165,6 +2171,8 @@ export default function App () {
         </dd>
         {title.media?.size ? <><dt>File</dt><dd>{fmtBytes(title.media.size)}</dd></> : null}
       </dl>
+      </div>
+      </div>
     </div>
   )
 
