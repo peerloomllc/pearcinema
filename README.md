@@ -45,7 +45,7 @@ of one library on a machine would corrupt each other.
 ### With Docker
 
 ```
-docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:0.1.5
+docker run -d --name pearcinema-host --restart unless-stopped --network host --device /dev/dri:/dev/dri -e PEARCINEMA_HTTP_HOST=0.0.0.0 -e PEARCINEMA_PASSWORD=choose-one -e PEARCINEMA_DATA=/data -e "PEARCINEMA_FOLDERS=/library/Movies:/library/TV Shows" -v /path/to/pearcinema-data:/data --mount "type=bind,source=/path/to/media,target=/library,bind-propagation=rslave" ghcr.io/peerloomllc/pearcinema-host:0.1.6
 ```
 
 There is deliberately no `latest` tag. A version is what an install can be reproduced

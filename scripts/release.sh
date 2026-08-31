@@ -1304,7 +1304,7 @@ fi
 # umbrel/, and build-image.sh still decides whether the store copy may move.
 _UMB="$REPO_ROOT/${UMBREL_DIR:-umbrel}/umbrel-app.yml"
 if [ -f "$_UMB" ]; then
-  _UMB_NOW=$(grep -m1 -E '^version:' "$_UMB" | sed -E 's|^version: *"?([^"]*)"?||')
+  _UMB_NOW=$(grep -m1 -E '^version:' "$_UMB" | sed -E 's|^version: *"?([^"]*)"?|\1|')
   if [ "$_UMB_NOW" = "$APP_VERSION" ]; then
     echo "    Umbrel listing already at $APP_VERSION."
   elif [ "$(printf '%s
@@ -2122,7 +2122,11 @@ else
     # STORE_DIR is what makes build-image.sh sync the community store listing from
     # umbrel/. Without it the builder pins the in-repo files and the store keeps whatever
     # snapshot it had - which on 2026-07-31 was image 0.1.0 pointed at an empty music path.
-    ( cd "$REPO_ROOT" && STORE_DIR="${UMBREL_STORE_DIR:-}" ${HOST_IMAGE_BUILD:-bash host/build-image.sh} "$HOST_IMAGE_BUILT" ) 2>&1 \
+    #
+    # --push is REQUIRED here, unlike PearTune's build-image.sh which always pushes.
+    # This line was copied from PearTune without it, so the 1.1.3 release built 0.1.6
+    # locally, pushed nothing, pinned nothing, synced nothing and still printed OK.
+    ( cd "$REPO_ROOT" && STORE_DIR="${UMBREL_STORE_DIR:-}" ${HOST_IMAGE_BUILD:-bash host/build-image.sh} "$HOST_IMAGE_BUILT" --push ) 2>&1 \
       | tee /tmp/pearcinema-build-host.log \
       | grep --line-buffered -E '^==|STEP [0-9]+/|Copying (blob|config)|Writing manifest|pinned |WARNING|[Ee]rror' \
       | awk '{ print "      " $0; fflush() }'

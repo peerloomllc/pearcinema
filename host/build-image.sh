@@ -149,6 +149,12 @@ if [ "$PUSH" = "--push" ]; then
   echo
   echo "pushed $IMAGE:$VERSION"
 
+  # The build ran from $STAGE (the `cd` above); everything from here on edits
+  # files in the repo by relative path, and under `set -e` the first sed that
+  # cannot find its file kills the script AFTER the push but BEFORE the pinning
+  # and the store sync - which is exactly what happened on the 1.1.3 release.
+  cd "$REPO"
+
   # ---------------------------------------------------------------------------
   # PIN THE NEW TAG AND DIGEST INTO EVERY FILE THAT NAMES THE IMAGE.
   #
