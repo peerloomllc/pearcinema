@@ -16,7 +16,7 @@ services:
   # umbrelOS fills with the app password shown next to PearCinema in the app list.
   # The host refuses to start on a non-loopback bind without it.
   app:
-    image: ghcr.io/peerloomllc/pearcinema-host:0.1.5@sha256:83783c1a1f90ce7a909dafd88bdd0bd6248ed60930c50669f8c98dc3ed55dd7d
+    image: ghcr.io/peerloomllc/pearcinema-host:0.1.6@sha256:41be9793c121b22b76f4e2bec296b59863231980d8f38c4c44c2e15aa7d58875
     restart: on-failure
     stop_grace_period: 1m
     network_mode: host
