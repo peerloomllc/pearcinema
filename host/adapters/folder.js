@@ -913,14 +913,29 @@ class FolderAdapter {
     // episode that found one - they all resolve to the same file, and taking the
     // first non-null means one episode in a season folder with no art does not blank
     // the whole season.
+    // AND WHOSE POSTER EACH ONE IS, for the same reason the leaf loop above records
+    // it. Until 2026-08-31 only leaves were recorded, so `itemForArt` answered null
+    // for a series or a season poster - and art.get skips its check on a null owner,
+    // which is the right answer for a source that cannot name owners at all and the
+    // wrong one here. A narrowed person holding a show's artId could still fetch that
+    // poster. `locationOf` already resolves a series or season row to its folder, so
+    // the gate works on these ids once it is given one.
     for (const e of episodes) {
       if (e._seriesArtId) {
         const s = this._tree.series.find(x => x.id === e.seriesId)
-        if (s && !s.artId) { s.artId = e._seriesArtId; this._artPaths.set(e._seriesArtId, e._seriesArtFile) }
+        if (s && !s.artId) {
+          s.artId = e._seriesArtId
+          this._artPaths.set(e._seriesArtId, e._seriesArtFile)
+          if (!this._artOwners.has(e._seriesArtId)) this._artOwners.set(e._seriesArtId, s.id)
+        }
       }
       if (e._seasonArtId) {
         const s = this._tree.seasons.find(x => x.id === e.seasonId)
-        if (s && !s.artId) { s.artId = e._seasonArtId; this._artPaths.set(e._seasonArtId, e._seasonArtFile) }
+        if (s && !s.artId) {
+          s.artId = e._seasonArtId
+          this._artPaths.set(e._seasonArtId, e._seasonArtFile)
+          if (!this._artOwners.has(e._seasonArtId)) this._artOwners.set(e._seasonArtId, s.id)
+        }
       }
     }
 

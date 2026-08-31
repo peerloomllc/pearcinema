@@ -23,6 +23,7 @@ const fsp = require('fs/promises')
 
 const { createProtocol } = require('@peerloom/host')
 const { FolderAdapter } = require('../host/adapters/folder')
+const { viewOf } = require('../host/visibility')
 
 const protocol = createProtocol({ app: 'pearcinema' })
 const LIB = protocol.ids.libraryId(require('hypercore-crypto').keyPair().publicKey)
@@ -143,6 +144,28 @@ test('a show, a season and an episode each get their own picture', async (t) => 
   // one - a season folder is not one thing the way a film directory is.
   const second = eps.items.find(e => e.episodeNumber === 2)
   assert.equal(second.artId, null)
+})
+
+test('A SHOW S POSTER HAS AN OWNER TOO, so a narrowed person can be refused it', async (t) => {
+  // Found 2026-08-31 by a security audit. `_artOwners` was filled for leaf items
+  // only, so itemForArt answered null for a series or season poster - and art.get
+  // treats a null owner as "this source cannot name owners", which is right for a
+  // source that cannot and wrong here. A narrowed person holding a show's artId
+  // could still fetch that poster.
+  const { a, root } = await library(t)
+  const wire = (await a.list({ type: 'series' })).items.find(s => s.title === 'The Wire')
+  const s1 = (await a.list({ type: 'seasons', seriesId: wire.id })).items[0]
+
+  assert.equal(a.itemForArt(wire.artId), wire.id, 'a show poster belongs to the show')
+  assert.equal(a.itemForArt(s1.artId), s1.id, 'a season poster belongs to the season')
+
+  // And the half that makes the refusal work: the narrowed view must place a series
+  // or season row, or art.get would let it through for a different reason.
+  const view = viewOf(a, { scope: 'full', paths: [{ root, rel: 'Chernobyl' }] })
+  assert.equal(await view.get({ id: wire.id }), null, 'The Wire is outside what this person may see')
+  assert.equal(await view.get({ id: s1.id }), null, 'and so is its season')
+  const chern = (await a.list({ type: 'series' })).items.find(s => s.title === 'Chernobyl')
+  assert.ok(await view.get({ id: chern.id }), 'the show they WERE given is still theirs')
 })
 
 test('the other season-art convention works too', async (t) => {
