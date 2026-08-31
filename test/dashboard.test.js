@@ -232,6 +232,72 @@ test('the mention in that refusal names OUR env var, not the donor s', async () 
   )
 })
 
+/* ------------------------------------------------- the passwordless doorway -- */
+// The desktop app runs this dashboard on loopback with NO password, so there is no
+// cookie and SameSite guards nothing. Without the two header checks a web page the
+// operator happened to visit could drive their library. See sameHostRequest in
+// host/ui/server.js for which attack each header stops.
+
+test('a passwordless dashboard refuses a request carrying somebody else s Host', async (t) => {
+  const { base } = await cinema(t, { password: '' })
+  const c = client(base)
+
+  // DNS rebinding: the connection really did arrive here, but the browser thinks it
+  // is talking to evil.example, which is what makes it hand over the ANSWERS.
+  const res = await c.req('GET', '/api/state', { headers: { host: 'evil.example' } })
+  assert.equal(res.status, 403)
+  assert.equal(/pair|library|movies/i.test(res.body), false, 'a refusal must not carry library data')
+})
+
+test('a passwordless dashboard refuses a POST sent from another site', async (t) => {
+  const { base, host } = await cinema(t, { password: '' })
+  const c = client(base)
+
+  // Plain CSRF. The Host header here is ours - the browser is honest about where it
+  // connected - so only the Origin gives this away.
+  const res = await c.req('POST', '/api/pair/start', { body: {}, headers: { origin: 'https://evil.example' } })
+  assert.equal(res.status, 403)
+  assert.ok(!host.pairing, 'no pairing window may open for a foreign origin')
+})
+
+test('a passwordless dashboard refuses a page with no origin at all', async (t) => {
+  const { base } = await cinema(t, { password: '' })
+  const c = client(base)
+
+  // "null" is what a sandboxed iframe and a file:// page send. Neither is the dashboard.
+  const res = await c.req('POST', '/api/watch/clear', { body: {}, headers: { origin: 'null' } })
+  assert.equal(res.status, 403)
+})
+
+test('the desktop s own dashboard still works: loopback Host, and its own origin', async (t) => {
+  const { base, dash } = await cinema(t, { password: '' })
+  const c = client(base)
+
+  // No Origin, which is what a browser sends for a plain GET, a <video src> and an
+  // EventSource - and what curl sends. This is the ordinary case and must not break.
+  const plain = await c.req('GET', '/api/state')
+  assert.equal(plain.status, 200)
+
+  // And the dashboard's own fetch, which does carry one.
+  const own = await c.req('GET', '/api/state', { headers: { origin: `http://127.0.0.1:${dash.port}` } })
+  assert.equal(own.status, 200)
+
+  // localhost is the same machine by another name, and people type it.
+  const local = await c.req('GET', '/api/state', { headers: { host: `localhost:${dash.port}`, origin: `http://localhost:${dash.port}` } })
+  assert.equal(local.status, 200)
+})
+
+test('a dashboard WITH a password is not host-checked, because SameSite already guards it', async (t) => {
+  // The Umbrel case: it binds 0.0.0.0 and is reached at umbrel.local or a bare IP,
+  // neither of which this host can know. Refusing them would break that install to
+  // fix the desktop one. The answer here is 401 (no session), never 403 (wrong host).
+  const { base } = await cinema(t)
+  const c = client(base)
+
+  const res = await c.req('GET', '/api/state', { headers: { host: 'umbrel.local' } })
+  assert.equal(res.status, 401)
+})
+
 test('nothing is readable without a session, and that includes the film', async (t) => {
   const { base } = await cinema(t)
   const c = client(base)
