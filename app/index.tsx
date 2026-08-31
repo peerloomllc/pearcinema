@@ -1062,6 +1062,20 @@ export default function App () {
   // notifications bar). The shell pads; the page never needs to know.
   const insets = useSafeAreaInsets()
 
+  // THE BOTTOM INSET GOES TO THE PAGE, not into root padding. The page already pads
+  // its navbar and sheets with --pear-safe-bottom, but env(safe-area-inset-bottom) is
+  // 0 in an Android WebView, so on a device whose navigation bar is a real bar - a
+  // tablet taskbar, 3-button nav - the dock sat behind it (field report, Galaxy Tab
+  // S7 FE, 2026-08-30). Root padding would fix the dock too but would also letterbox
+  // fullscreen video by the bar's height on every phone; handing the page the number
+  // keeps the video full-bleed and lets the CSS that always wanted the inset have it.
+  // First paint rides the boot script as window.__pearSafeBottom (main.jsx applies
+  // it - the document has no documentElement yet when that script runs); this effect
+  // only covers changes after load, e.g. a rotation moving the bar to a side.
+  useEffect(() => {
+    feedWebView(`window.__pearSafeBottom=${JSON.stringify(insets.bottom)};document.documentElement.style.setProperty('--pear-safe-bottom', ${JSON.stringify(insets.bottom + 'px')})`)
+  }, [insets.bottom])
+
   // THE OS's ANSWER IS THE AUTHORITY, not the WebView's own prefers-color-scheme: an
   // Android WebView does not reliably track the app's night mode, which is why
   // src/ui/theme.js reads `window.__pearColorScheme` first and only falls back to
@@ -1091,8 +1105,10 @@ export default function App () {
           originWhitelist={['*']}
           onMessage={onMessage}
           // Before the page's first line runs, so its very first paint resolves 'system'
-          // against the phone rather than against the WebView's guess.
-          injectedJavaScriptBeforeContentLoaded={`window.__pearColorScheme=${JSON.stringify(osScheme)};true;`}
+          // against the phone rather than against the WebView's guess. The bottom inset
+          // rides along for the same reason - see the effect above for why the page
+          // cannot read it itself.
+          injectedJavaScriptBeforeContentLoaded={`window.__pearColorScheme=${JSON.stringify(osScheme)};window.__pearSafeBottom=${JSON.stringify(insets.bottom)};true;`}
           // The player IS an HTML5 <video> pointed at the loopback shim, so media
           // must play inline and without a user-gesture fight.
           allowsInlineMediaPlayback
@@ -1202,7 +1218,10 @@ export default function App () {
             {/* box-none: the chrome rows catch their own taps, the empty
                 middle falls through to the show/hide Pressable above. */}
             {controlsOn && (
-              <View style={styles.controls} pointerEvents='box-none'>
+              // The video stays full-bleed behind the system bars; only the chrome
+              // moves in. Same field report as the --pear-safe-bottom effect: on a
+              // tablet the navigation bar is a bar, and the scrub row was under it.
+              <View style={[styles.controls, { paddingBottom: insets.bottom }]} pointerEvents='box-none'>
                 <View style={styles.ctlTop}>
                   <Pressable onPress={stopPlayback} style={styles.ctlBtn} hitSlop={8}>
                     <MaterialIcons name='arrow-back' size={26} color='#efe9df' />
