@@ -114,8 +114,8 @@ before this proposal and stay after it. No migration in either direction.
 ## Open questions
 
 1. Chips inside the two tabs, as proposed, or one home screen of shelf rows per section
-   the way streaming apps do? Chips are the smaller change and keep the tabs; shelves
-   are a bigger redesign that could subsume the tabs entirely.
+   the way streaming apps do? ANSWERED 2026-08-30 (Tim): chips inside the two tabs.
+   Shelves stay unbuilt and unrejected; they can return once chips have been lived with.
 2. Is one label per root right for both sharing and sections, or should a root's
    section name be settable separately? Proposed: one label, because two names for the
    same folder is a way to confuse the person doing the sharing.
