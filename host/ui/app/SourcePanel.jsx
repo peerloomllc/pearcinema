@@ -37,6 +37,36 @@ const TYPE_LABEL = { auto: 'Automatic', movies: 'Films', shows: 'TV shows' }
 const HOLDS_PHRASE = { movies: 'films', shows: 'TV shows', auto: 'films and TV shows' }
 const TYPE_ORDER = ['auto', 'movies', 'shows']
 
+// HOW SHORT IS TOO SHORT. The same floor the host applies (host/probe.js), offered as
+// the lengths somebody would actually pick rather than a free-text box of seconds.
+//
+// Five minutes is the default because a trailer, a disc menu and a rip fragment are
+// all under it and the shortest thing anybody files as an episode is not. It is a
+// setting rather than a fixed rule because plenty of real libraries hold things that
+// short - cartoons run seven minutes, music videos three - which is also why the files
+// it leaves out are listed rather than dropped in silence.
+const MIN_LENGTH_SEC = 300
+const LENGTH_CHOICES = [
+  { secs: 0, label: 'Keep everything' },
+  { secs: 60, label: 'Under 1 minute' },
+  { secs: 120, label: 'Under 2 minutes' },
+  { secs: 300, label: 'Under 5 minutes' },
+  { secs: 600, label: 'Under 10 minutes' },
+  { secs: 1200, label: 'Under 20 minutes' }
+]
+
+// "5 minutes", "1 hour 32 minutes", "no readable length". Used on the list of what was
+// left out, where the length is the whole reason the file is on it.
+function lengthWords (secs) {
+  if (secs === null || secs === undefined) return 'no readable length'
+  if (secs < 60) return secs === 1 ? '1 second' : `${secs} seconds`
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return mins === 1 ? '1 minute' : `${mins} minutes`
+  const h = Math.floor(mins / 60)
+  const m = mins % 60
+  return `${h} ${h === 1 ? 'hour' : 'hours'}${m ? ` ${m} ${m === 1 ? 'minute' : 'minutes'}` : ''}`
+}
+
 // WHAT WAS FOUND, in one phrase, and there is exactly one of these. The panel says it
 // after a test, a save and a rescan; the Library page says it on the row that names
 // where the films are. Two spellings of the same sentence would drift.
@@ -264,9 +294,12 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
   const [pass, setPass] = useState('')
   const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState('')
+  // The floor in force, which the host has already resolved from "never set" into the
+  // default - so this shows the number actually being applied, not a blank.
+  const [minLen, setMinLen] = useState(current.minLengthSec ?? MIN_LENGTH_SEC)
 
   const cfg = () => kind === 'folder'
-    ? { kind: 'folder', roots: roots.map(picked) }
+    ? { kind: 'folder', roots: roots.map(picked), minLengthSec: minLen }
     : { kind: 'jellyfin', url: url.trim(), username: user.trim(), password: pass }
 
   const describe = describeSource
@@ -332,6 +365,7 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
   // and treating that as a change would leave Save lit up on a page nobody touched.
   const dirty = kind !== current.kind ||
     (kind === 'folder' && JSON.stringify(roots.map(picked)) !== JSON.stringify((current.roots || []).map(asRoot).map(picked))) ||
+    (kind === 'folder' && minLen !== (current.minLengthSec ?? MIN_LENGTH_SEC)) ||
     (kind === 'jellyfin' && (url.trim() !== (current.url || '') || user.trim() !== (current.username || '') || pass))
 
   // Who keeps the library fresh. Neither the wizard (no library yet) nor the Library
@@ -409,6 +443,33 @@ export default function SourcePanel ({ state, reload, editor = false, wizard = f
           <p class='hint'>
             Saying what a folder holds is what keeps a hand-named episode under its show
             instead of in with the films.
+          </p>
+
+          {/* THE SHORT-FILE FLOOR, in the same row shape as a folder's own chooser. It
+              sits under the folders because it is a rule ABOUT them, and its hint says
+              what happens to what it catches - nothing on the disk is touched, and the
+              banner on this page names every file. */}
+          <label class='srclabel'>Short videos <span class='hint-inline'>- trailers, menus, disc fragments</span></label>
+          <div class='lenlist'>
+            <div class='lenrow'>
+              <span class='rowmain'>
+                <span class='rootpath'>Leave out videos shorter than this</span>
+              </span>
+              <span class='rowctl'>
+                <select
+                  value={String(minLen)}
+                  aria-label='Leave out videos shorter than'
+                  onChange={e => setMinLen(Number(e.currentTarget.value))}
+                >
+                  {LENGTH_CHOICES.map(c => <option value={String(c.secs)} key={c.secs}>{c.label}</option>)}
+                </select>
+              </span>
+            </div>
+          </div>
+          <p class='hint'>
+            Nothing is deleted and nothing on your drive is touched. Videos this short are
+            left out of the library, this page lists every one of them, and choosing Keep
+            everything brings them straight back.
           </p>
         </>
       )}
@@ -557,6 +618,13 @@ export function SourceBanners ({ state }) {
           </div>
         </div>
       )}
+      {/* WHAT THE LENGTH RULE LEFT OUT, and every path behind it. A user with a
+          17,000-file library ran a rescan expecting their trailers and disc fragments
+          to go and nothing happened, because the rule the code claimed to have was a
+          constant nothing ever called (2026-08-31). Now that something does hide them,
+          it says so and it shows its working - a filter nobody can check is one nobody
+          can trust. */}
+      {state.stats?.short > 0 && <ShortFiles stats={state.stats} />}
       {state.sourceError && (
         <div class='banner bad'>
           <b>The source is not answering.</b> {state.sourceError}
@@ -564,6 +632,54 @@ export function SourceBanners ({ state }) {
         </div>
       )}
     </>
+  )
+}
+
+// The list behind the count, fetched only when it is opened - a library of clips can
+// be thousands of rows and nobody needs them on every page load.
+function ShortFiles ({ stats }) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState(null)
+
+  useEffect(() => {
+    if (!open || rows) return
+    let live = true
+    api('/api/source/short').then(r => { if (live) setRows(r || {}) })
+    return () => { live = false }
+  }, [open])
+
+  const n = stats.short
+  return (
+    <div class='banner'>
+      <b>{n} short {n === 1 ? 'video is' : 'videos are'} not in the library.</b>{' '}
+      {n === 1 ? 'It is' : 'They are'} shorter than {lengthWords(stats.minLengthSec)}, which is
+      usually a trailer, a disc menu or a fragment of a rip. Nothing has been deleted.
+      <div class='hint'>
+        Change this under Where the films are, or choose Keep everything to put them back.
+      </div>
+      <div class='actions' style='justify-content:flex-start;margin-top:.5rem'>
+        <button class='ghost' onClick={() => setOpen(!open)} aria-expanded={open}>
+          {open ? 'Hide the list' : 'Show which files'}
+        </button>
+      </div>
+      {open && (
+        rows
+          ? (
+            <ul class='shortlist'>
+              {(rows.files || []).map(f => (
+                <li key={f.file}>
+                  <span class='rootpath' title={f.file}>{f.file}</span>
+                  <span class='hint-inline'>{lengthWords(f.duration)}</span>
+                </li>
+              ))}
+              {rows.total > (rows.files || []).length && (
+                <li><span class='hint-inline'>and {rows.total - rows.files.length} more.</span></li>
+              )}
+            </ul>
+            )
+          : <div class='hint'>Reading the list…</div>
+      )}
+    </div>
   )
 }
 

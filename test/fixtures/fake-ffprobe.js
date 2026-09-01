@@ -39,6 +39,13 @@ const subs = marker
     }))
   : []
 
+// LENGTH ON DEMAND, the same way. `.dur-120` anywhere in the name is a two-minute
+// file and `.dur-0` is a rip fragment ffprobe cannot measure, which is what the
+// minimum-length rule is made of. Everything else is 90 minutes, which is what every
+// test written before the marker expected.
+const durMarker = /\.dur-(\d+)/.exec(path.basename(file))
+const duration = durMarker ? Number(durMarker[1]) : 5400
+
 process.stdout.write(JSON.stringify({
   streams: [
     { codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080 },
@@ -47,7 +54,7 @@ process.stdout.write(JSON.stringify({
   ],
   format: {
     format_name: container,
-    duration: '5400.000000',
+    duration: duration.toFixed(6),
     size: String(size)
   }
 }))

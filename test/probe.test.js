@@ -16,7 +16,7 @@ const os = require('os')
 const path = require('path')
 const fsp = require('fs/promises')
 
-const { walkVideos, probeFile, probeAll, VIDEO_EXT } = require('../host/probe')
+const { walkVideos, probeFile, probeAll, VIDEO_EXT, tooShort, DEFAULT_MIN_LENGTH_SEC } = require('../host/probe')
 
 async function tree (t, spec) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-walk-'))
@@ -185,4 +185,26 @@ test('CREDITLESS OPENINGS, ENDINGS AND DISC MENUS ARE EXTRAS, even when they are
   for (const f of ['The Menu (2022).mkv', 'Menu Rouge (1998).mkv', 'The Preview Man (2011).mkv', 'Show - Operation Overlord.mkv', 'Show S01E01.mkv']) {
     assert.ok(!EXTRA_FILE_RE.test(f), f + ' is not an extra')
   }
+})
+
+test('TOO SHORT IS A LENGTH, and a floor of zero is off', () => {
+  // The rule this replaced was a 20 MB size constant that nothing ever called, which
+  // is how a user came to rescan a 17,000-file library expecting their clips to go and
+  // find them all still there (2026-08-31). Bytes were the wrong measure anyway: a
+  // disc rip's `00003.m2ts` reports no length at all and is gigabytes.
+  assert.equal(DEFAULT_MIN_LENGTH_SEC, 300, 'five minutes')
+
+  assert.equal(tooShort({ duration: 5400 }, 300), false, 'a ninety-minute film')
+  assert.equal(tooShort({ duration: 120 }, 300), true, 'a two-minute trailer')
+  assert.equal(tooShort({ duration: 300 }, 300), false, 'exactly the floor is long enough')
+
+  // A file whose length could not be established is not something anybody chose to
+  // keep - and it is the shape a rip fragment arrives in.
+  assert.equal(tooShort({ duration: null }, 300), true)
+  assert.equal(tooShort({}, 300), true)
+
+  // OFF MEANS OFF, for every one of them.
+  assert.equal(tooShort({ duration: 1 }, 0), false)
+  assert.equal(tooShort({ duration: null }, 0), false)
+  assert.equal(tooShort({ duration: null }), false)
 })

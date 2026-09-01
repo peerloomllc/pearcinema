@@ -1422,8 +1422,11 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
 .srclabel { display: block; font-size: .82rem; color: var(--muted); margin-bottom: .4rem }
 .hint-inline { color: var(--muted); font-weight: 400 }
 
-.rootlist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px }
-.rootrow {
+.rootlist, .lenlist { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px }
+/* `.lenrow` is the minimum-length control, which looks like a folder row and is
+ * deliberately NOT one: the folder list is walked by the picker and by the tests, and
+ * a rule ABOUT the folders sitting in it would be counted as another folder. */
+.rootrow, .lenrow {
   display: flex; align-items: center; gap: 8px;
   background: var(--card-2); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 6px 6px 11px;
@@ -1440,10 +1443,24 @@ button svg, .viewtoggle svg { vertical-align: -.15em }
  * text, so aligning to the top left the path sitting against the ceiling with a gap
  * under it (Tim, 2026-08-19, on the padding). The path and what it was read as sit as
  * one block against the middle of the control beside them. */
-.rootrow { align-items: center }
-.rootrow .rowmain { flex: 1 1 0; min-width: 0 }
+.rootrow, .lenrow { align-items: center }
+.rootrow .rowmain, .lenrow .rowmain { flex: 1 1 0; min-width: 0 }
 .rootrow .rowsub { display: block; color: var(--muted); font-size: .78rem; margin-top: .2rem }
-.rootrow .rowctl { display: flex; align-items: center; gap: .4rem; flex: 0 0 auto }
+.rootrow .rowctl, .lenrow .rowctl { display: flex; align-items: center; gap: .4rem; flex: 0 0 auto }
+
+/* The length chooser's words are longer than "Automatic", and 7.5rem clips them to
+ * "Keep everythi…". Its own width rather than a wider one for every row. */
+.lenrow select { width: 11rem }
+
+/* WHAT THE LENGTH RULE LEFT OUT, one file per line: the path takes the room and the
+ * length sits at the end, because the length is the reason the row is there. Scrolls
+ * rather than growing without limit - two hundred rows is a page nobody can leave. */
+.shortlist { list-style: none; margin: .5rem 0 0; padding: 0; max-height: 15rem; overflow-y: auto }
+.shortlist li {
+  display: flex; align-items: baseline; gap: .6rem;
+  padding: .25rem 0; border-top: 1px solid var(--line);
+}
+.shortlist li .hint-inline { flex: 0 0 auto; font-size: .78rem }
 
 /* ADD A FOLDER IS A BUTTON, not a box. Full width, directly under a list of bordered
  * boxes, it read as a fourth box of the wrong colour - which is what Tim's arrow was
