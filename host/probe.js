@@ -65,7 +65,36 @@ const SAMPLE_RE = /(^|[.\-_ ])sample([.\-_ ]|$)/i
 // `The Preview Man` could be. `menu` counts only inside brackets, which is the fansub
 // convention and nothing a title does; `preview` is not in the list at all.
 const EXTRA_FILE_RE = /(^|[.\-_ [(])(nc(op|ed)\d*|creditless)([.\-_ )\]]|$)|[[(](menu|ncop|nced|creditless)[)\]]|^s\d{1,2}(op|ed)\d*[.\-_]/i
-const MIN_FEATURE_BYTES = 20 * 1024 * 1024 // 20 MB - below this it is a clip, not a film
+// HOW SHORT IS TOO SHORT, and why this is measured in seconds rather than bytes.
+//
+// There used to be a `MIN_FEATURE_BYTES = 20 MB` here. It was exported, it was
+// never called by anything, and it was written down in two places as a rule the
+// scanner already applied - so a user with a 17,000-file library ran a rescan
+// expecting their clips to go and nothing happened (field report 2026-08-31).
+// Bytes were the wrong measure anyway: a disc rip's `00003.m2ts` reports no
+// length at all and is gigabytes.
+//
+// Length is the honest measure, it is already read off every file by `probeFile`
+// and it is already in the scan cache, so applying it costs no extra reading.
+//
+// A FLOOR OF 0 MEANS OFF. Nothing is hidden and this file behaves as it always
+// did. The default is set by the folder adapter, not here, because it belongs to
+// a library's configuration rather than to the probe.
+const DEFAULT_MIN_LENGTH_SEC = 300 // 5 minutes
+
+// Is this probed file too short to be part of a library?
+//
+// `duration` is null both for a file ffprobe measured as zero and for one it could
+// not measure at all - `probeFile` collapses the two, and a rip fragment is
+// usually the first. Both are treated as too short WHEN A FLOOR IS SET, because a
+// video whose length cannot be established is not something anybody chose to keep,
+// and the dashboard lists every file this hides so the judgement is reversible.
+function tooShort (probe, minSec = 0) {
+  if (!(minSec > 0)) return false
+  const secs = probe?.duration
+  if (secs === null || secs === undefined) return true
+  return secs < minSec
+}
 
 async function * walkVideos (root, { includeExtras = false, depth = 0 } = {}) {
   let entries
@@ -317,4 +346,4 @@ if (require.main === module) {
   })
 }
 
-module.exports = { walkVideos, probeFile, probeAll, VIDEO_EXT, SKIP_DIRS, EXTRA_DIRS, EXTRA_FILE_RE, MIN_FEATURE_BYTES }
+module.exports = { walkVideos, probeFile, probeAll, VIDEO_EXT, SKIP_DIRS, EXTRA_DIRS, EXTRA_FILE_RE, DEFAULT_MIN_LENGTH_SEC, tooShort }

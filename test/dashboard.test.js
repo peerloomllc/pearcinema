@@ -1480,3 +1480,49 @@ test('RESCAN ANSWERS AT ONCE AND SAYS SO ON /api/state', async (t) => {
   await new Promise(r => setTimeout(r, 50))
   assert.equal(host.scanning, null, 'and it is over when it is over')
 })
+
+test('THE FILES THE LENGTH RULE LEFT OUT ARE NAMED, not just counted', async (t) => {
+  // Hiding rather than deleting is only worth anything if the operator can see what
+  // was hidden. The count rides on /api/state with every other stat; this is the list
+  // behind it, and it is a dashboard route rather than a phone method because these
+  // are paths on somebody's disk.
+  const { c, adapter } = await loggedIn(t)
+
+  adapter.kind = 'folder'
+  adapter.minLengthSec = 300
+  adapter.shortFiles = [
+    { file: '/library/Movies/The Long One Trailer.mkv', duration: 120 },
+    { file: '/library/Movies/00003.m2ts', duration: null }
+  ]
+
+  const res = await c.req('GET', '/api/source/short')
+  assert.equal(res.status, 200)
+  assert.equal(res.json.total, 2)
+  assert.equal(res.json.minLengthSec, 300)
+  assert.deepEqual(res.json.files.map(f => f.file), [
+    '/library/Movies/The Long One Trailer.mkv',
+    '/library/Movies/00003.m2ts'
+  ])
+
+  // Capped, because a library of clips is thousands of rows and the page shows a
+  // sample with the total beside it.
+  adapter.shortFiles = Array.from({ length: 500 }, (_, i) => ({ file: `/library/clip-${i}.mkv`, duration: 9 }))
+  const big = await c.req('GET', '/api/source/short')
+  assert.equal(big.json.total, 500)
+  assert.equal(big.json.files.length, 200)
+
+  // A Jellyfin library has no such rule and answers an empty list rather than throwing.
+  adapter.kind = 'jellyfin'
+  const none = await c.req('GET', '/api/source/short')
+  assert.equal(none.status, 200)
+  assert.deepEqual(none.json.files, [])
+})
+
+test('the dashboard is told which floor is in force, so the chooser is not blank', async (t) => {
+  const { c, adapter } = await loggedIn(t)
+  adapter.kind = 'folder'
+  adapter.minLengthSec = 600
+
+  const state = await c.req('GET', '/api/state')
+  assert.equal(state.json.source.minLengthSec, 600)
+})

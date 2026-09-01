@@ -96,13 +96,14 @@ function adapter ({ root, dataDir, roots = null }) {
 // The fake ffprobe is invoked as an argv0; probe.js calls execFile(cmd, args), so
 // a two-word command will not work. Build the adapter with a wrapper script path
 // instead and let probe.js exec it directly.
-function realAdapter ({ root, dataDir, roots = null }) {
+function realAdapter ({ root, dataDir, roots = null, minLengthSec }) {
   return new FolderAdapter({
     roots: roots || [root],
     dataDir,
     libraryId: LIB,
     ids: protocol.ids,
-    ffprobe: FAKE_FFPROBE
+    ffprobe: FAKE_FFPROBE,
+    minLengthSec
   })
 }
 
@@ -1233,4 +1234,106 @@ test('A FILE THAT WILL NOT PROBE IS KEPT AND COUNTED, not silently dropped', asy
     assert.ok(row.file && row.at, 'each one says which file and when')
     assert.ok(!JSON.stringify(stats).includes(row.file), 'but the paths never ride in stats, which any phone can ask for')
   }
+})
+
+/* ------------------------------------------- how short is too short -------- */
+//
+// A user with a 17,000-file library ran a build that was supposed to drop their
+// trailers and disc fragments, rescanned, and watched nothing happen (field report
+// 2026-08-31). There was a `MIN_FEATURE_BYTES` constant, it was exported, it was
+// written down in two places as a rule the scanner applied - and nothing ever called
+// it. These tests are the rule actually being applied, so that cannot happen twice.
+
+// A film, a trailer, a 30-second clip and a rip fragment ffprobe cannot measure - the
+// four shapes that matter, in one flat folder like the real `Blurays/`.
+const SHORT_TREE = {
+  'Blurays/The Long One.dur-5400.mkv': 'x',
+  'Blurays/The Long One Trailer.dur-120.mkv': 'x',
+  'Blurays/Menu Clip.dur-30.mkv': 'x',
+  'Blurays/00003.dur-0.m2ts': 'x'
+}
+
+test('A TRAILER IS NOT A FILM: short videos are left out of the library', async (t) => {
+  const { root, dataDir } = await library(t, { extra: SHORT_TREE })
+  const a = realAdapter({ root, dataDir })
+  await a.scan()
+
+  const titles = (await a.list({ type: 'movies' })).items.map(m => m.title)
+  assert.ok(titles.some(x => /The Long One/.test(x)), 'the feature is in the library')
+  assert.ok(!titles.some(x => /Trailer/i.test(x)), 'the two-minute trailer is not')
+  assert.ok(!titles.some(x => /Menu Clip/i.test(x)), 'nor the thirty-second clip')
+  assert.ok(!titles.some(x => /00003/.test(x)), 'nor the fragment with no readable length')
+
+  const stats = await a.stats()
+  assert.equal(stats.short, 3, 'and the count says how many, because a silent drop is the bug')
+  assert.equal(stats.minLengthSec, 300, 'five minutes, the default')
+
+  // THE PATHS ARE KEPT, which is what makes hiding them different from deleting them:
+  // the dashboard names every one so the judgement can be checked.
+  const named = a.shortFiles.map(f => path.basename(f.file)).sort()
+  assert.deepEqual(named, ['00003.dur-0.m2ts', 'Menu Clip.dur-30.mkv', 'The Long One Trailer.dur-120.mkv'])
+  assert.equal(a.shortFiles.find(f => /00003/.test(f.file)).duration, null, 'no length, and it says so')
+})
+
+test('KEEP EVERYTHING PUTS THEM BACK, without reading a byte of the disk again', async (t) => {
+  const { root, dataDir } = await library(t, { extra: SHORT_TREE })
+  const first = realAdapter({ root, dataDir })
+  await first.scan()
+  const hidden = (await first.stats()).short
+  assert.equal(hidden, 3)
+
+  // The floor cleared, over the same data directory, WITH AN FFPROBE THAT CANNOT RUN.
+  // The rows have to be rebuilt (the index was filtered) and the probes must not be -
+  // the length was read the first time and hiding a file never threw it away.
+  const second = realAdapter({ root, dataDir, minLengthSec: 0 })
+  second.ffprobe = '/nonexistent/ffprobe-must-not-run'
+  await second.scan()
+
+  const titles = (await second.list({ type: 'movies' })).items.map(m => m.title)
+  assert.ok(titles.some(x => /Trailer/i.test(x)), 'the trailer is back')
+  assert.ok(titles.some(x => /00003/.test(x)), 'and so is the unmeasurable fragment')
+  const stats = await second.stats()
+  assert.equal(stats.short, 0, 'nothing is being left out now')
+  assert.equal(stats.minLengthSec, 0)
+})
+
+test('the floor is the one the operator picked, not a fixed rule', async (t) => {
+  const { root, dataDir } = await library(t, { extra: SHORT_TREE })
+  const a = realAdapter({ root, dataDir, minLengthSec: 60 })
+  await a.scan()
+
+  const titles = (await a.list({ type: 'movies' })).items.map(m => m.title)
+  assert.ok(titles.some(x => /Trailer/i.test(x)), 'two minutes clears a one-minute floor')
+  assert.ok(!titles.some(x => /Menu Clip/i.test(x)), 'thirty seconds does not')
+  assert.equal((await a.stats()).short, 2, 'the clip and the fragment')
+})
+
+test('A CHANGED FLOOR IS NOT SERVED FROM THE OLD INDEX', async (t) => {
+  // Without this the setting would save, the cached index would load, and the operator
+  // would watch nothing happen for up to twelve hours - the exact shape of the bug
+  // these tests exist for.
+  const { root, dataDir } = await library(t, { extra: SHORT_TREE })
+  await realAdapter({ root, dataDir }).scan()
+
+  const a = realAdapter({ root, dataDir, minLengthSec: 0 })
+  const loaded = await a._loadCache()
+  assert.equal(loaded, false, 'a cache built with a different floor describes a different library')
+})
+
+test('a nonsense floor is read as off rather than trusted', async (t) => {
+  const { root, dataDir } = await library(t, { extra: SHORT_TREE })
+  assert.equal(realAdapter({ root, dataDir, minLengthSec: -5 }).minLengthSec, 0)
+  assert.equal(realAdapter({ root, dataDir, minLengthSec: 'nonsense' }).minLengthSec, 0)
+  // And it cannot be set so high that a library empties itself by typo.
+  assert.equal(realAdapter({ root, dataDir, minLengthSec: 999999 }).minLengthSec, 4 * 60 * 60)
+  // Never set at all is the default, because the rule has to reach libraries that
+  // were configured before it existed.
+  assert.equal(realAdapter({ root, dataDir }).minLengthSec, 300)
+})
+
+test('the saved config carries the floor into the adapter', async (t) => {
+  const { root, dataDir } = await library(t)
+  const { buildAdapter } = require('../host/adapters')
+  const built = buildAdapter({ kind: 'folder', roots: [root], minLengthSec: 0 }, { libraryId: LIB, ids: protocol.ids, dataDir })
+  assert.equal(built.minLengthSec, 0, 'what the dashboard saves is what the scan applies')
 })

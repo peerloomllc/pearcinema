@@ -58,7 +58,10 @@ function buildAdapter (cfg, { libraryId, ids, dataDir = null, log = () => {} } =
         // The same binaries the rest of the host uses, through the one
         // resolution point (setting, bundled, PATH - see host/ffmpeg-bin.js).
         ffprobe: ffmpegBin.ffprobe(),
-        ffmpeg: ffmpegBin.ffmpeg()
+        ffmpeg: ffmpegBin.ffmpeg(),
+        // How short is too short to be a film or an episode. Absent means the
+        // default; 0 means keep everything. See the note in host/probe.js.
+        minLengthSec: cfg.minLengthSec
       })
 
     case 'jellyfin':

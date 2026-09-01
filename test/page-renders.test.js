@@ -3917,3 +3917,72 @@ test('GIVING SOMEBODY THE WHOLE LIBRARY IS CONFIRMED, and narrowing them is not'
   assert.equal(asked.length, 1, 'the window is opened')
   assert.ok(!asked[0].paths, 'with no folders named, which is everything')
 })
+
+test('THE SHORT VIDEOS LEFT OUT ARE ON SCREEN, and the list behind them opens', async (t) => {
+  // A user rescanned a 17,000-file library expecting their trailers and disc fragments
+  // to go, and nothing happened - the rule the code claimed to have was a constant
+  // nothing ever called (2026-08-31). Now that something does leave them out, the page
+  // has to say so and has to be able to show its working, or the next person cannot
+  // tell a working filter from a broken one.
+  const state = {
+    ...STATE,
+    stats: { ...STATE.stats, short: 3, minLengthSec: 300 },
+    source: { ...STATE.source, minLengthSec: 300 }
+  }
+  const asked = []
+  const { dom, doc, win, text } = await open(state, {
+    '/api/source/short': {
+      minLengthSec: 300,
+      total: 3,
+      files: [
+        { file: '/library/Movies/The Long One Trailer.mkv', duration: 120 },
+        { file: '/library/Movies/00003.m2ts', duration: null },
+        { file: '/library/Movies/Menu Clip.mkv', duration: 30 }
+      ]
+    }
+  }, asked)
+  t.after(() => dom.window.close())
+
+  const tab = [...doc.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === 'Settings')
+  tab.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 40))
+
+  assert.match(text(), /3 short videos are not in the library/)
+  assert.match(text(), /shorter than 5 minutes/)
+  assert.match(text(), /Nothing has been deleted/)
+
+  // THE LIST IS NOT FETCHED UNTIL IT IS ASKED FOR. A library of clips is thousands of
+  // rows and nobody needs them on every page load.
+  assert.equal(asked.some(u => u.includes('/api/source/short')), false)
+
+  const show = [...doc.querySelectorAll('button')].find(b => b.textContent.trim() === 'Show which files')
+  assert.ok(show, 'the banner offers the list')
+  show.dispatchEvent(new win.Event('click', { bubbles: true }))
+  await new Promise(r => setTimeout(r, 60))
+
+  assert.ok(asked.some(u => u.includes('/api/source/short')), 'and now it asked for it')
+  const rows = [...doc.querySelectorAll('.shortlist li')].map(li => li.textContent)
+  assert.equal(rows.length, 3)
+  assert.match(rows[0], /The Long One Trailer\.mkv/)
+  assert.match(rows[0], /2 minutes/)
+  // A file whose length could not be read says exactly that, rather than "0 minutes",
+  // which reads as a measurement.
+  assert.match(rows[1], /no readable length/)
+})
+
+test('the length chooser is in the source window, showing the floor in force', async (t) => {
+  const state = {
+    ...STATE,
+    stats: { ...STATE.stats, short: 0, minLengthSec: 600 },
+    source: { ...STATE.source, minLengthSec: 600 }
+  }
+  const { dom, doc, win } = await open(state)
+  t.after(() => dom.window.close())
+
+  await openSourceEditor(doc, win)
+
+  const sel = doc.querySelector('.lenrow select')
+  assert.ok(sel, 'the rule about the folders sits with the folders')
+  assert.equal(sel.value, '600', 'and it shows what the host is actually applying')
+  assert.deepEqual([...sel.options].map(o => o.textContent)[0], 'Keep everything', 'off is the first way out')
+})

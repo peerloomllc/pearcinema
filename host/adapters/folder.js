@@ -29,7 +29,7 @@ const items = require('../items')
 const names = require('../names')
 const nfo = require('../nfo')
 const subtitles = require('../subtitles')
-const { walkVideos, probeAll, SKIP_DIRS } = require('../probe')
+const { walkVideos, probeAll, SKIP_DIRS, DEFAULT_MIN_LENGTH_SEC, tooShort } = require('../probe')
 const visibility = require('../visibility')
 
 // How long a scan's results stand before a rescan is worth doing. A film library
@@ -72,7 +72,11 @@ const CACHE_VERSION = 7
 //       grouping and is served for up to SCAN_TTL_MS. Deployed to a real Umbrel on
 //       2026-08-26 and the phantom season was still there, which is how the miss was
 //       found.
-const INDEX_VERSION = 4
+//   5 - a minimum length. Files shorter than the library's floor are left out of
+//       the index, so a cache built without the rule is a library that still shows
+//       every trailer and disc fragment. The probes themselves are untouched - the
+//       length was always read, nothing acted on it - so this rebuilds in seconds.
+const INDEX_VERSION = 5
 
 // How many files to stat at once when deciding which of them need probing. A stat is
 // nothing next to an ffprobe, but three thousand at once is three thousand open file
@@ -162,12 +166,26 @@ function normaliseRoot (r) {
   }
 }
 
+// THE FLOOR, IN SECONDS, from whatever the config holds.
+//
+// Absent means the default, because the rule has to reach the libraries already in
+// the field - an operator who has never opened the setting is exactly the person
+// whose library is full of trailers. Anything at or below zero means OFF, which is
+// how the dashboard's "Keep everything" is saved. Capped at four hours so a typo
+// cannot empty a library outright.
+function normaliseMinLength (v) {
+  if (v === null || v === undefined || v === '') return DEFAULT_MIN_LENGTH_SEC
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.min(n, 4 * 60 * 60)
+}
+
 class FolderAdapter {
   // `roots` is a list of directories, each a path string or `{ path, type }`.
   // MULTI-ROOT from the start, because a real collection is `Movies` on one disk and
   // `TV Shows` on another more often than it is one tidy tree - and because a root
   // that is missing must not take the others down with it.
-  constructor ({ roots = [], dataDir = null, libraryId = null, ids, log = () => {}, ffprobe = 'ffprobe', ffmpeg = 'ffmpeg' } = {}) {
+  constructor ({ roots = [], dataDir = null, libraryId = null, ids, log = () => {}, ffprobe = 'ffprobe', ffmpeg = 'ffmpeg', minLengthSec } = {}) {
     if (!ids) throw new Error('FolderAdapter needs the protocol id factory')
 
     this.kind = 'folder'
@@ -186,6 +204,12 @@ class FolderAdapter {
     this.scanError = null
     // Video files ffprobe could not read on the last scan: kept, reported, retried.
     this.unreadable = []
+    // How short is too short for this library, and what the last scan left out
+    // because of it. HIDDEN, NOT DELETED: nothing on the disk is touched, the paths
+    // are kept so the dashboard can name every one of them, and raising or clearing
+    // the floor brings them straight back from probes that were never thrown away.
+    this.minLengthSec = normaliseMinLength(minLengthSec)
+    this.shortFiles = []
     // How many files claimed an id another file already had. See _index.
     this.idCollisions = 0
 
@@ -403,14 +427,46 @@ class FolderAdapter {
     // gone leaves the store with it.
     this._probes = media
 
+    // 2b. Leave out what is too short to be part of a library.
+    //
+    // A trailer, a disc menu, a numbered rip fragment and a two-minute sample all
+    // look like films to every rule above this one: they are video files, in the
+    // right folders, named the way the feature beside them is named. Length is what
+    // separates them, and it costs nothing here because it was probed anyway.
+    //
+    // BEFORE `_readDirs`, deliberately. That pass counts the videos in each
+    // directory and a count of one is what lets a folder's `poster.jpg` belong to
+    // the film in it. Counting three hidden trailers alongside would put a generic
+    // poster back into "this folder is about several things" and lose the artwork.
+    //
+    // The PROBES of the hidden files stay in the cache. Clearing the floor puts them
+    // back on the next scan without re-reading a byte.
+    const kept = []
+    this.shortFiles = []
+    for (const entry of files) {
+      const probe = media.get(entry.file)
+      if (probe && tooShort(probe, this.minLengthSec)) {
+        this.shortFiles.push({ file: entry.file, duration: probe.duration ?? null })
+        continue
+      }
+      kept.push(entry)
+    }
+    if (this.shortFiles.length) {
+      this.log('folder:too-short', {
+        count: this.shortFiles.length,
+        minLengthSec: this.minLengthSec,
+        first: this.shortFiles.slice(0, 5).map(s => s.file)
+      })
+    }
+
     // 3. Read every directory that holds a video, ONCE, plus the folders above
     // them - a show's poster lives in the show folder, not beside the episode.
-    const dirs = await this._readDirs(files)
+    const dirs = await this._readDirs(kept)
 
     // 4. Identify, sidecar-first.
     const movies = []
     const episodes = []
-    for (const { file, root } of files) {
+    for (const { file, root } of kept) {
       if (!media.has(file)) continue // unreadable; already counted
       const built = await this._identify(file, root, media.get(file), dirs)
       if (!built) continue
@@ -422,7 +478,7 @@ class FolderAdapter {
     this.scannedAt = Date.now()
     await this._saveCache(movies, episodes)
 
-    this.log('folder:scanned', { movies: movies.length, episodes: episodes.length, unreadable: failed.length })
+    this.log('folder:scanned', { movies: movies.length, episodes: episodes.length, unreadable: failed.length, short: this.shortFiles.length })
     return movies.length + episodes.length
   }
 
@@ -1005,6 +1061,11 @@ class FolderAdapter {
       // root whose TYPE changed describes the same files read a different way, which
       // is just as stale. Both are covered by comparing the normalised roots.
       if (JSON.stringify(raw.roots) !== JSON.stringify(this.roots)) return false
+      // AND A CHANGED MINIMUM LENGTH describes the same files filtered differently.
+      // Without this, moving the floor would write the new setting, load the old
+      // index and leave the operator watching nothing happen for up to SCAN_TTL_MS.
+      // The probes are kept either way, so the rebuild is the cheap kind.
+      if (normaliseMinLength(raw.minLengthSec) !== this.minLengthSec) return false
       if (!raw.scannedAt || Date.now() - raw.scannedAt > SCAN_TTL_MS) return false
 
       this._index(raw.movies || [], raw.episodes || [])
@@ -1012,6 +1073,8 @@ class FolderAdapter {
       // What would not read last time, so a restart still knows and the dashboard
       // still says so without a rescan.
       this.unreadable = Array.isArray(raw.unreadable) ? raw.unreadable : []
+      // And what the floor left out, so a restart can still name them.
+      this.shortFiles = Array.isArray(raw.shortFiles) ? raw.shortFiles : []
       return true
     } catch {
       return false
@@ -1049,7 +1112,12 @@ class FolderAdapter {
         probes: Object.fromEntries(this._probes || []),
         // Kept so the count survives a restart, and so the dashboard can name them
         // without a rescan. Never sent to a phone - see the note on `stats`.
-        unreadable: this.unreadable || []
+        unreadable: this.unreadable || [],
+        // The floor this index was built with, and the files it left out. The
+        // setting is stored HERE as well as in source.json because `_loadCache`
+        // has to be able to tell that the two disagree.
+        minLengthSec: this.minLengthSec,
+        shortFiles: this.shortFiles || []
       }))
     } catch (e) {
       // A cache that cannot be written is slow, not broken.
@@ -1091,7 +1159,13 @@ class FolderAdapter {
       // indistinguishable from a silent thirteen. A COUNT here, for the same reason
       // the duplicate paths are a count: this answers any paired phone, and the
       // dashboard reads the paths off the adapter directly.
-      unreadable: (this.unreadable || []).length
+      unreadable: (this.unreadable || []).length,
+      // AND HOW MANY WERE LEFT OUT FOR BEING TOO SHORT, with the floor that did it,
+      // so no surface has to guess why a count moved. A count and a number, not the
+      // paths, for the same reason as everything above - the dashboard reads the
+      // paths off the adapter directly.
+      short: (this.shortFiles || []).length,
+      minLengthSec: this.minLengthSec
     }
   }
 

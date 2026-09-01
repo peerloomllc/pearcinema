@@ -565,7 +565,14 @@ async function startDashboard ({
               ? host.adapter.roots
               : (host.source?.roots || (host.source?.root ? [host.source.root] : [])),
             url: host.source?.url || null,
-            username: host.source?.username || null
+            username: host.source?.username || null,
+            // THE MINIMUM LENGTH the folder scan is applying, read off the adapter for
+            // the same reason the roots are: it has resolved "not set" into the default
+            // already, and the panel must show the number actually in force rather than
+            // an empty box.
+            minLengthSec: host.adapter?.kind === 'folder'
+              ? host.adapter.minLengthSec
+              : (host.source?.minLengthSec ?? null)
           },
           devices,
           persons,
@@ -2113,6 +2120,24 @@ async function startDashboard ({
           out[k] = { ...r, svg: await QRCode.toString(r.value, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }) }
         }
         return json(res, 200, { rails: out })
+      }
+
+      // WHICH FILES THE MINIMUM LENGTH LEFT OUT, by name and by length.
+      //
+      // The count is on /api/state with every other stat; this is the list behind it,
+      // asked for only when the operator opens it. It is the whole point of hiding
+      // rather than deleting - a rule nobody can check is a rule nobody can trust -
+      // and it is a DASHBOARD route, never a method a phone can call, because these
+      // are paths on somebody's disk.
+      if (req.method === 'GET' && url.pathname === '/api/source/short') {
+        const rows = host.adapter?.kind === 'folder' ? (host.adapter.shortFiles || []) : []
+        return json(res, 200, {
+          minLengthSec: host.adapter?.minLengthSec ?? 0,
+          total: rows.length,
+          // Capped, because a library of clips could be thousands and the page shows a
+          // sample with a count beside it either way.
+          files: rows.slice(0, 200)
+        })
       }
 
       // STARTED, NOT FINISHED. A full rescan of the real library is minutes of ffprobe,
