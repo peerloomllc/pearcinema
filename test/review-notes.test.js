@@ -94,3 +94,24 @@ test('the video is promised, and the thing that makes it exists', () => {
   const release = fs.readFileSync(path.join(root, 'scripts', 'release.sh'), 'utf8')
   assert.match(release, /VIDEO URL/, 'release.sh must be the thing that refuses a placeholder at submission')
 })
+
+test('the note fits the field it is pasted into', () => {
+  // App Store Connect caps the App Review Information "Notes" box at 4000 characters and
+  // TRUNCATES over the API rather than refusing the write, so an over-long note loses its
+  // tail silently - and the tail is where the demo tap path and the contact address are.
+  // Worth a test because the note only grows: a section is added for each rejection
+  // answered, and nothing ever prompts anybody to take one out.
+  assert.ok(body.length <= 4000,
+    `the note is ${body.length} characters and the Notes field takes 4000`)
+})
+
+test('the note still answers both rejections 1.1.1 collected', () => {
+  // Neither section may be dropped while 1.1.1 is the version under review. The VPN one
+  // answers the automated flag of 2026-08-31; the 5.2.3 one answers "downloading of third
+  // party videos or shows" on 2026-09-03. The file lost the VPN section once already, by
+  // being written straight to the server and never written back here.
+  assert.match(body, /NO VPN FUNCTIONALITY/)
+  assert.match(body, /no NEVPNManager/, 'the VPN denial should name the API it is denying')
+  assert.match(body, /GUIDELINE 5\.2\.3/)
+  assert.match(body, /no catalogue, no search outside a library it is paired with/)
+})
