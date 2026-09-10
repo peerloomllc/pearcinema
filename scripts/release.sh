@@ -2260,6 +2260,12 @@ _bump_paths=(
   # block above stamps it. Committing one and not the other is how they drift.
   "${UMBREL_DIR:-umbrel}/official/umbrel-app.yml"
   "${UMBREL_DIR:-umbrel}/official/docker-compose.yml"
+  # README.md names the host image in its `docker run` one-liner, and
+  # host/build-image.sh rewrites it to the tag it just pushed. It was never on this
+  # list, so every release left that edit sitting uncommitted and the README kept
+  # telling newcomers to pull the PREVIOUS image - the same drift the builder was
+  # changed to prevent in 2026-08-27, one step further down.
+  README.md
   host/redeploy-umbrel.sh
   host/deploy/docker-compose.yml
   start9/Dockerfile

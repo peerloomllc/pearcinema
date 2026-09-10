@@ -144,6 +144,15 @@ test('THE IMAGE BUILD PINS WHAT IT PUSHED, rather than printing a line to paste'
   assert.match(img, /sed -i[\s\S]{0,200}README\.md/,
     'the README run command must be moved to the tag that was pushed')
 
+  // AND COMMITTED. The builder moved the line and release.sh never staged the file, so
+  // every release left that edit in the working tree and master's README went on naming
+  // the previous image - the same drift, one step further down. Found after 1.1.4, whose
+  // listings shipped host image 0.1.7 while the README still said 0.1.6.
+  const bump = /_bump_paths=\(([\s\S]*?)\n\)/.exec(release)
+  assert.ok(bump, 'release.sh still lists the paths a version bump commits')
+  assert.match(bump[1], /^\s*README\.md\s*$/m,
+    'README.md must be committed with the bump, or the pin the builder wrote never lands')
+
   // And the store copy is written from umbrel/ wholesale. release.sh's step 13c refuses
   // to call a run clean while the store has unpublished changes - but nothing had ever
   // WRITTEN any, so the gate saw a clean tree and passed while the store served the old
