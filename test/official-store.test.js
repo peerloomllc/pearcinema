@@ -108,3 +108,18 @@ test('the justifications a reviewer will ask for are written where the warnings 
   assert.match(officialCompose, /no-new-privileges/,
     'the security option is the restrictive kind, and should stay that way')
 })
+
+test('THE RELEASE STAMPS BOTH LISTINGS, or the next run fails on the drift it caused', () => {
+  // 2026-09-09. The version block in release.sh wrote umbrel/umbrel-app.yml alone.
+  // host/build-image.sh copies the version across to the official listing, but only when
+  // the HOST IMAGE is rebuilt, and a release that changes the app alone does not rebuild
+  // it - so 1.1.4 moved the community listing, left the official one at 1.1.3, and the
+  // test above failed in the middle of the release.
+  const release = read(path.join(ROOT, 'scripts', 'release.sh'))
+  assert.match(release, /official\/umbrel-app\.yml/,
+    'release.sh must stamp the official listing as well as the community one')
+  // And commit it. A file stamped but not staged is the same drift one run later.
+  const staged = /_bump_paths=\(([\s\S]*?)\n\)/.exec(release)
+  assert.ok(staged, 'release.sh still lists the paths a version bump commits')
+  assert.match(staged[1], /official\/umbrel-app\.yml/, 'the official listing is committed with the rest')
+})
