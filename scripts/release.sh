@@ -1302,21 +1302,30 @@ fi
 #
 # Left BEHIND rather than in front of that guard on purpose: this only writes
 # umbrel/, and build-image.sh still decides whether the store copy may move.
-_UMB="$REPO_ROOT/${UMBREL_DIR:-umbrel}/umbrel-app.yml"
-if [ -f "$_UMB" ]; then
+#
+# BOTH LISTINGS, not just the community one. `umbrel/official/umbrel-app.yml` is the
+# getumbrel/umbrel-apps submission and a second copy of the same version line;
+# test/official-store.test.js fails the moment the two disagree. host/build-image.sh
+# already copies the version across, but only when the HOST IMAGE is rebuilt, and a
+# release that changes the app alone does not rebuild it - which is exactly what
+# happened on 2026-09-09: the community listing went to 1.1.4, the official one stayed
+# at 1.1.3 and the verify gate failed after the release had started.
+for _UMB_REL in "${UMBREL_DIR:-umbrel}/umbrel-app.yml" "${UMBREL_DIR:-umbrel}/official/umbrel-app.yml"; do
+  _UMB="$REPO_ROOT/$_UMB_REL"
+  [ -f "$_UMB" ] || continue
   _UMB_NOW=$(grep -m1 -E '^version:' "$_UMB" | sed -E 's|^version: *"?([^"]*)"?|\1|')
   if [ "$_UMB_NOW" = "$APP_VERSION" ]; then
-    echo "    Umbrel listing already at $APP_VERSION."
+    echo "    $_UMB_REL already at $APP_VERSION."
   elif [ "$(printf '%s
 %s
 ' "$_UMB_NOW" "$APP_VERSION" | sort -V | tail -1)" != "$APP_VERSION" ]; then
-    echo "    WARNING: umbrel/umbrel-app.yml is at $_UMB_NOW, AHEAD of app.json's $APP_VERSION."
+    echo "    WARNING: $_UMB_REL is at $_UMB_NOW, AHEAD of app.json's $APP_VERSION."
     echo "             Left alone: writing it would publish a downgrade to every Umbrel install."
   else
     sed -i -E "s|^version: *\".*\"|version: \"$APP_VERSION\"|" "$_UMB"
-    echo "    Updated umbrel/umbrel-app.yml to $APP_VERSION (was ${_UMB_NOW:-unknown})."
+    echo "    Updated $_UMB_REL to $APP_VERSION (was ${_UMB_NOW:-unknown})."
   fi
-fi
+done
 
 # Derive APP_VERSION_CODE from the version string for Gradle.
 #
@@ -2247,6 +2256,10 @@ _bump_paths=(
   "$(dirname "$(dirname "$XCODE_PROJECT")")/${APP_NAME}/Info.plist"
   "${UMBREL_DIR:-umbrel}/umbrel-app.yml"
   "${UMBREL_DIR:-umbrel}/docker-compose.yml"
+  # The official-store submission carries the same version and the same image, and the
+  # block above stamps it. Committing one and not the other is how they drift.
+  "${UMBREL_DIR:-umbrel}/official/umbrel-app.yml"
+  "${UMBREL_DIR:-umbrel}/official/docker-compose.yml"
   host/redeploy-umbrel.sh
   host/deploy/docker-compose.yml
   start9/Dockerfile
