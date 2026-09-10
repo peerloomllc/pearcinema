@@ -10,7 +10,7 @@ name: PearCinema
 icon: https://peerloomllc.com/assets/icon-pearcinema.svg
 tagline: Your films and shows, playable anywhere - and shareable with family
 category: media
-version: "1.1.3"
+version: "1.1.4"
 port: 8751
 description: >-
   Watch the films and shows on your Umbrel from anywhere, without exposing your
@@ -94,19 +94,12 @@ gallery:
   - https://peerloomllc.com/assets/gallery-pearcinema-3.jpg
 releaseNotes: |-
   New Features
-  • Choose what each person can see. On the People page, every person now has a "Can see" line: tick the drives or folders they may watch, to any depth, and everything else disappears for them. Tick nothing and they see everything, as before. Films they have already downloaded stay on their phone.
-  • Decide it when you invite them, not after. Pairing a new device now asks what it will be able to see before it shows you a code, so a device can be limited from the moment it joins. Handing over the whole library asks you to confirm.
-  • The phone app works sideways, and on tablets. Turn it and the page fills the screen instead of staying a narrow column.
+  • Leave trailers and disc scraps out of your library. Each library now has a minimum length, chosen on the dashboard, and shorter videos are left out. Nothing on your drive is touched, and a button lists everything left out with its length. Files whose length cannot be read count as short, which is what catches the leftover pieces of a ripped disc.
   Improvements
-  • Films and TV shows with unusual filenames now get proper episode numbers. Anime numbered 01, 02, 03, files named only "E01", and several other naming styles were being filed with no episode number at all, so they could not be sorted or resumed.
-  • Specials, OVAs and bonus episodes are now filed under "Specials" instead of sitting numberless, and creditless openings and disc menus no longer show up as episodes.
-  • Films that cannot be read are now named on the dashboard. Previously a damaged or half-copied file simply never appeared in the library, with nothing said anywhere.
-  • Converting on an NVIDIA graphics card now works with the drivers Linux Mint and Ubuntu ship. The bundled converter needed a newer driver than those systems offer.
-  • When the video engine test fails, the page now shows what each graphics option said, in plain words, instead of one unexplained error.
-  • A television waiting on its Media Assistant channel is now named in the phone's TV picker, with the one step needed to fix it.
-  • Changes to what somebody can see reach their phone in about a second, without needing to refresh.
+  • Films now fill the whole screen on phones and tablets. The clock and the on-screen buttons move out of the way while a film plays, and the picture reaches every edge instead of sitting below a black band. Swipe in from an edge to get the buttons back, and everything returns the moment you close the film.
   Security
-  • The file holding this machine's private key for reaching other libraries is no longer readable by other users on the same computer. Reported by a user; it is tightened automatically the next time PearCinema starts.
+  • A show's poster can no longer be fetched by somebody who is not allowed to see that show. Series and season posters were not checked the way film posters were, so a person whose access had been narrowed could still load one they had seen before. The image only, never the film.
+  • A web page you visit can no longer reach the dashboard running on your own machine. The desktop app leaves its dashboard without a password because it only listens to your own computer, but nothing checked which site a request came from. Now it does, and setups with a password are unchanged.
 path: ""
 defaultUsername: ""
 # umbrelOS replaces defaultPassword with the derived value when this is set - it is
