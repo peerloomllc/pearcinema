@@ -1266,9 +1266,36 @@ test('THE APP TURNS SIDEWAYS, and a wide screen gets a wider page rather than a 
   assert.equal(app.expo.ios?.supportsTablet, true)
   const shell = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.tsx'), 'utf8')
   assert.ok(!shell.includes('OrientationLock.PORTRAIT_UP'), 'nothing locks portrait back')
-  assert.match(shell, /paddingLeft: insets\.left, paddingRight: insets\.right/, 'the side insets keep the page out from under a sideways cutout')
+  assert.match(shell, /marginLeft: insets\.left, marginRight: insets\.right/, 'the side insets keep the page out from under a sideways cutout')
   // The page is minified, so the rules are matched loosely on whitespace.
   assert.match(PAGE, /@media ?\(min-width: ?720px\)/, 'the built page carries the wide-screen rule')
   assert.match(PAGE, /\.app, ?\.dock, ?\.sheet ?\{ ?max-width: ?960px/, 'the column grows to 960px')
   assert.match(PAGE, /repeat\(auto-fill, ?minmax\(calc\(560px ?\/ ?var\(--cols, ?2\) ?- ?\.9rem\), ?1fr\)\)/, 'and the grid keeps the tile size, fitting as many as the width takes')
+})
+
+test('A FILM GETS THE WHOLE SCREEN, with the clock and the navigation bar out of the way', () => {
+  // Tim, 2026-09-09: in the player, on a phone and on a tablet, the status bar's clock
+  // and the navigation bar were drawn over the picture. Two separate things were wrong.
+  const shell = fs.readFileSync(path.join(__dirname, '..', 'app', 'index.tsx'), 'utf8')
+
+  // One: nothing had ever asked for the bars to go. The player is an overlay inside
+  // the app rather than a separate fullscreen activity, so Android had no reason to.
+  assert.match(shell, /SystemBars\.setHidden\(true\)/, 'the bars go when a film starts')
+  assert.match(shell, /SystemBars\.setHidden\(false\)/, 'and come back when it closes')
+  assert.match(shell, /AppState\.addEventListener\('change'/, 'and go again on the way back from the background, which redraws them')
+
+  // Two: the root view padded itself by the insets, and the player overlay is a child
+  // of that root, so the padding was a black band across the top of every picture.
+  assert.ok(!/styles\.root, \{ padding/.test(shell), 'the root does not pad the film out of the top of the screen')
+  assert.match(shell, /styles\.web, \{ marginTop: insets\.top/, 'the page keeps the same clearance, on the WebView instead')
+
+  const kt = fs.readFileSync(path.join(
+    __dirname, '..', 'modules', 'system-bars', 'android', 'src', 'main', 'java',
+    'expo', 'modules', 'systembars', 'SystemBarsModule.kt'
+  ), 'utf8')
+  assert.match(kt, /WindowInsetsCompat\.Type\.systemBars\(\)/, 'both bars, not the status bar alone')
+  assert.match(kt, /BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE/, 'and a swipe brings them back, so Home is reachable mid-film')
+
+  const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'modules', 'system-bars', 'expo-module.config.json'), 'utf8'))
+  assert.deepEqual(config.android?.modules, ['expo.modules.systembars.SystemBarsModule'], 'and autolinking is pointed at it')
 })

@@ -1,0 +1,25 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.systembars'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(project(':expo-modules-core').projectDir.absolutePath, 'ExpoModulesCorePlugin.gradle')
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace 'expo.modules.systembars'
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  lintOptions {
+    abortOnError false
+  }
+}
+
+// Nothing beyond androidx.core, which expo-modules-core already exposes as `api`:
+// WindowInsetsControllerCompat lives there.

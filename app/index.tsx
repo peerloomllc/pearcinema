@@ -8,7 +8,7 @@
 // back on the same ids. Events push the other way as { event, data }.
 
 import { useEffect, useRef, useState } from 'react'
-import { Animated, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, useColorScheme } from 'react-native'
+import { Animated, AppState, BackHandler, Easing, Image, PermissionsAndroid, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View, useColorScheme } from 'react-native'
 import { MaterialIcons } from '@expo/vector-icons'
 // expo-linking, NOT react-native's Linking: on the new architecture the RN
 // module's warm 'url' event never fires, so a pairing link tapped while the
@@ -29,6 +29,7 @@ import * as Haptics from 'expo-haptics'
 import b4a from 'b4a'
 import { probe as probeDecoders, audioSelection } from '../modules/decoder-probe'
 import * as CastRemote from '../modules/cast-remote'
+import * as SystemBars from '../modules/system-bars'
 
 import { DEMO_MANIFEST, DEMO_FILES, DEMO_POSTERS, DEMO_SUBTITLES } from '../shell/demo-assets'
 
@@ -578,6 +579,26 @@ export default function App () {
       .catch((e) => console.log('[shell] orientation unlock failed: ' + (e?.message || e)))
   }, [])
 
+  // AND THE FILM TAKES THE WHOLE SCREEN. The player is an overlay over the app
+  // rather than a separate activity, so nothing was telling Android to move the
+  // status bar's clock and the navigation bar off the picture - on a phone and on
+  // a tablet they sat on top of it (Tim, 2026-09-09). Both go for as long as a
+  // film is up and come back the moment it closes. They are hidden, not locked
+  // away: a swipe from an edge brings them back over the picture for a few
+  // seconds, so Home is reachable without stopping the film.
+  //
+  // RE-APPLIED ON THE WAY BACK FROM THE BACKGROUND. Android draws the bars again
+  // for an activity it brings forward, so a film paused to answer a message would
+  // otherwise return with them over it.
+  useEffect(() => {
+    if (!playing) return
+    SystemBars.setHidden(true)
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') SystemBars.setHidden(true)
+    })
+    return () => { sub.remove(); SystemBars.setHidden(false) }
+  }, [!!playing])
+
   useEffect(() => { navRef.current = nav }, [nav])
 
   // Position ticks flow INTO the UI, which owns every watch-state rule.
@@ -1059,7 +1080,16 @@ export default function App () {
 
   // Android 15 draws the app edge-to-edge, so without this the WebView's header
   // sits under the status bar (Tim, 2026-08-15: nothing may collide with the
-  // notifications bar). The shell pads; the page never needs to know.
+  // notifications bar). The shell keeps the page clear of it; the page never needs
+  // to know.
+  //
+  // THE MARGIN IS ON THE WEBVIEW, NOT ON THE ROOT. It was root padding until
+  // 2026-09-09, and the player overlay is a child of that root, so the padding
+  // letterboxed the film by the status bar's height - a black band across the top
+  // of every picture, with the clock sitting in it. Moving the same numbers onto
+  // the WebView leaves the page exactly where it was and lets the overlay have the
+  // whole window. (This is the same reason the bottom inset is handed to the page
+  // rather than padded here.)
   const insets = useSafeAreaInsets()
 
   // THE BOTTOM INSET GOES TO THE PAGE, not into root padding. The page already pads
@@ -1097,7 +1127,7 @@ export default function App () {
   // the WebView cannot see it (env(safe-area-inset-*) is 0 in an Android WebView), so
   // the shell keeps the page out from under it the way it already did for the top.
   return (
-    <View style={[styles.root, { paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right, backgroundColor: shellBg }]}>
+    <View style={[styles.root, { backgroundColor: shellBg }]}>
       {uri && (
         <WebView
           ref={webref}
@@ -1120,7 +1150,7 @@ export default function App () {
           // app itself holds the runtime permission (shell.cameraPermission).
           mediaCapturePermissionGrantType='grant'
           onPermissionRequest={(ev: any) => { try { ev?.grant?.(ev.resources) } catch {} }}
-          style={styles.web}
+          style={[styles.web, { marginTop: insets.top, marginLeft: insets.left, marginRight: insets.right }]}
         />
       )}
 
