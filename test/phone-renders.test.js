@@ -1298,4 +1298,15 @@ test('A FILM GETS THE WHOLE SCREEN, with the clock and the navigation bar out of
 
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'modules', 'system-bars', 'expo-module.config.json'), 'utf8'))
   assert.deepEqual(config.android?.modules, ['expo.modules.systembars.SystemBarsModule'], 'and autolinking is pointed at it')
+
+  // Three: on iOS expo-router's own default layout wrapped the app in a SafeAreaView,
+  // which boxed the player in with a band of shell background at each end. The root
+  // layout below is that layout without the wrapper, so both platforms agree.
+  const layout = fs.readFileSync(path.join(__dirname, '..', 'app', '_layout.tsx'), 'utf8')
+  assert.match(layout, /<Slot \/>/, 'the root layout renders the Slot and nothing around it')
+  assert.ok(!layout.includes('<SafeAreaView'), 'and nothing insets the app above the shell')
+
+  // The PICTURE is full-bleed; the CHROME is not, or the back arrow sits under an
+  // iPhone's island and under a sideways cutout in landscape.
+  assert.match(shell, /styles\.controls, \{\s*paddingTop: insets\.top/, 'the controls keep clear of the cutout')
 })

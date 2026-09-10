@@ -1248,10 +1248,22 @@ export default function App () {
             {/* box-none: the chrome rows catch their own taps, the empty
                 middle falls through to the show/hide Pressable above. */}
             {controlsOn && (
-              // The video stays full-bleed behind the system bars; only the chrome
-              // moves in. Same field report as the --pear-safe-bottom effect: on a
-              // tablet the navigation bar is a bar, and the scrub row was under it.
-              <View style={[styles.controls, { paddingBottom: insets.bottom }]} pointerEvents='box-none'>
+              // The video stays full-bleed behind the system bars and the cutout;
+              // only the chrome moves in. Same field report as the --pear-safe-bottom
+              // effect: on a tablet the navigation bar is a bar, and the scrub row was
+              // under it. The other three sides joined it on 2026-09-09, when the film
+              // gained the whole screen - the back arrow was then free to sit under an
+              // iPhone's island, and under a sideways cutout in landscape. While a film
+              // is up these are usually the cutout alone, since the bars are hidden.
+              <View
+                style={[styles.controls, {
+                  paddingTop: insets.top,
+                  paddingBottom: insets.bottom,
+                  paddingLeft: insets.left,
+                  paddingRight: insets.right
+                }]}
+                pointerEvents='box-none'
+              >
                 <View style={styles.ctlTop}>
                   <Pressable onPress={stopPlayback} style={styles.ctlBtn} hitSlop={8}>
                     <MaterialIcons name='arrow-back' size={26} color='#efe9df' />
