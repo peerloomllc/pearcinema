@@ -38,6 +38,7 @@ function defaultAnswers () {
   return {
     'app.state': {
       platform: 'android',
+      downloads: true,
       deviceKey: 'dev-key',
       paired: true,
       active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
@@ -219,6 +220,7 @@ test('A LIBRARY THAT REMOVED YOU SAYS SO, rather than connecting for ever', asyn
   const h = await open({
     'app.state': {
       platform: 'android',
+      downloads: true,
       deviceKey: 'dev-key',
       paired: true,
       active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'Ada s Films' },
@@ -246,6 +248,7 @@ test('THE ASK SHEET SAYS WHO IS BEING ASKED', async (t) => {
   const many = await open({
     'app.state': {
       platform: 'android',
+      downloads: true,
       deviceKey: 'dev-key',
       paired: true,
       active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
@@ -530,7 +533,7 @@ test('A FILM NOBODY CAN REACH REFUSES BEFORE THE RESUME PROMPT', async (t) => {
 
   assert.equal(called('stream.url').length, 0, 'and never asks for a stream it cannot have')
   assert.match(text(), /The Loft cannot reach this film/)
-  assert.match(text(), /not downloaded to this phone/)
+  assert.match(text(), /this phone has no copy of it/)
   void doc
 })
 
@@ -1076,6 +1079,7 @@ test('A LIBRARY THAT IS NOT ANSWERING SAYS SO, INSTEAD OF LOOKING EMPTY', async 
   // from the catalog cache, and vanished on the rebuild without a word.
   const state = {
     platform: 'android',
+    downloads: true,
     deviceKey: 'dev-key',
     paired: true,
     active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
@@ -1103,6 +1107,7 @@ test('AN UNREACHABLE LIBRARY IS ONLY MENTIONED WHILE IT IS BEING LOOKED AT', asy
   // on a screen that is showing exactly what it was asked for.
   const state = {
     platform: 'android',
+    downloads: true,
     deviceKey: 'dev-key',
     paired: true,
     active: { hostKey: 'host-key', libraryId: 'lib-1', libraryName: 'The Cinema' },
@@ -1309,4 +1314,25 @@ test('A FILM GETS THE WHOLE SCREEN, with the clock and the navigation bar out of
   // The PICTURE is full-bleed; the CHROME is not, or the back arrow sits under an
   // iPhone's island and under a sideways cutout in landscape.
   assert.match(shell, /styles\.controls, \{\s*paddingTop: insets\.top/, 'the controls keep clear of the cutout')
+})
+
+test('AN IPHONE SHOWS NO DOWNLOADS ANYWHERE', async (t) => {
+  // Guideline 5.2.3, rejected twice on 1.1.1: the iOS build has no Downloads. The worklet
+  // says so in app.state, and every place the word appears on Android is gone here.
+  const ios = { ...defaultAnswers()['app.state'], platform: 'ios', downloads: false }
+  const h = await open({ 'app.state': ios })
+  t.after(() => h.dom.window.close())
+  await h.settle(400)
+
+  h.click(h.button(/^You$/))
+  await h.settle(200)
+  assert.ok(h.labelled('Requests'), 'the You tab opened')
+  assert.ok(!h.labelled('Downloads'), 'with no Downloads view in it')
+
+  h.click(h.labelled('Settings'))
+  await h.settle(120)
+  assert.ok(h.button(/^Streaming$/), 'Settings calls the section Streaming')
+  h.click(h.button(/^Streaming$/))
+  await h.settle(120)
+  assert.doesNotMatch(h.text(), /[Dd]ownload/, 'and nothing in it says download')
 })

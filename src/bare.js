@@ -1031,6 +1031,9 @@ const CONTAINER_MIME = {
 const downloads = new Map()
 
 async function startDownload (itemId) {
+  // No Downloads on iOS (capabilities.js downloadsFor). The UI has no button there; this
+  // keeps it true for a WebView that is older than the rule.
+  if (!caps.downloadsFor(PLATFORM)) throw new Error('Downloads are not available on this device.')
   // A demo film is already on this phone, inside the app. Downloading it would copy
   // 60 MB out of the bundle to sit beside itself - and the UI hides the button in demo
   // mode anyway, so this is the seam that keeps the rule true if it ever forgets to.
@@ -1393,6 +1396,7 @@ const methods = {
     if (demoMode()) {
       return {
         platform: PLATFORM,
+        downloads: caps.downloadsFor(PLATFORM),
         deviceKey: z32.encode(keyPair.publicKey),
         demo: true,
         hosts: [demoHostRow()],
@@ -1405,6 +1409,7 @@ const methods = {
     const live = connectedLibs()
     return {
       platform: PLATFORM,
+      downloads: caps.downloadsFor(PLATFORM),
       deviceKey: z32.encode(keyPair.publicKey),
       hosts: hostsState.hosts.map((h) => ({
         ...h,

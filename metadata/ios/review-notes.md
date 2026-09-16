@@ -49,10 +49,8 @@ index. It cannot reach YouTube or any other third-party service, and no code in 
 media from anywhere but a paired host. It is MIT licensed and readable in full at
 https://github.com/peerloomllc/pearcinema
 
-"Downloads" copies a file from the user's own server to their own device so that it
-plays with no connection - the same file, moving between two machines the same person
-owns, the way Infuse, VLC, Jellyfin and Plex all do it. There is nowhere else it could
-copy from. "Requests" sends the owner of a library a message asking for a title; it
+THIS BUILD HAS NO DOWNLOADS. The offline Downloads feature is removed from the iOS app:
+there is no Download button, no Downloads screen and no way to save a video to the device. "Requests" sends the owner of a library a message asking for a title; it
 fetches nothing and reaches no third party.
 
 NO VPN FUNCTIONALITY
@@ -105,7 +103,7 @@ TO SEE THE FULL FLOW
 
 The part you cannot try - a host running on somebody's own machine, a phone paired to it,
 a real library browsed and played from, and the phone cut off mid-film - is shown end to
-end in the two-minute video attached to this submission. It is silent, with captions.
+end in the two-minute video attached to this submission. It is silent, with captions, and was filmed before Downloads were removed.
 
 CONTACT
 
