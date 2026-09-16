@@ -108,6 +108,15 @@ function staticFor (platform) {
   return String(platform || '').toLowerCase() === 'ios' ? { ...IOS_STATIC } : { ...STATIC }
 }
 
+// Whether this platform offers Downloads at all. NOT ON iOS (Tim, 2026-09-16): App Review
+// rejected 1.1.1 twice under Guideline 5.2.3, reading "keep a film on this phone" as
+// downloading third-party video, and did not move when the notes explained it. So the iOS
+// build has no Downloads, and the worklet refuses one there too. Films a person plays are
+// still cached as before; that is a cache, not a feature anyone chooses.
+function downloadsFor (platform) {
+  return String(platform || '').toLowerCase() !== 'ios'
+}
+
 // probe: Array<{ name, mime, hardware, profiles, maxWidth, maxHeight }> from
 // modules/decoder-probe. Returns a declaration, or null when the probe is
 // missing or too broken to trust - a list without hardware H.264 and AAC is a
@@ -226,4 +235,4 @@ function wantsPlaylist (mode, platform, audio = null) {
   return String(platform || '').toLowerCase() === 'ios'
 }
 
-module.exports = { fromProbe, without, withoutAudio, soundRebuilt, STATIC, IOS_STATIC, staticFor, wantsPlaylist, CONTAINERS }
+module.exports = { fromProbe, without, withoutAudio, soundRebuilt, STATIC, IOS_STATIC, staticFor, downloadsFor, wantsPlaylist, CONTAINERS }

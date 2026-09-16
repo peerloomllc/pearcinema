@@ -997,6 +997,9 @@ export default function App () {
   const [dlRows, setDlRows] = useState(null)
   const [dlRunning, setDlRunning] = useState([])
   const [dlIds, setDlIds] = useState(new Set())
+  // NO DOWNLOADS ON iOS. The worklet says which (app.state.downloads), and the demo has
+  // none anywhere because its films are already inside the app.
+  const canDownload = !!state?.downloads && !state?.demo
   // The device a revoke sheet is open for (Tim, 2026-08-17, replacing the
   // donor's armed two-tap text swap): confirmation belongs in the app's own
   // bottomsheet idiom, not in a button that changes its words - a WebView's
@@ -1630,7 +1633,7 @@ export default function App () {
     // person says yes and then watches an empty player.
     const { openable, openId, lostName } = reach(i)
     if (!openable) {
-      return setErr(`${lostName || 'That library'} cannot reach this film, and it is not downloaded to this phone.`)
+      return setErr(`${lostName || 'That library'} cannot reach this film, and this phone has no copy of it.`)
     }
 
     try {
@@ -2137,7 +2140,7 @@ export default function App () {
         {/* NO DOWNLOAD IN THE DEMO. A demo film is already on this phone, inside the
             app - downloading it would copy sixty megabytes to sit beside itself. The
             worklet refuses it too, so this is the button and not the rule. */}
-        {!state.demo && (
+        {canDownload && (
           <button onClick={() => toggleDownload(title, !dlIds.has(title.id))}>
             <span className='tcirc'><DownloadSimple size={20} weight={dlIds.has(title.id) ? 'fill' : 'regular'} /></span>
             <span>{dlIds.has(title.id) ? 'Downloaded' : 'Download'}</span>
@@ -2453,10 +2456,12 @@ export default function App () {
               <EnvelopeSimple size={17} weight={youView === 'requests' ? 'fill' : 'regular'} />
               {youView === 'requests' && <span>Requests</span>}
             </button>
-            <button className={youView === 'downloads' ? 'on' : ''} aria-label='Downloads' onClick={() => setYouView('downloads')}>
-              <DownloadSimple size={17} weight={youView === 'downloads' ? 'fill' : 'regular'} />
-              {youView === 'downloads' && <span>Downloads</span>}
-            </button>
+            {canDownload && (
+              <button className={youView === 'downloads' ? 'on' : ''} aria-label='Downloads' onClick={() => setYouView('downloads')}>
+                <DownloadSimple size={17} weight={youView === 'downloads' ? 'fill' : 'regular'} />
+                {youView === 'downloads' && <span>Downloads</span>}
+              </button>
+            )}
             {isOwner && (
               <button className={youView === 'manage' ? 'on' : ''} aria-label='Manage library' onClick={() => setYouView('manage')}>
                 <UsersThree size={17} weight={youView === 'manage' ? 'fill' : 'regular'} />
@@ -2561,7 +2566,7 @@ export default function App () {
         </div>
       )}
 
-      {youView === 'downloads' && (
+      {youView === 'downloads' && canDownload && (
         <>
           {dlRunning.length > 0 && (
             <ul className='tracks'>
@@ -2811,7 +2816,7 @@ export default function App () {
               )}
         </Section>
 
-        <Section id='streaming' title='Streaming and downloads' Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
+        <Section id='streaming' title={canDownload ? 'Streaming and downloads' : 'Streaming'} Icon={DownloadSimple} open={settingsOpen === 'streaming'} onToggle={toggleSection}>
           <div className='label'>Streaming quality</div>
           {/* THE OVERRIDE HAS TO BE SAID HERE (Tim, 2026-08-18, watching a relayed film
               with Full quality still selected). The cap is forced in the worklet and this
@@ -2835,7 +2840,7 @@ export default function App () {
             value={dataSaver ? 'saver' : 'auto'}
             onChange={(v) => { setDataSaver(v === 'saver'); call('setSettings', { dataSaver: v === 'saver' }).catch(() => {}) }}
           />
-          <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file, whatever is picked above.</p>
+          {canDownload && <p className='desc' style={{ marginTop: '.6rem' }}>Downloads always take the full file, whatever is picked above.</p>}
 
           {/* STORAGE, PearTune's shape (Tim, 2026-08-18). Films and artwork are separated
               because they behave differently: films are big and deliberate, artwork is
@@ -2843,8 +2848,8 @@ export default function App () {
               about a poster being wrong, and costs only a re-download. */}
           <div className='label' style={{ marginTop: '1rem' }}>Keep films on this phone up to</div>
           <div className='desc'>
-            Films you play are kept for a while so watching one again does not download it twice.
-            A film you downloaded on purpose is never cleared by this.
+            Films you play are kept for a while so watching one again does not fetch it twice.
+            {canDownload && ' A film you downloaded on purpose is never cleared by this.'}
           </div>
           <StepSlider
             options={FILM_CAPS}
@@ -3276,7 +3281,7 @@ export default function App () {
           downloaded={dlIds.has(sheet.id)}
           libraryNames={new Map((state?.hosts || []).map((h) => [h.libraryId, h.libraryName || 'Library']))}
           onClose={() => setSheet(null)} onPlay={open} onSave={toggleSave} onWatched={markWatched} onCast={openCast}
-          onDownload={state.demo ? null : toggleDownload}
+          onDownload={canDownload ? toggleDownload : null}
         />
       )}
 

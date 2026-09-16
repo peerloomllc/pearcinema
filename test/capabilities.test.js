@@ -340,3 +340,12 @@ test('AGAINST AN OLDER HOST the phone works out the sound verdict itself', () =>
   assert.strictEqual(v.audio, 'aac')
   assert.strictEqual(caps.wantsPlaylist('remux', 'android', caps.soundRebuilt(film, graphene) ? 'aac' : 'copy'), true)
 })
+
+test('an iPhone has no Downloads, and everything else keeps them', () => {
+  // App Review rejected 1.1.1 twice under Guideline 5.2.3 for "downloading of third
+  // party videos", so the iOS build offers none (Tim, 2026-09-16).
+  assert.strictEqual(caps.downloadsFor('ios'), false)
+  assert.strictEqual(caps.downloadsFor('IOS'), false)
+  assert.strictEqual(caps.downloadsFor('android'), true)
+  assert.strictEqual(caps.downloadsFor(undefined), true)
+})
