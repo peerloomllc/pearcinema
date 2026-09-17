@@ -87,6 +87,7 @@
         }
       ],
       "./plugins/with-android-abis",
+      "./plugins/with-gradle-jvmargs",
       "./plugins/with-android-debug-app-id",
       "./plugins/with-android-release-signing",
       "./plugins/with-android-queries",
