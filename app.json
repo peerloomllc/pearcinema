@@ -65,6 +65,7 @@
       "buildNumber": "15"
     },
     "plugins": [
+      "./plugins/with-ios-pod-deployment-target",
       [
         "expo-router"
       ],
