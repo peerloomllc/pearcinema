@@ -25,6 +25,11 @@ test('the AppDelegate stops making its own window and gains a SceneDelegate', ()
   assert.match(out, /appDelegate\.window = window/)
   assert.match(out, /launchOptions\[\.url\] = url/)
   assert.match(out, /openURLContexts/)
+  // Links go through the AppDelegate's own handlers, which is where PearCal and PearGuard
+  // route invites.
+  assert.match(out, /appDelegate\.application\(UIApplication\.shared, open: context\.url/)
+  assert.match(out, /appDelegate\.application\(UIApplication\.shared, continue:/)
+  assert.doesNotMatch(out, /_ = RCTLinkingManager/)
 })
 
 test('patching twice changes nothing', () => {

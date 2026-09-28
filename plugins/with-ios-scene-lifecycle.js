@@ -12,9 +12,14 @@
 // - AppDelegate.swift stops making the window. SceneDelegate makes it from the window scene
 //   and starts React Native in it. It also sets AppDelegate.window, because expo-system-ui
 //   and expo-screen-orientation read UIApplication.shared.delegate?.window.
-// - Deep links (pear:// pairing links) arrive at the scene, not the app delegate, once
-//   scenes are adopted. A cold-start link is passed as launchOptions[.url], which is where
-//   RCTLinkingManager's getInitialURL looks; a link while running goes to RCTLinkingManager.
+// - Links arrive at the scene, not the app delegate, once scenes are adopted. SceneDelegate
+//   hands each one to the AppDelegate's own application(_:open:options:) and
+//   application(_:continue:restorationHandler:), so any app-specific link handling there
+//   keeps working (PearCal and PearGuard keep theirs in the AppDelegate). A cold-start URL
+//   is also passed as launchOptions[.url], which is where RCTLinkingManager's
+//   getInitialURL looks.
+//
+// This file is shared across the suite's iOS apps; keep the copies the same.
 
 const { withInfoPlist, withAppDelegate } = require('expo/config-plugins')
 
@@ -44,16 +49,25 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
       launchOptions[.url] = url
     }
     factory.startReactNative(withModuleName: "main", in: window, launchOptions: launchOptions)
+
+    for context in connectionOptions.urlContexts {
+      _ = appDelegate.application(UIApplication.shared, open: context.url, options: [:])
+    }
+    for activity in connectionOptions.userActivities {
+      _ = appDelegate.application(UIApplication.shared, continue: activity, restorationHandler: { _ in })
+    }
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
     for context in URLContexts {
-      _ = RCTLinkingManager.application(UIApplication.shared, open: context.url, options: [:])
+      _ = appDelegate.application(UIApplication.shared, open: context.url, options: [:])
     }
   }
 
   func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
-    _ = RCTLinkingManager.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
+    guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
+    _ = appDelegate.application(UIApplication.shared, continue: userActivity, restorationHandler: { _ in })
   }
 }
 `
