@@ -1428,7 +1428,7 @@ _confirm "Release notes look good?"
 # the block never ran once. It read as "the iOS notes are kept in sync here", which is
 # exactly the kind of mostly-true statement that stops the real question being asked.
 #
-# What ACTUALLY carries the notes to Apple is step 3 of the App Store publish below: it
+# What ACTUALLY carries the notes to Apple is _gen_ios_version_metadata (step 5f): it
 # builds metadata/ios/version/${APP_VERSION}/en-US.json from version/default/en-US.json
 # and injects release_notes.md into its `whatsNew` field (stripping emoji, which App Store
 # Connect rejects). Removed 2026-08-18 rather than repointed, because a second copy of the
@@ -1826,6 +1826,55 @@ fi
 _confirm "$_RELEASE_SUMMARY ready to publish?"
 
 # ---------------------------------------------------------------------------
+# 5f. Generate the iOS version metadata BEFORE the bump commit
+#
+# metadata/ios/version/$APP_VERSION is generated: version/default/*.json with
+# `whatsNew` replaced by release_notes.md. It used to be written only inside the
+# App Store step (step 11), which runs after step 6, so step 6 never saw it and
+# the dir was never committed. Generating it here means step 6 commits it and the
+# tag carries the notes the release shipped with.
+#
+# The App Store step calls this again, because only it can bootstrap
+# version/default/ from App Store Connect. The same default/ and the same
+# release_notes.md give identical files, so the second call is normally a no-op.
+# ---------------------------------------------------------------------------
+_gen_ios_version_metadata() {
+  local _metadata_dir="$REPO_ROOT/metadata/ios"
+  local _default_dir="$_metadata_dir/version/default"
+  local _version_dir="$_metadata_dir/version/${APP_VERSION}"
+  local _f _whats_new=""
+
+  # Nothing to generate from yet. The App Store step can seed default/ from ASC.
+  compgen -G "$_default_dir/*.json" > /dev/null || return 1
+
+  if [ -f "$REPO_ROOT/release_notes.md" ]; then
+    _whats_new=$(cat "$REPO_ROOT/release_notes.md")
+  fi
+
+  mkdir -p "$_version_dir"
+  for _f in "$_default_dir"/*.json; do
+    python3 -c "
+import json, sys, re
+with open('$_f') as fh:
+    data = json.load(fh)
+# Strip emojis - App Store rejects non-ASCII symbols in whatsNew
+notes = sys.stdin.read().strip()
+data['whatsNew'] = re.sub(r'[^\x00-\x7FÀ-ɏ—’‘“”]+\s*', '', notes)
+with open('${_version_dir}/$(basename "$_f")', 'w') as out:
+    json.dump(data, out)
+" <<< "$_whats_new"
+    echo "    Created ${_version_dir}/$(basename "$_f")"
+  done
+}
+
+if $PUBLISH_APP_STORE; then
+  echo ""
+  echo "==> Generating iOS version metadata for $APP_VERSION..."
+  _gen_ios_version_metadata \
+    || echo "    Skipped - no metadata/ios/version/default/*.json yet (the App Store step will seed it)."
+fi
+
+# ---------------------------------------------------------------------------
 # Phase D — publishing starts here. Nothing below this line is undoable.
 # ---------------------------------------------------------------------------
 # Precheck: if every build platform was skipped, there's nothing to upload.
@@ -1905,6 +1954,9 @@ _bump_paths=(
   start9/Dockerfile
   docs/host-linux.md
   start9/README.md
+  # Step 5f writes the versioned App Store metadata. default/ is its source.
+  metadata/ios/version/default
+  "metadata/ios/version/${APP_VERSION}"
 )
 # EXISTS **AND** IS NOT IGNORED. The existence test alone was enough while every
 # path here was committed; it stopped being enough when /ios/ joined /android/ in
@@ -2852,26 +2904,13 @@ if priors:
       fi
     fi
 
-    # Create versioned metadata with whatsNew from release notes
-    if [ -n "$DEFAULT_DIR" ] && [ -d "$DEFAULT_DIR" ] && [ ! -d "$VERSION_DIR" ]; then
-      mkdir -p "$VERSION_DIR"
-      for f in "$DEFAULT_DIR"/*.json; do
-        WHATS_NEW=""
-        if [ -f "$REPO_ROOT/release_notes.md" ]; then
-          WHATS_NEW=$(cat "$REPO_ROOT/release_notes.md")
-        fi
-        python3 -c "
-import json, sys, re
-with open('$f') as fh:
-    data = json.load(fh)
-# Strip emojis — App Store rejects non-ASCII symbols in whatsNew
-notes = sys.stdin.read().strip()
-data['whatsNew'] = re.sub(r'[^\x00-\x7FÀ-ɏ—’‘“”]+\s*', '', notes)
-with open('${VERSION_DIR}/$(basename "$f")', 'w') as out:
-    json.dump(data, out)
-" <<< "$WHATS_NEW"
-        echo "    Created ${VERSION_DIR}/$(basename "$f")"
-      done
+    # Step 5f already generated this dir before the version-bump commit, so on the
+    # normal path this rewrites the same bytes. It stays because the bootstrap above
+    # is the only thing that can seed version/default/, and when it does, step 5f
+    # had nothing to generate from.
+    if [ -n "$DEFAULT_DIR" ] && [ -d "$DEFAULT_DIR" ]; then
+      _gen_ios_version_metadata \
+        || echo "    WARNING: no ${DEFAULT_DIR}/*.json to generate whatsNew from."
     fi
 
     if _asc_auth_linux; then
