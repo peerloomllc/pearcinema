@@ -39,6 +39,16 @@ rsync -az --checksum \
   --exclude='ios' \
   --exclude='.expo' \
   --exclude='*.bundle' \
+  --exclude='/*.apk' \
+  --exclude='/*.aab' \
+  --exclude='/*.AppImage' \
+  --exclude='/*.deb' \
+  --exclude='/*.exe' \
+  --exclude='/*.dmg' \
+  --exclude='/*.ipa' \
+  --exclude='/*.sha256' \
+  --exclude='/*.blockmap' \
+  --exclude='/latest*.yml' \
   ../ \
   "$MAC_HOST:$REMOTE_DIR/"
 rsync -az --checksum --exclude='.git' --exclude='node_modules' --exclude='test' \

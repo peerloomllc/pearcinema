@@ -2752,6 +2752,8 @@ else
       --exclude='ios/build' --exclude='ios/Pods' \
       --exclude='desktop/dist' --exclude='desktop/node_modules' \
       --exclude='host/node_modules' \
+      --exclude='/*.apk' --exclude='/*.aab' --exclude='/*.AppImage' --exclude='/*.deb' --exclude='/*.exe' \
+      --exclude='/*.dmg' --exclude='/*.ipa' --exclude='/*.sha256' --exclude='/*.blockmap' --exclude='/latest*.yml' \
       "$SUITE_ROOT/$_dir/" "${MAC_MINI}:${_mac_suite}/${_dir}/"
   done
   echo "    Sync complete."
