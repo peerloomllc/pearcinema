@@ -1997,6 +1997,7 @@ else
   # rsync will create the LAST directory of a destination but not a missing parent, and
   # this destination is two deep. Caught by running it: three "mkdir failed: No such file
   # or directory" errors on a Mac that had never held this tree.
+  release_check_mac_space "$MAC_MINI"
   ssh "$MAC_MINI" "mkdir -p ${_mac_suite}"
   echo "    Syncing the app and its two sibling packages to $MAC_MINI:$_mac_suite/ ..."
   for _dir in pearcinema peerloom-client peerloom-host; do
