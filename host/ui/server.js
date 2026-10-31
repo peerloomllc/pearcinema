@@ -351,6 +351,10 @@ async function startDashboard ({
   // to speak. The Docker host passes none - a container that could not accept a
   // connection would not have got this far.
   warnings = () => [],
+  // @peerloom/host's update checker, passed by the desktop tray app. Null
+  // elsewhere (Docker: the image is updated by the store), and /api/update
+  // then answers `disabled`, so the banner never shows.
+  updateChecker = null,
   log = () => {}
 } = {}) {
   // Before anything listens. A control plane that can revoke every device, open a
@@ -518,6 +522,15 @@ async function startDashboard ({
         req.on('close', drop)
         res.on('close', drop)
         return
+      }
+
+      // --- "a new PearCinema is out" -------------------------------------------
+      // Notify only: the banner links to the release page. The download list is
+      // left out, since the page needs none of it.
+      if (req.method === 'GET' && url.pathname === '/api/update') {
+        if (!updateChecker) return json(res, 200, { disabled: true, current: version })
+        const { assets, ...info } = updateChecker.get()
+        return json(res, 200, info)
       }
 
       // --- what the whole dashboard runs on -----------------------------------

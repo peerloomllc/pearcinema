@@ -321,6 +321,8 @@ label { font-size: .85rem; color: var(--muted); display: block; margin-bottom: .
 .banner.bad { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 12%, var(--card)) }
 .banner.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 12%, var(--card)) }
 .banner.good { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 10%, var(--card)) }
+.banner.info { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, var(--card)) }
+.updatebanner { display: flex; align-items: center; justify-content: space-between; gap: .75rem }
 
 .stats { display: flex; gap: 1.25rem; flex-wrap: wrap; margin: .3rem 0 1rem }
 .stat b { display: block; font-size: 1.35rem; font-weight: 650; line-height: 1.2 }

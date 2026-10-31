@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'preact/hooks'
 import { api, copyText, setRemoteBase, fmtSize, onLive } from './api'
 import { Modal, ConfirmHost, notify, loadThemePref, applyThemePref, resolveTheme, loadSkinPref, saveSkinPref, loadTonePref, saveTonePref } from './ui'
 import { needsSetup, setupDismissed, undismissSetup } from './setup'
+import { shouldShowUpdate, dismissUpdate, dismissedVersion } from './update'
 import { probeCapabilities } from './playback'
 // `People` is the devices SCREEN; `PeopleIcon` is the picture of one.
 import { Home, Search, Close, Gear, Sun, Moon, People as PeopleIcon, Download as DownloadIcon, Trash, Play, Eye, EyeOff, Spinner, Bell, Check } from './icons'
@@ -1683,6 +1684,17 @@ export default function App () {
     return () => { live = false; off() }
   }, [])
 
+  // GET /api/update, on its own slow poll: the host asks GitHub once an hour, so
+  // half that is enough for a dashboard left open overnight.
+  const [update, setUpdate] = useState(null)
+  const [dismissedUpdate, setDismissedUpdate] = useState(dismissedVersion)
+  useEffect(() => {
+    const poll = () => api('/api/update').then(setUpdate).catch(() => {})
+    poll()
+    const t = setInterval(poll, 30 * 60 * 1000)
+    return () => clearInterval(t)
+  }, [])
+
   const pickSource = (lib) => {
     setSource(lib)
     setRemoteBase(lib === '_blend' ? '/blend' : lib ? '/remote/' + lib : '')
@@ -1922,6 +1934,22 @@ export default function App () {
 
       <div class='scroller'>
       <div class='content'>
+        {shouldShowUpdate(update, dismissedUpdate) && (
+          <div class='banner info updatebanner'>
+            <span>
+              <strong>PearCinema {update.latest} is out.</strong>{' '}
+              {update.htmlUrl
+                ? <a href={update.htmlUrl} target='_blank' rel='noreferrer'>Download it</a>
+                : 'Get it from the PearCinema releases page.'}
+            </span>
+            <button
+              class='iconbtn'
+              onClick={() => { dismissUpdate(update.latest); setDismissedUpdate(update.latest) }}
+              title='Hide until the next release'
+              aria-label='Hide this update notice'
+            ><Close size={15} /></button>
+          </div>
+        )}
         {/* SOMETHING IS WRONG WITH THE MACHINE, not with the library - so it sits
             above the content on EVERY tab rather than beside the source rows. The
             case it exists for is Windows refusing inbound connections, where the

@@ -114,7 +114,7 @@ class TestAdapter {
   }
 }
 
-async function cinema (t, { bind = '127.0.0.1', password = PASSWORD } = {}) {
+async function cinema (t, { bind = '127.0.0.1', password = PASSWORD, updateChecker = null } = {}) {
   const testnet = await createTestnet(3)
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'pearcinema-dash-'))
 
@@ -129,7 +129,7 @@ async function cinema (t, { bind = '127.0.0.1', password = PASSWORD } = {}) {
   await host.ready()
 
   const dash = await startDashboard({
-    host, bind, port: 0, password, passwordSource: password ? 'file' : 'none'
+    host, bind, port: 0, password, passwordSource: password ? 'file' : 'none', updateChecker
   })
 
   t.after(async () => {
@@ -1525,4 +1525,21 @@ test('the dashboard is told which floor is in force, so the chooser is not blank
 
   const state = await c.req('GET', '/api/state')
   assert.equal(state.json.source.minLengthSec, 600)
+})
+
+test('/api/update: disabled without a checker, the checker\'s answer with one', async (t) => {
+  const off = await cinema(t, { password: '' })
+  assert.deepEqual(await (await fetch(off.base + '/api/update')).json(), { disabled: true, current: null })
+
+  const found = { available: true, current: '1.1.4', latest: '1.1.5', htmlUrl: 'https://example/v1.1.5', assets: [{ name: 'PearCinema-1.1.5.AppImage' }] }
+  const on = await cinema(t, { password: '', updateChecker: { get: () => found } })
+  const body = await (await fetch(on.base + '/api/update')).json()
+  assert.equal(body.latest, '1.1.5')
+  assert.equal(body.htmlUrl, 'https://example/v1.1.5')
+  assert.equal(body.assets, undefined, 'the download list stays on the host')
+})
+
+test('/api/update is behind the dashboard password', async (t) => {
+  const { base } = await cinema(t, { updateChecker: { get: () => ({ available: true, latest: '9.9.9' }) } })
+  assert.equal((await fetch(base + '/api/update')).status, 401)
 })
