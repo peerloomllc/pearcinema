@@ -12,10 +12,10 @@
 // gate. The P2P host (HyperDHT) runs regardless of that bind, so phones pair and
 // stream over the internet exactly as on a server install.
 //
-// One divergence from the PearTune donor: no update checker. PearCinema's host
-// has no update-check/update-apply modules yet, so the menu carries a plain
-// "Check for updates" that opens the releases page. Port the modules when the
-// release cadence earns them.
+// Updates are NOTIFY ONLY: @peerloom/host's checker asks GitHub hourly, and the tray
+// menu and the dashboard say when a newer PearCinema is out, linking to its release
+// page. Installing in place (update-apply) is left for later: the host can run as a
+// systemd unit or a LaunchDaemon, and replacing it under one needs testing on each.
 
 const { app, Tray, Menu, shell, dialog, nativeImage } = require('electron')
 const path = require('path')
@@ -31,6 +31,8 @@ const firewall = require('./firewall')
 pointAtBundledFfmpeg(process.resourcesPath)
 
 const { PearCinemaHost } = require('../../vendor/host/server')
+const { createUpdateChecker } = require('@peerloom/host/update-check')
+const UPDATE_CONFIG = require('./update-config')
 const { startDashboard } = require('../../vendor/host/ui/server')
 
 const PORT = 8751
@@ -39,6 +41,8 @@ const DASH_URL = `http://${BIND}:${PORT}`
 const BUILD = path.join(__dirname, '..', '..', 'build')
 
 const RELEASES_URL = 'https://github.com/peerloomllc/pearcinema/releases/latest'
+
+let updateChecker = null
 
 let host = null
 let dashboard = null
@@ -84,6 +88,24 @@ if (!app.requestSingleInstanceLock()) {
 async function main () {
   // Tray-only (menu-bar) app: no dock icon on macOS.
   if (process.platform === 'darwin') app.dock?.hide()
+
+  // Off in a dev run (the version there is not a released one) and with
+  // PEARCINEMA_NO_UPDATE_CHECK. Started before the service check so the tray menu
+  // says so either way; the dashboard banner only shows where this process serves
+  // it (a service's dashboard has no checker). The menu is built before the first
+  // check answers, so it is rebuilt when one finds a release.
+  if (app.isPackaged || process.env.PEARCINEMA_UPDATE_LATEST_URL) {
+    const upd = createUpdateChecker({
+      config: UPDATE_CONFIG,
+      currentVersion: app.getVersion(),
+      log: (msg, data) => {
+        console.log(msg, data ? JSON.stringify(data) : '')
+        if (msg === 'update:available') refreshMenu()
+      }
+    })
+    updateChecker = upd.checker
+    if (!updateChecker) console.log('update check off:', upd.reason)
+  }
 
   // A service already serving means this process is a CLIENT, not a host. Adopting
   // it rather than racing it is what keeps two processes off one data dir.
@@ -151,6 +173,7 @@ async function main () {
     dashboard = await startDashboard({
       host, bind: BIND, port: PORT, password: '', passwordSource: 'none',
       version: app.getVersion(),
+      updateChecker,
       // A GETTER, not a value, and a SYNCHRONOUS one: the first check is still running
       // when the dashboard starts listening. It answers with what is known now and
       // kicks off a refresh for the next read, so a page load a minute after the fix
@@ -227,9 +250,14 @@ function refreshMenu () {
         { type: 'separator' }]
     : []
 
+  const u = updateChecker && updateChecker.get()
+  const updateItem = u && u.available && u.latest
+    ? { label: `PearCinema ${u.latest} is available…`, click: () => shell.openExternal(u.htmlUrl || RELEASES_URL) }
+    : { label: 'Check for updates…', click: () => shell.openExternal(RELEASES_URL) }
+
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open dashboard', click: openDashboard },
-    { label: 'Check for updates…', click: () => shell.openExternal(RELEASES_URL) },
+    updateItem,
     { type: 'separator' },
     ...ownership,
     { label: `PearCinema ${app.getVersion()}`, enabled: false },
